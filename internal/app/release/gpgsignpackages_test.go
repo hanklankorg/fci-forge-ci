@@ -84,6 +84,7 @@ func TestGPGSignPackages_SignsOnlyDistroPackages(t *testing.T) {
 	fsys.WriteFile(filepath.Join("dist", "a.rpm"), []byte("rpm"))
 	fsys.WriteFile(filepath.Join("dist", "m.apk"), []byte("apk"))
 	fsys.WriteFile(filepath.Join("dist", "ignored.txt"), []byte("ignored"))
+	fsys.WriteFile(filepath.Join("dist", "nested", "unselected.deb"), []byte("legacy does not recurse"))
 	fsys.Chdir()
 
 	gpg := &fakeGPGPackageSigner{listed: "fpr:::::::::ABCDEF:"}

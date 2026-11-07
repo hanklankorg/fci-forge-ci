@@ -94,6 +94,13 @@ func readClassifiedPayloadManifest(payload fs.FS) (*FileManifest, error) {
 		return nil, err
 	}
 	defer func() { _ = file.Close() }()
+
+	return decodeStrictFileManifest(file)
+}
+
+// decodeStrictFileManifest is shared by classified admission and explicit
+// manifest-backed package selection; neither falls back to asset discovery.
+func decodeStrictFileManifest(file io.Reader) (*FileManifest, error) {
 	// Metadata is bounded independently of potentially large product packages.
 	const maxManifestBytes = 4 << 20
 

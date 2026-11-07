@@ -30,6 +30,9 @@ type GPGSignPackagesInput struct {
 	Fingerprint string
 	Passphrase  string
 	Dir         string
+	// ManifestFile opts into exact declared-asset selection, including nested
+	// packages. Empty retains the legacy top-level glob selection.
+	ManifestFile string
 }
 
 // GPGSignPackages imports the configured GPG key into the current GNUPGHOME,
@@ -45,7 +48,7 @@ func GPGSignPackages(ctx context.Context, signer gpgPackageSigner, out io.Writer
 		dir = "dist"
 	}
 
-	packages, err := packageFiles(dir)
+	packages, err := selectedPackageFiles(dir, in.ManifestFile)
 	if err != nil {
 		return 0, err
 	}
@@ -77,6 +80,14 @@ func GPGSignPackages(ctx context.Context, signer gpgPackageSigner, out io.Writer
 	_, _ = fmt.Fprintf(out, "GPG-signed %d package(s)\n", len(packages))
 
 	return len(packages), nil
+}
+
+func selectedPackageFiles(dir, manifest string) ([]string, error) {
+	if manifest != "" {
+		return manifestPackageFiles(FilesInput{DistDir: dir, ManifestFile: manifest, ManifestExplicit: true})
+	}
+
+	return packageFiles(dir)
 }
 
 // packageFileSigner reuses the release sidecar lifecycle for the GPG package
