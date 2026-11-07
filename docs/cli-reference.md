@@ -3179,6 +3179,37 @@ EXAMPLE:
 | `--publish-maven-snapshots` | opt into Maven-format snapshot publication for Maven, Gradle JVM and Android libraries | bool | `false` | `$PUBLISH_MAVEN_SNAPSHOTS` |
 | `--use-ci-token` | use the CI platform token in place of an explicit registry password | bool | `true` | `$USE_CI_TOKEN` |
 
+### `forge-ci plan validate-classified-files`
+
+validate existing root Go/Cargo plans for the opt-in classified file-only route
+
+```
+Consumes trusted, already generated config and whole release plans; the release
+plan includes its prepare, build, publish and transfer contracts. This does not
+compose plans, execute producers or tests, authenticate administrator ownership,
+or authorize signing/publication. No separate image/base/flavor plan is supported.
+The config source must already have passed its supported schema owner.
+
+Success is exit zero with no outputs or admission token. Failure has no fallback
+to native planning. Selections must include mandatory policy tests; the file-only
+declaration cannot prove that an opaque producer actually performs only file work.
+
+EXAMPLE:
+   forge-ci --provider local --runner local plan validate-classified-files \
+     --config-plan-json "$config_plan" --release-plan-json "$release_plan" \
+     --producer-file-only --release-sboms none \
+     --go-test-selections-json '{"product":{"packages":["./test/policy"],"gate":"policy"}}'
+```
+
+| Flag | Description | Type | Default | Env vars |
+|------|-------------|------|---------|----------|
+| `--config-plan-json` | trusted typed config-plan JSON from config parse-artifacts (required) | string | `""` | n/a |
+| `--release-plan-json` | trusted whole release-plan JSON from plan release, including all stages (required) | string | `""` | n/a |
+| `--producer-file-only` | explicit administrator declaration that the producer has only file capabilities (not proof of ownership or execution) | bool | `false` | n/a |
+| `--release-sboms` | original release-level SBOM request; this route requires none (required) | string | `""` | n/a |
+| `--go-test-selections-json` | complete trusted administrator Go selection map | string | `""` | n/a |
+| `--cargo-test-selections-json` | complete trusted administrator Cargo selection map | string | `""` | n/a |
+
 ### `forge-ci plan validate-test-selections`
 
 validate complete administrator-owned Go/Cargo mappings against the release build-stage plan before fanout

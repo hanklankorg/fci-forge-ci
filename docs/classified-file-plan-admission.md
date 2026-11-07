@@ -5,8 +5,9 @@
 
 This is an ordinary, side-effect-free Go admission unit, **not an activated
 workflow, an authorization receipt or a new plan/manifest format**. Existing
-native planning, CLI defaults and workflows are unchanged. No public CLI route
-is added in this slice.
+native planning, CLI defaults and workflows are unchanged. The explicit
+`plan validate-classified-files` CLI exposes this application gate separately
+from plan generation.
 
 `internal/app/plan.AdmitClassifiedFiles(ClassifiedFileAdmissionInput)` takes the
 existing config-plan JSON and whole release-plan JSON (with its existing prepare,
@@ -64,7 +65,7 @@ is not equivalent to complete route admission.
 This unit does not invent base/flavor fields in that type or claim to close its
 wire schema. The config source must already have passed its supported schema
 owner; unmodeled producer profiles/other image-plan inputs must be refused by the
-future caller, not silently dropped before invoking this function. A boolean
+caller, not silently dropped before invoking this function. A boolean
 declaration cannot inspect hidden OCI work in opaque consumer scripts or prove
 administrator ownership. The explicit typed image-plan input provides a refusal
 boundary when that existing plan is actually supplied.
@@ -81,11 +82,44 @@ and runtime binding, request/prepared-checkout/tag authorization, successful
 policy/producer scheduling, artifact ID/run/attempt binding, private payload
 staging, package-GPG path coverage, signing and publication remain separate
 reviewed units. No private-key or registry-login capability is present here.
-Tests use native plan constructors and in-process admission only; they are not
-live-provider, cryptographic or release acceptance evidence.
+Tests use native plan constructors, in-process admission and the real CLI command
+tree; they are not live-provider, cryptographic or release acceptance evidence.
 
-Future CLI/workflow integration must explicitly choose this application gate
-before producer scheduling and before trusted consumption; native defaults must
-not select it implicitly. There are no new reachable CLI inputs in this slice.
-Integration still needs legitimate canonical binary/checksum builds from the
-actual combined source; no old pins or production references are supplied here.
+## Opt-in CLI validation
+
+`forge-ci plan validate-classified-files` consumes explicit JSON strings through
+`--config-plan-json` and `--release-plan-json`. These are the existing serialized
+values emitted by `config parse-artifacts` and `plan release`, not their outer
+output envelopes. The whole release plan supplies the required prepare, build,
+publish and transfer contracts; separate stage flags would duplicate that input.
+The existing strict release-stage readers reject unknown fields, consumed-member
+duplicates and trailing input. Missing stages, contradictory targets and invalid
+plans fail closed through the application gate.
+
+The caller must supply `--producer-file-only`, the original `--release-sboms none`
+request and the applicable complete `--go-test-selections-json` or
+`--cargo-test-selections-json` map. These inputs have no environment defaults on
+this command. No application-test enforcement waiver is exposed. Separate image,
+base and flavor plans have no supported CLI input: unknown flags are refused,
+not silently projected away. The caller must not use this route for such work.
+
+For already generated, trusted root Go plans, for example:
+
+```sh
+forge-ci --provider local --runner local plan validate-classified-files \
+  --config-plan-json "$config_plan" --release-plan-json "$release_plan" \
+  --producer-file-only --release-sboms none \
+  --go-test-selections-json '{"product":{"packages":["./test/policy"],"gate":"policy"}}'
+```
+
+Success returns exit zero and emits no output, plan or authorization receipt.
+Failure returns an error without partial runner outputs, summary writes or a
+fallback to native plan generation. The command invokes `AdmitClassifiedFiles`,
+not just its domain predicate. A flag does not establish administrator ownership
+or prove producer execution. Generic plan generation commands are unchanged.
+
+Workflow integration must explicitly choose this gate before producer scheduling
+and before trusted consumption; native defaults must not select it implicitly.
+Because the gate is now CLI-reachable, integration requires fresh legitimate
+canonical binary/checksum builds from the actual combined source. No old pins,
+copied build records or production references are supplied here.
