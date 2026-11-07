@@ -379,6 +379,9 @@ jobs:
     permissions:
       contents: read
     outputs:
+      # Evaluated in this producing job, never relabelled by a downstream job.
+      binding-run-id: ${{ github.run_id }}
+      binding-run-attempt: ${{ github.run_attempt }}
       # Typed setup contracts used by the next escape-bash stages.
       config-plan-json: ${{ steps.parse.outputs.config-plan-json }}
       release-plan-json: ${{ steps.plan.outputs.release-plan-json }}
@@ -531,6 +534,9 @@ jobs:
       image: ${{ inputs['runtime-image'] || needs.resolve-bootstrap.outputs['runtime-image'] }}
     permissions:
       contents: read
+    outputs:
+      binding-run-id: ${{ github.run_id }}
+      binding-run-attempt: ${{ github.run_attempt }}
     steps:
       - name: Checkout immutable release commit
         env:
