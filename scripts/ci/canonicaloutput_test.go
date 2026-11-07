@@ -30,10 +30,12 @@ type canonicalOutputStep struct {
 // or success-emission shell in the inert execution test below.
 func canonicalOutputContract(t *testing.T) (canonicalOutputStep, canonicalOutputStep, canonicalOutputStep) {
 	t.Helper()
+
 	body, err := os.ReadFile("../../.github/workflows/canonical-cli-bootstrap.yml")
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	var workflow struct {
 		On struct {
 			Call struct {
@@ -51,46 +53,60 @@ func canonicalOutputContract(t *testing.T) (canonicalOutputStep, canonicalOutput
 	if err := yaml.Unmarshal(body, &workflow); err != nil {
 		t.Fatal(err)
 	}
+
 	receiver := workflow.Jobs["canonical-receive"]
 	if receiver.ContinueOnError != nil {
 		t.Fatal("receiver must propagate failures")
 	}
+
 	if got := workflow.On.Call.Outputs["artifact-id"].Value; got != "${{ jobs.canonical-receive.outputs.artifact-id }}" {
 		t.Fatalf("public output bypass/fallback: %q", got)
 	}
+
 	if got := receiver.Outputs["artifact-id"]; got != "${{ steps.verified.outputs.artifact-id }}" {
 		t.Fatalf("receiver output bypass/fallback: %q", got)
 	}
+
 	for output, field := range map[string]string{"producer-run-id": "run-id", "producer-run-attempt": "run-attempt"} {
 		if got := workflow.On.Call.Outputs[output].Value; got != "${{ jobs.canonical-build.outputs."+field+" }}" {
 			t.Fatalf("relabelled original producer %s: %q", output, got)
 		}
 	}
+
 	var admit, bootstrap, emit canonicalOutputStep
+
 	bootstrapIndex, emitIndex := -1, -1
+
 	for index, step := range receiver.Steps {
 		if step.ContinueOnError != nil {
 			t.Fatalf("receiver step %d can mask failure", index)
 		}
+
 		if strings.HasSuffix(step.Run, `canonical-cli-delivery.sh" admit`) {
 			admit = step
 		}
+
 		if step.ID == "bootstrap" {
 			bootstrap, bootstrapIndex = step, index
 		}
+
 		if step.ID == "verified" {
 			emit, emitIndex = step, index
 		}
 	}
+
 	if admit.Run == "" || bootstrap.Run != `/bin/bash "$ENGINE_CHECKOUT/scripts/ci/canonical-cli-delivery.sh" receive` || emitIndex != bootstrapIndex+1 || emitIndex != len(receiver.Steps)-1 {
 		t.Fatal("missing/incorrect receive -> emission ordering")
 	}
+
 	if bootstrap.If != "" || emit.If != "${{ success() && steps.bootstrap.outcome == 'success' }}" {
 		t.Fatal("emission must require overall success AND successful bootstrap")
 	}
+
 	if emit.Uses != "" || emit.Env["ORIGINAL_ARTIFACT_ID"] != "${{ needs.canonical-build.outputs.artifact-id }}" || len(emit.Env) != 1 {
 		t.Fatal("emission must use only the original producer ID")
 	}
+
 	return admit, bootstrap, emit
 }
 
@@ -102,16 +118,20 @@ func TestCanonicalVerifiedArtifactFailureOutputs(t *testing.T) {
 	admit, bootstrap, emit := canonicalOutputContract(t)
 	for _, scenario := range []string{"success", "metadata-failure", "download-failure", "hash-failure", "bootstrap-failure", "cli-failure"} {
 		t.Run(scenario, func(t *testing.T) {
-			f := newCanonicalFixture(t)
+			fixture := newCanonicalFixture(t)
+
 			entry, err := os.ReadFile("canonical-cli-delivery.sh")
 			if err != nil {
 				t.Fatal(err)
 			}
-			canonicalWrite(t, filepath.Join(f.engine, "scripts/ci/canonical-cli-delivery.sh"), string(entry), 0o600)
-			payload := f.cli
+
+			canonicalWrite(t, filepath.Join(fixture.engine, "scripts/ci/canonical-cli-delivery.sh"), string(entry), 0o600)
+
+			payload := fixture.cli
 			if scenario == "cli-failure" {
 				payload += "exit 42\n"
 			}
+
 			if scenario == "bootstrap-failure" || scenario == "cli-failure" {
 				record := fmt.Sprintf("%x  bin/forge-ci\n", sha256.Sum256([]byte(payload)))
 				// The existing build verifier reads the first record; the unchanged
@@ -119,26 +139,32 @@ func TestCanonicalVerifiedArtifactFailureOutputs(t *testing.T) {
 				if scenario == "bootstrap-failure" {
 					record += record
 				}
-				canonicalWrite(t, filepath.Join(f.engine, ".engine/bin/forge-ci-linux-amd64.sha256"), record, 0o600)
+
+				canonicalWrite(t, filepath.Join(fixture.engine, ".engine/bin/forge-ci-linux-amd64.sha256"), record, 0o600)
 				// Fixture-only reapproval, never a production/owner commit.
-				canonicalGit(t, f.engine, "-c", "core.fsmonitor=false", "-c", "filter.marker.clean=/bin/cat", "add", ".engine/bin/forge-ci-linux-amd64.sha256")
-				canonicalGit(t, f.engine, "-c", "core.fsmonitor=false", "-c", "filter.marker.clean=/bin/cat", "-c", "user.name=Offline", "-c", "user.email=offline@example.invalid", "-c", "commit.gpgsign=false", "commit", "-qm", "inert failure fixture")
-				commit := canonicalGit(t, f.engine, "rev-parse", "HEAD")
-				f.env["ENGINE_COMMIT"], f.env["PRODUCER_ENGINE_COMMIT"] = commit, commit
-				f.env["PRODUCER_ARTIFACT_NAME"] = "forge-ci-canonical-linux-amd64-100-2-" + commit
-				f.writeMetadata(t, nil)
+				canonicalGit(t, fixture.engine, "-c", "core.fsmonitor=false", "-c", "filter.marker.clean=/bin/cat", "add", ".engine/bin/forge-ci-linux-amd64.sha256")
+				canonicalGit(t, fixture.engine, "-c", "core.fsmonitor=false", "-c", "filter.marker.clean=/bin/cat", "-c", "user.name=Offline", "-c", "user.email=offline@example.invalid", "-c", "commit.gpgsign=false", "commit", "-qm", "inert failure fixture")
+				commit := canonicalGit(t, fixture.engine, "rev-parse", "HEAD")
+				fixture.env["ENGINE_COMMIT"], fixture.env["PRODUCER_ENGINE_COMMIT"] = commit, commit
+				fixture.env["PRODUCER_ARTIFACT_NAME"] = "forge-ci-canonical-linux-amd64-100-2-" + commit
+				fixture.writeMetadata(t, nil)
 			}
-			if out, err := f.run(t, "prepare"); err != nil {
+
+			if out, err := fixture.run(t, "prepare"); err != nil {
 				t.Fatalf("prepare: %v\n%s", err, out)
 			}
+
 			if scenario == "metadata-failure" {
-				f.writeMetadata(t, func(m map[string]any) { m["id"] = 301 })
+				fixture.writeMetadata(t, func(m map[string]any) { m["id"] = 301 })
 			}
+
 			if scenario == "hash-failure" {
 				payload += "# changed bytes\n"
 			}
-			archivePayload := filepath.Join(f.root, "inert-download-payload")
+
+			archivePayload := filepath.Join(fixture.root, "inert-download-payload")
 			canonicalWrite(t, archivePayload, payload, 0o600)
+
 			download := `cp "$INERT_DOWNLOAD_PAYLOAD" "$DELIVERY_DIRECTORY/forge-ci-linux-amd64"`
 			if scenario == "download-failure" {
 				download = "false"
@@ -147,10 +173,11 @@ func TestCanonicalVerifiedArtifactFailureOutputs(t *testing.T) {
 			// gating, whose exact if/outcome wiring is asserted above. Execute the
 			// ACTUAL admission, bootstrap and emission scripts. Only the external
 			// native downloader is replaced with an inert copy/failure, no network.
-			command := exec.Command("/bin/bash", "--noprofile", "--norc", "-c", "set -euo pipefail\n"+admit.Run+"\n"+download+"\n"+bootstrap.Run+"\n"+emit.Run)
-			f.env["ORIGINAL_ARTIFACT_ID"] = f.env["PRODUCER_ARTIFACT_ID"]
-			f.env["INERT_DOWNLOAD_PAYLOAD"] = archivePayload
-			for key, value := range f.env {
+			command := exec.CommandContext(t.Context(), "/bin/bash", "--noprofile", "--norc", "-c", "set -euo pipefail\n"+admit.Run+"\n"+download+"\n"+bootstrap.Run+"\n"+emit.Run)
+			fixture.env["ORIGINAL_ARTIFACT_ID"] = fixture.env["PRODUCER_ARTIFACT_ID"]
+			fixture.env["INERT_DOWNLOAD_PAYLOAD"] = archivePayload
+
+			for key, value := range fixture.env {
 				command.Env = append(command.Env, key+"="+value)
 			}
 			// Only the simulated download uses cp; production run scripts select
@@ -161,7 +188,8 @@ func TestCanonicalVerifiedArtifactFailureOutputs(t *testing.T) {
 			// unrelated earlier error that happened to leave outputs empty.
 			wantHelper := scenario == "success" || scenario == "bootstrap-failure" || scenario == "cli-failure"
 			wantCLI := scenario == "success" || scenario == "cli-failure"
-			for marker, wanted := range map[string]bool{f.helperMarker: wantHelper, f.marker: wantCLI} {
+
+			for marker, wanted := range map[string]bool{fixture.helperMarker: wantHelper, fixture.marker: wantCLI} {
 				body, err := os.ReadFile(marker)
 				if wanted {
 					if err != nil || len(body) == 0 {
@@ -171,7 +199,8 @@ func TestCanonicalVerifiedArtifactFailureOutputs(t *testing.T) {
 					t.Fatalf("process before admission (%s): %q (%v)\n%s", marker, body, err, out)
 				}
 			}
-			outputs, readErr := os.ReadFile(f.env["GITHUB_OUTPUT"])
+
+			outputs, readErr := os.ReadFile(fixture.env["GITHUB_OUTPUT"])
 			if scenario == "success" {
 				if runErr != nil || readErr != nil || string(outputs) != "artifact-id=300\n" {
 					t.Fatalf("success output: %v, %v, %q\n%s", runErr, readErr, outputs, out)
@@ -180,6 +209,7 @@ func TestCanonicalVerifiedArtifactFailureOutputs(t *testing.T) {
 				if runErr == nil {
 					t.Fatalf("accepted failure %s: %s", scenario, out)
 				}
+
 				if !os.IsNotExist(readErr) {
 					t.Fatalf("verified ID output after failure: %q (%v)\n%s", outputs, readErr, out)
 				}
