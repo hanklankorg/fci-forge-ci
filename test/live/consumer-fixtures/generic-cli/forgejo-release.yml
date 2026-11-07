@@ -53,10 +53,10 @@ jobs:
         run: bash .gitlab/check-release.sh
   prepare:
     needs: checks
-    uses: itiquette/forge-ci/.forgejo/workflows/prepare-release.yml@ENGINE_SHA
+    uses: examplescope/forge-ci/.forgejo/workflows/prepare-release.yml@ENGINE_SHA
     with:
       runner-label: ${{ vars.CI_RUNNER_LABEL }}
-      forge-ci-repository: itiquette/forge-ci
+      forge-ci-repository: examplescope/forge-ci
       forge-ci-sha: ENGINE_SHA
       signer-image: fixture.invalid/forge-ci/signer@sha256:0000000000000000000000000000000000000000000000000000000000000000
       bot-name: CLI fixture release bot
@@ -126,7 +126,7 @@ jobs:
           path: dist/
   sign-and-publish:
     needs: [prepare, build]
-    uses: itiquette/forge-ci/.forgejo/workflows/sign-and-publish-release.yml@ENGINE_SHA
+    uses: examplescope/forge-ci/.forgejo/workflows/sign-and-publish-release.yml@ENGINE_SHA
     with:
       runner-label: ${{ vars.CI_RUNNER_LABEL }}
       release-tag: ${{ needs.prepare.outputs.release-tag }}
@@ -136,7 +136,7 @@ jobs:
       artifact-name: build-dist
       artifact-path: dist/
       caller-workflow: release.yml
-      forge-ci-repository: itiquette/forge-ci
+      forge-ci-repository: examplescope/forge-ci
       forge-ci-sha: ENGINE_SHA
       sign-distro-packages: 'false'
       signer-image: fixture.invalid/forge-ci/signer@sha256:0000000000000000000000000000000000000000000000000000000000000000
