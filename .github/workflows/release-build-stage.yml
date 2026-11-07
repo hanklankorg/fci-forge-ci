@@ -139,11 +139,11 @@ jobs:
           BUILD_STAGE_PLAN_JSON: ${{ inputs['build-stage-plan-json'] }}
           ADMIN_GO_SELECTIONS_JSON: ${{ inputs['go-test-selections-json'] }}
           ADMIN_CARGO_SELECTIONS_JSON: ${{ inputs['cargo-test-selections-json'] }}
-        run: >-
-          forge-ci plan validate-test-selections
-          --build-stage-plan-json="$BUILD_STAGE_PLAN_JSON"
-          --go-test-selections-json="$ADMIN_GO_SELECTIONS_JSON"
-          --cargo-test-selections-json="$ADMIN_CARGO_SELECTIONS_JSON"
+        run: |
+          forge-ci plan validate-test-selections \
+            --build-stage-plan-json="$BUILD_STAGE_PLAN_JSON" \
+            --go-test-selections-json="$ADMIN_GO_SELECTIONS_JSON" \
+            --cargo-test-selections-json="$ADMIN_CARGO_SELECTIONS_JSON"
   maven:
     needs: [resolve-bootstrap, validate-test-selections]
     name: "Build: ${{ matrix.artifact.name }} (Maven)"

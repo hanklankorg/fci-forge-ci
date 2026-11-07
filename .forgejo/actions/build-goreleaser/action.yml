@@ -3,10 +3,7 @@
 
 name: Build unsigned GoReleaser files
 description: >-
-  Package the prepared release without signing, publishing or announcements,
-  then import its unsigned release manifest. Bring GoReleaser and syft in the
-  job toolchain. Follow with upload-dist and pass its digest to the separate
-  sign-and-publish workflow. Product configuration stays in the caller.
+  Package the prepared release without signing, publishing or announcements, then import its unsigned release manifest. Bring GoReleaser and syft in the job toolchain. Follow with upload-dist and pass its digest to the separate sign-and-publish workflow. Product configuration stays in the caller.
 inputs:
   release-tag:
     description: Final release tag emitted by prepare-release.
