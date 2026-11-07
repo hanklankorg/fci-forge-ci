@@ -207,7 +207,7 @@ func signAssemblyArtifacts(ctx context.Context, signer Signer, out io.Writer, as
 		return err
 	}
 
-	_, selected, err := validatedSigningAssembly(assemblyFile, extensions)
+	selected, err := validatedSigningAssembly(assemblyFile, extensions)
 	if err != nil {
 		return err
 	}

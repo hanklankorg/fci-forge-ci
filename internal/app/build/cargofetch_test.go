@@ -39,6 +39,8 @@ func TestCargoFetchBoundedReads(t *testing.T) {
 		{"once", 1, 0, 1, false}, {"transient", 3, 2, 3, false}, {"exhausted", 2, 3, 2, true},
 	} {
 		t.Run(scenario.name, func(t *testing.T) {
+			t.Parallel()
+
 			tool := &fetchCargo{failures: scenario.failures}
 			err := appbuild.CargoFetchWithRetry(t.Context(), tool, io.Discard, io.Discard, appbuild.CargoFetchInput{Dir: "module", Attempts: scenario.attempts})
 			require.Equal(t, scenario.failed, err != nil)

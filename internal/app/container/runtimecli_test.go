@@ -21,6 +21,7 @@ import (
 
 type runtimeCLIFixture struct {
 	registryInputFixture
+
 	body      []byte
 	directory string
 }
@@ -70,7 +71,7 @@ func TestRuntimeCLIVerifiesFileAndBakedBytesWithoutExecution(t *testing.T) {
 
 				manifest := []byte(`{"schemaVersion":2}`)
 				digest := fmt.Sprintf("sha256:%x", sha256.Sum256(manifest))
-				fixture := &runtimeCLIFixture{registryInputFixture: registryInputFixture{manifest: manifest, image: domaincontainer.LayoutImage{Digest: digest, Platform: "linux/amd64"}}, body: body}
+				fixture := &runtimeCLIFixture{manifest: manifest, image: domaincontainer.LayoutImage{Digest: digest, Platform: "linux/amd64"}, body: body}
 				ref := ""
 
 				if image {

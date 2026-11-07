@@ -28,6 +28,8 @@ const (
 	flagRefName                  = "ref-name"
 	flagSourceSHA                = "source-sha"
 	flagArtifactTransferPlanJSON = "artifact-transfer-plan-json"
+	flagPath                     = "path"
+	flagEvidenceFile             = "evidence-file"
 )
 
 // Shared flag defaults and credential labels, declared once for the same

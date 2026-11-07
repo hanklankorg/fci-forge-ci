@@ -76,13 +76,13 @@ func Checklist(ctx context.Context, root, repo, commit string) ([]Step, error) {
 		names = append(names, s.Name)
 	}
 
-	secretsDetail := "the forge's secrets are not visible from here; create them, then check off this step yourself"
+	createDetail := "the forge's secrets are not visible from here; create them, then check off this step yourself"
 	if len(names) > 0 {
-		secretsDetail = "create " + strings.Join(names, ", ") + " on the forge (not visible from here); " + keyTools
+		createDetail = "create " + strings.Join(names, ", ") + " on the forge (not visible from here); " + keyTools
 	}
 
 	steps = append(steps,
-		Step{Title: "Create the release secrets", State: StepManual, Detail: secretsDetail, Command: "forge-ci setup secrets"},
+		Step{Title: "Create the release secrets", State: StepManual, Detail: createDetail, Command: "forge-ci setup secrets"},
 		step("Pass forge-ci doctor", appdoctor.CountFailures(checks) == 0,
 			fmt.Sprintf("%d failing check(s)", appdoctor.CountFailures(checks)), "forge-ci doctor"),
 		enforcementStep(ctx),

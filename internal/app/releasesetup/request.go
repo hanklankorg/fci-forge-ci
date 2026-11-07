@@ -122,7 +122,7 @@ func signingChecks(ctx context.Context, in RequestInput) []RequestCheck {
 	allowed := false
 
 	if err == nil {
-		body, _ := os.ReadFile(filepath.Join(in.Root, filepath.FromSlash(file))) //nolint:gosec // repository allowlist under root.
+		body, _ := os.ReadFile(filepath.Join(in.Root, filepath.FromSlash(file)))
 		allowed = hasEntry(body, "", public)
 	}
 

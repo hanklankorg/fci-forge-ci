@@ -22,7 +22,7 @@ import (
 // the placeholder it would have filled is reported for a person instead. It
 // reads only; a malformed build file is the same as no answer.
 func DetectProject(fsys fs.FS) domain.Project {
-	var p domain.Project
+	var project domain.Project
 
 	if data, err := fs.ReadFile(fsys, "go.mod"); err == nil {
 		if mod := modfile.ModulePath(data); mod != "" {
@@ -31,27 +31,27 @@ func DetectProject(fsys fs.FS) domain.Project {
 				prefix = mod
 			}
 
-			p.Name = path.Base(prefix)
-			p.MainPackage = goMainPackage(fsys, p.Name)
+			project.Name = path.Base(prefix)
+			project.MainPackage = goMainPackage(fsys, project.Name)
 		}
 
-		return p
+		return project
 	}
 
 	switch {
 	case exists(fsys, "package.json"):
-		p.Name = npmName(fsys)
+		project.Name = npmName(fsys)
 	case exists(fsys, "Cargo.toml"):
-		p.Name = tomlPackageName(fsys, "Cargo.toml")
+		project.Name = tomlPackageName(fsys, "Cargo.toml")
 	case exists(fsys, "pom.xml"):
-		p.Name = pomArtifactID(fsys)
+		project.Name = pomArtifactID(fsys)
 	case exists(fsys, "settings.gradle.kts"):
-		p.Name = gradleRootName(fsys, "settings.gradle.kts")
+		project.Name = gradleRootName(fsys, "settings.gradle.kts")
 	case exists(fsys, "settings.gradle"):
-		p.Name = gradleRootName(fsys, "settings.gradle")
+		project.Name = gradleRootName(fsys, "settings.gradle")
 	}
 
-	return p
+	return project
 }
 
 func exists(fsys fs.FS, name string) bool {

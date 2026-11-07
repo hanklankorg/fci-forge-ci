@@ -72,9 +72,9 @@ func TestRun_UnfilledExampleValuesFail(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	c := findCheck(checks, doctor.CheckPlaceholders)
-	if c == nil || c.Severity != doctor.SeverityFail {
-		t.Fatalf("placeholder check = %+v, want FAIL", c)
+	check := findCheck(checks, doctor.CheckPlaceholders)
+	if check == nil || check.Severity != doctor.SeverityFail {
+		t.Fatalf("placeholder check = %+v, want FAIL", check)
 	}
 
 	for _, want := range []string{
@@ -82,17 +82,17 @@ func TestRun_UnfilledExampleValuesFail(t *testing.T) {
 		".github/workflows/release-workflow.yml:5 FIXME-release-bot",
 		".github/workflows/release-workflow.yml:6 PIN_DIGEST",
 	} {
-		if !strings.Contains(c.Message, want) {
-			t.Errorf("message %q does not name %q", c.Message, want)
+		if !strings.Contains(check.Message, want) {
+			t.Errorf("message %q does not name %q", check.Message, want)
 		}
 	}
 
-	if strings.Contains(c.Message, ":4 ") || strings.Contains(c.Message, "harbor.example.com") {
-		t.Errorf("a comment line was reported: %q", c.Message)
+	if strings.Contains(check.Message, ":4 ") || strings.Contains(check.Message, "harbor.example.com") {
+		t.Errorf("a comment line was reported: %q", check.Message)
 	}
 
-	if !strings.Contains(c.Remediation, "forge-ci container manifest digest") || !strings.Contains(c.Remediation, "forge-ci setup signer") {
-		t.Errorf("remediation must say how to fill each kind; got %q", c.Remediation)
+	if !strings.Contains(check.Remediation, "forge-ci container manifest digest") || !strings.Contains(check.Remediation, "forge-ci setup signer") {
+		t.Errorf("remediation must say how to fill each kind; got %q", check.Remediation)
 	}
 }
 

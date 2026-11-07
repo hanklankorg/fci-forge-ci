@@ -151,18 +151,18 @@ func snapshotImagesContextCmd() *cli.Command {
 
 func snapshotImagesPlanCmd() *cli.Command {
 	return &cli.Command{Name: subCmdPlan, Usage: "pin source and plan declared native snapshot images; no implicit root image", Flags: []cli.Flag{
-		&cli.StringFlag{Name: "file", Value: appsnapshot.DefaultConfigFile},
+		&cli.StringFlag{Name: flagFile, Value: appsnapshot.DefaultConfigFile},
 		&cli.StringFlag{Name: "branch", Required: true, Usage: "logical source branch (also for detached/manual checkouts)"},
 		&cli.StringFlag{Name: "source-sha", Required: true},
 		&cli.StringFlag{Name: flagImageRepository, Required: true, Usage: "full base OCI repository; configured image-name overrides its repository using the existing name rules"},
 		&cli.StringFlag{Name: flagOutput, Required: true},
 		&cli.BoolFlag{Name: flagPublish, Value: true, Usage: "enable declared images (false emits an empty disabled plan)"},
 	}, Action: func(ctx context.Context, cmd *cli.Command) error {
-		if err := snapshotOutputDistinct(cmd.String(flagOutput), cmd.String("file")); err != nil {
+		if err := snapshotOutputDistinct(cmd.String(flagOutput), cmd.String(flagFile)); err != nil {
 			return err
 		}
 
-		p, err := appsnapshot.Plan(ctx, gitadapter.New(), appsnapshot.PlanInput{File: cmd.String("file"), Branch: cmd.String("branch"), SourceSHA: cmd.String("source-sha"), ImageRepository: cmd.String(flagImageRepository), Publish: cmd.Bool(flagPublish)})
+		p, err := appsnapshot.Plan(ctx, gitadapter.New(), appsnapshot.PlanInput{File: cmd.String(flagFile), Branch: cmd.String("branch"), SourceSHA: cmd.String("source-sha"), ImageRepository: cmd.String(flagImageRepository), Publish: cmd.Bool(flagPublish)})
 		if err != nil {
 			return err
 		}

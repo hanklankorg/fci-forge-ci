@@ -474,10 +474,12 @@ func requireReleaseAssets(t *testing.T, scenario layerScenario, keys releaseKeys
 	}
 
 	published := make(map[string][]byte, len(release.Assets))
+
 	names := make([]string, 0, len(release.Assets))
 	for _, asset := range release.Assets {
 		names = append(names, asset.Name)
 	}
+
 	evidence, err := livetest.NewReleaseEvidence(target, repo, releaseFinalTag, source, names, releaseEvidenceSecrets(keys))
 	if err != nil {
 		t.Fatal("retain release inventory: ", err)

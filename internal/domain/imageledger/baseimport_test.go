@@ -33,6 +33,7 @@ func TestBaseImportPreservesIdentityAndCopiesOnlyUnsignedDigest(t *testing.T) {
 	if err := json.Unmarshal(beforeJSON, &before); err != nil {
 		t.Fatal(err)
 	}
+
 	registry := &fakeRegistry{digests: map[string]string{entry.Ref: goodDigest, entry.CandidateTag: otherDigest}}
 
 	result, err := imageledger.ImportBaseImages(t.Context(), registry, []imageledger.Entry{entry}, source, importDestination)

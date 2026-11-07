@@ -56,7 +56,7 @@ func releaseOwnerMetadata(t *testing.T, dir string) {
 	entries, err := os.ReadDir(dir)
 	require.NoError(t, err)
 
-	var artifacts []map[string]string
+	artifacts := make([]map[string]string, 0, len(entries))
 
 	for _, entry := range entries {
 		kind := "Archive"

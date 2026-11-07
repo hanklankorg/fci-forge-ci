@@ -75,7 +75,7 @@ EXAMPLE:
 		DisableSliceFlagSeparator: true,
 		Flags: []cli.Flag{
 			&cli.StringFlag{Name: "image-plan-json", Sources: cli.EnvVars("IMAGE_PLAN_JSON"), Usage: "resolved consumer image policy as builds/images JSON; admitted against --image-repository instead of loading artifacts.yml; supports content-addressed base tags"},
-			&cli.StringFlag{Name: "file", Value: defaultArtifactsFile, Sources: cli.EnvVars("ARTIFACTS_CONFIG"), Usage: "path to the artifacts.yml file declaring the containers; without it and the default file, the root Containerfile is the repository's image"},
+			&cli.StringFlag{Name: flagFile, Value: defaultArtifactsFile, Sources: cli.EnvVars("ARTIFACTS_CONFIG"), Usage: "path to the artifacts.yml file declaring the containers; without it and the default file, the root Containerfile is the repository's image"},
 			&cli.StringFlag{Name: flagImageRepository, Sources: cli.EnvVars("IMAGE_REPOSITORY"), Usage: "the one repository the release's images publish to, e.g. ghcr.io/owner/app; empty is the forge's own registry, <server host>/<owner>/<repository>"},
 			&cli.StringFlag{Name: flagServerURL, Sources: cienv.ServerURL(), Usage: "forge server URL, whose registry an empty --image-repository names"},
 			&cli.StringFlag{Name: flagRepository, Sources: cienv.Repository(), Usage: "owner/repo the image repositories are derived from"},
@@ -92,8 +92,8 @@ EXAMPLE:
 			return deps.FromCmd(ctx, cmd, func(dep *deps.Deps) error {
 				// A layer passes an input left empty as an empty value, which
 				// names no file.
-				file := cmd.String("file")
-				named := cmd.IsSet("file") && file != ""
+				file := cmd.String(flagFile)
+				named := cmd.IsSet(flagFile) && file != ""
 
 				resolved := cmd.String("image-plan-json")
 				if resolved != "" && named {

@@ -87,7 +87,7 @@ func filesCollectCmd() *cli.Command {
 
 func filesImportGoReleaserCmd() *cli.Command {
 	flags := append(releaseFilesFlags(),
-		&cli.StringSliceFlag{Name: "evidence-file", Usage: "additional dist file to sign and publish as evidence (repeatable)"},
+		&cli.StringSliceFlag{Name: flagEvidenceFile, Usage: "additional dist file to sign and publish as evidence (repeatable)"},
 	)
 
 	return &cli.Command{
@@ -102,7 +102,7 @@ checks it.`,
 		Action: func(_ context.Context, cmd *cli.Command) error {
 			_, err := apprelease.ImportGoReleaserFileManifest(apprelease.ImportGoReleaserFileManifestInput{
 				FilesInput:    releaseFilesInput(cmd),
-				EvidenceFiles: cmd.StringSlice("evidence-file"),
+				EvidenceFiles: cmd.StringSlice(flagEvidenceFile),
 			})
 
 			return err
@@ -117,7 +117,7 @@ func filesDeclareCmd() *cli.Command {
 		&cli.StringFlag{Name: flagManifest, Value: apprelease.DefaultReleaseFilesManifest, Sources: cli.EnvVars("RELEASE_FILES_MANIFEST"), Usage: "release file manifest to write; it must not exist"},
 		&cli.StringSliceFlag{Name: "asset", Usage: "dist file to publish, as a path or a glob pattern the command expands; directories a pattern matches are skipped (repeatable)"},
 		&cli.StringSliceFlag{Name: "sbom", Usage: "dist file to publish and classify as an SBOM, as a path or a glob pattern (repeatable)"},
-		&cli.StringSliceFlag{Name: "evidence-file", Usage: "additional dist file to sign and publish as evidence (repeatable)"},
+		&cli.StringSliceFlag{Name: flagEvidenceFile, Usage: "additional dist file to sign and publish as evidence (repeatable)"},
 		&cli.StringFlag{Name: flagChecksumsFile, Usage: "checksums file to write; it must not exist (default: checksums.txt in --dist-dir)"},
 	}
 
@@ -142,7 +142,7 @@ EXAMPLE:
 				FilesInput:    releaseFilesInput(cmd),
 				Assets:        cmd.StringSlice("asset"),
 				SBOMs:         cmd.StringSlice("sbom"),
-				EvidenceFiles: cmd.StringSlice("evidence-file"),
+				EvidenceFiles: cmd.StringSlice(flagEvidenceFile),
 				ChecksumsFile: cmd.String(flagChecksumsFile),
 			})
 			if err != nil {
@@ -161,7 +161,7 @@ func filesManifestCmd() *cli.Command {
 		&cli.StringFlag{Name: flagOutput, Usage: "output manifest file (defaults to --manifest; '-' for stdout)"},
 		&cli.StringFlag{Name: "assets-json", Usage: "release files collect JSON to reuse instead of re-collecting ('-' for stdin)"},
 		&cli.BoolFlag{Name: "unsigned", Usage: "extend an existing unsigned manifest with evidence without rediscovering producer metadata"},
-		&cli.StringSliceFlag{Name: "evidence-file", Usage: "additional file to publish and sign as evidence; requires --unsigned (repeatable)"},
+		&cli.StringSliceFlag{Name: flagEvidenceFile, Usage: "additional file to publish and sign as evidence; requires --unsigned (repeatable)"},
 		&cli.StringFlag{Name: "release-images-ledger", Usage: "require the exact pinned native final-image SBOM evidence from this ledger; requires --unsigned"},
 	)
 
@@ -188,7 +188,7 @@ opt into this flat-dist contract.`,
 				OutputFile:          cmd.String(flagOutput),
 				AssetsJSONFile:      cmd.String("assets-json"),
 				Unsigned:            cmd.Bool("unsigned"),
-				EvidenceFiles:       cmd.StringSlice("evidence-file"),
+				EvidenceFiles:       cmd.StringSlice(flagEvidenceFile),
 				ReleaseImagesLedger: cmd.String("release-images-ledger"),
 			}
 

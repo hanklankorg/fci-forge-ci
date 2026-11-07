@@ -104,25 +104,9 @@ EXAMPLE:
 				return err
 			}
 
-			var repositories []string
-
-			protected := make(map[string][]string)
-
-			if raw := cmd.String(flagProtectedPackages); raw != "" {
-				groups, err := domaincontainer.ParsePackageRetentionPins(raw)
-				if err != nil {
-					return err
-				}
-
-				for _, group := range groups {
-					repositories = append(repositories, group.Repository)
-					protected[group.Repository] = group.Digests
-				}
-			} else {
-				repositories, err = retentionRepositories(ctx, cmd, packages)
-				if err != nil {
-					return err
-				}
+			repositories, protected, err := retentionTargets(ctx, cmd, packages)
+			if err != nil {
+				return err
 			}
 
 			return withBaseImagesDockerConfig(func(authFile string) error {
@@ -196,6 +180,33 @@ func retentionRuleFromCmd(cmd *cli.Command) (domaincontainer.RetentionRule, erro
 
 // retentionRepositories resolves the packages to prune: the named ones and
 // every package matching the prefix, all on GHCR.
+// retentionTargets names the packages one pass prunes and the digests each
+// keeps: the protected-inventory rows when given, the selected repositories
+// otherwise.
+func retentionTargets(ctx context.Context, cmd *cli.Command, packages *github.Packages) ([]string, map[string][]string, error) {
+	protected := make(map[string][]string)
+
+	raw := cmd.String(flagProtectedPackages)
+	if raw == "" {
+		repositories, err := retentionRepositories(ctx, cmd, packages)
+
+		return repositories, protected, err
+	}
+
+	groups, err := domaincontainer.ParsePackageRetentionPins(raw)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	repositories := make([]string, 0, len(groups))
+	for _, group := range groups {
+		repositories = append(repositories, group.Repository)
+		protected[group.Repository] = group.Digests
+	}
+
+	return repositories, protected, nil
+}
+
 func retentionRepositories(ctx context.Context, cmd *cli.Command, packages *github.Packages) ([]string, error) {
 	repositories := cmd.StringSlice(flagRetentionRepository)
 

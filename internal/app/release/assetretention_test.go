@@ -152,8 +152,8 @@ func TestApplyAssetRetention_KeepsPublicReleaseEvidenceDependencies(t *testing.T
 		old.Assets = append(old.Assets, provider.ListedAsset{Name: name, Size: 1e3})
 	}
 
-	want := []string{"v1.0.0/app_v1.0.0_linux_amd64.tar.gz", "v1.0.0/app_v1.0.0_amd64.deb"}
-	for _, name := range []string{
+	// Files no retained evidence references are deleted with the archives.
+	unreferenced := []string{
 		"release-images.json", // Internal image ledger, not public evidence.
 		"trivy-results-distroless-amd64.json",
 		"payload.json",
@@ -161,12 +161,18 @@ func TestApplyAssetRetention_KeepsPublicReleaseEvidenceDependencies(t *testing.T
 		"release-plan.json.backup",
 		"other-sbom-distroless-amd64.json",
 		"sbom-distroless-amd64.json.backup",
-	} {
+	}
+
+	want := make([]string, 0, 2+len(unreferenced))
+	want = append(want, "v1.0.0/app_v1.0.0_linux_amd64.tar.gz", "v1.0.0/app_v1.0.0_amd64.deb")
+
+	for _, name := range unreferenced {
 		old.Assets = append(old.Assets, provider.ListedAsset{Name: name, Size: 1e3})
 		want = append(want, old.Tag+"/"+name)
 	}
 
 	pruner := &releasePruner{releases: []provider.ListedRelease{old, goRelease("v1.1.0", 2)}}
+
 	result, err := apprelease.ApplyAssetRetention(t.Context(), pruner, &bytes.Buffer{}, retention(1))
 	if err != nil {
 		t.Fatal(err)

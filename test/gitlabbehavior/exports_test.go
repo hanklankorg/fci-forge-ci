@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -73,7 +74,7 @@ func TestReleaseExportJobRunsForTheSelectedArchitectures(t *testing.T) {
 		{"arm64", "linux/amd64", false},
 	} {
 		out, err := runReleaseFunction(t, t.TempDir(), ownerCLI+"rc_export_selected "+test.arch+" '"+test.platforms+"'", "OWNER_CLI_BINARY="+os.Args[0])
-		if err != nil || strings.TrimSpace(out) != fmt.Sprint(test.selected) {
+		if err != nil || strings.TrimSpace(out) != strconv.FormatBool(test.selected) {
 			t.Errorf("%s with release-platforms %q: selected=%s, want %v: %v", test.arch, test.platforms, out, test.selected, err)
 		}
 	}

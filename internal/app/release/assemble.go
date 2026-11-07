@@ -735,20 +735,20 @@ func readAssembly(path string) (domainrelease.Assembly, error) {
 // Assembly paths are not discovery hints: every declared input must exist, and
 // checksums must cover exactly the public assets and the generated SBOM ZIP.
 func ValidateAssembly(path string) error {
-	_, _, err := validatedSigningAssembly(path, nil)
+	_, err := validatedSigningAssembly(path, nil)
 
 	return err
 }
 
-func validatedSigningAssembly(path string, extensions []string) (domainrelease.Assembly, []string, error) {
+func validatedSigningAssembly(path string, extensions []string) ([]string, error) {
 	asm, err := readAssembly(path)
 	if err != nil {
-		return asm, nil, err
+		return nil, err
 	}
 
 	subjectPaths, err := assemblyChecksumSubjects(asm)
 	if err != nil {
-		return asm, nil, err
+		return nil, err
 	}
 
 	selected := make([]string, 0, len(subjectPaths)+1)
@@ -761,43 +761,43 @@ func validatedSigningAssembly(path string, extensions []string) (domainrelease.A
 	}
 
 	if asm.ChecksumFile == "" {
-		return asm, nil, fmt.Errorf("assembly checksums file is required: %w", errs.ErrMissingInput)
+		return nil, fmt.Errorf("assembly checksums file is required: %w", errs.ErrMissingInput)
 	}
 
 	if err := checkChecksumOutputInputs(asm.ChecksumFile, append(append([]string{path}, selected...), assemblySBOMPaths(asm)...)); err != nil {
-		return asm, nil, err
+		return nil, err
 	}
 
 	selected = append(selected, asm.ChecksumFile)
 	if err := validateAssemblySignerOutputs(selected, extensions); err != nil {
-		return asm, nil, err
+		return nil, err
 	}
 
 	body, err := readReleaseFile(asm.ChecksumFile)
 	if err != nil {
-		return asm, nil, fmt.Errorf("assembly checksums file: %w", err)
+		return nil, fmt.Errorf("assembly checksums file: %w", err)
 	}
 
 	// Container-only releases can have no public file subjects. The producer
 	// still writes an empty checksums file; there is nothing to sign in it.
 	if len(subjectPaths) == 0 && len(bytes.TrimSpace(body)) == 0 {
-		return asm, selected[:len(selected)-1], nil
+		return selected[:len(selected)-1], nil
 	}
 
 	subjects, err := provenance.ParseChecksums(bytes.NewReader(body))
 	if err != nil {
-		return asm, nil, err
+		return nil, err
 	}
 
 	if err := checkChecksumSubjects(subjects, sortedChecksumSubjectNames(subjectPaths)); err != nil {
-		return asm, nil, err
+		return nil, err
 	}
 
 	if err := verifyReleaseChecksumDigests(subjects, subjectPaths); err != nil {
-		return asm, nil, err
+		return nil, err
 	}
 
-	return asm, selected, nil
+	return selected, nil
 }
 
 func assemblySBOMPaths(asm domainrelease.Assembly) []string {
@@ -812,6 +812,7 @@ func assemblySBOMPaths(asm domainrelease.Assembly) []string {
 func assemblyChecksumSubjects(asm domainrelease.Assembly) (map[string]string, error) {
 	subjects := make(map[string]string, len(asm.Assets)+1)
 	paths := map[string]bool{}
+
 	add := func(path, name string) error {
 		if name != filepath.Base(path) || subjects[name] != "" || paths[filepath.Clean(path)] {
 			return fmt.Errorf("assembly public asset has inconsistent or duplicate name/path %q: %w", path, errs.ErrValidation)

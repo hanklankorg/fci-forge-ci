@@ -77,23 +77,31 @@ func CheckReleaseExports(in ReleaseExportsInput) error {
 	}
 
 	if len(in.ImagePlan) != 0 {
-		var plan struct {
-			Builds []struct {
-				Arch string `json:"arch"`
-			} `json:"builds"`
-		}
-		if err := json.Unmarshal(in.ImagePlan, &plan); err != nil {
-			return fmt.Errorf("release image plan: %w", err)
+		return checkImagePlanPlatforms(in.ImagePlan, platforms)
+	}
+
+	return nil
+}
+
+// checkImagePlanPlatforms requires every native image build in the release
+// image plan to have an export platform.
+func checkImagePlanPlatforms(imagePlan []byte, platforms []string) error {
+	var plan struct {
+		Builds []struct {
+			Arch string `json:"arch"`
+		} `json:"builds"`
+	}
+	if err := json.Unmarshal(imagePlan, &plan); err != nil {
+		return fmt.Errorf("release image plan: %w", err)
+	}
+
+	for _, build := range plan.Builds {
+		if build.Arch != "amd64" && build.Arch != "arm64" {
+			return fmt.Errorf("unknown image architecture %q: %w", build.Arch, errs.ErrValidation)
 		}
 
-		for _, build := range plan.Builds {
-			if build.Arch != "amd64" && build.Arch != "arm64" {
-				return fmt.Errorf("unknown image architecture %q: %w", build.Arch, errs.ErrValidation)
-			}
-
-			if !slices.Contains(platforms, "linux/"+build.Arch) {
-				return fmt.Errorf("image and export architectures differ; set release-platforms: %w", errs.ErrValidation)
-			}
+		if !slices.Contains(platforms, "linux/"+build.Arch) {
+			return fmt.Errorf("image and export architectures differ; set release-platforms: %w", errs.ErrValidation)
 		}
 	}
 

@@ -167,12 +167,12 @@ func chooseExample(flag, dir string, in *os.File, out io.Writer) (string, error)
 func nestedProjects(dir string, entries []os.DirEntry) []string {
 	var found []string
 
-	for _, e := range entries {
-		if !e.IsDir() || strings.HasPrefix(e.Name(), ".") {
+	for _, entry := range entries {
+		if !entry.IsDir() || strings.HasPrefix(entry.Name(), ".") {
 			continue
 		}
 
-		sub, err := os.ReadDir(filepath.Join(dir, e.Name()))
+		sub, err := os.ReadDir(filepath.Join(dir, entry.Name()))
 		if err != nil {
 			continue
 		}
@@ -183,7 +183,7 @@ func nestedProjects(dir string, entries []os.DirEntry) []string {
 		}
 
 		if t := projecttype.DetectFromEntries(names); domain.ExampleFor(t) != "" {
-			found = append(found, fmt.Sprintf("%s (%s)", e.Name(), t))
+			found = append(found, fmt.Sprintf("%s (%s)", entry.Name(), t))
 		}
 	}
 
@@ -240,24 +240,24 @@ func report(out io.Writer, example string, result appinit.Result) {
 
 // reportProject says which values init took from the project's own build
 // files, so a wrong guess is visible before it is committed.
-func reportProject(out io.Writer, p domain.Project) {
-	if p.Name == "" && p.MainPackage == "" {
+func reportProject(out io.Writer, project domain.Project) {
+	if project.Name == "" && project.MainPackage == "" {
 		return
 	}
 
 	_, _ = fmt.Fprintln(out, "\nFrom your build files:")
 
-	if p.Name != "" {
+	if project.Name != "" {
 		note := ""
-		if !p.FillsName() {
+		if !project.FillsName() {
 			note = " (not filled: the example name is also the image name, which takes lowercase letters, digits, '.', '_' and '-')"
 		}
 
-		_, _ = fmt.Fprintf(out, "  project name   %s%s\n", p.Name, note)
+		_, _ = fmt.Fprintf(out, "  project name   %s%s\n", project.Name, note)
 	}
 
-	if p.MainPackage != "" {
-		_, _ = fmt.Fprintf(out, "  main package   %s\n", p.MainPackage)
+	if project.MainPackage != "" {
+		_, _ = fmt.Fprintf(out, "  main package   %s\n", project.MainPackage)
 	}
 }
 

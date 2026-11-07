@@ -30,12 +30,12 @@ func runtimePublicationVerifyCLICmd() *cli.Command {
 		Flags: []cli.Flag{
 			&cli.StringFlag{Name: flagArch, Required: true, Usage: "amd64 or arm64"},
 			&cli.StringFlag{Name: "workspace", Value: ".", Usage: "source checkout containing .engine/bin checksum recordings"},
-			&cli.StringFlag{Name: "file", Usage: "downloaded CLI file (exclusive with image-ref)"},
+			&cli.StringFlag{Name: flagFile, Usage: "downloaded CLI file (exclusive with image-ref)"},
 			&cli.StringFlag{Name: flagImageRef, Usage: "digest-pinned retained runtime image (exclusive with file)"},
 			regflags.AuthFile(regflags.AuthFileOpts{}),
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
-			return appcontainer.VerifyRuntimeCLI(ctx, ociregistry.WithAuthFile(cmd.String(flagAuthFile)), cmd.String("workspace"), cmd.String(flagArch), cmd.String("file"), cmd.String(flagImageRef))
+			return appcontainer.VerifyRuntimeCLI(ctx, ociregistry.WithAuthFile(cmd.String(flagAuthFile)), cmd.String("workspace"), cmd.String(flagArch), cmd.String(flagFile), cmd.String(flagImageRef))
 		},
 	}
 }

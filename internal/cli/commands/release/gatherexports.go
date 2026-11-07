@@ -13,14 +13,14 @@ import (
 
 func gatherExportsCmd() *cli.Command {
 	return &cli.Command{Name: "gather-exports", Usage: "validate and join pre-manifest export trees without overwriting any top-level path",
-		Flags: []cli.Flag{&cli.StringSliceFlag{Name: "source", Required: true}, &cli.StringFlag{Name: "path", Required: true}, &cli.BoolFlag{Name: "allow-missing"}, &cli.StringFlag{Name: "enabled", Value: "true"}},
+		Flags: []cli.Flag{&cli.StringSliceFlag{Name: "source", Required: true}, &cli.StringFlag{Name: flagPath, Required: true}, &cli.BoolFlag{Name: "allow-missing"}, &cli.StringFlag{Name: "enabled", Value: "true"}},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			enabled, err := parseStrictBoolFlag(cmd.String("enabled"), "enabled")
 			if err != nil {
 				return err
 			}
 
-			return apprelease.GatherExports(ctx, apprelease.GatherExportsInput{Sources: cmd.StringSlice("source"), Destination: cmd.String("path"), Enabled: enabled, AllowMissing: cmd.Bool("allow-missing")})
+			return apprelease.GatherExports(ctx, apprelease.GatherExportsInput{Sources: cmd.StringSlice("source"), Destination: cmd.String(flagPath), Enabled: enabled, AllowMissing: cmd.Bool("allow-missing")})
 		},
 	}
 }

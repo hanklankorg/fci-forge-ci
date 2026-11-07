@@ -28,7 +28,9 @@ func dependencyCmd() *cli.Command {
 			if err != nil {
 				return err
 			}
+
 			_, err = fmt.Fprintln(os.Stdout, value)
+
 			return err
 		},
 	}

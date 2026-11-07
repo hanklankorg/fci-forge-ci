@@ -28,7 +28,7 @@ func PublishStagePipeline(plan pipeline.ReleasePublishStagePlan, opts BuildPipel
 
 	stage := opts.Stage
 	if stage == "" {
-		stage = "publish"
+		stage = stagePublish
 	}
 
 	out := ChildPipeline{Stages: []string{stage}}
@@ -65,7 +65,7 @@ func PublishStagePipeline(plan pipeline.ReleasePublishStagePlan, opts BuildPipel
 		{name: "go-container-first", component: componentPublishContainer, planned: targetPlanned(tgt.GoContainerFirst)},
 	} {
 		if unsupported.planned {
-			return ChildPipeline{}, unsupportedTarget("publish", unsupported.name, unsupported.component)
+			return ChildPipeline{}, unsupportedTarget(stagePublish, unsupported.name, unsupported.component)
 		}
 	}
 

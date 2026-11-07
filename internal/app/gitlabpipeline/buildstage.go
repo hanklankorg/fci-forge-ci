@@ -106,7 +106,7 @@ func BuildStagePipeline(plan pipeline.ReleaseBuildStagePlan, opts BuildPipelineO
 
 	stage := opts.Stage
 	if stage == "" {
-		stage = "build"
+		stage = stageBuild
 	}
 
 	out := ChildPipeline{Stages: []string{stage}}
@@ -184,7 +184,7 @@ func validateBuildStageTargets(tgt pipeline.ReleaseBuildTargets, version string)
 	}
 
 	if targetPlanned(tgt.XcodeIOS) {
-		return unsupportedTarget("build", "xcode-ios", "build-xcode-ios")
+		return unsupportedTarget(stageBuild, "xcode-ios", "build-xcode-ios")
 	}
 
 	if err := validateGoTargetRepresentable(tgt.Go); err != nil {
@@ -355,7 +355,7 @@ func addTargetIncludes[T any](
 
 		inputs := map[string]any{
 			"job-name": jobName,
-			"stage":    out.Stages[0],
+			keyStage:   out.Stages[0],
 		}
 
 		if includeArtifactName {

@@ -32,8 +32,6 @@ import (
 // debugSwapWarning is the Warning annotation text emitted when the
 // --debug-allow-swap flag bypasses the swap policy. The exact tokens
 // "--debug-allow-swap" and "swap" are pinned by the integration test.
-//
-//nolint:gosec // G101 false positive: the substring "key material" is operator-facing warning text, not a credential literal.
 func debugSwapWarning() string {
 	return "swap policy bypassed via --debug-allow-swap — decrypted key material may be paged to disk. DO NOT USE FOR PRODUCTION RELEASES; see " + docslink.URL("verification.md#swap-policy") + "."
 }

@@ -101,12 +101,12 @@ func TestRemainingIgnoresTrailingComments(t *testing.T) {
 func TestProjectReplacementsFillWholeTokensOnly(t *testing.T) {
 	t.Parallel()
 
-	r := consumerinit.ProjectReplacements(consumerinit.Project{Name: "hello", MainPackage: "."})
+	replacements := consumerinit.ProjectReplacements(consumerinit.Project{Name: "hello", MainPackage: "."})
 	content := "main-package: ./cmd/my-cli\nbinary-name: my-cli\nattach: release-artifacts/*/my-cli-*\n" +
 		"ARTIFACT_NAME: FIXME-app\nkeep: my-application FIXME-apple FIXME-release-bot@example.com\n" +
 		"COPY dist/FIXME-service-linux-x /usr/local/bin/my-service\n"
 
-	got := consumerinit.ApplyProject(content, r)
+	got := consumerinit.ApplyProject(content, replacements)
 	want := "main-package: .\nbinary-name: hello\nattach: release-artifacts/*/hello-*\n" +
 		"ARTIFACT_NAME: hello\nkeep: my-application FIXME-apple FIXME-release-bot@example.com\n" +
 		"COPY dist/hello-linux-x /usr/local/bin/hello\n"
@@ -128,8 +128,8 @@ func TestProjectReplacementsFillWholeTokensOnly(t *testing.T) {
 
 	// Without a detected main package the example path stays for the person
 	// to fill; the name does not turn it into a ./cmd/<name> guess.
-	r = consumerinit.ProjectReplacements(consumerinit.Project{Name: "hello"})
-	if got := consumerinit.ApplyProject("main-package: ./cmd/my-cli\nbinary-name: my-cli\n", r); got != "main-package: ./cmd/my-cli\nbinary-name: hello\n" {
+	replacements = consumerinit.ProjectReplacements(consumerinit.Project{Name: "hello"})
+	if got := consumerinit.ApplyProject("main-package: ./cmd/my-cli\nbinary-name: my-cli\n", replacements); got != "main-package: ./cmd/my-cli\nbinary-name: hello\n" {
 		t.Errorf("undetected main package = %q", got)
 	}
 

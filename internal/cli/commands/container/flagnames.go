@@ -46,6 +46,7 @@ const (
 	flagPublish                 = "publish"
 	flagRecursive               = "recursive"
 	flagRequireLabel            = "require-label"
+	flagTags                    = "tags"
 	flagRef                     = "ref"
 	flagRegistryPasswordFile    = regflags.FlagPasswordFile
 	flagRegistryUsername        = regflags.FlagUsername

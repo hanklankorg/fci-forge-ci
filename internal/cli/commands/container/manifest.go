@@ -42,10 +42,10 @@ func manifestTagCmd() *cli.Command {
 		Usage: "expose an immutable manifest digest at validated repository tags",
 		Flags: []cli.Flag{
 			&cli.StringFlag{Name: flagImageRef, Required: true, Sources: cli.EnvVars("IMAGE_REF"), Usage: "immutable image@sha256:digest reference"},
-			&cli.StringFlag{Name: "tags", Required: true, Sources: cli.EnvVars("TAGS"), Usage: "newline-separated fully qualified destination tags"},
+			&cli.StringFlag{Name: flagTags, Required: true, Sources: cli.EnvVars("TAGS"), Usage: "newline-separated fully qualified destination tags"},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
-			return appcontainer.TagManifest(ctx, ociregistry.New(), cmd.String(flagImageRef), cmd.String("tags"))
+			return appcontainer.TagManifest(ctx, ociregistry.New(), cmd.String(flagImageRef), cmd.String(flagTags))
 		},
 	}
 }
@@ -145,13 +145,13 @@ func manifestMergeCmd() *cli.Command {
      --tags "v1.2.3" --digests-dir /tmp/digests`,
 		Flags: []cli.Flag{
 			&cli.StringFlag{Name: flagImageName, Sources: cli.EnvVars("IMAGE_NAME"), Usage: "base image name (without tag) the manifest list points to"},
-			&cli.StringFlag{Name: "tags", Sources: cli.EnvVars("TAGS"), Usage: "newline-separated tags to publish for the manifest list"},
+			&cli.StringFlag{Name: flagTags, Sources: cli.EnvVars("TAGS"), Usage: "newline-separated tags to publish for the manifest list"},
 			&cli.StringFlag{Name: "digests-dir", Value: domaincontainer.DefaultDigestsDir, Sources: cli.EnvVars("DIGESTS_DIR"), Usage: "directory holding the per-arch digest marker files"},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			return appcontainer.MergeManifest(ctx, ociregistry.New(), os.Stderr, appcontainer.MergeManifestInput{
 				ImageName:  cmd.String(flagImageName),
-				Tags:       cmd.String("tags"),
+				Tags:       cmd.String(flagTags),
 				DigestsDir: cmd.String("digests-dir"),
 			})
 		},
@@ -166,13 +166,13 @@ func manifestInspectCmd() *cli.Command {
    forge-ci container manifest inspect --image-ref ghcr.io/owner/app:v1.2.3`,
 		Flags: []cli.Flag{
 			&cli.StringFlag{Name: flagImageRef, Sources: cli.EnvVars("IMAGE_REF"), Usage: "fully-qualified image reference (registry/owner/name:tag) to inspect"},
-			&cli.StringFlag{Name: "tags", Sources: cli.EnvVars("TAGS"), Usage: "newline-separated tags whose digest output is emitted to the sink"},
+			&cli.StringFlag{Name: flagTags, Sources: cli.EnvVars("TAGS"), Usage: "newline-separated tags whose digest output is emitted to the sink"},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			return deps.FromCmd(ctx, cmd, func(d *deps.Deps) error {
 				_, err := appcontainer.InspectManifest(ctx, ociregistry.New(), d.OutputSink, os.Stderr, appcontainer.InspectManifestInput{
 					Image: cmd.String("image-ref"),
-					Tags:  cmd.String("tags"),
+					Tags:  cmd.String(flagTags),
 				})
 
 				return err

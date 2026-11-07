@@ -14,8 +14,8 @@ import (
 
 // ManifestTagger is the existing registry digest-to-tag copy capability.
 type ManifestTagger interface {
-	CopyTag(context.Context, string, string) error
-	ResolveDigest(context.Context, string) (string, error)
+	CopyTag(ctx context.Context, source, destination string) error
+	ResolveDigest(ctx context.Context, reference string) (string, error)
 }
 
 // TagManifest exposes an already published (and, when requested, signed)
@@ -23,6 +23,7 @@ type ManifestTagger interface {
 // first copy, and never resolve a mutable transport tag at this boundary.
 func TagManifest(ctx context.Context, reg ManifestTagger, source, tags string) error {
 	source = strings.TrimSpace(source)
+
 	image, digest, ok := strings.Cut(source, "@")
 	if !ok || !domaincontainer.ValidDigest(digest) {
 		return fmt.Errorf("manifest tag requires an immutable digest reference: %w", errs.ErrUsage)
@@ -32,6 +33,7 @@ func TagManifest(ctx context.Context, reg ManifestTagger, source, tags string) e
 	if len(destinations) == 0 {
 		return fmt.Errorf("tags is required: %w", errs.ErrUsage)
 	}
+
 	if err := domaincontainer.ValidateManifestTags(image, destinations); err != nil {
 		return err
 	}
@@ -48,9 +50,11 @@ func TagManifest(ctx context.Context, reg ManifestTagger, source, tags string) e
 		if err != nil {
 			return fmt.Errorf("verify promoted manifest %s: %w", dest, err)
 		}
+
 		if actual != digest {
 			return fmt.Errorf("promoted manifest %s digest mismatch: got %s, want %s: %w", dest, actual, digest, errs.ErrValidation)
 		}
 	}
+
 	return nil
 }

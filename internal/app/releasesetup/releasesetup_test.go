@@ -18,13 +18,15 @@ import (
 	"github.com/diggsweden/forge-ci/internal/testutil/sshkey"
 )
 
-func writeKeys(t *testing.T, dir string) (pubPath, privPath, pubLine string) {
+// writeKeys writes a fresh key pair into dir and returns the public key's
+// path, the private key's path and the public key's authorized_keys line.
+func writeKeys(t *testing.T, dir string) (string, string, string) {
 	t.Helper()
 
 	priv, signer := sshkey.New(t)
-	pubLine = strings.TrimSpace(string(ssh.MarshalAuthorizedKey(signer.PublicKey())))
-	pubPath = filepath.Join(dir, "id.pub")
-	privPath = filepath.Join(dir, "id")
+	pubLine := strings.TrimSpace(string(ssh.MarshalAuthorizedKey(signer.PublicKey())))
+	pubPath := filepath.Join(dir, "id.pub")
+	privPath := filepath.Join(dir, "id")
 
 	if err := os.WriteFile(pubPath, []byte(pubLine+" someone@laptop\n"), 0o600); err != nil {
 		t.Fatal(err)
@@ -169,13 +171,15 @@ func TestPlanRequestWithoutSSHSigning(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	fixes := ""
+	var builder strings.Builder
 
 	for _, c := range plan.Checks {
 		if !c.OK {
-			fixes += c.Fix + "\n"
+			builder.WriteString(c.Fix + "\n")
 		}
 	}
+
+	fixes := builder.String()
 
 	if !strings.Contains(fixes, "git config gpg.format ssh") || !strings.Contains(fixes, "git config user.signingkey") {
 		t.Errorf("fixes = %q", fixes)

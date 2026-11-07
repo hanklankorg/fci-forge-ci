@@ -29,6 +29,7 @@ import (
 	"codefloe.com/itiquette/forge-lab-contract/githubcontext"
 	"github.com/google/go-github/v91/github"
 
+	"github.com/diggsweden/forge-ci/internal/domain/errs"
 	"github.com/diggsweden/forge-ci/internal/retry"
 )
 
@@ -346,14 +347,17 @@ func (trial *GitHubTrial) stageConsumer(root, fixtures string, engine GitHubEngi
 		"GIT_AUTHOR_NAME="+consumerAuthor, "GIT_AUTHOR_EMAIL="+requestSigner,
 		"GIT_COMMITTER_NAME="+consumerAuthor, "GIT_COMMITTER_EMAIL="+requestSigner,
 		"GIT_AUTHOR_DATE=2000-01-01T00:00:00Z", "GIT_COMMITTER_DATE=2000-01-01T00:00:00Z")
+
 	staged.Commit, err = staged.commit(trial.tb.Context(), consumerBaseMessage)
 	if err != nil {
 		trial.tb.Fatalf("livetest: snapshot imported consumer: %v", err)
 	}
+
 	nativeLayer, err := githubNativePolicyLayer(trial.tb.Context(), staged, engine)
 	if err != nil {
 		trial.tb.Fatalf("livetest: native policy checksum: %v", err)
 	}
+
 	staged = staged.WithDraftLayer(trial.tb, nativeLayer)
 
 	prefix := filepath.ToSlash(filepath.Join(fixtures, "workflows")) + "/"
@@ -395,38 +399,48 @@ func (trial *GitHubTrial) stageConsumer(root, fixtures string, engine GitHubEngi
 // authentication. Without that reader, preserve the native policy's checksum;
 // it is NOT evidence that the selected engine's binary matches it. GitHub runs
 // only the separately rendered fixture workflows, never these native calls.
-func githubNativePolicyLayer(ctx context.Context, consumer Consumer, engine GitHubEngine) (Layer, error) { //nolint:funcorder // keep native staging policy beside stageConsumer.
+func githubNativePolicyLayer(ctx context.Context, consumer Consumer, engine GitHubEngine) (Layer, error) {
 	layer := Layer{ServerURL: "https://github.com", Repository: engine.Owner + "/" + engine.Repository,
 		Commit: engine.Commit, admin: engine.admin}
+
 	listed, err := consumer.git.output(ctx, consumer.stage, nil, "ls-tree", "-z", "--name-only", consumer.Commit, consumerWorkflows+"/")
 	if err != nil {
 		return Layer{}, err
 	}
+
 	hasWorkflow := false
+
 	for path := range strings.SplitSeq(string(listed), "\x00") {
-		if ext := filepath.Ext(path); ext == ".yml" || ext == ".yaml" {
+		if isWorkflowFile(path) {
 			hasWorkflow = true
+
 			break
 		}
 	}
+
 	if !hasWorkflow {
 		return layer, nil
 	}
+
 	workflows, err := consumer.workflows(ctx)
 	if err != nil {
 		return Layer{}, err
 	}
+
 	draft := false
 	for _, workflow := range workflows {
 		draft = draft || strings.Contains(workflow, "@PIN_FORGE_CI_SHA")
 	}
+
 	if !draft {
 		return layer, nil
 	}
+
 	pin, err := ReadConsumerPin(workflows)
 	if err != nil {
 		return Layer{}, err
 	}
+
 	if pin.Commit != "PIN_FORGE_CI_SHA" {
 		return layer, nil
 	}
@@ -436,20 +450,35 @@ func githubNativePolicyLayer(ctx context.Context, consumer Consumer, engine GitH
 	if pin.BinarySHA256 == "" || engine.admin == nil {
 		return layer, nil
 	}
-	if engine.admin.commit != engine.Commit || engine.admin.read == nil {
-		return Layer{}, fmt.Errorf("checksum reader does not identify the frozen engine commit")
-	}
-	line, err := engine.admin.read(layerChecksum)
+
+	digest, err := frozenEngineChecksum(engine)
 	if err != nil {
-		return Layer{}, fmt.Errorf("read frozen engine checksum: %w", err)
+		return Layer{}, err
 	}
-	digest, name, found := strings.Cut(strings.TrimSuffix(string(line), "\n"), "  ")
-	if decoded, decodeErr := hex.DecodeString(digest); !found || name != "bin/forge-ci" || decodeErr != nil || len(decoded) != sha256.Size {
-		return Layer{}, fmt.Errorf("%s is not one `<sha256>  bin/forge-ci` line", layerChecksum)
-	}
+
 	layer.BinarySHA256 = digest
 
 	return layer, nil
+}
+
+// frozenEngineChecksum reads the recorded CLI digest of the frozen engine
+// commit through its pinned reader.
+func frozenEngineChecksum(engine GitHubEngine) (string, error) {
+	if engine.admin.commit != engine.Commit || engine.admin.read == nil {
+		return "", fmt.Errorf("checksum reader does not identify the frozen engine commit: %w", errs.ErrValidation)
+	}
+
+	line, err := engine.admin.read(layerChecksum)
+	if err != nil {
+		return "", fmt.Errorf("read frozen engine checksum: %w", err)
+	}
+
+	digest, name, found := strings.Cut(strings.TrimSuffix(string(line), "\n"), "  ")
+	if decoded, decodeErr := hex.DecodeString(digest); !found || name != "bin/forge-ci" || decodeErr != nil || len(decoded) != sha256.Size {
+		return "", fmt.Errorf("%s is not one `<sha256>  bin/forge-ci` line: %w", layerChecksum, errs.ErrValidation)
+	}
+
+	return digest, nil
 }
 
 // stageFixtureWorkflows renders each top-level fixture workflow under prefix
@@ -1040,6 +1069,7 @@ func (trial *GitHubTrial) CheckRelease(repo string, tree GitHubConsumerTree, fin
 	}
 
 	assets := map[string]int64{}
+
 	names := make([]string, 0, len(release.Assets))
 	for _, asset := range release.Assets {
 		assets[asset.GetName()] = asset.GetID()
@@ -1055,10 +1085,13 @@ func (trial *GitHubTrial) CheckRelease(repo string, tree GitHubConsumerTree, fin
 	if err != nil {
 		trial.tb.Fatalf("retain GitHub release inventory: %v", err)
 	}
+
 	bundles := trial.verifyBundles(repo, assets, trust, evidence)
+
 	signatures := trial.verifyGPGSignatures(repo, assets, key, evidence)
 	if evidence.Enabled() {
 		dir := trial.tempDir("release-readback")
+
 		for name, id := range assets {
 			if !evidence.retained(name) {
 				trial.download(repo, id, filepath.Join(dir, name), evidence)
@@ -1395,17 +1428,21 @@ func (trial *GitHubTrial) download(repo string, id int64, path string, evidence 
 	if err != nil {
 		trial.tb.Fatalf("livetest: write %s: %v", path, err)
 	}
+
 	if size > 512<<20 {
 		trial.tb.Fatalf("livetest: release asset exceeds 512 MiB download limit")
 	}
+
 	if err := file.Close(); err != nil {
 		trial.tb.Fatalf("livetest: close release asset: %v", err)
 	}
+
 	if len(evidence) > 0 && evidence[0].Enabled() && !evidence[0].retained(filepath.Base(path)) {
 		payload, err := os.ReadFile(path) //nolint:gosec // own bounded download, closed above.
 		if err != nil {
 			trial.tb.Fatalf("livetest: read release evidence: %v", err)
 		}
+
 		if err := evidence[0].Retain(filepath.Base(path), payload); err != nil {
 			trial.tb.Fatalf("livetest: retain release evidence: %v", err)
 		}

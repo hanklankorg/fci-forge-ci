@@ -25,7 +25,7 @@ digest, writes digest=<sha256> to the CI output sink, and logs the digest.
 EXAMPLE:
    forge-ci release prepare-dist --path dist/ --prune-dirs false`,
 		Flags: []cli.Flag{
-			&cli.StringFlag{Name: "path", Value: defaultDistPath, Sources: cli.EnvVars("DIST_DIR", "UPLOAD_DIST_PATH"), Usage: "directory to prepare for upload"},
+			&cli.StringFlag{Name: flagPath, Value: defaultDistPath, Sources: cli.EnvVars("DIST_DIR", "UPLOAD_DIST_PATH"), Usage: "directory to prepare for upload"},
 			&cli.StringFlag{Name: "prune-dirs", Value: "false", Sources: cli.EnvVars("PRUNE_DIRS", "UPLOAD_DIST_PRUNE"), Usage: "whether to remove top-level directories before digesting: true|false"}, //nolint:goconst // generic bool literal, not a shared identifier.
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
@@ -36,7 +36,7 @@ EXAMPLE:
 
 			return deps.FromCmd(ctx, cmd, func(d *deps.Deps) error {
 				_, err := apprelease.PrepareDist(ctx, osfs.New(), d.OutputSink, os.Stderr, apprelease.PrepareDistInput{
-					Path:      cmd.String("path"),
+					Path:      cmd.String(flagPath),
 					PruneDirs: pruneDirs,
 				})
 

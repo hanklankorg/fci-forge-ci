@@ -824,8 +824,8 @@ func globalOptionsSummary(data any) string {
 // wrapList joins items with ", ", breaking with sep before a line passes width.
 func wrapList(items []string, width int, sep string) string {
 	var (
-		b    strings.Builder
-		line int
+		builder strings.Builder
+		line    int
 	)
 
 	for i, item := range items {
@@ -835,18 +835,18 @@ func wrapList(items []string, width int, sep string) string {
 		}
 
 		if line > 0 && line+1+len(piece) > width {
-			b.WriteString(sep)
+			builder.WriteString(sep)
 
 			line = 0
 		} else if line > 0 {
-			b.WriteString(" ")
+			builder.WriteString(" ")
 
 			line++
 		}
 
-		b.WriteString(piece)
+		builder.WriteString(piece)
 		line += len(piece)
 	}
 
-	return b.String()
+	return builder.String()
 }

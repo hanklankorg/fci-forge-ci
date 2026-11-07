@@ -23,7 +23,7 @@ func TestResolveExactPrefixAndAmbiguous(t *testing.T) {
 		"Verification.md":        "verification",
 		"verification#swap":      "verification",
 		"tutorial":               "tutorial-first-pull-request",
-		"setup-requirements.md ": "setup-requirements",
+		"setup-requirements.md ": "setup-requirements", //nolint:gocritic // the trailing space is the case under test.
 	} {
 		got, err := cmddocs.Resolve(query)
 		if err != nil || got != want {

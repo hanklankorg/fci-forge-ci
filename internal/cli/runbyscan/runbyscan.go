@@ -128,7 +128,7 @@ func Invoked(body string, known map[string]bool) []string {
 func commandWords(rest string) []string {
 	var words []string
 
-	for _, field := range strings.Fields(rest) {
+	for field := range strings.FieldsSeq(rest) {
 		field = strings.Trim(field, `"'`)
 
 		switch {

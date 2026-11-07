@@ -5,6 +5,7 @@ package doctor_test
 
 import (
 	"bytes"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -61,9 +62,7 @@ func hasCIFile(files map[string]string) bool {
 
 func withFile(files map[string]string, rel, body string) map[string]string {
 	out := map[string]string{rel: body}
-	for k, v := range files {
-		out[k] = v
-	}
+	maps.Copy(out, files)
 
 	return out
 }

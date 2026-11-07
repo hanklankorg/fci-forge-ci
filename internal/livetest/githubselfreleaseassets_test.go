@@ -113,14 +113,17 @@ func selfReleaseVerifyUploadedAssets(t *testing.T, trial *GitHubTrial, repo, tag
 	}
 
 	trust := CosignTrust{identity: "^https://github\\.com/" + regexp.QuoteMeta(trial.org+"/"+repo) + "/\\.github/workflows/release-binary\\.yml@refs/tags/" + regexp.QuoteMeta(request) + "$"}
+
 	names := make([]string, 0, len(release.Assets))
 	for _, asset := range release.Assets {
 		names = append(names, asset.GetName())
 	}
+
 	evidence, err := NewReleaseEvidence(Target{Forge: "github", Host: "github.com", Owner: trial.org, Token: trial.token}, repo, tag, source, names)
 	if err != nil {
 		t.Fatal("retain GitHub self-release inventory: ", err)
 	}
+
 	if !trial.verifyBundles(repo, assets, trust, evidence)["checksums.txt"] {
 		t.Fatal("the uploaded checksum manifest has no verified signature")
 	}

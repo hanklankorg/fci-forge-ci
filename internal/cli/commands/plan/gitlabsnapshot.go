@@ -19,12 +19,15 @@ import (
 )
 
 func gitlabSnapshotPipelineCmd() *cli.Command {
-	flags := []cli.Flag{}
-	for _, name := range []string{"plan", "output", "project", "engine-sha", "server-url", "registry", "pipeline-id", "context-job", "job-image", "build-image", "image-builder", "builder-job-image", "runtime-image-go", "runtime-image-java", "runtime-image-node", "runtime-image-rust"} {
+	names := []string{"plan", flagOutput, "project", "engine-sha", "server-url", "registry", "pipeline-id", "context-job", "job-image", "build-image", "image-builder", "builder-job-image", "runtime-image-go", "runtime-image-java", "runtime-image-node", "runtime-image-rust"}
+	tagNames := []string{"runner-tags", "amd64-tags", flagARM64Tags}
+
+	flags := make([]cli.Flag, 0, len(names)+len(tagNames))
+	for _, name := range names {
 		flags = append(flags, &cli.StringFlag{Name: name})
 	}
 
-	for _, name := range []string{"runner-tags", "amd64-tags", "arm64-tags"} {
+	for _, name := range tagNames {
 		flags = append(flags, &cli.StringFlag{Name: name, Value: "[]", Usage: "JSON string array of runner tags"})
 	}
 	// The child pipeline's enforcement inputs come from the root's validated
@@ -58,7 +61,7 @@ func gitlabSnapshotPipelineCmd() *cli.Command {
 			}
 
 			in := gitlabpipeline.SnapshotPipelineOptions{Project: cmd.String("project"), Pin: cmd.String("engine-sha"), Server: cmd.String("server-url"), Registry: cmd.String("registry"), Pipeline: cmd.String("pipeline-id"), Context: cmd.String("context-job"), JobImage: cmd.String("job-image"), BuildImage: cmd.String("build-image"), Builder: cmd.String("image-builder"), BuilderImage: cmd.String("builder-job-image"), ApplicationTests: tests, Vulnerabilities: vulnerabilities, Images: gitlabpipeline.RuntimeImages{Go: cmd.String("runtime-image-go"), Java: cmd.String("runtime-image-java"), Node: cmd.String("runtime-image-node"), Rust: cmd.String("runtime-image-rust")}}
-			for name, dest := range map[string]*[]string{"runner-tags": &in.Tags, "amd64-tags": &in.AMD64Tags, "arm64-tags": &in.ARM64Tags} {
+			for name, dest := range map[string]*[]string{"runner-tags": &in.Tags, "amd64-tags": &in.AMD64Tags, flagARM64Tags: &in.ARM64Tags} {
 				if err := json.Unmarshal([]byte(cmd.String(name)), dest); err != nil {
 					return fmt.Errorf("%s: %w", name, err)
 				}
@@ -74,12 +77,13 @@ func gitlabSnapshotPipelineCmd() *cli.Command {
 				return err
 			}
 
-			if cmd.String("output") == "" {
+			if cmd.String(flagOutput) == "" {
 				_, err = os.Stdout.Write(append(encoded, '\n'))
+
 				return err
 			}
 
-			return os.WriteFile(cmd.String("output"), append(encoded, '\n'), 0o600)
+			return os.WriteFile(cmd.String(flagOutput), append(encoded, '\n'), 0o600)
 		},
 	}
 }

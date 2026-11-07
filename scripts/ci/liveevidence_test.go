@@ -15,7 +15,9 @@ func TestRunLiveTests_JobEvidenceDestination(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			override := filepath.Join(t.TempDir(), "job-evidence")
+
 			var env []string
+
 			switch name {
 			case "explicit":
 				env = []string{"FORGE_CI_LIVE_SNAPSHOT_EVIDENCE_DIR=" + override}
@@ -26,12 +28,14 @@ func TestRunLiveTests_JobEvidenceDestination(t *testing.T) {
 			}
 
 			run := newLiveRun(t, env...)
+
 			out, errOut, status := run.exec(t, "focused", "SnapshotTrial")
 			if status != 0 {
 				t.Fatalf("status %d: %s\n%s", status, out, errOut)
 			}
 
 			log, _ := run.logFile(t)
+
 			want := override
 			if name == "default" {
 				want = filepath.Join(filepath.Dir(log), "job-logs")

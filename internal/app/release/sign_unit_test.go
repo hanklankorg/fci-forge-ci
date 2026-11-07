@@ -333,17 +333,18 @@ func TestSign_AssemblySignsDistroPackagesAsCanonicalAssets(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	packages = append(packages, "release-files/checksums.sha256")
+	want := slices.Concat(packages, []string{"release-files/checksums.sha256"})
+
 	signer := &fakeSigner{}
 	if err := apprelease.SignArtifacts(context.Background(), signer, io.Discard, apprelease.SignInput{AssemblyFile: "assembly.json"}); err != nil {
 		t.Fatal(err)
 	}
 
-	if !slices.Equal(signer.signed, packages) {
-		t.Errorf("signed = %v, want %v", signer.signed, packages)
+	if !slices.Equal(signer.signed, want) {
+		t.Errorf("signed = %v, want %v", signer.signed, want)
 	}
 
-	for _, path := range packages {
+	for _, path := range want {
 		if _, err := os.Stat(path + ".asc"); err != nil {
 			t.Errorf("missing canonical signature for %s: %v", path, err)
 		}

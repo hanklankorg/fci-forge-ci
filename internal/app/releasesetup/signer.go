@@ -161,7 +161,7 @@ func readPublicKey(path string) (string, error) {
 // "key-type base64" form. A private key is refused by name, so it is never
 // copied into a committed file.
 func ParsePublicKey(data []byte, source string) (string, error) {
-	pub, _, _, _, err := ssh.ParseAuthorizedKey(data)
+	pub, err := authorizedKey(data)
 	if err != nil {
 		if bytes.Contains(data, []byte("PRIVATE KEY")) {
 			return "", fmt.Errorf("%s is a private key; pass its .pub file: %w", source, errs.ErrUsage)
@@ -195,7 +195,7 @@ func hasEntry(body []byte, principal, key string) bool {
 
 		principals := line[:separator]
 
-		pub, _, _, _, err := ssh.ParseAuthorizedKey([]byte(line[separator:])) //nolint:dogsled // only the key is compared.
+		pub, err := authorizedKey([]byte(line[separator:]))
 		if err != nil || marshalKey(pub) != key {
 			continue
 		}
@@ -218,4 +218,12 @@ func dirExists(path string) bool {
 	info, err := os.Stat(path)
 
 	return err == nil && info.IsDir()
+}
+
+// authorizedKey parses one authorized_keys-format line and returns only its
+// key: allowed-signers handling never uses the comment or the options.
+func authorizedKey(line []byte) (ssh.PublicKey, error) {
+	key, _, _, _, err := ssh.ParseAuthorizedKey(line) //nolint:dogsled // the comment, options and rest are unused.
+
+	return key, err
 }

@@ -131,8 +131,9 @@ type Placeholder struct {
 
 // Remaining lists the placeholders content still holds, one per token and
 // line, outside comments: a comment that explains a placeholder is not one,
-// whether it fills its own line or trails the value (`main-package: . #
-// FIXME: …` is filled; the FIXME was the instruction).
+// whether it fills its own line or trails the value: in
+// `main-package: . # FIXME: …` the value is filled, and the FIXME was the
+// instruction.
 func Remaining(content string) []Placeholder {
 	var found []Placeholder
 
@@ -186,6 +187,8 @@ func withoutComment(line string) string {
 
 // Hint says how to fill one placeholder token: where its value comes from
 // and, when the binary can find it, the command that does.
+//
+//nolint:cyclop,gosec // one case per placeholder family; G101 reads the placeholder names in them as credentials.
 func Hint(token string) string {
 	switch {
 	case token == "PIN_FORGE_CI_SHA":
@@ -266,8 +269,8 @@ func ProjectReplacements(p Project) []Replacement {
 }
 
 // ApplyProject substitutes the project replacements in one left-to-right pass
-// on whole tokens only, so that my-app in my-application, or FIXME-app in
-// FIXME-apple, is left alone. The earliest match wins, and on a tie the first
+// on whole tokens only, so that my-app in my-application, or the FIXME-app
+// in FIXME-apple, is left alone. The earliest match wins, and on a tie the first
 // replacement listed: ./cmd/my-cli is replaced whole and never as ./cmd/<name>,
 // and no replacement rewrites another's output.
 func ApplyProject(content string, r []Replacement) string {

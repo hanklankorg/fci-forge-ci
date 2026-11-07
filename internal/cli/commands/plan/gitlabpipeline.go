@@ -42,7 +42,7 @@ EXAMPLE:
 			&cli.StringFlag{Name: "runtime-image-go", Usage: "runtime image of build-go; required when the plan builds Go"},
 			&cli.StringFlag{Name: "runtime-image-rust", Usage: "runtime image of build-cargo; required when the plan builds Cargo"},
 			&cli.StringFlag{Name: "runtime-image-android", Usage: "runtime image of build-gradle-android; required when the plan builds Android"},
-			&cli.StringFlag{Name: "output", Sources: cli.EnvVars("OUTPUT_FILE"), Usage: "destination path for the child pipeline (default: stdout)"},
+			&cli.StringFlag{Name: flagOutput, Sources: cli.EnvVars("OUTPUT_FILE"), Usage: "destination path for the child pipeline (default: stdout)"},
 		},
 		Action: func(_ context.Context, cmd *cli.Command) error {
 			raw := cmd.String("build-stage-plan-json")
@@ -76,7 +76,7 @@ EXAMPLE:
 				return err
 			}
 
-			return emitChildPipeline(child, cmd.String("output"), "build")
+			return emitChildPipeline(child, cmd.String(flagOutput), "build")
 		},
 	}
 }
@@ -101,7 +101,7 @@ EXAMPLE:
 			&cli.StringFlag{Name: "component-base", Required: true, Sources: cli.EnvVars("COMPONENT_BASE"), Usage: "explicit CI/CD Catalog path prefix for the publish-<target> components"},
 			&cli.StringFlag{Name: "component-ref", Required: true, Sources: cli.EnvVars("COMPONENT_REF"), Usage: "component version to pin (e.g. 1.0.0)"},
 			&cli.StringFlag{Name: "version", Sources: cli.EnvVars("VERSION"), Usage: "release version forwarded to each publish component"},
-			&cli.StringFlag{Name: "output", Sources: cli.EnvVars("OUTPUT_FILE"), Usage: "destination path for the child pipeline (default: stdout)"},
+			&cli.StringFlag{Name: flagOutput, Sources: cli.EnvVars("OUTPUT_FILE"), Usage: "destination path for the child pipeline (default: stdout)"},
 		},
 		Action: func(_ context.Context, cmd *cli.Command) error {
 			raw := cmd.String("publish-stage-plan-json")
@@ -128,7 +128,7 @@ EXAMPLE:
 				return err
 			}
 
-			return emitChildPipeline(child, cmd.String("output"), "publish")
+			return emitChildPipeline(child, cmd.String(flagOutput), "publish")
 		},
 	}
 }

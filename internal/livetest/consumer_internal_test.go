@@ -223,12 +223,17 @@ func TestPlanConsumer_BindsOnlyTheSelectedLayerSubject(t *testing.T) {
 			t.Parallel()
 
 			layer := sampleLayer()
-			workflow := "jobs:\n  check:\n    uses: " + reference + consumerPinned + "\n"
+
+			var pins strings.Builder
+
 			for _, argument := range []string{subject, "'" + subject + "'", `"` + subject + `"`} {
 				for _, separator := range []string{" ", "\t", "="} {
-					workflow += "# forge-ci validate isolation --single-pin-subject" + separator + argument + "\n"
+					pins.WriteString("# forge-ci validate isolation --single-pin-subject" + separator + argument + "\n")
 				}
 			}
+
+			workflow := "jobs:\n  check:\n    uses: " + reference + consumerPinned + "\n" + pins.String()
+
 			unchanged := "# " + subject + " is the upstream repository.\n" +
 				"# forge-ci validate isolation --single-pin-subject other/engine\n" +
 				"# forge-ci validate isolation --single-pin-subject " + subject + "-extra\n" +
@@ -237,15 +242,19 @@ func TestPlanConsumer_BindsOnlyTheSelectedLayerSubject(t *testing.T) {
 				"# forge-ci validate isolation --single-pin-subject '${SUBJECT}'\n"
 			workflow += unchanged
 			workflows := map[string]string{"ci.yml": workflow}
+
 			plan, err := layer.PlanConsumer(workflows, ConsumerFacts{})
 			if err != nil {
 				t.Fatal(err)
 			}
+
 			want := strings.ReplaceAll(workflow[:len(workflow)-len(unchanged)], subject, layer.Repository) + unchanged
+
 			want = strings.ReplaceAll(want, consumerPinned, layer.Commit)
 			if strings.HasPrefix(reference, "https://") {
 				want = strings.ReplaceAll(want, "https://forge.example/", layer.ServerURL+"/")
 			}
+
 			if got := plan.Render(workflow); got != want {
 				t.Fatalf("selected workflow subject binding:\ngot:\n%s\nwant:\n%s", got, want)
 			}
@@ -255,6 +264,7 @@ func TestPlanConsumer_BindsOnlyTheSelectedLayerSubject(t *testing.T) {
 			if got, want := plan.Render(gate), "forge-ci validate isolation --single-pin-subject "+layer.Repository+"\n"+unchanged; got != want {
 				t.Fatalf("gate subject binding: got %q, want %q", got, want)
 			}
+
 			if workflows["ci.yml"] != workflow {
 				t.Fatal("planning changed the source workflow")
 			}

@@ -43,6 +43,7 @@ func TestOwnCLIReleaseTargets(t *testing.T) {
 	require.Equal(t, []target{{GOOS: "darwin", GOARCH: "amd64"}}, build.Ignore)
 
 	var targets []string
+
 	for _, goos := range build.GOOS {
 		for _, goarch := range build.GOARCH {
 			if goos == build.Ignore[0].GOOS && goarch == build.Ignore[0].GOARCH {

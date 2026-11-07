@@ -21,7 +21,7 @@ func TestEmbeddedPagesMatchList(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	var embedded []string
+	embedded := make([]string, 0, len(entries))
 	for _, e := range entries {
 		embedded = append(embedded, strings.TrimSuffix(e.Name(), ".md"))
 	}

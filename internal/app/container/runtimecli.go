@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 
 	"github.com/diggsweden/forge-ci/internal/cliio"
+	domaincontainer "github.com/diggsweden/forge-ci/internal/domain/container"
 	"github.com/diggsweden/forge-ci/internal/domain/errs"
 )
 
@@ -23,7 +24,7 @@ type RuntimeCLIReader interface {
 
 // VerifyRuntimeCLI compares downloaded or retained image bytes to the source pin.
 func VerifyRuntimeCLI(ctx context.Context, registry RuntimeCLIReader, workspace, arch, file, imageRef string) error {
-	if arch != "amd64" && arch != "arm64" {
+	if arch != domaincontainer.ArchAMD64 && arch != domaincontainer.ArchARM64 {
 		return fmt.Errorf("unsupported CLI architecture: %w", errs.ErrUsage)
 	}
 

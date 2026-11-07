@@ -26,17 +26,21 @@ func (s *manifestTagStore) ResolveDigest(_ context.Context, ref string) (string,
 	if digest, ok := s.digests[ref]; ok {
 		return digest, s.readErr
 	}
+
 	return "sha256:" + strings.Repeat("a", 64), s.readErr
 }
 
 func (s *manifestTagStore) CopyTag(_ context.Context, source, dest string) error {
 	s.copies = append(s.copies, [2]string{source, dest})
+
 	return s.err
 }
 
 func TestTagManifestPreflightsEveryAlias(t *testing.T) {
 	t.Parallel()
+
 	const image = "ghcr.io/owner/app"
+
 	source := image + "@sha256:" + strings.Repeat("a", 64)
 	for _, tc := range []struct{ source, tags string }{
 		{image + ":candidate", image + ":latest"},
@@ -50,6 +54,7 @@ func TestTagManifestPreflightsEveryAlias(t *testing.T) {
 		require.Empty(t, store.copies)
 		require.Empty(t, store.reads)
 	}
+
 	store := &manifestTagStore{}
 	require.NoError(t, appcontainer.TagManifest(t.Context(), store, source, image+":v1\n\n"+image+":latest\n"))
 	require.Equal(t, [][2]string{{source, image + ":v1"}, {source, image + ":latest"}}, store.copies)
@@ -64,12 +69,16 @@ func TestTagManifestPreflightsEveryAlias(t *testing.T) {
 
 func TestTagManifestRejectsOverlappingAliasPublication(t *testing.T) {
 	t.Parallel()
+
 	const image = "ghcr.io/owner/app"
+
 	source := image + "@sha256:" + strings.Repeat("a", 64)
+
 	aliases := []string{image + ":v1", image + ":latest", image + ":staging-v1"}
 	for _, moved := range aliases {
 		t.Run(moved, func(t *testing.T) {
 			t.Parallel()
+
 			store := &manifestTagStore{digests: map[string]string{moved: "sha256:" + strings.Repeat("b", 64)}}
 			err := appcontainer.TagManifest(t.Context(), store, source, strings.Join(aliases, "\n"))
 			require.ErrorContains(t, err, "digest mismatch")
@@ -78,6 +87,7 @@ func TestTagManifestRejectsOverlappingAliasPublication(t *testing.T) {
 			require.Contains(t, store.reads, moved)
 		})
 	}
+
 	store := &manifestTagStore{}
 	require.NoError(t, appcontainer.TagManifest(t.Context(), store, source, strings.Join(aliases, "\n")))
 	require.Equal(t, aliases, store.reads, "every destination, including the staging alias, must be verified")

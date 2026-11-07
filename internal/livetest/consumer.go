@@ -316,6 +316,7 @@ func (pin ConsumerPin) repository() string {
 	if pin.Workflows != "" {
 		return strings.TrimSuffix(pin.Workflows, "/"+consumerWorkflows+"/")
 	}
+
 	if actionURL, err := url.Parse(pin.Actions); err == nil {
 		return strings.TrimSuffix(strings.TrimPrefix(actionURL.Path, "/"), "/"+layerDir+"/actions/")
 	}
@@ -378,6 +379,7 @@ func ReadConsumerPin(workflows map[string]string) (ConsumerPin, error) {
 	if conflict != nil {
 		return ConsumerPin{}, conflict
 	}
+
 	if pin.Actions != "" && pin.Workflows != "" && (ConsumerPin{Actions: pin.Actions}).repository() != pin.repository() {
 		return ConsumerPin{}, fmt.Errorf("the consumer's actions and workflows name different layer repositories: %w", errs.ErrValidation)
 	}
@@ -941,7 +943,7 @@ func (consumer Consumer) workflows(ctx context.Context) (map[string]string, erro
 	workflows := map[string]string{}
 
 	for path := range strings.SplitSeq(strings.TrimSuffix(string(listed), "\x00"), "\x00") {
-		if ext := filepath.Ext(path); ext != ".yml" && ext != ".yaml" {
+		if !isWorkflowFile(path) {
 			continue
 		}
 
@@ -1074,4 +1076,11 @@ func (consumer Consumer) commit(ctx context.Context, message string, commitTree 
 	}
 
 	return git.run(ctx, consumer.stage, append(commitTree, "-m", message, tree)...)
+}
+
+// isWorkflowFile reports a path with a workflow file's YAML extension.
+func isWorkflowFile(path string) bool {
+	ext := filepath.Ext(path)
+
+	return ext == ".yml" || ext == ".yaml"
 }

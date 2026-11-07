@@ -6,6 +6,7 @@ package artifact
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"maps"
@@ -115,7 +116,7 @@ func uploadInventory(ctx context.Context, entries []domainartifact.UploadEntry) 
 			return nil, fmt.Errorf("artifact inventory exceeds byte limit: %w", errs.ErrValidation)
 		}
 
-		result[entry.RelPath] = fmt.Sprintf("%x", hash.Sum(nil))
+		result[entry.RelPath] = hex.EncodeToString(hash.Sum(nil))
 	}
 
 	return result, nil

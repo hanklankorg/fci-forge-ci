@@ -132,7 +132,7 @@ func Section(body, anchor string) (string, bool) {
 	start, level := -1, 0
 	fenced := false
 
-	for i, line := range lines {
+	for index, line := range lines {
 		if strings.HasPrefix(strings.TrimSpace(line), "```") {
 			fenced = !fenced
 
@@ -146,9 +146,9 @@ func Section(body, anchor string) (string, bool) {
 
 		switch {
 		case start >= 0 && depth <= level:
-			return strings.Join(lines[start:i], ""), true
+			return strings.Join(lines[start:index], ""), true
 		case start < 0 && headingAnchor(line[depth:]) == anchor:
-			start, level = i, depth
+			start, level = index, depth
 		}
 	}
 

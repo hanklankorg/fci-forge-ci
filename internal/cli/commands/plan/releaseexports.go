@@ -18,7 +18,7 @@ import (
 
 func releaseExportsCmd() *cli.Command {
 	return &cli.Command{Name: "release-exports", Usage: "admit native export jobs or print whether an architecture is selected",
-		Flags: []cli.Flag{&cli.StringFlag{Name: "enabled", Value: "false"}, &cli.StringFlag{Name: "job-image"}, &cli.StringFlag{Name: "release-platforms"}, &cli.StringFlag{Name: "arm64-tags", Value: "[]"}, &cli.StringFlag{Name: "commands-file", Value: "-", Usage: "JSON export commands, data only"}, &cli.StringFlag{Name: "image-plan", Usage: "optional release image plan file"}, &cli.StringFlag{Name: "selected-arch", Usage: "print true/false for this native architecture instead of admitting export jobs"}},
+		Flags: []cli.Flag{&cli.StringFlag{Name: "enabled", Value: "false"}, &cli.StringFlag{Name: "job-image"}, &cli.StringFlag{Name: "release-platforms"}, &cli.StringFlag{Name: flagARM64Tags, Value: "[]"}, &cli.StringFlag{Name: "commands-file", Value: "-", Usage: "JSON export commands, data only"}, &cli.StringFlag{Name: "image-plan", Usage: "optional release image plan file"}, &cli.StringFlag{Name: "selected-arch", Usage: "print true/false for this native architecture instead of admitting export jobs"}},
 		Action: func(_ context.Context, cmd *cli.Command) error {
 			if arch := cmd.String("selected-arch"); arch != "" {
 				if arch != "amd64" && arch != "arm64" {
@@ -40,7 +40,7 @@ func releaseExportsCmd() *cli.Command {
 				return err
 			}
 
-			in := appplan.ReleaseExportsInput{Enabled: cmd.String("enabled"), JobImage: cmd.String("job-image"), Platforms: cmd.String("release-platforms"), ARM64Tags: cmd.String("arm64-tags"), Commands: string(commands)}
+			in := appplan.ReleaseExportsInput{Enabled: cmd.String("enabled"), JobImage: cmd.String("job-image"), Platforms: cmd.String("release-platforms"), ARM64Tags: cmd.String(flagARM64Tags), Commands: string(commands)}
 			if cmd.String("image-plan") != "" {
 				in.ImagePlan, err = cliio.ReadRegularFile(cmd.String("image-plan"))
 				if err != nil {

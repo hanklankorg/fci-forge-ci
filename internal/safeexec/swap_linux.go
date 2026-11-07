@@ -133,7 +133,7 @@ func RequireNoSwap(debugAllowSwap bool) (SwapState, error) {
 			"Debug-only escape hatch (LOCAL USE ONLY — NOT for production releases):\n"+
 			"  forge-ci release sign --debug-allow-swap\n"+
 			"  When set, the policy is bypassed and a Warning annotation is emitted.\n\n"+
-			"Background: "+docslink.URL("verification.md#swap-policy")+": %w",
-		errs.ErrInvalidConfig,
+			"Background: %s: %w",
+		docslink.URL("verification.md#swap-policy"), errs.ErrInvalidConfig,
 	)
 }

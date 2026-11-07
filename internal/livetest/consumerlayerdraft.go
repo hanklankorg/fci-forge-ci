@@ -6,7 +6,6 @@ package livetest
 import (
 	"context"
 	"fmt"
-	"path/filepath"
 	"strings"
 )
 
@@ -32,13 +31,17 @@ func (consumer Consumer) bindDraftLayer(ctx context.Context, layer Layer) (Consu
 	if err != nil {
 		return consumer, err
 	}
+
 	hasWorkflow := false
+
 	for path := range strings.SplitSeq(string(listed), "\x00") {
-		if ext := filepath.Ext(path); ext == ".yml" || ext == ".yaml" {
+		if isWorkflowFile(path) {
 			hasWorkflow = true
+
 			break
 		}
 	}
+
 	if !hasWorkflow {
 		return consumer, nil
 	}
@@ -52,13 +55,16 @@ func (consumer Consumer) bindDraftLayer(ctx context.Context, layer Layer) (Consu
 	for _, workflow := range workflows {
 		draft = draft || strings.Contains(workflow, "@PIN_FORGE_CI_SHA")
 	}
+
 	if !draft {
 		return consumer, nil
 	}
+
 	pin, err := ReadConsumerPin(workflows)
 	if err != nil {
 		return consumer, err
 	}
+
 	if pin.Commit != "PIN_FORGE_CI_SHA" {
 		return consumer, nil
 	}
@@ -74,6 +80,7 @@ func (consumer Consumer) bindDraftLayer(ctx context.Context, layer Layer) (Consu
 	if err != nil {
 		return consumer, fmt.Errorf("render admitted draft: %w", err)
 	}
+
 	consumer.Commit = commit
 
 	return consumer, nil

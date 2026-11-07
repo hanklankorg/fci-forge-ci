@@ -595,21 +595,26 @@ func requireSignedRelease(t *testing.T, target livetest.Target, repo string, key
 	}
 
 	verified := 0
+
 	names := make([]string, 0, len(found[0].Assets))
 	for _, asset := range found[0].Assets {
 		names = append(names, asset.Name)
 	}
+
 	evidence, err := livetest.NewReleaseEvidence(target, repo, tag, source, names, releaseEvidenceSecrets(keys))
 	if err != nil {
 		t.Fatal("retain release inventory: ", err)
 	}
+
 	retained := map[string]bool{}
 	read := func(name string) []byte {
 		body := livetest.Download(t, target, assets[name], maxReleaseFile)
 		if err := evidence.Retain(name, body); err != nil {
 			t.Fatal("retain release payload: ", err)
 		}
+
 		retained[name] = true
+
 		return body
 	}
 
@@ -634,6 +639,7 @@ func requireSignedRelease(t *testing.T, target livetest.Target, repo string, key
 
 		verified++
 	}
+
 	if evidence.Enabled() {
 		for _, name := range names {
 			if !retained[name] {

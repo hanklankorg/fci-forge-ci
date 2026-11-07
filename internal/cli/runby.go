@@ -126,26 +126,33 @@ func GenerateRunBy(root string) (string, error) {
 
 	slices.Sort(keys)
 
-	var b strings.Builder
+	var builder strings.Builder
 
-	b.WriteString("{\n")
+	builder.WriteString("{\n")
 
 	for i, k := range keys {
-		key, _ := json.Marshal(k)
-		units, _ := json.Marshal(found[k])
-
-		fmt.Fprintf(&b, "  %s: %s", key, units)
-
-		if i < len(keys)-1 {
-			b.WriteString(",")
+		key, err := json.Marshal(k)
+		if err != nil {
+			return "", err
 		}
 
-		b.WriteString("\n")
+		units, err := json.Marshal(found[k])
+		if err != nil {
+			return "", err
+		}
+
+		fmt.Fprintf(&builder, "  %s: %s", key, units)
+
+		if i < len(keys)-1 {
+			builder.WriteString(",")
+		}
+
+		builder.WriteString("\n")
 	}
 
-	b.WriteString("}\n")
+	builder.WriteString("}\n")
 
-	return b.String(), nil
+	return builder.String(), nil
 }
 
 // runByJSON maps a command path to the reusable workflows, actions and

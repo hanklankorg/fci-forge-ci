@@ -89,20 +89,7 @@ func checkCIWorkflowsPresent(root string) Check {
 // no Forge CI file at all there is nothing to judge, and ok is false: the
 // CI-workflow check already fails that repository.
 func checkPlaceholdersFilled(root, artifactsPath string) (Check, bool) {
-	files := ciFiles(root)
-
-	var artifactsRel string
-
-	if regularFileExists(artifactsPath) {
-		rel, err := filepath.Rel(root, artifactsPath)
-		if err != nil || !filepath.IsLocal(rel) {
-			rel = artifactsPath
-		}
-
-		artifactsRel = filepath.ToSlash(rel)
-		files = append([]string{artifactsRel}, files...)
-	}
-
+	files, artifactsRel := placeholderFiles(root, artifactsPath)
 	if len(files) == 0 {
 		return Check{}, false
 	}
@@ -126,8 +113,8 @@ func checkPlaceholdersFilled(root, artifactsPath string) (Check, bool) {
 			continue
 		}
 
-		// Every workflow init writes calls forge-ci. Another workflow's
-		// FIXME or PIN_NODE_VERSION is the repository's own business.
+		// Every workflow init writes calls forge-ci. A FIXME or PIN_NODE_VERSION
+		// in another workflow is the repository's own business.
 		if rel != artifactsRel && !strings.Contains(string(body), "forge-ci") {
 			continue
 		}
@@ -284,4 +271,23 @@ func Find(checks []Check, name string) (Check, bool) {
 	}
 
 	return Check{}, false
+}
+
+// placeholderFiles lists the files checkPlaceholdersFilled reads: the
+// artifacts configuration first, when there is one, then the CI files.
+// The second result is the configuration's slash path, empty without one.
+func placeholderFiles(root, artifactsPath string) ([]string, string) {
+	files := ciFiles(root)
+	if !regularFileExists(artifactsPath) {
+		return files, ""
+	}
+
+	rel, err := filepath.Rel(root, artifactsPath)
+	if err != nil || !filepath.IsLocal(rel) {
+		rel = artifactsPath
+	}
+
+	artifactsRel := filepath.ToSlash(rel)
+
+	return append([]string{artifactsRel}, files...), artifactsRel
 }

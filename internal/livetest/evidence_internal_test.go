@@ -217,6 +217,7 @@ func TestJobLogEvidenceFetchFailureFailsAcceptance(t *testing.T) {
 		if strings.HasSuffix(r.URL.Path, "/jobs") {
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = io.WriteString(w, `[{"id":7,"status":"success","pipeline":{"id":547}}]`)
+
 			return
 		}
 
@@ -226,6 +227,7 @@ func TestJobLogEvidenceFetchFailureFailsAcceptance(t *testing.T) {
 	original := http.DefaultTransport
 	transport := original.(*http.Transport).Clone()
 	transport.DialContext = (&dialRecorder{to: server.Listener.Addr().String()}).dial
+
 	http.DefaultTransport = transport
 	defer func() { http.DefaultTransport = original }()
 	defer transport.CloseIdleConnections()
@@ -233,6 +235,7 @@ func TestJobLogEvidenceFetchFailureFailsAcceptance(t *testing.T) {
 	for _, forge := range []provider.ForgeAPI{provider.ForgeForgejo, provider.ForgeGitLab} {
 		t.Run(string(forge), func(t *testing.T) {
 			target := Target{Forge: forge, Host: labHost, Owner: "fixture", CAFile: "captured", caPEM: ca, accepted: true}
+
 			recorder := &recordingTB{}
 			if forge == provider.ForgeGitLab {
 				tb := &evidenceCleanupTB{TB: recorder}
@@ -245,6 +248,7 @@ func TestJobLogEvidenceFetchFailureFailsAcceptance(t *testing.T) {
 			if len(recorder.errors) != 1 || !strings.Contains(recorder.errors[0], "no full evidence retained") {
 				t.Fatalf("missing evidence did not fail acceptance: %+v", recorder)
 			}
+
 			if strings.Contains(strings.Join(append(recorder.logs, recorder.errors...), "\n"), "synthetic-secret-response-body") {
 				t.Fatal("log fetch failure exposed the response body")
 			}
@@ -255,11 +259,13 @@ func TestJobLogEvidenceFetchFailureFailsAcceptance(t *testing.T) {
 func TestJobLogEvidenceRedactedBeforePersistenceAndTail(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("FORGE_CI_LIVE_SNAPSHOT_EVIDENCE_DIR", root)
+
 	const secret = "synthetic-boundary-secret"
 	// The secret crosses the console tail boundary, and the early marker must
 	// survive in durable evidence even though the console tail drops it.
 	log := "full-evidence-marker\n" + secret + strings.Repeat("x", jobLogTail-len(secret)/2)
 	tail := retainJobLogText(t, Target{}, "owner/repository", RunJob{ID: 7}, log, map[string]string{"token": secret})
+
 	files, err := filepath.Glob(filepath.Join(root, "job-*.log"))
 	if err != nil || len(files) != 1 {
 		t.Fatalf("missing persisted log: %v, %v", files, err)
@@ -269,9 +275,11 @@ func TestJobLogEvidenceRedactedBeforePersistenceAndTail(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if strings.Contains(string(body), secret) || !strings.Contains(string(body), redactedTargetSecret) || !strings.HasPrefix(string(body), "full-evidence-marker\n") {
 		t.Fatal("full log was truncated or persisted before redaction")
 	}
+
 	if len(tail) > jobLogTail || strings.Contains(tail, "boundary-secret") || strings.Contains(tail, "full-evidence-marker") {
 		t.Fatal("tail was formed before redaction or was not bounded")
 	}

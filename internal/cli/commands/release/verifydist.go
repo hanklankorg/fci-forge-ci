@@ -50,6 +50,7 @@ EXAMPLE:
 			} else {
 				digest, err = apprelease.DistDigestWithManifestRoot(cmd.String(flagDistDir), cmd.String("manifest-root"))
 			}
+
 			if err != nil {
 				return err
 			}
@@ -95,6 +96,7 @@ EXAMPLE:
 			if cmd.Bool("canonical-payload") && cmd.IsSet("manifest-root") {
 				return fmt.Errorf("--canonical-payload fixes --manifest-root to '.': %w", errs.ErrUsage)
 			}
+
 			dir := cmd.String(flagDistDir)
 
 			digest := cmd.String("expected-digest")
@@ -112,6 +114,7 @@ EXAMPLE:
 			}
 
 			var err error
+
 			if destination := cmd.String("stage-dir"); destination != "" {
 				if cmd.Bool("canonical-payload") {
 					err = apprelease.StageVerifiedCanonicalPayload(ctx, dir, destination, digest)
