@@ -155,6 +155,7 @@ jobs:
     name: "Publish: release notes"
     permissions:
       contents: read
+      actions: read # Callee's canonical receiver read cap (also needed when opt-in is off).
     uses: ./.github/workflows/generate-changelog.yml
     with:
       forge-ci-binary-ref: ${{ needs.resolve-bootstrap.outputs.forge-ci-binary-ref }}

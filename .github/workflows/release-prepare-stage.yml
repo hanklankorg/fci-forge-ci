@@ -10,6 +10,14 @@ on:
         type: boolean
         required: false
         default: false
+      require-canonical-bootstrap: {type: boolean, required: false, default: false}
+      canonical-artifact-id: {type: string, required: false, default: ""}
+      canonical-artifact-name: {type: string, required: false, default: ""}
+      canonical-producer-run-id: {type: string, required: false, default: ""}
+      canonical-producer-run-attempt: {type: string, required: false, default: ""}
+      canonical-producer-engine-repository: {type: string, required: false, default: ""}
+      canonical-producer-engine-commit: {type: string, required: false, default: ""}
+      canonical-producer-result: {type: string, required: false, default: ""}
       release-policy:
         description: "Accepted release versions: stable or stable-prerelease"
         type: string
@@ -120,8 +128,17 @@ jobs:
     if: ${{ inputs['existing-release-sha'] == '' && fromJson(inputs['prepare-stage-plan-json']).targets.version_bump.runs }}
     permissions:
       contents: read
+      actions: read # Propagate only the receiver's read cap through workflow_call.
     uses: ./.github/workflows/generate-changelog.yml
     with:
+      require-canonical-bootstrap: ${{ inputs['require-canonical-bootstrap'] }}
+      canonical-artifact-id: ${{ inputs['canonical-artifact-id'] }}
+      canonical-artifact-name: ${{ inputs['canonical-artifact-name'] }}
+      canonical-producer-run-id: ${{ inputs['canonical-producer-run-id'] }}
+      canonical-producer-run-attempt: ${{ inputs['canonical-producer-run-attempt'] }}
+      canonical-producer-engine-repository: ${{ inputs['canonical-producer-engine-repository'] }}
+      canonical-producer-engine-commit: ${{ inputs['canonical-producer-engine-commit'] }}
+      canonical-producer-result: ${{ inputs['canonical-producer-result'] }}
       forge-ci-binary-ref: ${{ needs.resolve-bootstrap.outputs.forge-ci-binary-ref }}
       release-policy: ${{ inputs['release-policy'] }}
       branch: ${{ inputs['authorized-source-sha'] }}
@@ -137,8 +154,17 @@ jobs:
     if: ${{ inputs['existing-release-sha'] == '' && fromJson(inputs['prepare-stage-plan-json']).targets.version_bump.runs }}
     permissions:
       contents: read
+      actions: read
     uses: ./.github/workflows/generate-changelog.yml
     with:
+      require-canonical-bootstrap: ${{ inputs['require-canonical-bootstrap'] }}
+      canonical-artifact-id: ${{ inputs['canonical-artifact-id'] }}
+      canonical-artifact-name: ${{ inputs['canonical-artifact-name'] }}
+      canonical-producer-run-id: ${{ inputs['canonical-producer-run-id'] }}
+      canonical-producer-run-attempt: ${{ inputs['canonical-producer-run-attempt'] }}
+      canonical-producer-engine-repository: ${{ inputs['canonical-producer-engine-repository'] }}
+      canonical-producer-engine-commit: ${{ inputs['canonical-producer-engine-commit'] }}
+      canonical-producer-result: ${{ inputs['canonical-producer-result'] }}
       forge-ci-binary-ref: ${{ needs.resolve-bootstrap.outputs.forge-ci-binary-ref }}
       release-policy: ${{ inputs['release-policy'] }}
       branch: ${{ inputs['authorized-source-sha'] }}
@@ -182,12 +208,56 @@ jobs:
           [[ "$CONTEXT_SOURCE_SHA" =~ ^[0-9a-f]{40}$ && "$AUTHORIZED_SOURCE_SHA" == "$CONTEXT_SOURCE_SHA" ]]
           [[ "$FULL_RESULT" == success && "$FULL_RUN_ID" == "$CURRENT_RUN_ID" && "$FULL_RUN_ATTEMPT" == "$CURRENT_RUN_ATTEMPT" ]]
           [[ "$FULL_ARTIFACT_ID" =~ ^[1-9][0-9]*$ && "$FULL_ARTIFACT_NAME" == "full-changelog-$CURRENT_RUN_ID-$CURRENT_RUN_ATTEMPT" ]]
+      - &canonical-context
+        name: Require original canonical success and approved identity
+        if: ${{ inputs['require-canonical-bootstrap'] }}
+        shell: /bin/bash --noprofile --norc -peuo pipefail {0}
+        env:
+          ENGINE_REPOSITORY: ${{ needs.resolve-bootstrap.outputs.forge-ci-repository }}
+          ENGINE_COMMIT: ${{ inputs['forge-ci-binary-ref'] }}
+          ENGINE_ORIGIN: ${{ github.server_url }}/${{ needs.resolve-bootstrap.outputs.forge-ci-repository }}
+          RUNTIME_IMAGE: ${{ inputs['runtime-image'] }}
+          PRODUCER_ARTIFACT_ID: ${{ inputs['canonical-artifact-id'] }}
+          PRODUCER_ARTIFACT_NAME: ${{ inputs['canonical-artifact-name'] }}
+          PRODUCER_RUN_ID: ${{ inputs['canonical-producer-run-id'] }}
+          PRODUCER_RUN_ATTEMPT: ${{ inputs['canonical-producer-run-attempt'] }}
+          PRODUCER_ENGINE_REPOSITORY: ${{ inputs['canonical-producer-engine-repository'] }}
+          PRODUCER_ENGINE_COMMIT: ${{ inputs['canonical-producer-engine-commit'] }}
+          CANONICAL_PRODUCER_RESULT: ${{ inputs['canonical-producer-result'] }}
+        run: |
+          [[ "$GITHUB_RUN_ID" =~ ^[1-9][0-9]*$ && "$GITHUB_RUN_ATTEMPT" =~ ^[1-9][0-9]*$ ]]
+          [[ "$CANONICAL_PRODUCER_RESULT" == success && "$PRODUCER_RUN_ID" == "$GITHUB_RUN_ID" && "$PRODUCER_RUN_ATTEMPT" == "$GITHUB_RUN_ATTEMPT" ]]
+          [[ "$ENGINE_REPOSITORY" =~ ^[A-Za-z0-9_-][A-Za-z0-9_.-]*/[A-Za-z0-9_-][A-Za-z0-9_.-]*$ && "$ENGINE_COMMIT" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$PRODUCER_ENGINE_REPOSITORY" == "$ENGINE_REPOSITORY" && "$PRODUCER_ENGINE_COMMIT" == "$ENGINE_COMMIT" ]]
+          [[ "$PRODUCER_ARTIFACT_ID" =~ ^[1-9][0-9]*$ && "$PRODUCER_ARTIFACT_NAME" == "forge-ci-canonical-linux-amd64-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-$ENGINE_COMMIT" ]]
+          [[ "$RUNTIME_IMAGE" =~ ^[a-z0-9][a-z0-9./:_-]*@sha256:[0-9a-f]{64}$ ]]
+          [[ "$GITHUB_SERVER_URL" =~ ^https://[^/?#@[:space:]]+$ && "$ENGINE_ORIGIN" == "$GITHUB_SERVER_URL/$ENGINE_REPOSITORY" ]]
+          for variable in ENGINE_REPOSITORY ENGINE_COMMIT ENGINE_ORIGIN RUNTIME_IMAGE PRODUCER_ARTIFACT_ID PRODUCER_ARTIFACT_NAME PRODUCER_RUN_ID PRODUCER_RUN_ATTEMPT PRODUCER_ENGINE_REPOSITORY PRODUCER_ENGINE_COMMIT CANONICAL_PRODUCER_RESULT; do
+            printf '%s=%s\n' "$variable" "${!variable}" >>"$GITHUB_ENV"
+          done
+      - &canonical-checkout
+        name: Checkout only the approved engine before consumer or private steps
+        if: ${{ inputs['require-canonical-bootstrap'] }}
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          repository: ${{ env.ENGINE_REPOSITORY }}
+          ref: ${{ env.ENGINE_COMMIT }}
+          path: _forge_ci_bootstrap
+          persist-credentials: false
+          submodules: false
+          lfs: false
+      - &canonical-consume
+        name: Consume canonical CLI from the independently pinned engine checkout
+        id: canonical-bootstrap
+        if: ${{ inputs['require-canonical-bootstrap'] }}
+        uses: ./_forge_ci_bootstrap/.github/actions/consume-canonical-cli
       - name: Checkout immutable authorized source
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           ref: ${{ inputs['authorized-source-sha'] }}
           persist-credentials: false
       - name: Checkout forge-ci bootstrap installers
+        if: ${{ !inputs['require-canonical-bootstrap'] }}
         id: forge-ci-bootstrap
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
@@ -197,6 +267,7 @@ jobs:
           sparse-checkout: scripts/bootstrap
           persist-credentials: false
       - name: Install forge-ci binary
+        if: ${{ !inputs['require-canonical-bootstrap'] }}
         env:
           FORGE_CI_BINARY_REF: ${{ needs.resolve-bootstrap.outputs.forge-ci-binary-ref }}
           FORGE_CI_SOURCE_SHA: ${{ steps.forge-ci-bootstrap.outputs.commit }}
@@ -313,6 +384,9 @@ jobs:
           check_producer full-changelog "$FULL_RESULT" "$FULL_RUN_ID" "$FULL_RUN_ATTEMPT" "$FULL_ARTIFACT_ID" "$FULL_ARTIFACT_NAME"
           check_producer minimal-changelog "$MINIMAL_RESULT" "$MINIMAL_RUN_ID" "$MINIMAL_RUN_ATTEMPT" "$MINIMAL_ARTIFACT_ID" "$MINIMAL_ARTIFACT_NAME"
           check_producer prepared-version-bumps "$PATCH_RESULT" "$PATCH_RUN_ID" "$PATCH_RUN_ATTEMPT" "$PATCH_ARTIFACT_ID" "$PATCH_ARTIFACT_NAME"
+      - *canonical-context
+      - *canonical-checkout
+      - *canonical-consume
       - name: Checkout immutable authorized source
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
@@ -320,6 +394,7 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - name: Checkout forge-ci bootstrap installers
+        if: ${{ !inputs['require-canonical-bootstrap'] }}
         id: forge-ci-bootstrap
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
@@ -328,6 +403,7 @@ jobs:
           path: .github-shared
           sparse-checkout: scripts/bootstrap
       - name: Install forge-ci binary
+        if: ${{ !inputs['require-canonical-bootstrap'] }}
         env:
           FORGE_CI_BINARY_REF: ${{ needs.resolve-bootstrap.outputs.forge-ci-binary-ref }}
           FORGE_CI_SOURCE_SHA: ${{ steps.forge-ci-bootstrap.outputs.commit }}
@@ -474,12 +550,12 @@ jobs:
           printf 'release-sha=%s\n' "$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           printf 'source-date-epoch=%s\n' "$(git log -1 --format=%ct HEAD)" >> "$GITHUB_OUTPUT"
       - name: Cleanup GPG key
-        if: ${{ always() && inputs['git-signing-method'] != 'ssh' }}
+        if: ${{ always() && (!inputs['require-canonical-bootstrap'] || steps.canonical-bootstrap.outputs.verified == 'true') && inputs['git-signing-method'] != 'ssh' }}
         env:
           GPG_FINGERPRINT: ${{ steps.import-gpg.outputs.fingerprint }}
         run: forge-ci release gpg cleanup
       - name: Cleanup SSH signing key
-        if: ${{ always() && inputs['git-signing-method'] == 'ssh' }}
+        if: ${{ always() && (!inputs['require-canonical-bootstrap'] || steps.canonical-bootstrap.outputs.verified == 'true') && inputs['git-signing-method'] == 'ssh' }}
         run: forge-ci release ssh cleanup
   summarize-prepare-stage:
     name: Summary
@@ -490,11 +566,15 @@ jobs:
       image: ${{ inputs['runtime-image'] || needs.resolve-bootstrap.outputs['runtime-image'] }}
     permissions:
       contents: read
+      actions: read
     outputs:
       stage-ran: ${{ steps.summary.outputs.stage-ran }}
       stage-result: ${{ steps.summary.outputs.stage-result }}
       result-json: ${{ steps.summary.outputs.result-json }}
     steps:
+      - *canonical-context
+      - *canonical-checkout
+      - *canonical-consume
       - name: Normalize prepare stage result
         id: summary
         env:
@@ -502,7 +582,7 @@ jobs:
           JOB_RESULTS: ${{ toJson(needs) }}
         run: forge-ci report stage-result
       - name: Upload prepare stage manifests
-        if: always() && hashFiles('.ci-results/*.json') != ''
+        if: ${{ always() && (!inputs['require-canonical-bootstrap'] || steps.canonical-bootstrap.outputs.verified == 'true') && hashFiles('.ci-results/*.json') != '' }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ci-results-prepare

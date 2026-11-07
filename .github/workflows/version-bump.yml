@@ -124,6 +124,7 @@ jobs:
     name: "Prepare: changelog"
     permissions:
       contents: read
+      actions: read # Propagate generate-changelog's read-only receiver cap.
     uses: ./.github/workflows/generate-changelog.yml
     with:
       branch: ${{ github.sha }}
@@ -140,6 +141,7 @@ jobs:
     name: "Prepare: commit message"
     permissions:
       contents: read
+      actions: read
     uses: ./.github/workflows/generate-changelog.yml
     with:
       branch: ${{ github.sha }}
