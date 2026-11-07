@@ -79,13 +79,36 @@ func TestMavenServiceDevelopmentPreservesSource(t *testing.T) {
 
 			var shellJobs struct {
 				Jobs map[string]struct {
-					Steps []struct {
+					Uses    string            `yaml:"uses"`
+					Secrets map[string]string `yaml:"secrets"`
+					Steps   []struct {
 						Run string `yaml:"run"`
 					} `yaml:"steps"`
 				} `yaml:"jobs"`
 			}
 			if err = yaml.Unmarshal([]byte(workflow), &shellJobs); err != nil {
 				t.Fatal(err)
+			}
+
+			// Unsigned is the fixture's policy mode, not proof that a remote
+			// registry contains no signatures or attestations.
+			if len(shellJobs.Jobs) != 3 || !strings.Contains(shellJobs.Jobs["snapshot"].Uses, "/snapshot-images.yml@") ||
+				len(shellJobs.Jobs["check"].Steps) == 0 || len(shellJobs.Jobs["readiness"].Steps) == 0 {
+				t.Fatal("snapshot fixture must have only snapshot, check and readiness roles")
+			}
+
+			for name, job := range shellJobs.Jobs {
+				if name == "snapshot" {
+					if len(job.Secrets) != 1 || job.Secrets["SNAPSHOT_REGISTRY_PASSWORD"] != "${{ secrets.DEVELOPMENT_REGISTRY_TOKEN }}" {
+						t.Fatal("snapshot must receive only the development registry credential")
+					}
+				} else if len(job.Secrets) != 0 {
+					t.Fatalf("unexpected secret forwarding in %s", name)
+				}
+			}
+
+			if strings.Count(workflow, "secrets.") != 2 || strings.Count(workflow, "${{ secrets.DEVELOPMENT_REGISTRY_TOKEN }}") != 2 {
+				t.Fatal("snapshot fixture references non-development secrets")
 			}
 
 			for name, job := range shellJobs.Jobs {
@@ -118,6 +141,10 @@ func TestMavenServiceDevelopmentPreservesSource(t *testing.T) {
 
 			if err = config.Derive(cfg); err != nil {
 				t.Fatal(err)
+			}
+
+			if len(cfg.Containers) != 1 || cfg.Containers[0].EnableSLSA == nil || cfg.Containers[0].EnableSLSAEffective() {
+				t.Fatal("snapshot declaration must explicitly disable SLSA")
 			}
 
 			tag, err := version.ComposeSnapshotContainerTag("9.2.0", serviceConfig.Branch, fixture.Commit[:7])

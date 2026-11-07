@@ -176,6 +176,48 @@ gate lints without `lint-archive=`. The lane then runs past failures and fails w
 `<dir>/<provider>.results`, one tab-separated line a case: interval, case,
 exit status and the `verdict.json` to read, as above.
 
+### Published development snapshot (Forgejo Maven service only)
+
+`test/live/campaigns/published-snapshot-forgejo.cases` adds one standalone event:
+
+```text
+consumer hello-maven-service published-unsigned-snapshot job-image=@JOB_IMAGE_JAVA
+```
+
+Prepare with `forgejo=<that cases file>` and `job-image=java:<reviewed local image>`.
+The Java job image must support the existing native Maven build/check recipe;
+the original Containerfile independently builds the published image. A literal
+full SHA-256 digest reference is also accepted. No other case settings are accepted.
+The checked-in profile requires public visibility and Buildah. Declarations are
+expectations, not overrides: an explicit conflicting builder refuses the whole
+plan. The native driver uses the Forgejo run selector (default Buildah), not an
+inherited consumer `CI_IMAGE_BUILDER` setting. A separately declared Kaniko run
+still requires its existing reviewed archive. Both builders require the contract's
+container/readiness runner, because readiness runs the published digest with Podman.
+Budget that runner and the builder before launch; this profile claims native Linux
+amd64 only, not ARM images or a multi-platform product matrix.
+
+The recipe calls the existing guarded launcher and
+`TestForgejoLayer_ConsumerDevelopment` / `runForgejoMavenServiceDevelopment`.
+It fixes branch `development`, readiness `/health`, an empty optional runtime
+fixture and disposable repository mode. It overrides stale consumer event/settings,
+ephemeral-snapshot image/dependency selectors and reused signing-key selection;
+administrator settings, builder selection, targets, acknowledgements, resource
+admission, locks, evidence retention and cleanup authority remain the existing ones.
+Only the development registry credential is provisioned by the native trial.
+
+Acceptance binds the frozen snapshot plan and image receipt to source, architecture,
+registry digest/tag and readiness, rejects stable image aliases, and checks unchanged
+policy main plus absence of Git tags/releases. This is **unsigned snapshot mode;
+signature/attestation absence and scan readbacks are not independently verified**.
+It is not the ephemeral `ConsumerSnapshotTrial`, a linked PR/snapshot/release run,
+or full Gommi/Nano inventory acceptance. GitLab and hosted GitHub do not support this
+campaign event and refuse admission; hosted GitHub keeps its separate guarded road.
+
+Forge CI owns these CI consumer scenarios. Forge Lab owns its CLI/infrastructure
+tests and provides the existing contract/SDK guards; its destructive live TestMain
+is not a validation entry point for this profile. No scenario is duplicated there.
+
 ### Explicit-input GitLab regressions
 
 The normal consumer release recipe also selects these exact scenarios with
