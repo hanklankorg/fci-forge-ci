@@ -21,6 +21,19 @@ func Flag(mutations string) cli.Flag {
 	return &cli.BoolFlag{Name: FlagName, Usage: "preview " + mutations + " without performing them"}
 }
 
+// DeletionFlag returns the --dry-run flag of a command that deletes: it is
+// on by default, read from envVar too, and its usage says so. The help line
+// of a true boolean shows no default otherwise, and this default is the
+// one that keeps a first run from deleting anything.
+func DeletionFlag(envVar string) cli.Flag {
+	return &cli.BoolFlag{
+		Name:    FlagName,
+		Value:   true,
+		Sources: cli.EnvVars(envVar),
+		Usage:   "report what would be deleted without deleting it (default: true; pass --dry-run=false to delete)",
+	}
+}
+
 // Enabled reports whether the command was invoked with --dry-run.
 func Enabled(cmd *cli.Command) bool {
 	return cmd.Bool(FlagName)

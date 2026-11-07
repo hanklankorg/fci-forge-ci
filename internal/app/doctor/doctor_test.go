@@ -5,6 +5,7 @@ package doctor_test
 
 import (
 	"bytes"
+	"errors"
 	"maps"
 	"os"
 	"path/filepath"
@@ -12,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/diggsweden/forge-ci/internal/app/doctor"
+	"github.com/diggsweden/forge-ci/internal/domain/errs"
 	"github.com/diggsweden/forge-ci/internal/domain/provider"
 )
 
@@ -597,5 +599,67 @@ git-signing:
 
 	if c.Remediation == "" {
 		t.Error("FAIL check should carry a remediation")
+	}
+}
+
+// A root that is not a directory is a mistyped --root, not a repository
+// without Forge CI files: doctor refuses it as missing input instead of
+// failing every check and proposing init.
+func TestRunRefusesARootThatIsNotADirectory(t *testing.T) {
+	t.Parallel()
+
+	file := filepath.Join(t.TempDir(), "file")
+	if err := os.WriteFile(file, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, root := range []string{filepath.Join(t.TempDir(), "absent"), file} {
+		checks, err := doctor.Run(doctor.Input{Root: root})
+		if !errors.Is(err, errs.ErrMissingInput) || checks != nil || !strings.Contains(err.Error(), "--root") {
+			t.Errorf("root %s: checks = %v, err = %v, want a missing-input refusal naming --root", root, checks, err)
+		}
+	}
+}
+
+// The Forgejo examples turn the request-tag signature check off until the
+// allowed-signers file is committed. Doctor warns with the line while it is
+// off, passes once it is on, and says nothing where no Forgejo workflow sets it.
+func TestRequestSignatureCheckFollowsTheForgejoInput(t *testing.T) {
+	t.Parallel()
+
+	const meta = "artifacts:\n  - name: x\n    project-type: meta\n"
+
+	for name, tc := range map[string]struct {
+		workflow string
+		want     doctor.Severity
+		listed   bool
+	}{
+		"off, quoted with a comment": {"      verify-release-request-signature: 'false' # until signers are committed\n", doctor.SeverityWarn, true},
+		"off, bare":                  {"      verify-release-request-signature: false\n", doctor.SeverityWarn, true},
+		"on":                         {"      verify-release-request-signature: 'true'\n", doctor.SeverityOK, true},
+		"not set":                    {"      bot-name: Release Bot\n", "", false},
+		"only in a comment":          {"      # verify-release-request-signature: 'true'\n", "", false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			body := "on: push\njobs:\n  release:\n    uses: ./.forgejo/workflows/x.yml\n    with:\n" + tc.workflow
+			root := writeRepo(t, meta, map[string]string{".forgejo/workflows/release.yml": body})
+
+			checks, err := doctor.Run(doctor.Input{Root: root})
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			got := findCheck(checks, doctor.CheckRequestSignature)
+			switch {
+			case !tc.listed && got != nil:
+				t.Errorf("check reported without the input: %+v", *got)
+			case tc.listed && (got == nil || got.Severity != tc.want):
+				t.Errorf("check = %+v, want severity %q", got, tc.want)
+			case tc.want == doctor.SeverityWarn && !strings.Contains(got.Message, ".forgejo/workflows/release.yml:6"):
+				t.Errorf("warning %q does not name the line", got.Message)
+			}
+		})
 	}
 }

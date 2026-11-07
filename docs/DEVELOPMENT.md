@@ -334,6 +334,22 @@ and name the fix when it fails. The full rule, including why `platform` is an
 adapter and why pure OpenPGP verification lives in `internal/pgp` rather than
 an exempt adapter, is in [ADR 0004](adr/0004-package-layering.md).
 
+### Changing a command, a flag or help text
+
+The CLI's text is generated into files the tests hold to the code. After a
+change to a command, a flag, help text or a workflow step that runs the
+binary, run in this order:
+
+```bash
+just generate              # docs/cli-reference.md, the schemas, internal/cli/runby.json
+just test-unit
+just test-smoke            # drives the built binary; the pull-request workflow runs it
+just refresh-engine-binary # last: the binary embeds the generated reference
+```
+
+Commit the generated files and the two `.engine/bin/*.sha256` lines with the
+change. A guide edit under `docs/` needs only the last step.
+
 ## Input-policy decisions
 
 ### Optional distro-package signing
@@ -513,8 +529,10 @@ It refuses a toolchain other than the Go release `go.mod` pins, builds the
 CLI of your tree for both architectures as
 [`scripts/ci/engine-binary.sh`](../scripts/ci/engine-binary.sh) defines
 (cross-compiled, so any host records both), and records the digests. Run it after a change to a build input (`cmd/`,
-`internal/`, `go.mod`, `go.sum`); a change to documentation, workflows or
-tests names the same binary and needs nothing.
+`internal/`, `docs/`, `go.mod`, `go.sum`): the binary embeds the user-facing
+pages under `docs/` for `forge-ci docs`, so a guide edit changes it too. Run it
+last, after `just generate`, since the generated CLI reference is one of those
+pages. A change to workflows or tests names the same binary and needs nothing.
 
 Before pushing, verify the lines are fresh with a read-only check that builds
 both architectures and compares, without writing anything:

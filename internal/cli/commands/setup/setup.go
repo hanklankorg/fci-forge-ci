@@ -153,7 +153,8 @@ func requestCmd() *cli.Command {
 		Description: `A release starts when a signed release-request/vX.Y.Z tag is pushed; the
 release workflow, not you, then creates vX.Y.Z. This checks that git signs
 tags with an SSH key the repository's allowed-signers file lists, and that
-neither tag exists, then prints the two git commands. It does not run them.
+neither tag exists in this clone (fetch the tags first: it does not ask
+the remote), then prints the two git commands. It does not run them.
 It exits 1 while a check fails.`,
 		Flags: []cli.Flag{
 			rootFlag(),

@@ -354,7 +354,15 @@ func TestBinary_SARIFUploadDegradesWithAnExplanatoryNotice(t *testing.T) {
 		stdout, stderr, code := runBinary(t, bin, "--provider", forge, "--format", "text",
 			"security", "report", "upload-sarif", "--sarif-file", sarif, "--repository", "owner/repo")
 
-		want := `Notice: SARIF upload skipped — SARIF upload to Code Scanning is not supported on platform "` + forge + `": unsupported on this platform` + "\n"
+		// Outside a CI job the notice also says which flag and token select
+		// a forge; on a named forge it is the bare notice.
+		reason := ""
+		if forge == "local" {
+			reason = ": outside a CI job no forge is detected; pass --provider github with GH_TOKEN or GITHUB_TOKEN; " +
+				"--provider forgejo with FORGEJO_TOKEN or GITEA_TOKEN and FORGEJO_SERVER_URL; --provider gitlab with GITLAB_TOKEN and CI_SERVER_URL"
+		}
+
+		want := `Notice: SARIF upload skipped — SARIF upload to Code Scanning is not supported on platform "` + forge + `"` + reason + `: unsupported on this platform` + "\n"
 		if code != 0 || stdout != "" || stderr != want {
 			t.Errorf("%s: exit %d, stdout %q, stderr %q, want exit 0, no stdout and %q", forge, code, stdout, stderr, want)
 		}

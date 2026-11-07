@@ -10,10 +10,10 @@ GitHub workflows and GitLab CI components use these images to select their
 execution tools. An image digest pins image content for a selected platform;
 it does not pin the runner environment or dependencies fetched during a job.
 
-> **Current source versus release pins:** `v0.90.0` examples identify a historical
-> baseline, not the current source revision. Confirm matching workflows, CLI
-> assets and runtime images before adoption. Maintainers test unreleased changes
-> with reviewed source and its published images; see [Branch Testing](#branch-testing).
+> **Which version to pin:** snippets here pin `v0.90.0`; replace it with the
+> release you install, as [Which version to pin](README.md#documentation-index)
+> describes. Maintainers test unreleased changes with reviewed source and its
+> published images; see [Branch Testing](#branch-testing).
 
 ## Image roster
 

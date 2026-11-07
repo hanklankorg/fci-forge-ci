@@ -144,9 +144,17 @@ func TestPlanRequestChecksSigningAndTags(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	plan, err = releasesetup.PlanRequest(context.Background(), releasesetup.RequestInput{Root: root, Version: "v1.2.3", Git: git})
+	plan, err = releasesetup.PlanRequest(context.Background(), releasesetup.RequestInput{Root: root, Version: "v1.2.3", Remote: "upstream", Git: git})
 	if err != nil || !plan.Ready() {
 		t.Fatalf("with the signer listed: plan = %+v, %v", plan, err)
+	}
+
+	// The tag checks read only the clone: an unused tag names the fetch that
+	// shows the remote's tags, so a stale clone is not taken as proof.
+	for _, check := range plan.Checks {
+		if strings.HasSuffix(check.What, " is unused") && !strings.Contains(check.Detail, "git fetch --tags upstream") {
+			t.Errorf("tag check %q detail = %q, want the fetch for the named remote", check.What, check.Detail)
+		}
 	}
 
 	git.tags["v1.2.3"] = true

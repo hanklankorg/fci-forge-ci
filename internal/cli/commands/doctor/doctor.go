@@ -45,7 +45,8 @@ func New(commit string) *cli.Command {
 
 Exit codes:
    0   — all checks pass or are warnings
-   1   — at least one FAIL check (ExitCodeValidation)`,
+   1   — at least one FAIL check
+   66  — the --root directory does not exist`,
 		Flags: []cli.Flag{
 			&cli.BoolFlag{Name: "requirements", Usage: "show local release setup guidance for GitHub, GitLab and Forgejo; unverified workflow contracts are labelled"},
 			&cli.StringFlag{

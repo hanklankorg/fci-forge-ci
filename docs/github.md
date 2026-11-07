@@ -8,9 +8,9 @@ The three forge guides, [GitHub](github.md), [GitLab](gitlab.md) and
 [Forgejo](forgejo.md), use the same section order. What each layer has beside
 the others is in [Delivery layers side by side](providers.md#delivery-layers-side-by-side).
 
-> **Current source versus release pins:** `v0.90.0` examples identify a historical
-> baseline, not the current source revision. Confirm matching workflows, CLI
-> assets and runtime images before adoption. For unreleased changes, follow
+> **Which version to pin:** snippets here pin `v0.90.0`; replace it with the
+> release you install, as [Which version to pin](README.md#documentation-index)
+> describes. For unreleased changes, follow
 > [Branch Testing](runtime-images.md#branch-testing).
 
 To inspect the CLI today, use the reviewed
@@ -104,7 +104,8 @@ By hand:
    runs `nanolinter verify`, which discovers root `nanolinter.toml`, then
    `development/nanolinter.toml`, then uses defaults. It requires at least the `required-lints`
    floor, default `secrets,sast`.
-3. **Pin the references.** `uses: ...@v0.90.0`, `forge-ci-binary-ref` and any
+3. **Pin the references.** Replace the examples' `v0.90.0` with the release
+   you install: `uses: ...@vX.Y.Z`, `forge-ci-binary-ref` and any
    `runtime-image*` override move together; see
    [Advanced Pinning Recipe](runtime-images.md#advanced-pinning-recipe).
 4. **Set the [secrets](#secrets-and-tokens)** your release plan selects
@@ -113,9 +114,11 @@ By hand:
 5. **Commit the release allowlist** your signing policy needs
    (`forge-ci setup signer` writes its lines); see
    [Release Authorisation](verification.md#release-authorisation).
-6. **Release** by pushing a signed request tag:
+6. **Release** by pushing a signed request tag. First check your signing
+   setup; the command prints the two git commands below once it passes:
 
    ```bash
+   forge-ci setup release-request v1.0.0
    git tag -s release-request/v1.0.0 -m "Release v1.0.0"
    git push origin release-request/v1.0.0
    ```
@@ -129,8 +132,9 @@ By hand:
    SSH or `.forge-ci/allowed_gpg_keys.asc` for GPG, with the principal you
    sign as. It is distinct from the bot's `RELEASE_*` secrets, which sign the
    release commit, the final tag and the artifacts after the request is
-   admitted. [Local Git signature setup](DEVELOPMENT.md#local-git-signature-setup)
-   says how to install and inspect signing keys locally.
+   admitted. `forge-ci setup release-request` names the step that is
+   missing: the git signing settings, or the allowlist line, which
+   `forge-ci setup signer` adds.
 
    If a release fails partway, identify the failed stage before retrying. Keep
    final tags and published content immutable. A failed publisher reuses the

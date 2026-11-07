@@ -2,9 +2,9 @@
 
 Complete reference for the artifacts config format.
 
-> **Current source versus release pins:** `v0.90.0` examples identify a historical
-> baseline, not the current source revision. Confirm matching workflows, CLI
-> assets and runtime images before adoption. For unreleased changes, follow
+> **Which version to pin:** snippets here pin `v0.90.0`; replace it with the
+> release you install, as [Which version to pin](README.md#documentation-index)
+> describes. For unreleased changes, follow
 > [Branch Testing](runtime-images.md#branch-testing).
 
 ---

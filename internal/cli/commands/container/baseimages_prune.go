@@ -14,6 +14,7 @@ import (
 	"github.com/diggsweden/forge-ci/internal/adapters/cosign"
 	appbaseimages "github.com/diggsweden/forge-ci/internal/app/baseimages"
 	"github.com/diggsweden/forge-ci/internal/cli/deps"
+	"github.com/diggsweden/forge-ci/internal/cli/dryrun"
 	"github.com/diggsweden/forge-ci/internal/cli/regflags"
 	domaincontainer "github.com/diggsweden/forge-ci/internal/domain/container"
 )
@@ -71,12 +72,7 @@ EXAMPLE:
 				Sources: cli.EnvVars("BASE_IMAGES_MAX_DELETE"),
 				Usage:   "maximum unreferenced base-input IDs per pass; all flavor tags of each ID are removed (0 disables the bound)",
 			},
-			&cli.BoolFlag{
-				Name:    flagDryRun,
-				Value:   true,
-				Sources: cli.EnvVars("BASE_IMAGES_PRUNE_DRY_RUN"),
-				Usage:   "report what would be deleted without deleting it",
-			},
+			dryrun.DeletionFlag("BASE_IMAGES_PRUNE_DRY_RUN"),
 			localRegistryFlag(),
 			regflags.AuthFile(regflags.AuthFileOpts{Usage: "registry auth file for attestation verification and registry access"}),
 		),

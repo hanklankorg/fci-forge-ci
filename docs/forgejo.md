@@ -277,6 +277,8 @@ the steps are these.
    and commits `release-request-allowed-signers`, then enables the check: an
    annotated request tag does not authenticate its author, and tag protection
    alone leaves one control between a policy error and a signed release.
+   `forge-ci setup signer` writes the allowlist, and `forge-ci doctor` warns
+   while the check is still off.
 5. **Set the [variables](#variables) and [secrets](#secrets-and-tokens)**, among them
    `CI_JOB_IMAGE`, the image the pull-request jobs run in.
 6. **Add the two files** as `.forgejo/workflows/pullrequest.yml` and

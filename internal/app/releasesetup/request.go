@@ -77,7 +77,7 @@ func PlanRequest(ctx context.Context, in RequestInput) (RequestPlan, error) {
 
 	plan := RequestPlan{Version: tag, Tag: version.ReleaseRequestPrefix + tag}
 	plan.Checks = append(plan.Checks, signingChecks(ctx, in)...)
-	plan.Checks = append(plan.Checks, tagChecks(ctx, in.Git, plan.Tag, tag)...)
+	plan.Checks = append(plan.Checks, tagChecks(ctx, in.Git, remote, plan.Tag, tag)...)
 	plan.Commands = []string{
 		fmt.Sprintf("git tag -s %s -m %q", plan.Tag, "Release "+tag),
 		fmt.Sprintf("git push %s %s", remote, plan.Tag),
@@ -178,13 +178,16 @@ func publicKeyPath(key string) string {
 	return key + ".pub"
 }
 
-func tagChecks(ctx context.Context, git Git, request, release string) []RequestCheck {
+// tagChecks reads the clone's tags only; it does not ask the remote, so a
+// stale clone can pass. The detail names the fetch that brings the remote's
+// tags in.
+func tagChecks(ctx context.Context, git Git, remote, request, release string) []RequestCheck {
 	checks := make([]RequestCheck, 0, 2)
 
 	for _, tag := range []string{request, release} {
 		exists, err := git.TagExists(ctx, tag)
 
-		check := RequestCheck{OK: err == nil && !exists, What: tag + " is unused", Detail: "no local tag " + tag}
+		check := RequestCheck{OK: err == nil && !exists, What: tag + " is unused", Detail: "no local tag " + tag + " (git fetch --tags " + remote + " first, to see the remote's)"}
 		switch {
 		case err != nil:
 			check.Detail = "cannot list tags: " + err.Error()

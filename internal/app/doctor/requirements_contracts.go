@@ -38,7 +38,7 @@ func (report *RequirementsReport) inspect(root, repo, commit, forge, file string
 	if domaingit.ValidCommitSHA(commit) && commit == revision {
 		contract = "revision-matched reference rules; remote readiness not checked"
 	} else {
-		report.unknown(where + ": pinned contract not verified; rows below are this CLI's reference guidance, not authoritative requirements for that revision")
+		report.unknown(where + ": pinned contract not verified; the rows listed for it are this CLI's reference guidance, not authoritative requirements for that revision")
 	}
 
 	call := SetupCall{Location: where, Forge: forge, Workflow: name, Revision: revision, Contract: contract, Requirements: []SetupItem{}, Settings: []SetupSetting{}}

@@ -32,7 +32,8 @@ forge-ci --version
 This installs the released CLI globally; no Go toolchain is required.
 Alternatively, download the archive for your platform from the
 [release page](https://github.com/diggsweden/forge-ci/releases/tag/v0.93.2)
-and follow [Artifact Verification](docs/verification.md) before installation.
+and [verify it](docs/verification.md#verify-the-forge-ci-cli-before-you-install-it)
+before installation.
 Source builds are covered in [Development](docs/DEVELOPMENT.md).
 
 ### Write the CI files

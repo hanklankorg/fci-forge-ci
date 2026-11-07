@@ -109,6 +109,12 @@ func Run(in Input) ([]Check, error) {
 		root = wd
 	}
 
+	// A mistyped --root must not read as a repository without Forge CI files:
+	// every check would fail and send the person to init.
+	if info, err := os.Stat(root); err != nil || !info.IsDir() {
+		return nil, fmt.Errorf("doctor: repository root %s is not a directory; pass the repository's top directory to --root: %w", root, errs.ErrMissingInput)
+	}
+
 	artifactsPath := in.ArtifactsPath
 	if artifactsPath == "" {
 		artifactsPath = filepath.Join(root, ".forge-ci", "artifacts.yml")
@@ -133,6 +139,10 @@ func Run(in Input) ([]Check, error) {
 	}
 
 	checks = append(checks, checkWorkflowVersionRefs(root, repoSlug))
+	if c, ok := checkRequestSignatureVerified(root); ok {
+		checks = append(checks, c)
+	}
+
 	if c, ok := checkGitLabComponentJobNames(root, repoSlug); ok {
 		checks = append(checks, c)
 	}
