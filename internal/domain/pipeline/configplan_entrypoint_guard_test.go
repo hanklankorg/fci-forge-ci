@@ -32,9 +32,10 @@ func TestConfigPlanHasNoStandaloneEntryPoints(t *testing.T) {
 
 	// The functions whose whole job is the boundary itself.
 	validating := map[string]string{
-		"ValidateConfigPlan":     "is the validator",
-		"NewReleasePlan":         "validates before building the plan",
-		"NewSnapshotReleasePlan": "validates before building the plan",
+		"ValidateConfigPlan":          "is the validator",
+		"NewReleasePlan":              "validates before building the plan",
+		"NewSnapshotReleasePlan":      "validates before building the plan",
+		"ValidateClassifiedFilePlans": "validates before checking file-only eligibility",
 	}
 
 	entries, err := os.ReadDir(".")
