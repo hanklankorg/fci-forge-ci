@@ -31,20 +31,23 @@ var (
 
 // fakeTagGit implements the tag-verify git surface.
 type fakeTagGit struct {
-	head         string
-	tagCommit    string
-	tags         []string
-	tagType      string
-	localObject  string
-	remoteObject string
-	queries      *int
-	repositories *[]string
-	observe      func(context.Context, tagVerifyCall) error
-	parents      []string
-	request      string
-	changed      []string
-	changeErr    error
-	diff         string
+	head                string
+	tagCommit           string
+	tags                []string
+	tagType             string
+	localObject         string
+	remoteObject        string
+	queries             *int
+	repositories        *[]string
+	observe             func(context.Context, tagVerifyCall) error
+	parents             []string
+	request             string
+	requestObject       string
+	remoteRequestObject string
+	remoteRequestCommit string
+	changed             []string
+	changeErr           error
+	diff                string
 }
 
 type tagVerifyCall struct {
@@ -69,6 +72,10 @@ func (f fakeTagGit) RevParse(ctx context.Context, ref string) (string, error) {
 	}
 
 	if strings.HasPrefix(ref, "refs/tags/release-request/") {
+		if !strings.HasSuffix(ref, "^{commit}") && f.requestObject != "" {
+			return f.requestObject, err
+		}
+
 		return f.request, err
 	}
 
@@ -190,6 +197,18 @@ func (f fakeTagGit) CatFileType(ctx context.Context, ref string) (string, error)
 
 func (f fakeTagGit) RemoteTagObjectAtURL(ctx context.Context, repository, tag string, token runcontext.Credential) (string, error) {
 	err := f.record(ctx, tagVerifyCall{method: "RemoteTagObjectAtURL", ref: tag, repository: repository, token: token})
+	if strings.HasPrefix(tag, "release-request/") {
+		if f.remoteRequestObject != "" {
+			return f.remoteRequestObject, err
+		}
+
+		if f.requestObject != "" {
+			return f.requestObject, err
+		}
+
+		return f.request, err
+	}
+
 	if f.remoteObject != "" {
 		return f.remoteObject, err
 	}
@@ -199,6 +218,13 @@ func (f fakeTagGit) RemoteTagObjectAtURL(ctx context.Context, repository, tag st
 
 func (f fakeTagGit) RemoteTagCommit(ctx context.Context, repository, tag string, token runcontext.Credential) (string, error) {
 	err := f.record(ctx, tagVerifyCall{method: "RemoteTagCommit", ref: tag, repository: repository, token: token})
+	if strings.HasPrefix(tag, "release-request/") {
+		if f.remoteRequestCommit != "" {
+			return f.remoteRequestCommit, err
+		}
+
+		return f.request, err
+	}
 
 	return f.tagCommit, err
 }
@@ -480,7 +506,7 @@ func TestVerifyReleaseTag_RequiresTheSingleChildOfTheAuthorisedSource(t *testing
 
 			git := fakeTagGit{
 				head: releaseSHA, tagCommit: releaseSHA, tags: []string{"v1.2.3"}, tagType: "tag",
-				localObject: releaseSHA, remoteObject: releaseSHA, parents: test.parents,
+				localObject: releaseSHA, remoteObject: releaseSHA, parents: test.parents, request: test.parent,
 			}
 
 			err := apprelease.VerifyReleaseTag(t.Context(), git, io.Discard, apprelease.VerifyReleaseTagInput{
