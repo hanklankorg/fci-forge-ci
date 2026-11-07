@@ -212,6 +212,11 @@
         "type": "boolean",
         "default": true
       },
+      "require-canonical-bootstrap": {
+        "required": false,
+        "type": "boolean",
+        "default": false
+      },
       "runtime-image": {
         "required": false,
         "type": "string",
