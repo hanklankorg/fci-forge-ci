@@ -22,38 +22,49 @@ var originalUploadID = regexp.MustCompile(`^\$\{\{ steps\.([A-Za-z0-9_-]+)\.outp
 func exactIDLineageProofs(workflow lineageWorkflow, jobName string) map[string]bool {
 	proofs := map[string]bool{}
 	job := workflow.jobs[jobName]
+
 	steps := mappingChild(job, "steps")
 	if steps == nil {
 		return proofs
 	}
+
 	for _, step := range steps.Content {
 		if scalarChild(step, "uses") != "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c" {
 			continue
 		}
+
 		with := mappingChild(step, "with")
 		ids := scalarChild(with, "artifact-ids")
+
 		match := exactIDNeeds.FindStringSubmatch(ids)
 		if match == nil || !slices.Contains(needsOf(job), match[1]) {
 			continue
 		}
+
 		foreign := false
+
 		for _, key := range []string{"name", "pattern", "run-id", "repository", "github-token"} {
 			if mappingChild(with, key) != nil {
 				foreign = true
 			}
 		}
+
 		if foreign {
 			continue
 		}
+
 		producer := workflow.jobs[match[1]]
+
 		output := originalUploadID.FindStringSubmatch(scalarChild(mappingChild(producer, "outputs"), match[2]))
 		if output == nil {
 			continue
 		}
+
 		uploads := mappingChild(producer, "steps")
 		if uploads == nil {
 			continue
 		}
+
 		for _, upload := range uploads.Content {
 			overwrite := scalarChild(mappingChild(upload, "with"), "overwrite")
 			if scalarChild(upload, "id") == output[1] && scalarChild(upload, "uses") == "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a" && (overwrite == "" || overwrite == "false") {
@@ -61,6 +72,7 @@ func exactIDLineageProofs(workflow lineageWorkflow, jobName string) map[string]b
 			}
 		}
 	}
+
 	return proofs
 }
 
@@ -81,6 +93,7 @@ func TestExactIDLineageRequiresOriginalUpload(t *testing.T) {
         with:
           artifact-ids: ${{ needs.producer.outputs.artifact-id }}
 `
+
 	for _, test := range []struct{ name, from, to string }{
 		{name: "original"},
 		{name: "missing-needs", from: "needs: producer", to: "needs: other"},
@@ -98,12 +111,15 @@ func TestExactIDLineageRequiresOriginalUpload(t *testing.T) {
 			if test.from != "" {
 				text = strings.Replace(text, test.from, test.to, 1)
 			}
+
 			var doc yaml.Node
 			if err := yaml.Unmarshal([]byte(text), &doc); err != nil {
 				t.Fatal(err)
 			}
+
 			jobs := mappingChild(doc.Content[0], "jobs")
 			workflow := lineageWorkflow{jobs: map[string]*yaml.Node{"producer": mappingChild(jobs, "producer"), "receiver": mappingChild(jobs, "receiver")}}
+
 			proof := exactIDLineageProofs(workflow, "receiver")
 			if got, want := len(proof) > 0, test.name == "original"; got != want {
 				t.Fatalf("proof=%v, want %v", proof, want)
