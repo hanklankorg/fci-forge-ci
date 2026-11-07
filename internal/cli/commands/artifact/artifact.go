@@ -156,6 +156,8 @@ func downloadCmd() *cli.Command {
      --blob-store images-blob`,
 		Flags: []cli.Flag{
 			&cli.StringFlag{Name: "name", Usage: "exact artifact name to download (omit with --pattern)"},
+			&cli.StringFlag{Name: "artifact-id", Usage: "GitHub only: exact immutable artifact ID; requires trusted name, repository, run-id and expected-run-head-sha; never falls back to name lookup"},
+			&cli.StringFlag{Name: "expected-run-head-sha", Usage: "with --artifact-id: trusted expected workflow run head (request SHA, not the prepared release checkout)"},
 			&cli.StringFlag{Name: "pattern", Usage: "glob over artifact names; downloads every match (alternative to --name)"},
 			&cli.BoolFlag{Name: "merge-multiple", Usage: "with --pattern: flatten all matches into --dir instead of --dir/<name>/"},
 			&cli.StringFlag{Name: flagDir, Value: ".", Usage: "destination directory"},
@@ -164,6 +166,11 @@ func downloadCmd() *cli.Command {
 			&cli.StringFlag{Name: flagBlobStore, Usage: "with --name, current run only: restore the blobs the artifact was uploaded without from this blob store, each verified against its sha256 digest"},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
+			// An explicitly empty ID must not silently select the legacy path.
+			if cmd.IsSet("artifact-id") && cmd.String("artifact-id") == "" {
+				return fmt.Errorf("artifact-id must not be empty when supplied: %w", errs.ErrUsage)
+			}
+
 			return deps.FromCmd(ctx, cmd, func(dep *deps.Deps) error {
 				dl, err := dep.RequireRunArtifactDownloader()
 				if err != nil {
@@ -171,15 +178,21 @@ func downloadCmd() *cli.Command {
 				}
 
 				in := provider.RunArtifactDownload{
-					Name:          cmd.String("name"),
-					Pattern:       cmd.String("pattern"),
-					MergeMultiple: cmd.Bool("merge-multiple"),
-					Dir:           cmd.String(flagDir),
-					RunID:         cmd.String("run-id"),
-					Repository:    cmd.String("repository"),
+					ID:                 cmd.String("artifact-id"),
+					ExpectedRunHeadSHA: cmd.String("expected-run-head-sha"),
+					Name:               cmd.String("name"),
+					Pattern:            cmd.String("pattern"),
+					MergeMultiple:      cmd.Bool("merge-multiple"),
+					Dir:                cmd.String(flagDir),
+					RunID:              cmd.String("run-id"),
+					Repository:         cmd.String("repository"),
 				}
 
 				if prefix := cmd.String(flagBlobStore); prefix != "" {
+					if in.ID != "" || in.ExpectedRunHeadSHA != "" {
+						return fmt.Errorf("exact artifact download does not support blob-store reconstruction: %w", errs.ErrUsage)
+					}
+
 					if in.RunID != "" && in.RunID != runcontext.RunID().Resolve(os.Getenv) {
 						return fmt.Errorf("--blob-store reads the current run's store, not run %q: %w", in.RunID, errs.ErrUsage)
 					}

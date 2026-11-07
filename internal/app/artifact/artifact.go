@@ -24,6 +24,9 @@ import (
 // RunArtifactDownloader, and records the result. The resolved name and
 // totals are written to the sink; a one-line summary goes to w (stderr).
 func Download(ctx context.Context, dl provider.RunArtifactDownloader, sink domainci.OutputSink, out io.Writer, in provider.RunArtifactDownload) (provider.RunArtifactInfo, error) {
+	if _, _, err := provider.ExactArtifactDownloadIDs(in); err != nil {
+		return provider.RunArtifactInfo{}, err
+	}
 	// Pattern selects a set of artifacts by glob; a single named artifact
 	// is the exact-match case. Exactly one of the two must be given.
 	switch {
@@ -115,6 +118,10 @@ func emit(ctx context.Context, sink domainci.OutputSink, out io.Writer, info pro
 		}
 	}
 
+	if err := emitArtifactObservation(ctx, sink, info.Observation); err != nil {
+		return err
+	}
+
 	if out == nil {
 		return nil
 	}
@@ -126,6 +133,28 @@ func emit(ctx context.Context, sink domainci.OutputSink, out io.Writer, info pro
 	}
 
 	_, _ = fmt.Fprintf(out, "%s %s (%d files, %d bytes)\n", verb, info.Name, info.FileCount, info.Bytes)
+
+	return nil
+}
+
+func emitArtifactObservation(ctx context.Context, sink domainci.OutputSink, observed *provider.RunArtifactObservation) error {
+	if sink == nil || observed == nil {
+		return nil
+	}
+
+	for key, value := range map[string]string{
+		"artifact-repository":         observed.Repository,
+		"artifact-repository-id":      observed.RepositoryID,
+		"artifact-run-id":             observed.RunID,
+		"artifact-run-head-sha":       observed.RunHeadSHA,
+		"artifact-head-repository-id": observed.HeadRepositoryID,
+		"artifact-head-branch":        observed.HeadBranch,
+		"artifact-archive-digest":     observed.ArchiveDigest,
+	} {
+		if err := sink.Set(ctx, key, value); err != nil {
+			return fmt.Errorf("emit artifact observation: %w", err)
+		}
+	}
 
 	return nil
 }

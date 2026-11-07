@@ -81,6 +81,10 @@ func fileMD5Base64(r io.Reader) (string, error) {
 // disk); every entry path is gated by domain/artifact.SafeJoin and each
 // file is size-capped.
 func (p *Provider) DownloadRunArtifact(ctx context.Context, in provider.RunArtifactDownload) (provider.RunArtifactInfo, error) {
+	if in.ID != "" || in.ExpectedRunHeadSHA != "" {
+		return provider.RunArtifactInfo{}, fmt.Errorf("forgejo exact artifact-ID binding is not supported: %w", errs.ErrUnsupported)
+	}
+
 	if _, err := path.Match(in.Pattern, ""); err != nil {
 		return provider.RunArtifactInfo{}, fmt.Errorf("invalid artifact pattern: %w", errs.ErrUsage)
 	}

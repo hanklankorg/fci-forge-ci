@@ -5,6 +5,7 @@ package artifact_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/urfave/cli/v3"
@@ -66,5 +67,41 @@ func TestTransferFlagsReadNoEnvironment(t *testing.T) {
 				t.Errorf("artifact %s reads %v from the environment; pass it as a flag instead", site, envs)
 			}
 		}
+	}
+}
+
+func TestExactArtifactFlagsAreExplicitAndKeepRequestHeadSeparate(t *testing.T) {
+	t.Setenv("ARTIFACT_ID", "foreign-id")
+	t.Setenv("GITHUB_SHA", strings.Repeat("b", 40))
+
+	root := artifact.New()
+
+	var id, head string
+
+	for _, command := range root.Commands {
+		if command.Name == "download" {
+			command.Action = func(_ context.Context, cmd *cli.Command) error {
+				id, head = cmd.String("artifact-id"), cmd.String("expected-run-head-sha")
+
+				return nil
+			}
+		}
+	}
+
+	if err := root.Run(t.Context(), []string{"artifact", "download", "--artifact-id", "42", "--expected-run-head-sha", strings.Repeat("a", 40)}); err != nil {
+		t.Fatal(err)
+	}
+
+	if id != "42" || head != strings.Repeat("a", 40) {
+		t.Fatalf("exact selector read ambient source facts: id=%q head=%q", id, head)
+	}
+}
+
+func TestExplicitlyEmptyArtifactIDCannotFallBackToName(t *testing.T) {
+	t.Parallel()
+
+	root := artifact.New()
+	if err := root.Run(t.Context(), []string{"artifact", "download", "--name", "dist", "--artifact-id", ""}); err == nil || !strings.Contains(err.Error(), "artifact-id must not be empty") {
+		t.Fatalf("empty ID did not fail before provider acquisition: %v", err)
 	}
 }

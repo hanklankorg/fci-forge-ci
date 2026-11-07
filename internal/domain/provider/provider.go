@@ -696,6 +696,11 @@ type RunArtifactUpload struct {
 // artifact names, downloading every match) is given.
 type RunArtifactDownload struct {
 	Name string
+	// ID opts into an exact, bound download. Name, Repository, RunID and
+	// ExpectedRunHeadSHA then become required trusted expectations, not search
+	// filters. Unsupported providers must refuse this mode, never ignore it.
+	ID                 string
+	ExpectedRunHeadSHA string
 	// Pattern is a glob over artifact names (the JS download-artifact
 	// `pattern:`). When set, every matching artifact downloads and Name is
 	// ignored.
@@ -715,4 +720,20 @@ type RunArtifactInfo struct {
 	ID        string
 	Bytes     int64
 	FileCount int
+	// Observation contains API-observed facts only for a bound exact download.
+	// It does not authenticate a producer job or its prepared checkout.
+	Observation *RunArtifactObservation
+}
+
+// RunArtifactObservation records only facts returned by the provider's artifact
+// and repository APIs. GitHub's artifact metadata has no producer-job identity,
+// job result, run attempt or approved prepared-release commit.
+type RunArtifactObservation struct {
+	Repository       string
+	RepositoryID     string
+	RunID            string
+	RunHeadSHA       string
+	HeadRepositoryID string
+	HeadBranch       string
+	ArchiveDigest    string
 }
