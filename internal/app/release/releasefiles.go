@@ -693,6 +693,9 @@ type releaseFilesCtx struct {
 	distDir          string
 	manifestFile     string
 	manifestExplicit bool
+	// payload is set only by classified handoff admission after WalkSafe.
+	// Legacy workspace commands retain their descriptor-based file opener.
+	payload fs.FS
 }
 
 func releaseFilesContext(in FilesInput) releaseFilesCtx {
@@ -1212,7 +1215,7 @@ func validateUnsignedReleaseFiles(ctx releaseFilesCtx, manifest *FileManifest) e
 	}
 
 	for _, path := range signerWritten {
-		if _, err := os.Lstat(path); err == nil {
+		if _, err := statReleaseManifestPath(ctx, path); err == nil {
 			return fmt.Errorf("unsigned dist must not hold %s: signing writes it: %w", path, errs.ErrValidation)
 		} else if !errors.Is(err, fs.ErrNotExist) {
 			return fmt.Errorf("stat %s: %w", path, err)
@@ -1306,7 +1309,28 @@ func validateReleaseDistAsset(ctx releaseFilesCtx, path string) error {
 		return err
 	}
 
+	if ctx.payload != nil {
+		info, err := fs.Stat(ctx.payload, path)
+		if err != nil {
+			return err
+		}
+
+		if !info.Mode().IsRegular() {
+			return fmt.Errorf("release asset must be a regular file: %s: %w", path, errs.ErrValidation)
+		}
+
+		return nil
+	}
+
 	return validateReleasePathComponents(path)
+}
+
+func statReleaseManifestPath(ctx releaseFilesCtx, path string) (fs.FileInfo, error) {
+	if ctx.payload != nil {
+		return fs.Stat(ctx.payload, path)
+	}
+
+	return os.Lstat(path)
 }
 
 // validateReleaseDistPath checks the shape of a release file path, whether or
