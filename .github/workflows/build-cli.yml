@@ -44,6 +44,13 @@ on: # yamllint disable-line rule:truthy
       artifact-name:
         description: "Echoes the dist/ artifact name for callers to download."
         value: ${{ inputs.artifact-name }}
+      engine-cli-artifact-id:
+        description: "Original immutable canonical upload ID (legacy two-architecture artifact)"
+        value: ${{ jobs.build.outputs.engine-cli-artifact-id }}
+      engine-cli-producer-run-id:
+        value: ${{ jobs.build.outputs.engine-cli-producer-run-id }}
+      engine-cli-producer-run-attempt:
+        value: ${{ jobs.build.outputs.engine-cli-producer-run-attempt }}
 permissions:
   contents: read
 jobs:
@@ -56,6 +63,9 @@ jobs:
       id-token: write # Sigstore keyless OIDC (cosign sign-blob: checksums + provenance)
     outputs:
       version: ${{ steps.version.outputs.value }}
+      engine-cli-artifact-id: ${{ steps.engine-cli.outputs.artifact-id }}
+      engine-cli-producer-run-id: ${{ steps.canonical.outputs.run-id }}
+      engine-cli-producer-run-attempt: ${{ steps.canonical.outputs.run-attempt }}
     steps:
       - name: Harden runner
         # audit (not block), consistent with every other job in
@@ -141,6 +151,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GORELEASER_CURRENT_TAG: ${{ inputs.version-tag }}
       - name: Build canonical delivery CLIs for runtime images
+        id: canonical
         run: |
           set -euo pipefail
           mkdir -p engine-cli
@@ -148,7 +159,9 @@ jobs:
             bash scripts/ci/engine-binary.sh build "$arch" "$PWD/engine-cli/forge-ci-linux-$arch"
             bash scripts/ci/engine-binary.sh verify "$arch" "engine-cli/forge-ci-linux-$arch"
           done
+          printf 'run-id=%s\nrun-attempt=%s\n' "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" >>"$GITHUB_OUTPUT"
       - name: Upload canonical delivery CLIs
+        id: engine-cli
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: engine-cli
