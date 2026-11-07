@@ -6,8 +6,11 @@ package github
 import (
 	"archive/zip"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"net/http"
 	"os"
@@ -38,6 +41,15 @@ const maxArtifactRedirects = 3
 // RunID (or the current run, when empty) is honored — there is no
 // cross-run restriction.
 func (p *Provider) DownloadRunArtifact(ctx context.Context, in provider.RunArtifactDownload) (provider.RunArtifactInfo, error) {
+	artifactID, expectedRunID, err := provider.ExactArtifactDownloadIDs(in)
+	if err != nil {
+		return provider.RunArtifactInfo{}, err
+	}
+
+	if in.ID != "" {
+		return p.downloadExactArtifact(ctx, in, artifactID, expectedRunID)
+	}
+
 	runID := in.RunID
 	if runID == "" {
 		runID = p.envFunc()("GITHUB_RUN_ID")
@@ -334,6 +346,12 @@ func findArtifactID(ctx context.Context, client *gogithub.Client, owner, repo st
 // The body is streamed to a temp file so the ZIP reader (which needs
 // io.ReaderAt) doesn't materialise the whole archive in memory.
 func downloadAndExtractZip(ctx context.Context, client *http.Client, url, dir string, maxBytes int64, maxFiles int) (int64, int, error) {
+	return downloadAndExtractZipChecked(ctx, client, url, dir, maxBytes, maxFiles, "", false)
+}
+
+// The exact-ID path verifies the API's archive digest (when provided) and
+// refuses duplicate ZIP paths before creating any extraction staging.
+func downloadAndExtractZipChecked(ctx context.Context, client *http.Client, url, dir string, maxBytes int64, maxFiles int, digest string, exact bool) (int64, int, error) {
 	// The zip is bounded by progress, not wall time: a large artifact must not
 	// be cut off by the API client's whole-request Timeout.
 	ctx, transfer := httpretry.StartTransfer(ctx, httpretry.ClientTimeout())
@@ -341,7 +359,7 @@ func downloadAndExtractZip(ctx context.Context, client *http.Client, url, dir st
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return 0, 0, fmt.Errorf("build download request: %w", err)
+		return 0, 0, fmt.Errorf("build download request: %w", httpretry.SafeError(err))
 	}
 
 	resp, err := client.Do(req)
@@ -373,7 +391,8 @@ func downloadAndExtractZip(ctx context.Context, client *http.Client, url, dir st
 
 	defer func() { _ = os.Remove(tmpPath) }()
 
-	size, err := domainartifact.CopyAtMost(tmp, resp.Body, domainartifact.MaxArchiveBytes)
+	hash := sha256.New()
+	size, err := domainartifact.CopyAtMost(io.MultiWriter(tmp, hash), resp.Body, domainartifact.MaxArchiveBytes)
 	err = transfer.Err(err)
 
 	if cerr := tmp.Close(); err == nil {
@@ -382,6 +401,10 @@ func downloadAndExtractZip(ctx context.Context, client *http.Client, url, dir st
 
 	if err != nil {
 		return 0, 0, fmt.Errorf("write temp zip: %w", err)
+	}
+
+	if err := verifyArtifactArchiveDigest(hex.EncodeToString(hash.Sum(nil)), digest); err != nil {
+		return 0, 0, err
 	}
 
 	zr, err := zip.OpenReader(tmpPath)
@@ -395,6 +418,10 @@ func downloadAndExtractZip(ctx context.Context, client *http.Client, url, dir st
 	}
 
 	defer func() { _ = zr.Close() }()
+
+	if err := validateExactArtifactZip(zr, exact); err != nil {
+		return 0, 0, err
+	}
 
 	stage, err := pathsafe.NewArtifactStaging(dir)
 	if err != nil {

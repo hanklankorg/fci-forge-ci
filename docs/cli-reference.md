@@ -115,6 +115,8 @@ EXAMPLES (as a workflow step):
 | Flag | Description | Type | Default | Env vars |
 |------|-------------|------|---------|----------|
 | `--name` | exact artifact name to download (omit with --pattern) | string | `""` | n/a |
+| `--artifact-id` | GitHub only: exact immutable artifact ID; requires trusted name, repository, run-id and expected-run-head-sha; never falls back to name lookup | string | `""` | n/a |
+| `--expected-run-head-sha` | with --artifact-id: trusted expected workflow run head (request SHA, not the prepared release checkout) | string | `""` | n/a |
 | `--pattern` | glob over artifact names; downloads every match (alternative to --name) | string | `""` | n/a |
 | `--merge-multiple` | with --pattern: flatten all matches into --dir instead of --dir/<name>/ | bool | `false` | n/a |
 | `--dir` | destination directory | string | `"."` | n/a |

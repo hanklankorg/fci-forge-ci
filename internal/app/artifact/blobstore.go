@@ -293,6 +293,10 @@ func verifyStoredBlob(ctx context.Context, store provider.RunArtifactDownloader,
 // error naming the digest. The manifest is removed, so the directory is the
 // one that was uploaded.
 func DownloadWithBlobStore(ctx context.Context, store blobDownloadRoles, sink domainci.OutputSink, out io.Writer, in BlobStoreDownload) (provider.RunArtifactInfo, error) {
+	if in.ID != "" || in.ExpectedRunHeadSHA != "" {
+		return provider.RunArtifactInfo{}, fmt.Errorf("exact artifact download does not support blob-store reconstruction: %w", errs.ErrUsage)
+	}
+
 	if err := domainartifact.ValidateBlobPrefix(in.Prefix); err != nil {
 		return provider.RunArtifactInfo{}, err
 	}
