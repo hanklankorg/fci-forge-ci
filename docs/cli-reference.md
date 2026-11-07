@@ -3827,6 +3827,13 @@ Set --manifest-root to override the path prefix written into the manifest; use
 --manifest-root . for artifact contents that are staged under different
 directory names by producer and verifier.
 
+With --classified-files, --dist-dir is a file-only workspace containing
+dist/release-files.json and exactly its declared unsigned files. Admit the
+classified inventory before hashing; preserve all producer bytes and names.
+This mode fixes the manifest prefix to '.' and cannot be combined with
+--canonical-payload or an explicit --manifest-root. It establishes integrity,
+not source or artifact authorization.
+
 EXAMPLE:
    forge-ci release dist-digest --dist-dir dist
 ```
@@ -3834,6 +3841,7 @@ EXAMPLE:
 | Flag | Description | Type | Default | Env vars |
 |------|-------------|------|---------|----------|
 | `--canonical-payload` | admit a workspace containing dist/ and optional premade-sboms/; use the stable '.' manifest prefix | bool | `false` | n/a |
+| `--classified-files` | admit a closed unsigned file-only workspace with dist/release-files.json; fixes manifest prefix to '.'; not source authorization | bool | `false` | n/a |
 | `--dist-dir` | directory whose release hand-off digest is printed | string | `"dist"` | n/a |
 | `--manifest-root` | path prefix written into the sha256sum manifest (defaults to --dist-dir) | string | `""` | n/a |
 
@@ -4429,6 +4437,12 @@ Set --manifest-root to override the path prefix written into the manifest during
 digest recomputation; use --manifest-root . for artifact contents that are
 staged under different directory names by producer and verifier.
 
+With --classified-files, --dist-dir is an unsigned file-only workspace with
+dist/release-files.json. A non-empty --stage-dir is required and must not exist:
+admit and verify the privately staged classified files before installing them.
+The mode fixes the manifest prefix to '.' and conflicts with --canonical-payload
+and an explicit --manifest-root. No source or artifact authorization is implied.
+
 EXAMPLE:
    forge-ci release validate-dist --dist-dir dist --expected-digest sha256:abc...
 ```
@@ -4436,6 +4450,7 @@ EXAMPLE:
 | Flag | Description | Type | Default | Env vars |
 |------|-------------|------|---------|----------|
 | `--canonical-payload` | admit and verify the entire dist/ plus premade-sboms/ workspace; fixes manifest prefix to '.' | bool | `false` | n/a |
+| `--classified-files` | admit and privately stage a closed unsigned file-only workspace; requires a fresh --stage-dir; fixes manifest prefix to '.' | bool | `false` | n/a |
 | `--dist-dir` | directory to verify | string | `"dist"` | n/a |
 | `--expected-digest` | expected dist digest (from the build job) | string | `""` | `$EXPECTED_DIGEST`, `$DIST_DIGEST` |
 | `--digest-file` | regular producer digest recording; exclusive with --expected-digest | string | `""` | n/a |
