@@ -274,7 +274,7 @@ func TestCanonicalDeliveryProducer(t *testing.T) {
 	compiler := filepath.Join(fixture.root, "approved-inert-go")
 	// Exercise the EXISTING recipe/toolchain check without compiling the CLI or
 	// spending live-lane CPU. This is not a qualification/reproducibility claim.
-	canonicalWrite(t, compiler, "#!/bin/bash\nset -eu\nif [[ $1 == env ]]; then printf 'go1.26.4\\n'; exit; fi\nif [[ $3 == mod && $4 == download && $5 == all ]]; then touch \"$GOMODCACHE/prepared\"; exit; fi\n[[ $GOPROXY == off && $GOSUMDB == off && -f $GOMODCACHE/prepared ]]\nwhile [[ $# -gt 0 ]]; do if [[ $1 == -o ]]; then cp '"+cli+"' \"$2\"; exit; fi; shift; done\nexit 99\n", 0o700)
+	canonicalWrite(t, compiler, "#!/bin/bash\nset -eu\nif [[ $1 == env ]]; then printf 'go1.26.4\\n'; exit; fi\nif [[ $# == 4 && $3 == mod && $4 == download ]]; then touch \"$GOMODCACHE/prepared\"; exit; fi\n[[ $GOPROXY == off && $GOSUMDB == off && -f $GOMODCACHE/prepared ]]\nwhile [[ $# -gt 0 ]]; do if [[ $1 == -o ]]; then cp '"+cli+"' \"$2\"; exit; fi; shift; done\nexit 99\n", 0o700)
 
 	fixture.env["GO"] = compiler
 	if out, err := fixture.run(t, "build"); err != nil {

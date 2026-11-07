@@ -72,7 +72,7 @@ The native artifact service uses its own job-scoped authenticated transport.
    image. No legacy build/signing job is called. No consumer checkout occurs.
 2. `canonical-build` checks out only the explicit engine commit, without LFS or
    submodules. After origin/full-commit and committed recipe/checksum/module-file
-   checks, delivery glue runs only `go mod download all` in a cleared environment
+   checks, delivery glue runs only no-argument `go mod download` in a cleared environment
    with normal HTTPS proxy/TLS and default `sum.golang.org` verification. A fresh
    private job-owned module cache and separate compiler cache are removed on exit.
    It neither executes dependency/consumer hooks nor installs tools. Missing or
@@ -80,6 +80,10 @@ The native artifact service uses its own job-scoped authenticated transport.
    stop before building or emitting upload inputs. The administrator must select
    trusted full source, including any local replacements; Go sums do not
    authenticate local replacements. Existing caches are not used or changed.
+   For the pinned Go >=1.17 module, native no-argument selection downloads the
+   main module's explicit requirements, including indirect package providers.
+   It does not broaden selection to unrelated graph modules with `download all`
+   or repair the selected locks. The post-download immutability gate is unchanged.
    The existing `engine-binary.sh build amd64` recipe uses that prepared cache
    for the
    pinned-toolchain/offline-module build, then its existing `verify` checks the
