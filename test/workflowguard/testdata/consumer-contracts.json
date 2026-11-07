@@ -108,6 +108,31 @@
         "type": "boolean",
         "default": false
       },
+      "classified-cosign-transparency": {
+        "required": false,
+        "type": "string",
+        "default": "none"
+      },
+      "classified-package-gpg-fingerprint": {
+        "required": false,
+        "type": "string",
+        "default": ""
+      },
+      "classified-producer-file-only": {
+        "required": false,
+        "type": "boolean",
+        "default": false
+      },
+      "classified-producer-path": {
+        "required": false,
+        "type": "string",
+        "default": ""
+      },
+      "classified-release-notes-path": {
+        "required": false,
+        "type": "string",
+        "default": ""
+      },
       "cosign-public-key": {
         "required": false,
         "type": "string",
@@ -177,6 +202,11 @@
         "required": false,
         "type": "string",
         "default": ""
+      },
+      "release-file-mode": {
+        "required": false,
+        "type": "string",
+        "default": "native"
       },
       "release-policy": {
         "required": false,

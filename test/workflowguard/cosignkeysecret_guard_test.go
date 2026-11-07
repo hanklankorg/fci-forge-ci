@@ -116,10 +116,15 @@ func checkKeySecretJob(t *testing.T, where string, job keySecretJob) int {
 
 			switch {
 			case binds:
+				// A fixed key-backed role can bind and sign in one fail-fast
+				// step. It has no alternative method or conditional skip.
+				fixedRole := step.If == "" &&
+					strings.Contains(step.Run, "forge-ci release sign --method kms --key env://COSIGN_KEY") &&
+					strings.Contains(step.Run, "--method kms --key env://COSIGN_KEY --bundle")
 				// The binding must run whenever the key is selected, and
 				// its refusal must stop the job: no alternative branch in
 				// its condition, and no continue-on-error.
-				if !keySecretSelected.MatchString(step.If) || strings.Contains(step.If, "||") || strings.Contains(step.If, "always()") {
+				if !fixedRole && (!keySecretSelected.MatchString(step.If) || strings.Contains(step.If, "||") || strings.Contains(step.If, "always()")) {
 					t.Errorf("%s step %q binds the key secret under %q, not exactly when the key secret is selected", where, step.Name, step.If)
 				}
 
