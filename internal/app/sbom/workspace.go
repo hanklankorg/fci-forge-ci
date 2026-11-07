@@ -17,11 +17,13 @@ import (
 )
 
 type workspace struct {
-	root   string
-	fsys   fs.FS
-	cwd    string
-	hostFS bool
-	host   *os.Root
+	root             string
+	fsys             fs.FS
+	cwd              string
+	hostFS           bool
+	host             *os.Root
+	freshOutputs     bool
+	generatedOutputs map[string]bool
 }
 
 func newWorkspace(in GenerateInput) (workspace, error) {
@@ -54,7 +56,7 @@ func newWorkspace(in GenerateInput) (workspace, error) {
 		fsys = root.FS()
 	}
 
-	return workspace{root: abs, fsys: fsys, cwd: cwd, hostFS: hostFS, host: root}, nil
+	return workspace{root: abs, fsys: fsys, cwd: cwd, hostFS: hostFS, host: root, freshOutputs: in.RequireFreshOutputs, generatedOutputs: in.generatedOutputs}, nil
 }
 
 func (w workspace) close() error {
@@ -160,6 +162,10 @@ func (w workspace) createOutput(name string, perm fs.FileMode) (*os.File, error)
 
 	info, err := w.host.Lstat(clean)
 	if err == nil {
+		if w.freshOutputs {
+			return nil, fmt.Errorf("generated SBOM would overwrite acquired member %s: %w", name, errs.ErrValidation)
+		}
+
 		if !info.Mode().IsRegular() {
 			return nil, fmt.Errorf("SBOM output is not a regular file: %s: %w", name, errs.ErrValidation)
 		}

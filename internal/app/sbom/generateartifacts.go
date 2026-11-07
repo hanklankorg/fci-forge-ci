@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"path/filepath"
 	"slices"
 	"strings"
 
@@ -14,6 +15,7 @@ import (
 	"github.com/diggsweden/forge-ci/internal/domain/errs"
 	"github.com/diggsweden/forge-ci/internal/domain/pipeline"
 	"github.com/diggsweden/forge-ci/internal/domain/projecttype"
+	"github.com/diggsweden/forge-ci/internal/pathsafe"
 )
 
 // GenerateArtifactsInput drives `sbom assemble --plan`.
@@ -22,6 +24,9 @@ type GenerateArtifactsInput struct {
 	SBOMs          string
 	Version        string
 	WorkingDir     string
+	// AcquisitionDir selects the isolated producer tree in release fan-in.
+	// Source working directories are metadata, not producer-file inventories.
+	AcquisitionDir string
 }
 
 type sbomArtifact struct {
@@ -46,6 +51,10 @@ func GenerateArtifacts(
 		return err
 	}
 
+	if err := validateSBOMAcquisition(in.AcquisitionDir); err != nil {
+		return err
+	}
+
 	if len(layers) == 0 {
 		_, _ = fmt.Fprintln(out, "No artifact-level SBOM layers requested; analyzed-container (if any) is already downloaded.")
 
@@ -56,6 +65,12 @@ func GenerateArtifacts(
 	if err != nil {
 		return err
 	}
+
+	if in.AcquisitionDir != "" && strings.TrimSpace(in.Version) == "" {
+		return fmt.Errorf("version is required with acquisition-dir: %w", errs.ErrUsage)
+	}
+
+	generatedOutputs := make(map[string]bool)
 
 	for _, artifact := range artifacts {
 		if artifact.Type == projecttype.Meta {
@@ -76,15 +91,42 @@ func GenerateArtifacts(
 			workingDir = in.WorkingDir
 		}
 
+		if in.AcquisitionDir != "" {
+			workingDir = in.AcquisitionDir
+		}
+
 		if err := Generate(ctx, syft, mvn, gitRepo, nil, out, stderr, GenerateInput{
-			ProjectType: string(artifact.Type),
-			Layers:      sbomLayerCSV(artifactLayers),
-			Version:     in.Version,
-			Name:        artifact.Name,
-			WorkingDir:  workingDir,
+			ProjectType:         string(artifact.Type),
+			Layers:              sbomLayerCSV(artifactLayers),
+			Version:             in.Version,
+			Name:                artifact.Name,
+			WorkingDir:          workingDir,
+			RequireFreshOutputs: in.AcquisitionDir != "",
+			generatedOutputs:    generatedOutputs,
 		}); err != nil {
 			return err
 		}
+	}
+
+	return nil
+}
+
+func validateSBOMAcquisition(dir string) error {
+	if dir == "" {
+		return nil
+	}
+
+	if !filepath.IsAbs(dir) {
+		return fmt.Errorf("acquisition-dir must be absolute: %w", errs.ErrValidation)
+	}
+
+	disjoint, err := pathsafe.DisjointRoots(".", dir)
+	if err != nil {
+		return err
+	}
+
+	if !disjoint {
+		return fmt.Errorf("acquisition directory must be disjoint from the source checkout: %w", errs.ErrValidation)
 	}
 
 	return nil

@@ -105,7 +105,6 @@
   "release assemble": [".github/workflows/release-create-github.yml"],
   "release assemble-dist": [".forgejo/actions/assemble-release-dist"],
   "release asset-retention": [".forgejo/workflows/sign-and-publish-release.yml",".github/workflows/release-create-github.yml"],
-  "release attachments plan": [".github/workflows/release-create-github.yml"],
   "release attachments upload": [".github/workflows/publish-maven-github.yml"],
   "release checksums": [".github/workflows/release-create-github.yml"],
   "release dist-digest": [".forgejo/workflows/sign-and-publish-release.yml",".github/workflows/release-create-github.yml"],

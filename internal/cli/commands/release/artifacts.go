@@ -446,6 +446,7 @@ func downloadArtifactsCmd() *cli.Command {
 EXAMPLE (as a workflow step):
    forge-ci release download-artifacts --run-id 123456 --repository org/app`,
 		Flags: []cli.Flag{
+			&cli.BoolFlag{Name: "isolated", Usage: "acquire into a fresh directory outside the checkout; emit acquisition-dir for assembly (runner cleans it at job end)"},
 			&cli.StringFlag{Name: flagArtifactTransferPlanJSON, Sources: cli.EnvVars("ARTIFACT_TRANSFER_PLAN_JSON"), Usage: "typed transfer plan JSON listing which CI artifacts to download"},
 			&cli.StringFlag{Name: "run-id", Sources: cienv.RunID(), Usage: "CI run ID artifacts are downloaded from"},
 			&cli.StringFlag{Name: flagRepository, Sources: cienv.Repository(), Usage: "\"owner/repo\" the run belongs to"},
@@ -457,11 +458,18 @@ EXAMPLE (as a workflow step):
 					return err
 				}
 
-				return apprelease.DownloadArtifacts(ctx, dl, os.Stderr, apprelease.DownloadArtifactsInput{
+				in := apprelease.DownloadArtifactsInput{
 					ArtifactTransferPlanJSON: cmd.String(flagArtifactTransferPlanJSON),
 					RunID:                    cmd.String("run-id"),
 					Repository:               cmd.String(flagRepository),
-				})
+				}
+				if cmd.Bool("isolated") {
+					_, err := apprelease.AcquireArtifacts(ctx, dl, d.OutputSink, os.Stderr, in)
+
+					return err
+				}
+
+				return apprelease.DownloadArtifacts(ctx, dl, os.Stderr, in)
 			})
 		},
 	}

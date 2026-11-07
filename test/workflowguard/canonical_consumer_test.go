@@ -260,6 +260,27 @@ func TestCanonicalConsumerNativeCommandsSecretsAndReadCaps(t *testing.T) {
 					continue
 				}
 
+				// The acquisition fix deliberately changes only producer-file
+				// authority in this native leaf, not its secrets or permissions.
+				if file == "release-create-github.yml" && name == "assemble-release" {
+					switch step.Name {
+					case "Compute effective attach-artifacts (auto-include extracted binaries)":
+						for _, candidate := range after.Steps {
+							require.NotEqual(t, step.Name, candidate.Name, "source binaries must not become implicit attachments")
+						}
+
+						continue
+					case "Download planned release artifacts":
+						step.Run = "forge-ci release download-artifacts --isolated"
+					case "Generate CISA-layer SBOMs":
+						step.Run = "forge-ci sbom assemble --version \"$VERSION\""
+						step.Env["ACQUISITION_DIR"] = "${{ steps.acquisition.outputs.acquisition-dir }}"
+					case "Assemble release files":
+						step.Env["ACQUISITION_DIR"] = "${{ steps.acquisition.outputs.acquisition-dir }}"
+						step.Env["ATTACH_ARTIFACTS"] = "${{ inputs['attach-artifacts'] }}"
+					}
+				}
+
 				found := false
 
 				for _, candidate := range after.Steps {
@@ -314,6 +335,32 @@ func applyLateRequestBindingDelta(file string, original *canonicalConsumerWorkfl
 		})
 		original.Jobs["create-release"] = publisher
 	}
+}
+
+func TestReleaseAcquisitionSeparatesSourceFromProducerInventory(t *testing.T) {
+	t.Parallel()
+	workflow := readCanonicalConsumerWorkflow(t, "release-create-github.yml")
+	steps := workflow.Jobs["assemble-release"].Steps
+
+	indices := map[string]int{}
+	for index, step := range steps {
+		indices[step.Name] = index
+		require.NotEqual(t, "forge-ci release attachments plan", step.Run, "no source-resident implicit binary attachments")
+	}
+
+	acquire := steps[indices["Download planned release artifacts"]]
+	require.Equal(t, "acquisition", acquire.ID)
+	require.Equal(t, "forge-ci release download-artifacts --isolated", acquire.Run)
+
+	for _, name := range []string{"Generate CISA-layer SBOMs", "Assemble release files"} {
+		require.Greater(t, indices[name], indices[acquire.Name])
+		require.Equal(t, "${{ steps.acquisition.outputs.acquisition-dir }}", steps[indices[name]].Env["ACQUISITION_DIR"])
+	}
+
+	require.Equal(t, "${{ inputs['attach-artifacts'] }}", steps[indices["Assemble release files"]].Env["ATTACH_ARTIFACTS"])
+	// Changelog and git metadata remain source-owned, never producer-inventory hints.
+	require.Equal(t, "forge-ci artifact download --name release-changelog --dir .", steps[indices["Download Release Changelog"]].Run)
+	require.Contains(t, steps[indices["Set deterministic release epoch"]].Run, "git rev-parse")
 }
 
 func TestCanonicalConsumerContextRefusesBeforeInertEffect(t *testing.T) {
