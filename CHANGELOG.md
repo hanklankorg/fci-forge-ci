@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Add credential-free root-only plan and canonical-payload admission against
+  independently approved exact plan bytes and explicit producer source facts.
+  Verify retained producer SBOM pins without regeneration; content revisions
+  remain distinct from checkout commits. No protected workflow is activated.
 - `forge-ci setup status` adds a step to protect the release tags before the
   first release request. The README Quick Start and the forge guides now lead
   from `init` to `setup status`, and the README pins the current release.
