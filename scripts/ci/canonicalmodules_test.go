@@ -30,7 +30,10 @@ func canonicalModuleProxy(t *testing.T, root string) (string, string) {
 		t.Fatal(err)
 	}
 
-	mod := "module example.invalid/tiny\n\ngo 1.26.4\n"
+	// This graph-only dependency supplies no package imported by the main
+	// module. It is deliberately absent from the proxy: preparation must use
+	// the native no-argument selection, not broaden it to "download all".
+	mod := "module example.invalid/tiny\n\ngo 1.26.4\n\nrequire example.invalid/graph-only v1.0.0\n"
 	canonicalWrite(t, filepath.Join(directory, "v1.0.0.mod"), mod, 0o600)
 	canonicalWrite(t, filepath.Join(directory, "v1.0.0.info"), `{"Version":"v1.0.0","Time":"2026-01-01T00:00:00Z"}`, 0o600)
 	canonicalWrite(t, filepath.Join(directory, "list"), "v1.0.0\n", 0o600)
@@ -96,7 +99,7 @@ if [[ $1 == env ]]; then printf 'go1.26.4\n'; exit; fi
 [[ $GOENV == off && $GOWORK == off && $GOTOOLCHAIN == local ]]
 [[ -z ${GH_TOKEN-}${GITHUB_TOKEN-}${GOAUTH-}${GOPRIVATE-}${GOINSECURE-} ]]
 [[ $GOMODCACHE != %q && $GOCACHE != "$GOMODCACHE" ]]
-if [[ $3 == mod && $4 == download && $5 == all ]]; then
+if [[ $# == 4 && $3 == mod && $4 == download ]]; then
   [[ $GOPROXY == https://proxy.golang.org && $GOSUMDB == sum.golang.org ]]
   [[ -z $(ls -A "$GOMODCACHE") ]]
   printf download >>%q
@@ -106,7 +109,7 @@ if [[ $3 == mod && $4 == download && $5 == all ]]; then
 fi
 printf build >>%q
 [[ $GOPROXY == off && $GOSUMDB == off ]]
-%q -C "$2" mod download all
+%q -C "$2" mod download
 while [[ $# -gt 0 ]]; do
   if [[ $1 == -o ]]; then cp %q "$2"; exit; fi
   shift
@@ -263,7 +266,7 @@ func TestCanonicalModuleWorkflowOrdering(t *testing.T) {
 
 	last = -1
 
-	for _, boundary := range []string{"wrong engine checkout", "wrong engine origin", "files+=(go.mod go.sum)", "modified engine file:", "mktemp -d", "mod download all", "module preparation changed", "engine-binary.sh\" build amd64", "engine-binary.sh\" verify amd64", "GITHUB_OUTPUT:?"} {
+	for _, boundary := range []string{"wrong engine checkout", "wrong engine origin", "files+=(go.mod go.sum)", "modified engine file:", "mktemp -d", "mod download\n", "module preparation changed", "engine-binary.sh\" build amd64", "engine-binary.sh\" verify amd64", "GITHUB_OUTPUT:?"} {
 		index := strings.Index(string(body), boundary)
 		if index <= last {
 			t.Fatalf("missing/out-of-order preparation boundary: %s", boundary)
@@ -272,7 +275,7 @@ func TestCanonicalModuleWorkflowOrdering(t *testing.T) {
 		last = index
 	}
 
-	for _, forbidden := range []string{"GITHUB_ENV", "go env -w", "GOINSECURE=", "GONOSUMDB="} {
+	for _, forbidden := range []string{"GITHUB_ENV", "go env -w", "GOINSECURE=", "GONOSUMDB=", "mod download all"} {
 		if strings.Contains(string(body), forbidden) {
 			t.Fatalf("persistent or unauthenticated module configuration: %s", forbidden)
 		}

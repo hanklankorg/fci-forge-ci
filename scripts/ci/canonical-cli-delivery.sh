@@ -70,7 +70,10 @@ if [[ "$mode" == build ]]; then
 		GOMAXPROCS=2 GOOS=linux GOARCH=amd64)
 	pinned=go$(sed -n 's/^go \([0-9][0-9.]*\)$/\1/p' "$ENGINE_CHECKOUT/go.mod")
 	[[ "$("${module_env[@]}" "$GO" env GOVERSION)" == "$pinned" ]] || fail 'wrong preparation toolchain'
-	"${module_env[@]}" "$GO" -C "$ENGINE_CHECKOUT" mod download all
+	# With Go >=1.17, the no-argument command selects the main module's
+	# explicit requirements (including indirect package providers). "all"
+	# instead fetches unrelated graph modules and records extra checksums.
+	"${module_env[@]}" "$GO" -C "$ENGINE_CHECKOUT" mod download
 	# Download must not repair an incomplete selected lock file. Missing/changed
 	# sums fail before ANY build/output, even if Go authenticated their retrieval.
 	for relative in go.mod go.sum; do
