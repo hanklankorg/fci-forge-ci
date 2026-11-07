@@ -239,6 +239,18 @@ func TestCanonicalConsumerNativeCommandsSecretsAndReadCaps(t *testing.T) {
 			}
 
 			for _, step := range before.Steps {
+				// Intentional security correction after the bootstrap baseline:
+				// validation must not import or clean up a private signing key.
+				// All other native commands and secret declarations stay pinned.
+				if file == "validate-release-prerequisites.yml" && name == "validate" &&
+					(step.Run == "forge-ci release gpg import" || step.Run == "forge-ci release gpg cleanup") {
+					for _, candidate := range after.Steps {
+						require.NotEqual(t, step.Run, candidate.Run)
+					}
+
+					continue
+				}
+
 				found := false
 
 				for _, candidate := range after.Steps {

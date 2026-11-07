@@ -19,13 +19,14 @@
 # - Refuses pull-request context before release secrets are accessed
 # - Keeps secret values in environment variables and reports only status
 # - Enforces the signer allowlist when require-allowlisted-signer is enabled
-# - Maven and GPG preflights are presence/import checks, not remote registry
+# - Private GPG material is presence-checked only; this job never imports it
+# - Maven and GPG preflights are presence/public-key checks, not remote registry
 #   authentication or key-expiration probes
 #
 # Required Secrets (depending on configuration):
 #   RELEASE_TOKEN: For version bump/release operations
-#   RELEASE_GPG_PRIVATE_KEY: Only when artifact or git-object signing resolves to GPG
-#   RELEASE_GPG_PASSPHRASE: Passphrase for that GPG key
+#   RELEASE_GPG_PRIVATE_KEY: Presence-only compatibility input; never imported here
+#   RELEASE_GPG_PASSPHRASE: Presence-only compatibility input; never decrypted here
 #   RELEASE_GPG_PUBLIC_KEY: For tag/public-key validation
 #   MAVEN_CENTRAL_USERNAME: Presence-checked for Maven Central publishing
 #   MAVEN_CENTRAL_PASSWORD: Presence-checked for Maven Central publishing
@@ -124,6 +125,8 @@ on:
       NPM_TOKEN:
         description: "npm registry publish token"
         required: false
+      # Compatibility declarations only: this validator maps presence booleans,
+      # never these values. Private-key import belongs to downstream signers.
       RELEASE_GPG_PRIVATE_KEY:
         description: "Armored OpenPGP private key used by `release sign`"
         required: false
@@ -236,16 +239,9 @@ jobs:
           ACTION_REPOSITORY: ${{ github.action_repository }}
           ACTION_REF: ${{ github.action_ref }}
         run: forge-ci platform debug-workspace
-      - name: Import GPG key
-        id: import-gpg
-        if: ${{ (inputs['sign-artifacts'] && fromJSON(inputs['config-plan-json']).sign.imports_gpg_key) || fromJSON(inputs['config-plan-json']).git_signing.imports_gpg_key }}
-        env:
-          GPG_PRIVATE_KEY: ${{ secrets.RELEASE_GPG_PRIVATE_KEY }}
-          GPG_PASSPHRASE: ${{ secrets.RELEASE_GPG_PASSPHRASE }}
-          GIT_USER_SIGNINGKEY: "true"
-          GIT_COMMIT_GPGSIGN: "true"
-          FORGE_CI_GIT_CONFIG_GLOBAL: "true"
-        run: forge-ci release gpg import
+      # Public signature verification needs no private-key import or Git signing
+      # configuration. Keep private material out of every process in this job,
+      # including when the request is ultimately refused by an allowlist.
       # All prerequisite validators run concurrently inside one Go
       # invocation. The orchestrator owns ordering, output capture, and
       # aggregate failure reporting. Replaces ~10 sequential workflow
@@ -298,8 +294,3 @@ jobs:
           HAS_NPM_TOKEN: ${{ secrets.NPM_TOKEN != '' }}
           HAS_CODE_SCANNING_TOKEN: ${{ secrets.CODE_SCANNING_TOKEN != '' }}
         run: forge-ci report status prerequisites
-      - name: Cleanup GPG key
-        if: ${{ always() && (!inputs['require-canonical-bootstrap'] || steps.canonical-bootstrap.outputs.verified == 'true') && ((inputs['sign-artifacts'] && fromJSON(inputs['config-plan-json']).sign.imports_gpg_key) || fromJSON(inputs['config-plan-json']).git_signing.imports_gpg_key) }}
-        env:
-          GPG_FINGERPRINT: ${{ steps.import-gpg.outputs.fingerprint }}
-        run: forge-ci release gpg cleanup
