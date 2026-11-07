@@ -707,6 +707,75 @@ candidate images to immutable final base tags. Checkout and pinned-binary
 bootstrap remain owned by the caller.
 ```
 
+#### `forge-ci container base-images child-base`
+
+single cold child BASE stage; no graph scheduling, warm/cache or expected-parent promotion
+
+```
+The protected caller must independently verify the parent with Cosign, its trust key, source/workflow and input ID before supplying parent-base-json. The producer only binds that assertion to its registry input and unsigned lineage; it never authenticates the parent or traverses a graph.
+```
+
+##### `forge-ci container base-images child-base build`
+
+build one child BASE using secret-free prepared parent inputs
+
+```
+Requires --inputs-dir from the existing release-images fetch-build-inputs boundary. No registry fetch credentials or parent authentication run in the builder.
+```
+
+| Flag | Description | Type | Default | Env vars |
+|------|-------------|------|---------|----------|
+| `--plan` | plan file release-images plan --output wrote (required) | string | `""` | n/a |
+| `--image-repository` | the one repository the plan publishes to; the plan is checked against it (required) | string | `""` | n/a |
+| `--release-tag` | release tag the plan was made for, e.g. v1.2.3 (required) | string | `""` | n/a |
+| `--release-sha` | release commit the images are built from and labelled with, unless the plan names a revision (required) | string | `""` | n/a |
+| `--server-url` | forge server URL the source labels name | string | `""` | `$CI_SERVER_URL`, `$FORGEJO_SERVER_URL`, `$FORGEJO_SERVER`, `$GITHUB_SERVER_URL` |
+| `--repository` | owner/repo the source labels name | string | `""` | `$REPOSITORY`, `$CI_REPO`, `$CI_PROJECT_PATH`, `$FORGEJO_REPOSITORY`, `$FORGEJO_REPO`, `$GITHUB_REPOSITORY` |
+| `--retry-attempts` | registry attempts | int | `3` | n/a |
+| `--arch` | architecture to build, the host's own: amd64 or arm64 (required) | string | `""` | n/a |
+| `--source-dir` | release checkout the plan's Containerfile and context paths are relative to | string | `"."` | n/a |
+| `--created` | org.opencontainers.image.created value: the release commit's time, so the label names the source, not the build (required) | string | `""` | n/a |
+| `--metadata-dir` | directory the staged <name>-arch-<arch> layouts are written under; keep it outside the build context (required) | string | `""` | n/a |
+| `--inputs-dir` | secret-free prepared inputs root, with a <name>-arch-<arch> fetch-build-inputs directory for every build | string | `""` | n/a |
+| `--image-builder` | image builder type: buildah (default; rootless, needs user namespaces) or kaniko (for a pool that denies them; runs as root in the job image CI_IMAGE_BUILDER_JOB_IMAGE names, builds to a layout, exports a stage's files in local mode, no load mode, no build secrets). Set CI_IMAGE_BUILDER on the repository to select it. | string | `"buildah"` | `$CI_IMAGE_BUILDER` |
+| `--kaniko-executor` | path of the kaniko executor (default /kaniko/executor) | string | `""` | `$KANIKO_EXECUTOR` |
+| `--parent-base-json` | explicit caller-verified immediate parent as {ref: digest-pinned-ref, input_id: opaque-sha256-ID}; not producer authentication (required) | string | `""` | n/a |
+
+##### `forge-ci container base-images child-base plan`
+
+admit one cold child BASE against an explicit caller-verified parent
+
+| Flag | Description | Type | Default | Env vars |
+|------|-------------|------|---------|----------|
+| `--plan` | plan file release-images plan --output wrote (required) | string | `""` | n/a |
+| `--image-repository` | the one repository the plan publishes to; the plan is checked against it (required) | string | `""` | n/a |
+| `--release-tag` | release tag the plan was made for, e.g. v1.2.3 (required) | string | `""` | n/a |
+| `--release-sha` | release commit the images are built from and labelled with, unless the plan names a revision (required) | string | `""` | n/a |
+| `--server-url` | forge server URL the source labels name | string | `""` | `$CI_SERVER_URL`, `$FORGEJO_SERVER_URL`, `$FORGEJO_SERVER`, `$GITHUB_SERVER_URL` |
+| `--repository` | owner/repo the source labels name | string | `""` | `$REPOSITORY`, `$CI_REPO`, `$CI_PROJECT_PATH`, `$FORGEJO_REPOSITORY`, `$FORGEJO_REPO`, `$GITHUB_REPOSITORY` |
+| `--retry-attempts` | registry attempts | int | `3` | n/a |
+| `--output` | admitted plan output file (required) | string | `""` | n/a |
+| `--runner-archs` | native architectures scheduled by the caller's YAML (required) | string | `""` | n/a |
+| `--parent-base-json` | explicit caller-verified immediate parent as {ref: digest-pinned-ref, input_id: opaque-sha256-ID}; not producer authentication (required) | string | `""` | n/a |
+
+##### `forge-ci container base-images child-base publish`
+
+scan/gate all child layouts and publish unsigned canonical evidence retaining parent lineage
+
+| Flag | Description | Type | Default | Env vars |
+|------|-------------|------|---------|----------|
+| `--plan` | plan file release-images plan --output wrote (required) | string | `""` | n/a |
+| `--image-repository` | the one repository the plan publishes to; the plan is checked against it (required) | string | `""` | n/a |
+| `--release-tag` | release tag the plan was made for, e.g. v1.2.3 (required) | string | `""` | n/a |
+| `--release-sha` | release commit the images are built from and labelled with, unless the plan names a revision (required) | string | `""` | n/a |
+| `--server-url` | forge server URL the source labels name | string | `""` | `$CI_SERVER_URL`, `$FORGEJO_SERVER_URL`, `$FORGEJO_SERVER`, `$GITHUB_SERVER_URL` |
+| `--repository` | owner/repo the source labels name | string | `""` | `$REPOSITORY`, `$CI_REPO`, `$CI_PROJECT_PATH`, `$FORGEJO_REPOSITORY`, `$FORGEJO_REPO`, `$GITHUB_REPOSITORY` |
+| `--retry-attempts` | registry attempts | int | `3` | n/a |
+| `--auth-file` | staging registry auth file; never signing/publication credentials | string | `""` | `$FORGE_CI_REGISTRY_AUTH_FILE` |
+| `--layouts-dir` | complete admitted native layout set (required) | string | `""` | n/a |
+| `--output-dir` | new canonical payload directory with an existing parent (required) | string | `""` | n/a |
+| `--parent-base-json` | explicit caller-verified immediate parent as {ref: digest-pinned-ref, input_id: opaque-sha256-ID}; not producer authentication (required) | string | `""` | n/a |
+
 #### `forge-ci container base-images cleanup`
 
 delete promoted and stale staging base-image tags safely

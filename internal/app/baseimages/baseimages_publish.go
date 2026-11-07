@@ -57,8 +57,13 @@ func PublishRootBase(ctx context.Context, registry appcontainer.StagedSignerRegi
 		return err
 	}
 
+	return publishBaseStage(ctx, registry, out, in, image, entry)
+}
+
+// Both narrow native boundaries share the complete admission/gate/upload barrier.
+func publishBaseStage(ctx context.Context, registry appcontainer.StagedSignerRegistry, out io.Writer, in PublishRootBaseInput, image pipeline.ReleaseImage, entry imageledger.Entry) error {
 	if registry == nil || in.Trivy == nil || in.Syft == nil || in.Gate == nil {
-		return fmt.Errorf("root base publication requires registry, scanners and publication gate: %w", errs.ErrMissingInput)
+		return fmt.Errorf("native base publication requires registry, scanners and publication gate: %w", errs.ErrMissingInput)
 	}
 
 	if err := appcontainer.AdmitReleaseImageLayouts(in.LayoutsDir, []pipeline.ReleaseImage{image}); err != nil {
@@ -138,12 +143,31 @@ func rootBaseAssembleInput(in PublishRootBaseInput, image pipeline.ReleaseImage,
 }
 
 func admitRootBasePublication(in PublishRootBaseInput) (pipeline.ReleaseImage, imageledger.Entry, error) {
+	image, entry, err := admitBaseStagePublication(in)
+	if err != nil {
+		return image, entry, err
+	}
+
+	for _, build := range in.Plan.Builds {
+		if len(build.RegistryInputs) != 0 {
+			return image, entry, fmt.Errorf("root base publication does not support prepared parents: %w", errs.ErrInvalidConfig)
+		}
+	}
+
+	if _, parent := entry.Provenance["parent_base"]; parent {
+		return image, entry, fmt.Errorf("root base publication does not support parent lineage: %w", errs.ErrInvalidConfig)
+	}
+
+	return image, entry, nil
+}
+
+func admitBaseStagePublication(in PublishRootBaseInput) (pipeline.ReleaseImage, imageledger.Entry, error) {
 	var image pipeline.ReleaseImage
 
 	var entry imageledger.Entry
 
 	if len(in.Plan.Images) != 1 || in.Plan.Images[0].ImageKind != string(imageledger.ImageKindBase) {
-		return image, entry, fmt.Errorf("root base publication requires exactly one base image: %w", errs.ErrInvalidConfig)
+		return image, entry, fmt.Errorf("native base stage requires exactly one base image: %w", errs.ErrInvalidConfig)
 	}
 
 	body, err := json.Marshal(in.Plan)
@@ -158,13 +182,7 @@ func admitRootBasePublication(in PublishRootBaseInput) (pipeline.ReleaseImage, i
 
 	image = plan.Images[0]
 	if image.BaseRef != "" || image.MovingTagName != "" || image.CacheTagPrefix != "" {
-		return image, entry, fmt.Errorf("root base publication requires a base without parent, moving tag or cache: %w", errs.ErrInvalidConfig)
-	}
-
-	for _, build := range plan.Builds {
-		if len(build.RegistryInputs) != 0 {
-			return image, entry, fmt.Errorf("root base publication does not support prepared parents: %w", errs.ErrInvalidConfig)
-		}
+		return image, entry, fmt.Errorf("native base stage does not support base-ref, moving tags or architecture caches: %w", errs.ErrInvalidConfig)
 	}
 
 	entry = imageledger.Entry{
@@ -177,10 +195,6 @@ func admitRootBasePublication(in PublishRootBaseInput) (pipeline.ReleaseImage, i
 		if err := json.Unmarshal([]byte(image.ProvenanceJSON), &entry.Provenance); err != nil {
 			return image, entry, err
 		}
-	}
-
-	if _, parent := entry.Provenance["parent_base"]; parent {
-		return image, entry, fmt.Errorf("root base publication does not support parent lineage: %w", errs.ErrInvalidConfig)
 	}
 
 	return image, entry, nil

@@ -35,6 +35,10 @@ func rootBaseGroup() *cli.Command {
 }
 
 func readRootBasePlanFile(cmd *cli.Command) (pipeline.ReleaseImagesPlan, error) {
+	return readBaseStagePlanFile(cmd, appbaseimages.ValidateRootBasePlan)
+}
+
+func readBaseStagePlanFile(cmd *cli.Command, validate func(pipeline.ReleaseImagesPlan, string) error) (pipeline.ReleaseImagesPlan, error) {
 	body, err := cliio.ReadRegularFile(cmd.String(flagPlan))
 	if err != nil {
 		return pipeline.ReleaseImagesPlan{}, err
@@ -45,10 +49,14 @@ func readRootBasePlanFile(cmd *cli.Command) (pipeline.ReleaseImagesPlan, error) 
 		return pipeline.ReleaseImagesPlan{}, err
 	}
 
-	return plan, appbaseimages.ValidateRootBasePlan(plan, cmd.String(flagImageRepository))
+	return plan, validate(plan, cmd.String(flagImageRepository))
 }
 
 func rootBasePlanCmd() *cli.Command {
+	return nativeBasePlanCmd(readRootBasePlanFile)
+}
+
+func nativeBasePlanCmd(readPlan func(*cli.Command) (pipeline.ReleaseImagesPlan, error)) *cli.Command {
 	return &cli.Command{
 		Name:  subCmdPlan,
 		Usage: "admit a resolved consumer single-root plan and freeze it for native jobs",
@@ -57,7 +65,7 @@ func rootBasePlanCmd() *cli.Command {
 			&cli.StringFlag{Name: flagRunnerArchs, Required: true, Usage: "native architectures scheduled by the caller's YAML"},
 		),
 		Action: func(_ context.Context, cmd *cli.Command) error {
-			plan, err := readRootBasePlanFile(cmd)
+			plan, err := readPlan(cmd)
 			if err != nil {
 				return err
 			}
@@ -72,29 +80,42 @@ func rootBasePublishCmd() *cli.Command {
 		Name:        subCmdPublish,
 		Usage:       "scan/gate all root layouts, publish unsigned candidates and write a canonical payload",
 		Description: "Output is a new workspace containing dist/base-images.json and premade-sboms/. Transport and verify the entire workspace with release dist-digest/validate-dist --canonical-payload before trusted base-images import/sign/promote. No final tags or signatures are produced here.",
-		Flags: append(releaseImagesJobFlags(),
-			ledgerAuthFileFlag("staging registry auth file; never signing/publication credentials"),
-			&cli.StringFlag{Name: flagLayoutsDir, Required: true, Usage: "complete admitted native layout set"},
-			&cli.StringFlag{Name: flagOutputDir, Required: true, Usage: "new canonical payload directory with an existing parent"},
-		),
+		Flags:       baseStagePublishFlags(),
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			plan, err := readRootBasePlanFile(cmd)
 			if err != nil {
 				return err
 			}
 
-			if cmd.String(flagAuthFile) == "" {
-				return fmt.Errorf("root-base publish requires --auth-file: %w", errs.ErrUsage)
+			input, err := baseStagePublicationInput(cmd, plan)
+			if err != nil {
+				return err
 			}
 
-			scanner := trivy.New()
-
-			return appbaseimages.PublishRootBase(ctx, ociregistry.WithAuthFile(cmd.String(flagAuthFile)), os.Stderr, appbaseimages.PublishRootBaseInput{
-				Plan: plan, ExpectedRepository: cmd.String(flagImageRepository),
-				LayoutsDir: cmd.String(flagLayoutsDir), OutputDir: cmd.String(flagOutputDir), AuthFile: cmd.String(flagAuthFile),
-				SourceSHA: cmd.String(flagReleaseSHA), ServerURL: cmd.String(flagServerURL), Repository: cmd.String(flagRepository),
-				RetryAttempts: cmd.Int(flagRetryAttempts), Trivy: scanner, Syft: syft.New(), Gate: publicationGate(scanner, deps.Annotator(cmd)),
-			})
+			return appbaseimages.PublishRootBase(ctx, ociregistry.WithAuthFile(cmd.String(flagAuthFile)), os.Stderr, input)
 		},
 	}
+}
+
+func baseStagePublishFlags() []cli.Flag {
+	return append(releaseImagesJobFlags(),
+		ledgerAuthFileFlag("staging registry auth file; never signing/publication credentials"),
+		&cli.StringFlag{Name: flagLayoutsDir, Required: true, Usage: "complete admitted native layout set"},
+		&cli.StringFlag{Name: flagOutputDir, Required: true, Usage: "new canonical payload directory with an existing parent"},
+	)
+}
+
+func baseStagePublicationInput(cmd *cli.Command, plan pipeline.ReleaseImagesPlan) (appbaseimages.PublishRootBaseInput, error) {
+	if cmd.String(flagAuthFile) == "" {
+		return appbaseimages.PublishRootBaseInput{}, fmt.Errorf("base stage publication requires --auth-file: %w", errs.ErrUsage)
+	}
+
+	scanner := trivy.New()
+
+	return appbaseimages.PublishRootBaseInput{
+		Plan: plan, ExpectedRepository: cmd.String(flagImageRepository),
+		LayoutsDir: cmd.String(flagLayoutsDir), OutputDir: cmd.String(flagOutputDir), AuthFile: cmd.String(flagAuthFile),
+		SourceSHA: cmd.String(flagReleaseSHA), ServerURL: cmd.String(flagServerURL), Repository: cmd.String(flagRepository),
+		RetryAttempts: cmd.Int(flagRetryAttempts), Trivy: scanner, Syft: syft.New(), Gate: publicationGate(scanner, deps.Annotator(cmd)),
+	}, nil
 }
