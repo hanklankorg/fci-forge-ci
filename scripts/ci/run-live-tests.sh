@@ -20,13 +20,54 @@ usage() {
 	exit 2
 }
 
+print_help() {
+	printf 'usage: %s full\n       %s focused <go-test-run-filter>\n' "$0" "$0"
+	cat <<'EOF'
+
+Runs the live-forge conformance tier against the Forge Lab: preflight the lab
+contract and host tools, build the product, run the suite, keep a
+credential-redacted log.
+
+Profiles:
+  full     every live scenario in the provider scope
+  focused  only the scenarios <go-test-run-filter> matches (go test -run)
+
+Environment:
+  FORGE_CI_LIVE_PROVIDER  all (default), gitlab or forgejo
+  GO                      the go command (default: go)
+  LAB_TARGETS_FILE        the lab contract (default:
+                          $XDG_STATE_HOME/forge-lab/targets/forgeci.json)
+  FORGE_CI_LIVE_EVIDENCE_ROOT
+                          absolute directory for the run logs, kept 30 days
+                          (default: $XDG_STATE_HOME/forge-ci/live-runs)
+  FORGE_CI_LIVE_SNAPSHOT_EVIDENCE_DIR
+                          full job logs (default: <run directory>/job-logs;
+                          FORGE_CI_LIVE_SNAPSHOT_EVIDENCE is the old name)
+  XDG_STATE_HOME          state root (default: ~/.local/state); the live
+                          locks are forge-ci/live*.lock under it
+  TMPDIR                  where the product is built for the run
+  FORGE_CI_LIVE_DEMO, FORGE_CI_LIVE_CONSUMER*, FORGE_CI_LIVE_ADMIN_*,
+  FORGE_CI_LIVE_EXTERNAL_REGISTRY_*, FORGE_CI_LIVE_*_IMAGE_BUILDER,
+  FORGE_CI_LIVE_IMAGE_PLAN_JOB_IMAGE
+                          scenario inputs; those set are recorded in the log
+EOF
+}
+
 profile=${1:-}
 scenario=
 case "$profile" in
+-h | --help)
+	print_help
+	exit 0
+	;;
 full) [[ $# -eq 1 ]] || usage ;;
 focused)
 	[[ $# -eq 2 && -n "$2" ]] || usage
 	scenario=$2
+	;;
+-*)
+	printf 'live: unknown option: %s\n' "$1" >&2
+	usage
 	;;
 *) usage ;;
 esac
