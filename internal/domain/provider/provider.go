@@ -701,6 +701,12 @@ type RunArtifactDownload struct {
 	// filters. Unsupported providers must refuse this mode, never ignore it.
 	ID                 string
 	ExpectedRunHeadSHA string
+	// ExpectedRepositoryID optionally binds the repository created by the caller,
+	// rather than merely observing the current repository at that name.
+	ExpectedRepositoryID string
+	// Limits opts into bounded exact-ID acquisition. Unsupported providers must
+	// refuse exact mode; limits must never silently fall back to native budgets.
+	Limits *RunArtifactLimits
 	// Pattern is a glob over artifact names (the JS download-artifact
 	// `pattern:`). When set, every matching artifact downloads and Name is
 	// ignored.
