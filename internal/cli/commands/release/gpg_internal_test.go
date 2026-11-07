@@ -226,3 +226,46 @@ func TestGPGKeyAndPassphrase_RefusedWhenBothReadStdin(t *testing.T) {
 		})
 	}
 }
+
+func TestGPGPackageManifestPreflightBeforeSecretsAndKeyring(t *testing.T) {
+	for _, manifest := range []string{"", "missing-manifest.json", "bad-manifest.json"} {
+		t.Run(manifest, func(t *testing.T) {
+			t.Chdir(t.TempDir())
+			t.Setenv("RUNNER_TEMP", ".")
+			// Inert executables record any GPG/agent process effect.
+			bin := t.TempDir()
+			t.Setenv("PATH", bin)
+
+			for _, name := range []string{"gpg", "gpgconf"} {
+				if err := os.WriteFile(filepath.Join(bin, name), []byte("#!/bin/sh\n: > gpg-process-count\nexit 97\n"), 0o700); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			if err := os.WriteFile("bad-manifest.json", []byte(`{"version":1,"unknown":true}`), 0o600); err != nil {
+				t.Fatal(err)
+			}
+
+			err := New().Run(t.Context(), []string{New().Name, "gpg", "sign-packages", "--manifest", manifest,
+				"--private-key-file", "unread-key", "--passphrase-file", "unread-passphrase", "--fingerprint", "ABCDEF"})
+			if err == nil || strings.Contains(err.Error(), "unread-key") || strings.Contains(err.Error(), "unread-passphrase") {
+				t.Fatalf("expected manifest refusal before secret reads, got %v", err)
+			}
+
+			if _, err := os.Stat("gpg-process-count"); !os.IsNotExist(err) {
+				t.Fatal("GPG process reached before selection validation")
+			}
+
+			entries, readErr := os.ReadDir(".")
+			if readErr != nil {
+				t.Fatal(readErr)
+			}
+
+			for _, entry := range entries {
+				if strings.HasPrefix(entry.Name(), "forge-ci-gnupg-") {
+					t.Fatal("created keyring before preflight")
+				}
+			}
+		})
+	}
+}

@@ -4082,6 +4082,13 @@ Imports the supplied GPG private key into an ephemeral GNUPGHOME,
 verifies the imported key fingerprint, signs distro packages under --dir, and
 then removes the temporary keyring. The private key is passed to gpg via stdin;
 the passphrase is passed via gpg --passphrase-fd 0.
+
+Without --manifest, only top-level packages are selected (legacy behavior).
+With --manifest, select only declared .deb/.rpm/.apk assets, including nested
+paths. Validate the entire unsigned manifest and its checksums before reading
+keys; refuse existing .sig/.bundle outputs, including unlisted sidecars. Run this
+role before Cosign/provenance, then use the existing manifest finalizer. This
+independent package role does not replace Cosign or authorize the producer.
 ```
 
 | Flag | Description | Type | Default | Env vars |
@@ -4090,6 +4097,7 @@ the passphrase is passed via gpg --passphrase-fd 0.
 | `--passphrase-file` | path to GPG passphrase (use "-" for stdin; defaults to $GPG_PASSPHRASE or $GPG_SIGNING_PASSWORD) | string | `""` | n/a |
 | `--fingerprint` | expected imported key fingerprint (required) | string | `""` | `$GPG_FINGERPRINT`, `$GPG_SIGNING_FINGERPRINT` |
 | `--dir` | directory containing .deb/.rpm/.apk packages | string | `"dist"` | n/a |
+| `--manifest` | opt into exact declared .deb/.rpm/.apk assets (including nested paths); validate unsigned files and manifest checksums before keys | string | `""` | n/a |
 
 ### `forge-ci release notes`
 

@@ -110,14 +110,30 @@ func gpgSignPackagesCmd() *cli.Command {
 		Description: `Imports the supplied GPG private key into an ephemeral GNUPGHOME,
 verifies the imported key fingerprint, signs distro packages under --dir, and
 then removes the temporary keyring. The private key is passed to gpg via stdin;
-the passphrase is passed via gpg --passphrase-fd 0.`,
+the passphrase is passed via gpg --passphrase-fd 0.
+
+Without --manifest, only top-level packages are selected (legacy behavior).
+With --manifest, select only declared .deb/.rpm/.apk assets, including nested
+paths. Validate the entire unsigned manifest and its checksums before reading
+keys; refuse existing .sig/.bundle outputs, including unlisted sidecars. Run this
+role before Cosign/provenance, then use the existing manifest finalizer. This
+independent package role does not replace Cosign or authorize the producer.`,
 		Flags: []cli.Flag{
 			&cli.StringFlag{Name: flagPrivateKeyFile, Usage: "path to armored GPG private key (use \"-\" for stdin; defaults to $GPG_PRIVATE_KEY or $GPG_SIGNING_KEY)"},
 			&cli.StringFlag{Name: flagPassphraseFile, Usage: "path to GPG passphrase (use \"-\" for stdin; defaults to $GPG_PASSPHRASE or $GPG_SIGNING_PASSWORD)"},
 			&cli.StringFlag{Name: "fingerprint", Sources: cli.EnvVars("GPG_FINGERPRINT", "GPG_SIGNING_FINGERPRINT"), Usage: "expected imported key fingerprint (required)"},
 			&cli.StringFlag{Name: "dir", Value: defaultDistDir, Usage: "directory containing .deb/.rpm/.apk packages"},
+			&cli.StringFlag{Name: "manifest", Usage: "opt into exact declared .deb/.rpm/.apk assets (including nested paths); validate unsigned files and manifest checksums before keys"},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
+			if cmd.IsSet("manifest") {
+				if err := apprelease.ValidateGPGPackageManifest(apprelease.FilesInput{
+					DistDir: cmd.String("dir"), ManifestFile: cmd.String("manifest"), ManifestExplicit: true,
+				}); err != nil {
+					return err
+				}
+			}
+
 			if err := gpgSingleStdin(cmd); err != nil {
 				return err
 			}
@@ -144,10 +160,11 @@ the passphrase is passed via gpg --passphrase-fd 0.`,
 
 			return withEphemeralGNUPGHome(ctx, func() error {
 				_, err := apprelease.GPGSignPackages(ctx, gpg.NewIsolated(), os.Stderr, apprelease.GPGSignPackagesInput{
-					PrivateKey:  privateKey,
-					Fingerprint: fingerprint,
-					Passphrase:  passphrase,
-					Dir:         cmd.String("dir"),
+					PrivateKey:   privateKey,
+					Fingerprint:  fingerprint,
+					Passphrase:   passphrase,
+					Dir:          cmd.String("dir"),
+					ManifestFile: cmd.String("manifest"),
 				})
 
 				return err
