@@ -3,8 +3,9 @@
 
 # Classified file handoff: first admission unit
 
-**This is a Go use-case unit, not a deployed GitHub workflow or full release
-parity.** The existing GitHub native Go/Cargo workflows are unchanged. No new
+**This is a Go use-case unit with explicit CLI routes, not a deployed GitHub
+workflow or full release parity.** The existing GitHub native Go/Cargo workflows
+are unchanged. No new
 artifact schema, test-selection schema, orchestrator or production pin is added.
 
 ## Implemented interface
@@ -43,6 +44,22 @@ SBOM/evidence bytes are not rewritten. There is no SBOM regeneration or SBOM ZIP
 
 Both functions are key-free and perform no provider calls or consumer execution.
 They do not relax or bypass any policy-test selection.
+
+The existing release commands expose this contract only with `--classified-files`:
+
+```sh
+forge-ci release dist-digest --classified-files --dist-dir payload
+forge-ci release validate-dist --classified-files --dist-dir downloaded-payload \
+  --stage-dir fresh-admitted-payload --expected-digest "$EXPECTED_PAYLOAD_DIGEST"
+```
+
+The directory is the workspace **containing** `dist/`, not its contents. Consume
+requires a non-empty, fresh `--stage-dir`; `--digest-file` can supply the existing
+bare lowercase digest recording instead of `--expected-digest`. Classified mode
+conflicts with active `--canonical-payload` and any explicit `--manifest-root`,
+including an empty one. Generic/canonical modes and their defaults are unchanged.
+This CLI route admits unsigned file-only bytes, not image/base claims, signed
+payloads or source/artifact authenticity.
 
 ## Existing signing owners compose without replacing Cosign
 
@@ -83,9 +100,10 @@ boundary, rather than treating producer-supplied JSON as authentication:
    handoff, with separately scoped publication credentials; no rediscovery or
    generic GitHub assembly/ZIP/checksum regeneration is appropriate.
 
-No reusable workflow, CLI route or provider acquisition API is exposed by this
-slice. Those authorization and scheduling guarantees, including negative tests
-for foreign source/artifact facts and failed producer/policy jobs, are pending.
+No reusable workflow or provider acquisition API is exposed by this slice. The
+classified CLI routes do not add authorization or scheduling guarantees. Those
+guarantees and their negative tests for foreign source/artifact facts and failed
+producer/policy jobs remain pending.
 
 ## Explicit image limitation
 
