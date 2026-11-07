@@ -1,0 +1,359 @@
+# SPDX-FileCopyrightText: The Forge CI Authors
+# SPDX-License-Identifier: CC0-1.0
+name: Classified file release
+on:
+  workflow_call:
+    inputs:
+      engine-repository: {type: string, required: true}
+      engine-commit: {type: string, required: true}
+      runtime-image: {type: string, required: true}
+      canonical-artifact-id: {type: string, required: true}
+      canonical-artifact-name: {type: string, required: true}
+      canonical-producer-run-id: {type: string, required: true}
+      canonical-producer-run-attempt: {type: string, required: true}
+      canonical-producer-engine-repository: {type: string, required: true}
+      canonical-producer-engine-commit: {type: string, required: true}
+      canonical-producer-result: {type: string, required: true}
+      upstream-json: {type: string, required: true}
+      config-plan-json: {type: string, required: true}
+      release-plan-json: {type: string, required: true}
+      release-sboms: {type: string, required: true}
+      producer-path: {type: string, required: true}
+      producer-file-only: {type: boolean, required: true}
+      release-notes-path: {type: string, required: true}
+      go-test-selections-json: {type: string, required: true}
+      cargo-test-selections-json: {type: string, required: true}
+      enforce-application-tests: {type: boolean, default: false}
+      cosign-public-key: {type: string, required: true}
+      cosign-public-key-sha256: {type: string, required: true}
+      package-gpg-fingerprint: {type: string, required: true}
+      cosign-transparency: {type: string, default: "none"}
+    secrets:
+      RELEASE_GPG_PUBLIC_KEY: {required: false}
+      RELEASE_GPG_PRIVATE_KEY: {required: true}
+      RELEASE_GPG_PASSPHRASE: {required: true}
+      RELEASE_COSIGN_PRIVATE_KEY: {required: true}
+      RELEASE_COSIGN_PASSPHRASE: {required: true}
+      RELEASE_TOKEN: {required: true}
+permissions:
+  contents: read
+env:
+  # Never read a consumer plan file or implicit source-dependent checksums.
+  FORGE_CI_PLAN: ""
+  CHECKSUMS_FILE: ""
+  ENGINE_REPOSITORY: ${{ inputs['engine-repository'] }}
+  ENGINE_COMMIT: ${{ inputs['engine-commit'] }}
+  ENGINE_ORIGIN: ${{ github.server_url }}/${{ inputs['engine-repository'] }}
+  RUNTIME_IMAGE: ${{ inputs['runtime-image'] }}
+  PRODUCER_ARTIFACT_ID: ${{ inputs['canonical-artifact-id'] }}
+  PRODUCER_ARTIFACT_NAME: ${{ inputs['canonical-artifact-name'] }}
+  PRODUCER_RUN_ID: ${{ inputs['canonical-producer-run-id'] }}
+  PRODUCER_RUN_ATTEMPT: ${{ inputs['canonical-producer-run-attempt'] }}
+  PRODUCER_ENGINE_REPOSITORY: ${{ inputs['canonical-producer-engine-repository'] }}
+  PRODUCER_ENGINE_COMMIT: ${{ inputs['canonical-producer-engine-commit'] }}
+  CANONICAL_PRODUCER_RESULT: ${{ inputs['canonical-producer-result'] }}
+  UPSTREAM: ${{ inputs['upstream-json'] }}
+  CONFIG_PLAN: ${{ inputs['config-plan-json'] }}
+  RELEASE_PLAN: ${{ inputs['release-plan-json'] }}
+  RELEASE_SBOMS: ${{ inputs['release-sboms'] }}
+  PRODUCER_FILE_ONLY: ${{ inputs['producer-file-only'] }}
+  GO_SELECTIONS: ${{ inputs['go-test-selections-json'] }}
+  CARGO_SELECTIONS: ${{ inputs['cargo-test-selections-json'] }}
+  NOTES_PATH: ${{ inputs['release-notes-path'] }}
+jobs:
+  policy:
+    runs-on: ubuntu-26.04
+    container:
+      image: ${{ inputs['runtime-image'] }}
+    permissions: {contents: read, actions: read}
+    outputs:
+      binding-run-id: ${{ github.run_id }}
+      binding-run-attempt: ${{ github.run_attempt }}
+    steps:
+      - &graph
+        name: Admit original successful current-attempt graph
+        shell: /bin/bash --noprofile --norc -peuo pipefail {0}
+        env:
+          LOCAL_NEEDS: ${{ toJson(needs) }}
+        run: |
+          [[ "$GITHUB_RUN_ID" =~ ^[1-9][0-9]*$ && "$GITHUB_RUN_ATTEMPT" =~ ^[1-9][0-9]*$ && "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$GITHUB_EVENT_NAME" == push && "$GITHUB_REF" == refs/tags/release-request/* ]]
+          for job in parse-config validate-prerequisites execute-prepare-stage validate-release-tag; do
+            jq -e --arg j "$job" --arg r "$GITHUB_RUN_ID" --arg a "$GITHUB_RUN_ATTEMPT" '
+              .[$j] | .result == "success" and .outputs["binding-run-id"] == $r and .outputs["binding-run-attempt"] == $a
+            ' <<<"$UPSTREAM" >/dev/null
+          done
+          for prefix in full-changelog minimal-changelog version-files; do
+            jq -e --arg p "$prefix" --arg r "$GITHUB_RUN_ID" --arg a "$GITHUB_RUN_ATTEMPT" '
+              .["execute-prepare-stage"].outputs | .[$p+"-binding-run-id"] == $r and .[$p+"-binding-run-attempt"] == $a
+            ' <<<"$UPSTREAM" >/dev/null
+          done
+          jq -e --arg r "$GITHUB_RUN_ID" --arg a "$GITHUB_RUN_ATTEMPT" '
+            all(.[]; .result == "success" and .outputs["binding-run-id"] == $r and .outputs["binding-run-attempt"] == $a)
+          ' <<<"$LOCAL_NEEDS" >/dev/null
+          prepared=$(jq -er '.["execute-prepare-stage"].outputs["release-sha"]' <<<"$UPSTREAM")
+          tag=$(jq -er '.["parse-config"].outputs["release-tag"]' <<<"$UPSTREAM")
+          epoch=$(jq -er '.["execute-prepare-stage"].outputs["source-date-epoch"]' <<<"$UPSTREAM")
+          [[ "$prepared" =~ ^[0-9a-f]{40}$ && "$prepared" != "$GITHUB_SHA" && "$epoch" =~ ^[0-9]+$ ]]
+          [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?$ && "$GITHUB_REF" == "refs/tags/release-request/$tag" ]]
+          printf 'PREPARED_SHA=%s\nTAG=%s\nSOURCE_DATE_EPOCH=%s\n' "$prepared" "$tag" "$epoch" >>"$GITHUB_ENV"
+      - &context
+        name: Require original canonical success and approved identity
+        shell: /bin/bash --noprofile --norc -peuo pipefail {0}
+        run: |
+          [[ "$CANONICAL_PRODUCER_RESULT" == success && "$PRODUCER_RUN_ID" == "$GITHUB_RUN_ID" && "$PRODUCER_RUN_ATTEMPT" == "$GITHUB_RUN_ATTEMPT" ]]
+          [[ "$ENGINE_REPOSITORY" =~ ^[A-Za-z0-9_-][A-Za-z0-9_.-]*/[A-Za-z0-9_-][A-Za-z0-9_.-]*$ && "$ENGINE_COMMIT" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$PRODUCER_ENGINE_REPOSITORY" == "$ENGINE_REPOSITORY" && "$PRODUCER_ENGINE_COMMIT" == "$ENGINE_COMMIT" ]]
+          [[ "$PRODUCER_ARTIFACT_ID" =~ ^[1-9][0-9]*$ && "$PRODUCER_ARTIFACT_NAME" == "forge-ci-canonical-linux-amd64-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-$ENGINE_COMMIT" ]]
+          [[ "$RUNTIME_IMAGE" =~ ^[a-z0-9][a-z0-9./:_-]*@sha256:[0-9a-f]{64}$ ]]
+          [[ "$GITHUB_SERVER_URL" =~ ^https://[^/?#@[:space:]]+$ && "$ENGINE_ORIGIN" == "$GITHUB_SERVER_URL/$ENGINE_REPOSITORY" ]]
+      - &engine
+        name: Checkout approved engine only
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          repository: ${{ inputs['engine-repository'] }}
+          ref: ${{ inputs['engine-commit'] }}
+          path: _forge_ci_bootstrap
+          persist-credentials: false
+          submodules: false
+          lfs: false
+      - &consume
+        name: Verify canonical CLI before any consumer checkout or CLI
+        id: canonical-bootstrap
+        uses: ./_forge_ci_bootstrap/.github/actions/consume-canonical-cli
+      - &event
+        name: Validate event context before privileged operations
+        run: forge-ci validate event-context
+      - &plan
+        name: Admit trusted file-only plan and administrator selections
+        shell: /bin/bash --noprofile --norc -peuo pipefail {0}
+        run: |
+          [[ "$PRODUCER_FILE_ONLY" == true ]]
+          forge-ci plan validate-classified-files --config-plan-json "$CONFIG_PLAN" --release-plan-json "$RELEASE_PLAN" \
+            --producer-file-only --release-sboms "$RELEASE_SBOMS" --go-test-selections-json "$GO_SELECTIONS" --cargo-test-selections-json "$CARGO_SELECTIONS"
+          jq -e --arg t "$TAG" '.context.ref_name == $t and .policy.create_draft_release == false' <<<"$RELEASE_PLAN" >/dev/null
+      - &checkout
+        name: Checkout prepared metadata outside payload acquisition
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: forge-ci platform checkout --ref "$PREPARED_SHA" --workspace "$RUNNER_TEMP/classified-source" --fetch-all-refs
+      - &source
+        name: Revalidate request signature and bounded prepared final tag
+        shell: /bin/bash --noprofile --norc -peuo pipefail {0}
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          RELEASE_GPG_PUBLIC_KEY: ${{ secrets.RELEASE_GPG_PUBLIC_KEY }}
+        run: |
+          cd "$RUNNER_TEMP/classified-source" || exit
+          kind=$(jq -er '.artifacts.all[0].project_type' <<<"$CONFIG_PLAN")
+          extra=()
+          case "$kind" in go) ;; cargo) extra=(--version-bump cargo) ;; *) exit 1 ;; esac
+          policy=$(jq -er '.context.release_policy' <<<"$RELEASE_PLAN")
+          forge-ci release validate-tag --tag "$TAG" --release-sha "$PREPARED_SHA" --repo-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" \
+            --release-policy "$policy" --expected-parent "$GITHUB_SHA" --changelog-only "${extra[@]}"
+          forge-ci validate tag signature --tag "release-request/$TAG" --repository "$GITHUB_REPOSITORY" --require-valid-signature --require-allowlisted-signer
+          forge-ci validate tag signature --tag "$TAG" --repository "$GITHUB_REPOSITORY" --require-valid-signature --require-allowlisted-signer
+      - name: Validate complete test map then execute selected native policy
+        env:
+          ADMIN_APPLICATION_TESTS: ${{ inputs['enforce-application-tests'] }}
+        shell: /bin/bash --noprofile --norc -peuo pipefail {0}
+        run: |
+          build=$(jq -cer '.stages.build' <<<"$RELEASE_PLAN")
+          forge-ci plan validate-test-selections --build-stage-plan-json "$build" --go-test-selections-json "$GO_SELECTIONS" --cargo-test-selections-json "$CARGO_SELECTIONS"
+          name=$(jq -er '.artifacts.all[0].name' <<<"$CONFIG_PLAN")
+          kind=$(jq -er '.artifacts.all[0].project_type' <<<"$CONFIG_PLAN")
+          case "$kind" in
+            go)
+              selection=$(jq -cer --arg n "$name" '.[$n] | select(type == "object")' <<<"$GO_SELECTIONS")
+              forge-ci build go test --working-dir "$RUNNER_TEMP/classified-source" --test-selection-json "$selection" --enforce-application-tests="$ADMIN_APPLICATION_TESTS"
+              ;;
+            cargo)
+              selection=$(jq -cer --arg n "$name" '.[$n] | select(type == "object")' <<<"$CARGO_SELECTIONS")
+              forge-ci build cargo test --working-dir "$RUNNER_TEMP/classified-source" --test-selection-json "$selection" --enforce-application-tests="$ADMIN_APPLICATION_TESTS"
+              ;;
+            *) exit 1 ;;
+          esac
+  producer:
+    needs: [policy]
+    if: ${{ success() && needs.policy.result == 'success' }}
+    runs-on: ubuntu-26.04
+    container:
+      image: ${{ inputs['runtime-image'] }}
+    permissions: {contents: read, actions: read}
+    outputs:
+      binding-run-id: ${{ github.run_id }}
+      binding-run-attempt: ${{ github.run_attempt }}
+      artifact-id: ${{ steps.upload.outputs.artifact-id }}
+      payload-digest: ${{ steps.handoff.outputs.digest }}
+    steps:
+      - *graph
+      - *context
+      - *engine
+      - *consume
+      - *event
+      - *plan
+      - *checkout
+      - *source
+      - name: Run administrator-selected unsigned product producer without credentials
+        shell: /bin/bash --noprofile --norc -peuo pipefail {0}
+        env:
+          PRODUCER_PATH: ${{ inputs['producer-path'] }}
+        run: |
+          [[ "$PRODUCER_PATH" =~ ^[A-Za-z0-9_][A-Za-z0-9_./-]*$ && "/$PRODUCER_PATH/" != *"/../"* && "/$PRODUCER_PATH/" != *"/./"* ]]
+          source_root="$RUNNER_TEMP/classified-source"
+          script=$(realpath -e -- "$source_root/$PRODUCER_PATH")
+          [[ "$script" == "$source_root/"* && -f "$script" && -x "$script" ]]
+          umask 077
+          mkdir "$RUNNER_TEMP/classified-product" "$RUNNER_TEMP/classified-product-home"
+          cd "$source_root" || exit
+          env -i PATH=/usr/local/bin:/usr/bin:/bin HOME="$RUNNER_TEMP/classified-product-home" \
+            SOURCE_DATE_EPOCH="$SOURCE_DATE_EPOCH" RELEASE_SHA="$PREPARED_SHA" TAG_NAME="$TAG" \
+            FORGE_CI_CLASSIFIED_OUTPUT="$RUNNER_TEMP/classified-product" "$script"
+      - name: Admit exact unsigned producer workspace and record digest
+        id: handoff
+        shell: /bin/bash --noprofile --norc -peuo pipefail {0}
+        run: |
+          digest=$(forge-ci release dist-digest --classified-files --dist-dir "$RUNNER_TEMP/classified-product")
+          [[ "$digest" =~ ^[0-9a-f]{64}$ ]]
+          printf 'digest=%s\n' "$digest" >>"$GITHUB_OUTPUT"
+      - name: Upload only admitted unsigned workspace
+        id: upload
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: classified-files-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/classified-product/
+          include-hidden-files: true
+          if-no-files-found: error
+          overwrite: false
+  sign:
+    needs: [policy, producer]
+    if: ${{ success() && needs.policy.result == 'success' && needs.producer.result == 'success' }}
+    runs-on: ubuntu-26.04
+    container:
+      image: ${{ inputs['runtime-image'] }}
+    permissions: {contents: read, actions: read}
+    outputs:
+      binding-run-id: ${{ github.run_id }}
+      binding-run-attempt: ${{ github.run_attempt }}
+      artifact-id: ${{ steps.upload-signed.outputs.artifact-id }}
+      payload-digest: ${{ steps.handoff.outputs.digest }}
+    steps:
+      - *graph
+      - *context
+      - *engine
+      - *consume
+      - *event
+      - *plan
+      - *checkout
+      - *source
+      - name: Acquire exact original producer ID and privately stage classified bytes
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          ARTIFACT_ID: ${{ needs.producer.outputs.artifact-id }}
+          PAYLOAD_DIGEST: ${{ needs.producer.outputs.payload-digest }}
+        shell: /bin/bash --noprofile --norc -peuo pipefail {0}
+        run: |
+          [[ "$ARTIFACT_ID" =~ ^[1-9][0-9]*$ && "$PAYLOAD_DIGEST" =~ ^[0-9a-f]{64}$ ]]
+          umask 077
+          mkdir "$RUNNER_TEMP/classified-acquisition"
+          forge-ci artifact download --artifact-id "$ARTIFACT_ID" --name "classified-files-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" \
+            --repository "$GITHUB_REPOSITORY" --run-id "$GITHUB_RUN_ID" --expected-run-head-sha "$GITHUB_SHA" --dir "$RUNNER_TEMP/classified-acquisition"
+          forge-ci release validate-dist --classified-files --dist-dir "$RUNNER_TEMP/classified-acquisition" \
+            --stage-dir "$RUNNER_TEMP/classified-admitted" --expected-digest "$PAYLOAD_DIGEST"
+          cd "$RUNNER_TEMP/classified-admitted" || exit
+          jq -e --arg p "$NOTES_PATH" 'any(.evidence[]; .path == $p)' dist/release-files.json >/dev/null
+      # Recheck source immediately before private steps, not merely upstream.
+      - *source
+      - name: Independently GPG-sign declared packages including nested assets
+        env:
+          GPG_SIGNING_KEY: ${{ secrets.RELEASE_GPG_PRIVATE_KEY }}
+          GPG_SIGNING_PASSWORD: ${{ secrets.RELEASE_GPG_PASSPHRASE }}
+          PACKAGE_FINGERPRINT: ${{ inputs['package-gpg-fingerprint'] }}
+        run: |
+          cd "$RUNNER_TEMP/classified-admitted" || exit
+          forge-ci release gpg sign-packages --fingerprint "$PACKAGE_FINGERPRINT" --dir dist --manifest dist/release-files.json
+      - name: Bind Cosign key and sign checksum SBOM evidence and prepared provenance
+        env:
+          COSIGN_KEY: ${{ secrets.RELEASE_COSIGN_PRIVATE_KEY }}
+          COSIGN_PASSWORD: ${{ secrets.RELEASE_COSIGN_PASSPHRASE }}
+          TRUSTED_PUBLIC_KEY: ${{ inputs['cosign-public-key'] }}
+          TRUSTED_PUBLIC_DIGEST: ${{ inputs['cosign-public-key-sha256'] }}
+          FORGE_CI_COSIGN_TRANSPARENCY: ${{ inputs['cosign-transparency'] }}
+        shell: /bin/bash --noprofile --norc -peuo pipefail {0}
+        run: |
+          case "$FORGE_CI_COSIGN_TRANSPARENCY" in none|public) ;; *) exit 1 ;; esac
+          trusted_key="$RUNNER_TEMP/classified-cosign.pub"
+          public_key_bytes=$(printf '%s' "$TRUSTED_PUBLIC_KEY")
+          printf '%s\n' "$public_key_bytes" >"$trusted_key"
+          printf '%s\n' "$TRUSTED_PUBLIC_DIGEST" >"$trusted_key.sha256"
+          forge-ci validate signing-key --key env://COSIGN_KEY --trusted-public-key "$trusted_key" --trusted-public-key-digest "$trusted_key.sha256"
+          cd "$RUNNER_TEMP/classified-admitted" || exit
+          forge-ci release sign --method kms --key env://COSIGN_KEY --checksums-from-manifest --manifest dist/release-files.json \
+            --dist-dir dist --manifest-section sboms --manifest-section evidence --no-release-artifacts-dir
+          forge-ci release provenance --checksums-from-manifest --manifest dist/release-files.json --dist-dir dist --go-sum '' \
+            --profile generic --ref-name "$TAG" --source-sha "$PREPARED_SHA" --output dist/slsa-provenance.intoto.json \
+            --method kms --key env://COSIGN_KEY --bundle dist/slsa-provenance.intoto.json.bundle
+      - name: Finalize native manifest without regenerating producer files and record signed digest
+        id: handoff
+        shell: /bin/bash --noprofile --norc -peuo pipefail {0}
+        run: |
+          cd "$RUNNER_TEMP/classified-admitted" || exit
+          forge-ci release files manifest --manifest dist/release-files.json --dist-dir dist
+          forge-ci release files validate --manifest dist/release-files.json --dist-dir dist
+          forge-ci release files validate-checksums --manifest dist/release-files.json --dist-dir dist
+          digest=$(forge-ci release dist-digest --dist-dir . --manifest-root .)
+          [[ "$digest" =~ ^[0-9a-f]{64}$ ]]
+          printf 'digest=%s\n' "$digest" >>"$GITHUB_OUTPUT"
+      - name: Upload exact finalized signer workspace
+        id: upload-signed
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: classified-signed-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/classified-admitted/
+          include-hidden-files: true
+          if-no-files-found: error
+          overwrite: false
+  publish:
+    needs: [policy, producer, sign]
+    if: ${{ success() && needs.policy.result == 'success' && needs.producer.result == 'success' && needs.sign.result == 'success' }}
+    runs-on: ubuntu-26.04
+    container:
+      image: ${{ inputs['runtime-image'] }}
+    permissions: {contents: read, actions: read}
+    steps:
+      - *graph
+      - *context
+      - *engine
+      - *consume
+      - *event
+      - *plan
+      - *checkout
+      - *source
+      - name: Acquire exact signed ID and privately verify finalized native files
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          ARTIFACT_ID: ${{ needs.sign.outputs.artifact-id }}
+          PAYLOAD_DIGEST: ${{ needs.sign.outputs.payload-digest }}
+        shell: /bin/bash --noprofile --norc -peuo pipefail {0}
+        run: |
+          [[ "$ARTIFACT_ID" =~ ^[1-9][0-9]*$ && "$PAYLOAD_DIGEST" =~ ^[0-9a-f]{64}$ ]]
+          umask 077
+          mkdir "$RUNNER_TEMP/classified-acquisition"
+          forge-ci artifact download --artifact-id "$ARTIFACT_ID" --name "classified-signed-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" \
+            --repository "$GITHUB_REPOSITORY" --run-id "$GITHUB_RUN_ID" --expected-run-head-sha "$GITHUB_SHA" --dir "$RUNNER_TEMP/classified-acquisition"
+          forge-ci release validate-dist --dist-dir "$RUNNER_TEMP/classified-acquisition" --stage-dir "$RUNNER_TEMP/classified-signed" --manifest-root . --expected-digest "$PAYLOAD_DIGEST"
+          cd "$RUNNER_TEMP/classified-signed" || exit
+          forge-ci release files validate --manifest dist/release-files.json --dist-dir dist
+          forge-ci release files validate-checksums --manifest dist/release-files.json --dist-dir dist
+          jq -e --arg p "$NOTES_PATH" 'any(.evidence[]; .path == $p)' dist/release-files.json >/dev/null
+          jq -e '.provenance | length > 0' dist/release-files.json >/dev/null
+      - *source
+      - name: Publish only finalized native manifest with explicit publication token
+        env:
+          GITHUB_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+        shell: /bin/bash --noprofile --norc -peuo pipefail {0}
+        run: |
+          policy=$(jq -er '.context.release_policy' <<<"$RELEASE_PLAN")
+          cd "$RUNNER_TEMP/classified-signed" || exit
+          forge-ci release publish --strategy reconcile --release-policy "$policy" --tag "$TAG" --repository "$GITHUB_REPOSITORY" \
+            --manifest dist/release-files.json --dist-dir dist --release-notes-file "$NOTES_PATH" --draft=false

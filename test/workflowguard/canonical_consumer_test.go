@@ -8,7 +8,6 @@ import (
 	"maps"
 	"os/exec"
 	"path/filepath"
-	"slices"
 	"strings"
 	"testing"
 
@@ -126,6 +125,13 @@ func TestCanonicalConsumerWorkflowGraph(t *testing.T) {
 				require.Empty(t, job.Steps[0].Uses)
 			}
 
+			if file == "release-orchestrator.yml" && name == "parse-config" {
+				offset = 2
+
+				require.Equal(t, "Admit protected release route before consumer checkout", job.Steps[1].Name)
+				require.NotContains(t, job.Steps[1].Run, "forge-ci")
+			}
+
 			if file == "release-prepare-stage.yml" && name != "summarize-prepare-stage" {
 				offset = 1
 
@@ -178,7 +184,7 @@ func TestCanonicalConsumerWorkflowGraph(t *testing.T) {
 	}
 
 	root := readCanonicalConsumerWorkflow(t, "release-orchestrator.yml")
-	require.Equal(t, "${{ needs.canonical-cli.outputs.artifact-id }}", root.Jobs["parse-config"].Steps[1].Env["PRODUCER_ARTIFACT_ID"])
+	require.Equal(t, "${{ needs.canonical-cli.outputs.artifact-id }}", root.Jobs["parse-config"].Steps[2].Env["PRODUCER_ARTIFACT_ID"])
 
 	for _, caller := range []string{"validate-prerequisites", "execute-prepare-stage"} {
 		require.Contains(t, root.Jobs[caller].Needs, "canonical-cli")
@@ -197,14 +203,13 @@ func TestCanonicalConsumerNativeCommandsSecretsAndReadCaps(t *testing.T) {
 	}
 	for file, readJobs := range allowed {
 		current := readCanonicalConsumerWorkflow(t, file)
-		cmd := exec.CommandContext(t.Context(), "git", "show", "4943724be6b9ac5088a517c35cd87b40b5665b27:.github/workflows/"+file)
+		cmd := exec.CommandContext(t.Context(), "git", "show", "f539911ee63fbe5709e7d477863fc833722d8cbf:.github/workflows/"+file)
 		cmd.Dir = reporoot.Path(t)
 		body, err := cmd.Output()
 		require.NoError(t, err)
 
 		var original canonicalConsumerWorkflow
 		require.NoError(t, yaml.Unmarshal(body, &original))
-		applyLateRequestBindingDelta(file, &original)
 		require.Equal(t, original.Permissions, current.Permissions, "no workflow-global expansion")
 		require.Equal(t, original.On.Call.Secrets, current.On.Call.Secrets)
 
@@ -216,8 +221,8 @@ func TestCanonicalConsumerNativeCommandsSecretsAndReadCaps(t *testing.T) {
 			after := current.Jobs[name]
 			require.Equal(t, before.Env, after.Env, "native job environment is unchanged")
 
-			if file == "release-orchestrator.yml" && (name == "parse-config" || name == "validate-prerequisites") {
-				require.Contains(t, after.If, "!inputs['require-canonical-bootstrap'] || needs.canonical-cli.result == 'success'")
+			if file == "release-orchestrator.yml" && before.If != after.If {
+				assertClassifiedRootCondition(t, name, before.If, after.If)
 			} else {
 				require.Equal(t, before.If, after.If, file+name)
 			}
@@ -248,54 +253,30 @@ func TestCanonicalConsumerNativeCommandsSecretsAndReadCaps(t *testing.T) {
 			}
 
 			for _, step := range before.Steps {
-				// Intentional security correction after the bootstrap baseline:
-				// validation must not import or clean up a private signing key.
-				// All other native commands and secret declarations stay pinned.
-				if file == "validate-release-prerequisites.yml" && name == "validate" &&
-					(step.Run == "forge-ci release gpg import" || step.Run == "forge-ci release gpg cleanup") {
-					for _, candidate := range after.Steps {
-						require.NotEqual(t, step.Run, candidate.Run)
-					}
-
-					continue
-				}
-
-				// The acquisition fix deliberately changes only producer-file
-				// authority in this native leaf, not its secrets or permissions.
-				if file == "release-create-github.yml" && name == "assemble-release" {
-					switch step.Name {
-					case "Compute effective attach-artifacts (auto-include extracted binaries)":
-						for _, candidate := range after.Steps {
-							require.NotEqual(t, step.Name, candidate.Name, "source binaries must not become implicit attachments")
-						}
-
-						continue
-					case "Download planned release artifacts":
-						step.Run = "forge-ci release download-artifacts --isolated"
-					case "Generate CISA-layer SBOMs":
-						step.Run = "forge-ci sbom assemble --version \"$VERSION\""
-						step.Env["ACQUISITION_DIR"] = "${{ steps.acquisition.outputs.acquisition-dir }}"
-					case "Assemble release files":
-						step.Env["ACQUISITION_DIR"] = "${{ steps.acquisition.outputs.acquisition-dir }}"
-						step.Env["ATTACH_ARTIFACTS"] = "${{ inputs['attach-artifacts'] }}"
-					}
-				}
-
 				found := false
 
 				for _, candidate := range after.Steps {
 					if candidate.Name == step.Name {
 						if candidate.If != step.If {
-							if step.Name == "Install forge-ci binary" || step.Name == "Checkout forge-ci bootstrap installers" {
+							switch {
+							case file == "release-orchestrator.yml" && strings.Contains(step.If, "inputs['require-canonical-bootstrap']"):
+								require.Equal(t, "${{ inputs['require-canonical-bootstrap'] || inputs['release-file-mode'] == 'classified-files' }}", candidate.If)
+							case step.Name == "Install forge-ci binary" || step.Name == "Checkout forge-ci bootstrap installers":
 								require.Empty(t, step.If)
 								require.Equal(t, "${{ !inputs['require-canonical-bootstrap'] }}", candidate.If)
-							} else {
+							default:
 								require.Contains(t, step.If, "always()")
 								require.Contains(t, candidate.If, "!inputs['require-canonical-bootstrap'] || steps.canonical-bootstrap.outputs.verified == 'true'")
 							}
 						}
 
 						require.Equal(t, step.Run, candidate.Run)
+
+						if file == "release-orchestrator.yml" && step.Name == "Generate Release Summary" {
+							require.Equal(t, "${{ inputs['release-file-mode'] == 'classified-files' && needs.classified-release.result || needs.create-release.result }}", candidate.Env["CREATE_RELEASE_RESULT"])
+							candidate.Env["CREATE_RELEASE_RESULT"] = step.Env["CREATE_RELEASE_RESULT"]
+						}
+
 						require.Equal(t, step.Env, candidate.Env)
 						require.Equal(t, step.With, candidate.With)
 
@@ -308,32 +289,6 @@ func TestCanonicalConsumerNativeCommandsSecretsAndReadCaps(t *testing.T) {
 				require.True(t, found, file+name+step.Name)
 			}
 		}
-	}
-}
-
-// Keep the bootstrap transplant's historical comparison, with only the native
-// late-authorization delta admitted. Dedicated late-boundary guards assert the
-// replacement checks, their original-Q binding and ordering before private use.
-func applyLateRequestBindingDelta(file string, original *canonicalConsumerWorkflow) {
-	switch file {
-	case "release-orchestrator.yml":
-		original.Jobs["create-release"].Secrets["RELEASE_GPG_PUBLIC_KEY"] = "${{ secrets.RELEASE_GPG_PUBLIC_KEY }}"
-
-		for _, step := range original.Jobs["validate-release-tag"].Steps {
-			if step.Name == "Validate remote final tag object and commit" {
-				step.Env["RELEASE_REQUEST_SHA"] = "${{ github.sha }}"
-				step.Env["RELEASE_REQUEST_IS_RELEASE"] = "${{ !fromJson(needs.parse-config.outputs['prepare-stage-plan-json']).targets.version_bump.runs }}"
-			}
-		}
-	case "release-create-github.yml":
-		original.On.Call.Secrets["RELEASE_GPG_PUBLIC_KEY"] = map[string]any{
-			"description": "Public verification material only, for final-tag signature checks", "required": false,
-		}
-		publisher := original.Jobs["create-release"]
-		publisher.Steps = slices.DeleteFunc(publisher.Steps, func(step canonicalConsumerStep) bool {
-			return step.Name == "Checkout exact release source" || step.Name == "Revalidate release tag before publication"
-		})
-		original.Jobs["create-release"] = publisher
 	}
 }
 

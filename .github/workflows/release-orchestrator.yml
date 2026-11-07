@@ -47,6 +47,15 @@ name: Orchestrate Release
 on:
   workflow_call: # yamllint disable-line rule:truthy
     inputs:
+      release-file-mode:
+        description: "Protected administrator alternative: native or classified-files (one root Go/Cargo product, no images). Not a dispatch policy."
+        type: string
+        default: native
+      classified-producer-path: {type: string, default: ""}
+      classified-producer-file-only: {type: boolean, default: false}
+      classified-release-notes-path: {type: string, default: ""}
+      classified-package-gpg-fingerprint: {type: string, default: ""}
+      classified-cosign-transparency: {type: string, default: "none"}
       require-canonical-bootstrap:
         description: "Opt into canonical CLI consumption for plan/prerequisite/prepare/tag/summary only; protected full engine ref and qualified digest runtime required. Not classified release activation."
         type: boolean
@@ -377,7 +386,7 @@ jobs:
   # ===== Stage 0: Configuration And Policy =====
   canonical-cli:
     needs: [resolve-bootstrap]
-    if: ${{ inputs['require-canonical-bootstrap'] }}
+    if: ${{ inputs['require-canonical-bootstrap'] || inputs['release-file-mode'] == 'classified-files' }}
     permissions:
       contents: read
       actions: read
@@ -390,7 +399,7 @@ jobs:
       runtime-image: ${{ inputs['runtime-image'] }}
   parse-config:
     needs: [resolve-bootstrap, canonical-cli]
-    if: ${{ !failure() && !cancelled() && (!inputs['require-canonical-bootstrap'] || needs.canonical-cli.result == 'success') }}
+    if: ${{ !failure() && !cancelled() && ((!inputs['require-canonical-bootstrap'] && inputs['release-file-mode'] != 'classified-files') || needs.canonical-cli.result == 'success') }}
     name: "Check: plan"
     runs-on: ubuntu-26.04
     container:
@@ -430,9 +439,14 @@ jobs:
             printf '%s\n' 'original request source must be a full lowercase SHA-1 or SHA-256 object ID' >&2
             exit 1
           fi
+      - name: Admit protected release route before consumer checkout
+        env:
+          RELEASE_FILE_MODE: ${{ inputs['release-file-mode'] }}
+        run: |
+          case "$RELEASE_FILE_MODE" in native|classified-files) ;; *) exit 1 ;; esac
       - &canonical-context
         name: Require original canonical success and approved identity
-        if: ${{ inputs['require-canonical-bootstrap'] }}
+        if: ${{ inputs['require-canonical-bootstrap'] || inputs['release-file-mode'] == 'classified-files' }}
         shell: /bin/bash --noprofile --norc -peuo pipefail {0}
         env:
           ENGINE_REPOSITORY: ${{ needs.resolve-bootstrap.outputs.forge-ci-repository }}
@@ -459,7 +473,7 @@ jobs:
           done
       - &canonical-checkout
         name: Checkout only the approved engine before consumer or private steps
-        if: ${{ inputs['require-canonical-bootstrap'] }}
+        if: ${{ inputs['require-canonical-bootstrap'] || inputs['release-file-mode'] == 'classified-files' }}
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           repository: ${{ env.ENGINE_REPOSITORY }}
@@ -471,7 +485,7 @@ jobs:
       - &canonical-consume
         name: Consume canonical CLI from the independently pinned engine checkout
         id: canonical-bootstrap
-        if: ${{ inputs['require-canonical-bootstrap'] }}
+        if: ${{ inputs['require-canonical-bootstrap'] || inputs['release-file-mode'] == 'classified-files' }}
         uses: ./_forge_ci_bootstrap/.github/actions/consume-canonical-cli
       - name: Validate release workflow provider
         run: forge-ci validate release-provider
@@ -541,7 +555,7 @@ jobs:
   validate-prerequisites:
     name: "Check: release request"
     needs: [resolve-bootstrap, parse-config, canonical-cli]
-    if: ${{ !failure() && !cancelled() && needs.parse-config.result == 'success' && (!inputs['require-canonical-bootstrap'] || needs.canonical-cli.result == 'success') }}
+    if: ${{ !failure() && !cancelled() && needs.parse-config.result == 'success' && ((!inputs['require-canonical-bootstrap'] && inputs['release-file-mode'] == 'native') || needs.canonical-cli.result == 'success') && (inputs['release-file-mode'] != 'classified-files' || (needs.parse-config.outputs.binding-run-id == github.run_id && needs.parse-config.outputs.binding-run-attempt == github.run_attempt)) }}
     permissions:
       contents: read
       actions: read # Propagate receiver read cap through workflow_call.
@@ -556,7 +570,7 @@ jobs:
       CODE_SCANNING_TOKEN: ${{ secrets.CODE_SCANNING_TOKEN }}
     uses: ./.github/workflows/validate-release-prerequisites.yml
     with:
-      require-canonical-bootstrap: ${{ inputs['require-canonical-bootstrap'] }}
+      require-canonical-bootstrap: ${{ inputs['require-canonical-bootstrap'] || inputs['release-file-mode'] == 'classified-files' }}
       canonical-artifact-id: ${{ needs.canonical-cli.outputs.artifact-id }}
       canonical-artifact-name: ${{ needs.canonical-cli.outputs.artifact-name }}
       canonical-producer-run-id: ${{ needs.canonical-cli.outputs.producer-run-id }}
@@ -580,13 +594,13 @@ jobs:
       authorized-source-sha: ${{ github.sha }}
       # Cargo prerequisite validation checks Cargo.lock and `cargo --version`,
       # so use the Rust runtime whenever Cargo artifacts (either mode) are present.
-      runtime-image: ${{ (fromJson(needs.parse-config.outputs['publish-stage-plan-json']).targets.cargo_container_first.runs || fromJson(needs.parse-config.outputs['build-stage-plan-json']).targets.cargo.runs) && (inputs['runtime-image-rust'] || (inputs['require-canonical-bootstrap'] && inputs['runtime-image']) || needs.resolve-bootstrap.outputs['runtime-image-rust']) || (inputs['runtime-image'] || needs.resolve-bootstrap.outputs['runtime-image']) }}
+      runtime-image: ${{ (fromJson(needs.parse-config.outputs['publish-stage-plan-json']).targets.cargo_container_first.runs || fromJson(needs.parse-config.outputs['build-stage-plan-json']).targets.cargo.runs) && (inputs['runtime-image-rust'] || ((inputs['require-canonical-bootstrap'] || inputs['release-file-mode'] == 'classified-files') && inputs['runtime-image']) || needs.resolve-bootstrap.outputs['runtime-image-rust']) || (inputs['runtime-image'] || needs.resolve-bootstrap.outputs['runtime-image']) }}
   # ===== Stage 2: Release Preparation =====
   # Release preparation now lives below this control-plane stage call.
   execute-prepare-stage:
     name: Prepare
     needs: [resolve-bootstrap, parse-config, validate-prerequisites, canonical-cli]
-    if: ${{ !failure() && !cancelled() }}
+    if: ${{ !failure() && !cancelled() && (inputs['release-file-mode'] == 'native' || (inputs['release-file-mode'] == 'classified-files' && needs.parse-config.result == 'success' && needs.validate-prerequisites.result == 'success' && needs.canonical-cli.result == 'success' && needs.parse-config.outputs.binding-run-id == github.run_id && needs.parse-config.outputs.binding-run-attempt == github.run_attempt && needs.validate-prerequisites.outputs.binding-run-id == github.run_id && needs.validate-prerequisites.outputs.binding-run-attempt == github.run_attempt)) }}
     permissions:
       actions: read
       contents: write
@@ -598,7 +612,8 @@ jobs:
       RELEASE_SSH_SIGNING_KEY: ${{ secrets.RELEASE_SSH_SIGNING_KEY }}
     uses: ./.github/workflows/release-prepare-stage.yml
     with:
-      require-canonical-bootstrap: ${{ inputs['require-canonical-bootstrap'] }}
+      require-current-attempt: ${{ inputs['release-file-mode'] == 'classified-files' }}
+      require-canonical-bootstrap: ${{ inputs['require-canonical-bootstrap'] || inputs['release-file-mode'] == 'classified-files' }}
       canonical-artifact-id: ${{ needs.canonical-cli.outputs.artifact-id }}
       canonical-artifact-name: ${{ needs.canonical-cli.outputs.artifact-name }}
       canonical-producer-run-id: ${{ needs.canonical-cli.outputs.producer-run-id }}
@@ -663,11 +678,49 @@ jobs:
           REQUIRE_VALID_SIGNATURE: "true"
         run: forge-ci validate tag signature
   # ===== Stage 3: Build =====
+  classified-release:
+    name: "Publish: classified files"
+    needs: [resolve-bootstrap, canonical-cli, parse-config, validate-prerequisites, execute-prepare-stage, validate-release-tag]
+    if: ${{ !failure() && !cancelled() && inputs['release-file-mode'] == 'classified-files' && needs.canonical-cli.result == 'success' && needs.parse-config.result == 'success' && needs.validate-prerequisites.result == 'success' && needs.execute-prepare-stage.result == 'success' && needs.validate-release-tag.result == 'success' }}
+    permissions: {contents: read, actions: read}
+    uses: ./.github/workflows/release-classified-files.yml
+    secrets:
+      RELEASE_GPG_PUBLIC_KEY: ${{ secrets.RELEASE_GPG_PUBLIC_KEY }}
+      RELEASE_GPG_PRIVATE_KEY: ${{ secrets.RELEASE_GPG_PRIVATE_KEY }}
+      RELEASE_GPG_PASSPHRASE: ${{ secrets.RELEASE_GPG_PASSPHRASE }}
+      RELEASE_COSIGN_PRIVATE_KEY: ${{ secrets.RELEASE_COSIGN_PRIVATE_KEY }}
+      RELEASE_COSIGN_PASSPHRASE: ${{ secrets.RELEASE_COSIGN_PASSPHRASE }}
+      RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+    with:
+      engine-repository: ${{ needs.resolve-bootstrap.outputs.forge-ci-repository }}
+      engine-commit: ${{ inputs['forge-ci-binary-ref'] }}
+      runtime-image: ${{ inputs['runtime-image'] }}
+      canonical-artifact-id: ${{ needs.canonical-cli.outputs.artifact-id }}
+      canonical-artifact-name: ${{ needs.canonical-cli.outputs.artifact-name }}
+      canonical-producer-run-id: ${{ needs.canonical-cli.outputs.producer-run-id }}
+      canonical-producer-run-attempt: ${{ needs.canonical-cli.outputs.producer-run-attempt }}
+      canonical-producer-engine-repository: ${{ needs.canonical-cli.outputs.engine-repository }}
+      canonical-producer-engine-commit: ${{ needs.canonical-cli.outputs.engine-commit }}
+      canonical-producer-result: ${{ needs.canonical-cli.result }}
+      upstream-json: ${{ toJson(needs) }}
+      config-plan-json: ${{ needs.parse-config.outputs.config-plan-json }}
+      release-plan-json: ${{ needs.parse-config.outputs.release-plan-json }}
+      release-sboms: ${{ inputs['release.sboms'] }}
+      producer-path: ${{ inputs['classified-producer-path'] }}
+      producer-file-only: ${{ inputs['classified-producer-file-only'] }}
+      release-notes-path: ${{ inputs['classified-release-notes-path'] }}
+      package-gpg-fingerprint: ${{ inputs['classified-package-gpg-fingerprint'] }}
+      cosign-transparency: ${{ inputs['classified-cosign-transparency'] }}
+      go-test-selections-json: ${{ inputs['go-test-selections-json'] }}
+      cargo-test-selections-json: ${{ inputs['cargo-test-selections-json'] }}
+      enforce-application-tests: ${{ inputs['enforce-application-tests'] }}
+      cosign-public-key: ${{ inputs['cosign-public-key'] }}
+      cosign-public-key-sha256: ${{ inputs['cosign-public-key-sha256'] }}
   # Build fanout now lives below this control-plane stage call.
   execute-build-stage:
     name: Build
     needs: [resolve-bootstrap, parse-config, execute-prepare-stage, validate-release-tag]
-    if: ${{ !failure() && !cancelled() }}
+    if: ${{ !failure() && !cancelled() && inputs['release-file-mode'] == 'native' }}
     permissions:
       contents: read
       packages: read
@@ -709,7 +762,7 @@ jobs:
   execute-publish-stage:
     name: Publish
     needs: [resolve-bootstrap, parse-config, execute-prepare-stage, execute-build-stage]
-    if: ${{ !failure() && !cancelled() }}
+    if: ${{ !failure() && !cancelled() && inputs['release-file-mode'] == 'native' }}
     permissions:
       contents: write
       packages: write
@@ -764,7 +817,7 @@ jobs:
   promote-dev:
     name: "Publish: images to dev"
     needs: [parse-config, execute-publish-stage]
-    if: ${{ !failure() && !cancelled() && !fromJson(needs.parse-config.outputs['release-plan-json']).policy.prerelease && fromJson(needs.parse-config.outputs['publish-stage-plan-json']).targets.containers.runs }}
+    if: ${{ !failure() && !cancelled() && inputs['release-file-mode'] == 'native' && !fromJson(needs.parse-config.outputs['release-plan-json']).policy.prerelease && fromJson(needs.parse-config.outputs['publish-stage-plan-json']).targets.containers.runs }}
     permissions:
       actions: read
       contents: read
@@ -777,7 +830,7 @@ jobs:
   promote-staging:
     name: "Publish: images to staging"
     needs: [parse-config, execute-publish-stage, promote-dev]
-    if: ${{ !failure() && !cancelled() && !fromJson(needs.parse-config.outputs['release-plan-json']).policy.prerelease && fromJson(needs.parse-config.outputs['publish-stage-plan-json']).targets.containers.runs }}
+    if: ${{ !failure() && !cancelled() && inputs['release-file-mode'] == 'native' && !fromJson(needs.parse-config.outputs['release-plan-json']).policy.prerelease && fromJson(needs.parse-config.outputs['publish-stage-plan-json']).targets.containers.runs }}
     permissions:
       actions: read
       contents: read
@@ -791,7 +844,7 @@ jobs:
   promote-release:
     name: "Publish: images to release"
     needs: [parse-config, execute-publish-stage, promote-staging]
-    if: ${{ !failure() && !cancelled() && !fromJson(needs.parse-config.outputs['release-plan-json']).policy.prerelease && fromJson(needs.parse-config.outputs['publish-stage-plan-json']).targets.containers.runs }}
+    if: ${{ !failure() && !cancelled() && inputs['release-file-mode'] == 'native' && !fromJson(needs.parse-config.outputs['release-plan-json']).policy.prerelease && fromJson(needs.parse-config.outputs['publish-stage-plan-json']).targets.containers.runs }}
     permissions:
       actions: read
       contents: read
@@ -815,7 +868,7 @@ jobs:
     name: "Publish: release"
     needs: [resolve-bootstrap, parse-config, execute-prepare-stage, validate-release-tag, execute-publish-stage]
     # Run even if previous jobs were skipped but at least one succeeded
-    if: ${{ fromJson(needs.parse-config.outputs['release-plan-json']).policy.create_release }}
+    if: ${{ inputs['release-file-mode'] == 'native' && fromJson(needs.parse-config.outputs['release-plan-json']).policy.create_release }}
     permissions:
       actions: read
       contents: read
@@ -853,6 +906,7 @@ jobs:
   release-summary:
     name: Summary
     needs:
+      - classified-release
       - canonical-cli
       - resolve-bootstrap
       - parse-config
@@ -875,6 +929,11 @@ jobs:
       - *canonical-context
       - *canonical-checkout
       - *canonical-consume
+      - name: Refuse incomplete classified route instead of accepting skipped native jobs
+        if: ${{ inputs['release-file-mode'] == 'classified-files' }}
+        env:
+          CLASSIFIED_RESULT: ${{ needs.classified-release.result }}
+        run: test "$CLASSIFIED_RESULT" = success
       - name: Generate Release Summary
         env:
           # Release context.
@@ -898,5 +957,5 @@ jobs:
           PROMOTE_RELEASE_RESULT: ${{ needs.promote-release.result }}
 
           # Release-stage result.
-          CREATE_RELEASE_RESULT: ${{ needs.create-release.result }}
+          CREATE_RELEASE_RESULT: ${{ inputs['release-file-mode'] == 'classified-files' && needs.classified-release.result || needs.create-release.result }}
         run: forge-ci report release
