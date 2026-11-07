@@ -185,8 +185,11 @@ consumer hello-maven-service published-unsigned-snapshot job-image=@JOB_IMAGE_JA
 ```
 
 Prepare with `forgejo=<that cases file>` and `job-image=java:<reviewed local image>`.
-The Java job image must support the existing native Maven build/check recipe;
-the original Containerfile independently builds the published image. A literal
+The Java job image must support the existing native Maven build/check recipe.
+The consumer's declaration selects the existing route: artifact-first dependencies
+are built and gathered by the native snapshot producer before the original
+Containerfile wraps them; a declared container-only service builds from source
+inside its original Containerfile. The fixture preserves that choice. A literal
 full SHA-256 digest reference is also accepted. No other case settings are accepted.
 The checked-in profile requires public visibility and Buildah. Declarations are
 expectations, not overrides: an explicit conflicting builder refuses the whole

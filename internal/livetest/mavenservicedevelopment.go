@@ -15,7 +15,13 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/diggsweden/forge-ci/internal/domain/build"
+	"github.com/diggsweden/forge-ci/internal/domain/config"
 	"github.com/diggsweden/forge-ci/internal/domain/container"
+	"github.com/diggsweden/forge-ci/internal/domain/pipeline"
+	"github.com/diggsweden/forge-ci/internal/domain/projecttype"
+	"github.com/diggsweden/forge-ci/internal/domain/snapshotimage"
+	"gopkg.in/yaml.v3"
 )
 
 var (
@@ -25,6 +31,7 @@ var (
 	errServiceSourceBranch      = errors.New("select a valid source branch different from policy main")
 	errServiceFixtureRelative   = errors.New("fixture must be an absolute CI script path")
 	errServiceFixtureNotRegular = errors.New("fixture must be a regular CI script")
+	errServiceDeclaration       = errors.New("service trial requires one root Containerfile/context, native amd64, and only a root Maven application dependency")
 )
 
 // MavenServiceDevelopmentConfig supplies trusted trial infrastructure. Fixture
@@ -39,7 +46,8 @@ var mavenServiceDevelopmentRecipe string
 
 // NewMavenServiceDevelopmentFixture reuses the native Maven and snapshot layer
 // recipes, overlaying CI only in Consumer's private index. The original
-// Containerfile builds independently; checked JAR/image byte equality is NOT claimed.
+// declaration selects artifact-first or container-first; checked JAR/image byte
+// equality is NOT claimed.
 func NewMavenServiceDevelopmentFixture(tb TB, source Consumer, config MavenServiceDevelopmentConfig) Consumer {
 	tb.Helper()
 
@@ -72,6 +80,16 @@ func mavenServiceDevelopmentFixture(ctx context.Context, source Consumer, config
 		return source, err
 	}
 
+	declared, err := githubWorkflow(ctx, source, ".forge-ci/artifacts.yml")
+	if err != nil {
+		return source, err
+	}
+
+	declaration, err := mavenServiceSnapshotDeclaration(declared)
+	if err != nil {
+		return source, err
+	}
+
 	fixture, err := readMavenServiceFixture(config.Fixture)
 	if err != nil {
 		return source, err
@@ -95,9 +113,7 @@ func mavenServiceDevelopmentFixture(ctx context.Context, source Consumer, config
 	if _, err = source.git.run(ctx, source.stage, "read-tree", source.Commit); err != nil {
 		return source, err
 	}
-	// A container-only declaration deliberately creates no unused Maven producer.
-	// Maven's original checked app lifecycle runs once in the separate check job.
-	declaration := "containers:\n  - name: service\n    container-file: Containerfile\n    context: .\n    platforms: linux/amd64\n    enable-slsa: false\n"
+
 	for path, text := range map[string]string{
 		forgejoDevelopmentWorkflow:          workflow,
 		".forge-ci/service-development.yml": declaration,
@@ -111,6 +127,141 @@ func mavenServiceDevelopmentFixture(ctx context.Context, source Consumer, config
 	source.Commit, err = source.commit(ctx, consumerBaseMessage)
 
 	return source, err
+}
+
+// mavenServiceSnapshotDeclaration preserves the declared build graph and raw
+// ecosystem settings. Only the trial's native platform and unsigned policy are
+// overlaid; release signing settings remain in the original declaration.
+func mavenServiceSnapshotDeclaration(body string) (string, error) {
+	cfg, err := parseMavenServiceDeclaration(body)
+	if err != nil {
+		return "", err
+	}
+
+	if err = validateMavenServiceTrial(cfg); err != nil {
+		return "", err
+	}
+
+	ctr := &cfg.Containers[0]
+	ctr.Platforms = build.DefaultPlatform
+	ctr.EnableSLSA = new(bool)
+	// Artifact's typed ecosystem fields are not YAML-marshallable. Keep their
+	// original nodes after the strict shared parser has admitted the whole input.
+	var raw struct {
+		Artifacts yaml.Node `yaml:"artifacts,omitempty"`
+	}
+	if err = yaml.Unmarshal([]byte(body), &raw); err != nil {
+		return "", err
+	}
+
+	overlay, err := yaml.Marshal(struct {
+		Artifacts  yaml.Node          `yaml:"artifacts,omitempty"`
+		Containers []config.Container `yaml:"containers"`
+	}{raw.Artifacts, cfg.Containers})
+	if err != nil {
+		return "", err
+	}
+	// An alias whose anchor lived in an omitted release-policy block must not
+	// leave an invalid private declaration behind.
+	if _, err = parseMavenServiceDeclaration(string(overlay)); err != nil {
+		return "", err
+	}
+
+	return string(overlay), nil
+}
+
+func validateMavenServiceTrial(cfg *config.Config) error {
+	if len(cfg.Containers) != 1 {
+		return errServiceDeclaration
+	}
+
+	ctr := cfg.Containers[0]
+	typed := pipeline.NewConfigPlan(cfg)
+	selected := typed.Containers.All[0]
+
+	if selected.ContainerFile != "Containerfile" || selected.Context != "." || ctr.ImageName != "" || ctr.TagSuffix != "" ||
+		len(ctr.From) > 1 || len(ctr.BuildSecrets) > 0 || ctr.Extract != nil {
+		return errServiceDeclaration
+	}
+	// Do not silently turn unsupported provenance into a supported request.
+	if ctr.EnableSLSA != nil && *ctr.EnableSLSA {
+		return errServiceDeclaration
+	}
+
+	if !mavenServiceSupportsAMD64(selected.Platforms) {
+		return errServiceDeclaration
+	}
+
+	return validateMavenServiceDependencies(typed, ctr.From)
+}
+
+func mavenServiceSupportsAMD64(platforms string) bool {
+	hasAMD64 := false
+	seen := map[string]bool{}
+
+	for _, platform := range strings.FieldsFunc(platforms, func(r rune) bool { return r == ',' || r == ' ' || r == '\n' || r == '\t' }) {
+		if seen[platform] || (platform != build.DefaultPlatform && platform != "linux/arm64") {
+			return false
+		}
+
+		seen[platform] = true
+		hasAMD64 = hasAMD64 || platform == build.DefaultPlatform
+	}
+
+	return hasAMD64
+}
+
+func validateMavenServiceDependencies(typed pipeline.ConfigPlan, from []string) error {
+	for _, name := range from {
+		for _, a := range typed.Artifacts.All {
+			if a.Name == name && (a.ProjectType != projecttype.Maven || a.WorkingDirectory != "." || a.BuildType != config.BuildTypeApplication) {
+				return errServiceDeclaration
+			}
+		}
+	}
+
+	return nil
+}
+
+// MavenServiceDevelopmentPlan reads the selected private declaration through
+// the same Git reader as the fixture, then uses the existing typed planner.
+// Acceptance must not assume that every service is container-first.
+func MavenServiceDevelopmentPlan(tb TB, source Consumer, in snapshotimage.Input) snapshotimage.Plan {
+	tb.Helper()
+
+	body, err := githubWorkflow(Context(tb), source, ".forge-ci/service-development.yml")
+	if err != nil {
+		tb.Fatalf("service declaration: %v", err)
+	}
+
+	cfg, err := parseMavenServiceDeclaration(body)
+	if err != nil {
+		tb.Fatalf("service declaration: %v", err)
+	}
+
+	plan, err := snapshotimage.New(pipeline.NewConfigPlan(cfg), in)
+	if err != nil {
+		tb.Fatalf("service plan: %v", err)
+	}
+
+	return plan
+}
+
+func parseMavenServiceDeclaration(body string) (*config.Config, error) {
+	cfg, err := config.Parse([]byte(body))
+	if err != nil {
+		return nil, err
+	}
+
+	if err = config.Validate(cfg); err != nil {
+		return nil, err
+	}
+
+	if err = config.Derive(cfg); err != nil {
+		return nil, err
+	}
+
+	return cfg, nil
 }
 
 // validateInfrastructure checks the recipe directory, the job image and the

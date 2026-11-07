@@ -1580,7 +1580,7 @@ proves that a deployed service works.
 
 Setting `FORGE_CI_LIVE_MAVEN_APPLICATION_IMAGE` selects the Java-service case
 of `TestForgejoLayer_ConsumerDevelopment`: an unsigned snapshot trial of a
-container-first service, public or private, on the existing private-index
+declared Maven service, public or private, on the existing private-index
 staging, scratch-resource cleanup and shared snapshot workflow. It does not
 exercise stable release or PR linting.
 
@@ -1616,13 +1616,28 @@ receives that source, the CI overlay and the standard trial canary, so policy
 SHA feeds both the image build and the checked Maven job. The source POM,
 business code, Containerfile, Maven checks and rules stay unchanged.
 
-The generated CI declaration is container-only: the original Containerfile
-builds the image, and no unused artifact-first producer is scheduled. A
-separate Maven `app` job on the shared builder keeps its normal checks and
-tests and copies the actual `target/<artifactId>-*.jar` outputs. That is a
-second checked build on purpose: **the checked JAR is not asserted to be the
-JAR inside the image**. Artifact-first projects use the shared snapshot
-producer instead of this case.
+The private snapshot declaration preserves the consumer's validated
+`.forge-ci/artifacts.yml` artifacts, `from` dependencies and build settings.
+The trial admits one root service with native amd64 support, narrows its platforms
+to `linux/amd64`, and applies unsigned snapshot policy without modifying the
+original release declaration or importing signing inputs. Other contexts/images,
+non-Maven application dependencies, build secrets, extraction and explicit OCI
+provenance are refused, not silently removed.
+
+For artifact-first services (including `hello-maven-service`), the shared snapshot
+workflow automatically builds the declared Maven application in the reviewed Java
+job image, gathers its bound `target` JAR input and only then builds the original
+jar-wrapping Containerfile. Its `artifact-job-image-java` input uses the same
+reviewed Java image; `context-artifact` stays empty. For an explicit container-only
+declaration, compilation belongs in the original Containerfile and no unused
+artifact producer is scheduled. Missing or invalid declarations never imply a
+fallback between these routes.
+
+A separate Maven `app` job after snapshot publication keeps its normal checks and
+tests and copies the actual `target/<artifactId>-*.jar` outputs. This separate
+checked build is intentional: **the checked JAR is not asserted to be the JAR
+inside the image**. Acceptance derives the expected producer/dependency graph
+from the validated private declaration rather than assuming zero producers.
 
 The runtime fixture script runs inside the Java job and writes
 `trial-runtime/runtime.env` plus optional files. They are transferred in the
@@ -1640,7 +1655,7 @@ protocol. The offline guard for source preservation is:
 
 ```sh
 env GOTOOLCHAIN=local GOPROXY=off GOSUMDB=off go test ./internal/livetest \
-  -run '^TestMavenServiceDevelopmentPreservesSource$' -count=1
+  -run '^TestMavenService(Development|SnapshotDeclaration)' -count=1
 ```
 
 The bundled fixture `test/live/cases/maven-issuer-service/service-fixture.sh`
