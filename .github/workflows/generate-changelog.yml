@@ -60,6 +60,15 @@ on:
         required: false
         default: ""
         type: string
+    outputs:
+      binding-run-id:
+        value: ${{ jobs.generate-changelog.outputs.binding-run-id }}
+      binding-run-attempt:
+        value: ${{ jobs.generate-changelog.outputs.binding-run-attempt }}
+      artifact-id:
+        value: ${{ jobs.generate-changelog.outputs.artifact-id }}
+      artifact-name:
+        value: ${{ jobs.generate-changelog.outputs.artifact-name }}
 permissions:
   contents: read
 jobs:
@@ -74,6 +83,11 @@ jobs:
     name: Generate
     runs-on: ubuntu-26.04
     timeout-minutes: 15
+    outputs:
+      binding-run-id: ${{ github.run_id }}
+      binding-run-attempt: ${{ github.run_attempt }}
+      artifact-id: ${{ steps.upload.outputs.artifact-id }}
+      artifact-name: ${{ inputs['artifact-name'] }}
     container:
       image: ${{ inputs['runtime-image'] || needs.resolve-bootstrap.outputs['runtime-image'] }}
     steps:
@@ -131,6 +145,7 @@ jobs:
           mkdir -p .forge-ci/changelog-artifact
           cp -- "$CHANGELOG_FILE" ".forge-ci/changelog-artifact/$(basename -- "$CHANGELOG_FILE")"
       - name: Upload Changelog Artifact
+        id: upload
         if: ${{ inputs['upload-as-artifact'] }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:

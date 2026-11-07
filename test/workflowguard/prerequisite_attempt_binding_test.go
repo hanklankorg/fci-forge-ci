@@ -26,6 +26,8 @@ func TestReleasePrerequisiteBindingCapturedAtOriginalJobs(t *testing.T) {
 		{"release-orchestrator.yml", "validate-release-tag", false},
 		{"validate-release-prerequisites.yml", "validate", true},
 		{"release-prepare-stage.yml", "version-bump", true},
+		{"generate-changelog.yml", "generate-changelog", true},
+		{"release-prepare-stage.yml", "prepare-version-files", false},
 	} {
 		t.Run(tc.producer, func(t *testing.T) {
 			t.Parallel()

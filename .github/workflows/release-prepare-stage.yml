@@ -5,6 +5,11 @@ name: Release Prepare Stage
 on:
   workflow_call: # yamllint disable-line rule:truthy
     inputs:
+      require-current-attempt:
+        description: "Opt into current-attempt preparation input binding and exact-ID downloads; protected callers only. Native default is unchanged."
+        type: boolean
+        required: false
+        default: false
       release-policy:
         description: "Accepted release versions: stable or stable-prerelease"
         type: string
@@ -67,6 +72,18 @@ on:
         description: "OpenSSH private key for signing the release commit + tag when git-signing-method=ssh"
         required: false
     outputs:
+      full-changelog-binding-run-id:
+        value: ${{ jobs.generate-full-changelog.outputs.binding-run-id }}
+      full-changelog-binding-run-attempt:
+        value: ${{ jobs.generate-full-changelog.outputs.binding-run-attempt }}
+      minimal-changelog-binding-run-id:
+        value: ${{ jobs.generate-minimal-changelog.outputs.binding-run-id }}
+      minimal-changelog-binding-run-attempt:
+        value: ${{ jobs.generate-minimal-changelog.outputs.binding-run-attempt }}
+      version-files-binding-run-id:
+        value: ${{ jobs.prepare-version-files.outputs.binding-run-id }}
+      version-files-binding-run-attempt:
+        value: ${{ jobs.prepare-version-files.outputs.binding-run-attempt }}
       binding-run-id:
         description: "Run captured by the original release-state producer, not the summary"
         value: ${{ jobs.version-bump.outputs.binding-run-id }}
@@ -113,7 +130,7 @@ jobs:
       changelog-config: "/opt/forge-ci/templates/gitcliff/keepachangelog.toml"
       git-cliff-args: ""
       output-file: "CHANGELOG.md"
-      artifact-name: "full-changelog"
+      artifact-name: ${{ inputs['require-current-attempt'] && format('full-changelog-{0}-{1}', github.run_id, github.run_attempt) || 'full-changelog' }}
   generate-minimal-changelog:
     needs: [resolve-bootstrap]
     name: "Prepare: commit message"
@@ -130,7 +147,7 @@ jobs:
       changelog-config: "/opt/forge-ci/templates/gitcliff/minimal.toml"
       git-cliff-args: "--latest --strip header"
       output-file: "minimal-changelog.txt"
-      artifact-name: "minimal-changelog"
+      artifact-name: ${{ inputs['require-current-attempt'] && format('minimal-changelog-{0}-{1}', github.run_id, github.run_attempt) || 'minimal-changelog' }}
   prepare-version-files:
     name: "Prepare: version files without signing keys"
     needs: [resolve-bootstrap, generate-full-changelog]
@@ -141,7 +158,30 @@ jobs:
       contents: read
     outputs:
       patch-digest: ${{ steps.patch.outputs.digest }}
+      binding-run-id: ${{ github.run_id }}
+      binding-run-attempt: ${{ github.run_attempt }}
+      artifact-id: ${{ steps.upload.outputs.artifact-id }}
+      artifact-name: ${{ inputs['require-current-attempt'] && format('prepared-version-bumps-{0}-{1}', github.run_id, github.run_attempt) || 'prepared-version-bumps' }}
     steps:
+      - name: Require current full changelog producer before preparing version files
+        if: ${{ inputs['require-current-attempt'] }}
+        shell: bash
+        env:
+          CURRENT_RUN_ID: ${{ github.run_id }}
+          CURRENT_RUN_ATTEMPT: ${{ github.run_attempt }}
+          CONTEXT_SOURCE_SHA: ${{ github.sha }}
+          AUTHORIZED_SOURCE_SHA: ${{ inputs['authorized-source-sha'] }}
+          FULL_RESULT: ${{ needs.generate-full-changelog.result }}
+          FULL_RUN_ID: ${{ needs.generate-full-changelog.outputs.binding-run-id }}
+          FULL_RUN_ATTEMPT: ${{ needs.generate-full-changelog.outputs.binding-run-attempt }}
+          FULL_ARTIFACT_ID: ${{ needs.generate-full-changelog.outputs.artifact-id }}
+          FULL_ARTIFACT_NAME: ${{ needs.generate-full-changelog.outputs.artifact-name }}
+        run: |
+          set -euo pipefail
+          [[ "$CURRENT_RUN_ID" =~ ^[1-9][0-9]*$ && "$CURRENT_RUN_ATTEMPT" =~ ^[1-9][0-9]*$ ]]
+          [[ "$CONTEXT_SOURCE_SHA" =~ ^[0-9a-f]{40}$ && "$AUTHORIZED_SOURCE_SHA" == "$CONTEXT_SOURCE_SHA" ]]
+          [[ "$FULL_RESULT" == success && "$FULL_RUN_ID" == "$CURRENT_RUN_ID" && "$FULL_RUN_ATTEMPT" == "$CURRENT_RUN_ATTEMPT" ]]
+          [[ "$FULL_ARTIFACT_ID" =~ ^[1-9][0-9]*$ && "$FULL_ARTIFACT_NAME" == "full-changelog-$CURRENT_RUN_ID-$CURRENT_RUN_ATTEMPT" ]]
       - name: Checkout immutable authorized source
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
@@ -171,9 +211,27 @@ jobs:
           RELEASE_POLICY: ${{ inputs['release-policy'] }}
         run: forge-ci version derive-release --release-policy "$RELEASE_POLICY"
       - name: Download Full Changelog
+        if: ${{ !inputs['require-current-attempt'] }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: forge-ci artifact download --name full-changelog --dir .
+      - name: Download exact current full changelog before native preparation
+        if: ${{ inputs['require-current-attempt'] }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ARTIFACT_ID: ${{ needs.generate-full-changelog.outputs.artifact-id }}
+          REPOSITORY: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+          REQUEST_SHA: ${{ github.sha }}
+          ARTIFACT_NAME: full-changelog-${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          destination="${RUNNER_TEMP:?}/version-file-full-changelog"
+          test ! -e "$destination" && test ! -L "$destination"
+          forge-ci artifact download --artifact-id "$ARTIFACT_ID" --name "$ARTIFACT_NAME" --repository "$REPOSITORY" --run-id "$RUN_ID" --expected-run-head-sha "$REQUEST_SHA" --dir "$destination"
+          test -f "$destination/CHANGELOG.md" && test ! -L "$destination/CHANGELOG.md"
+          cp --remove-destination -- "$destination/CHANGELOG.md" CHANGELOG.md
+          forge-ci validate changelog --path CHANGELOG.md --required
       - name: Prepare version files
         env:
           PREPARE_STAGE_PLAN_JSON: ${{ inputs['prepare-stage-plan-json'] }}
@@ -193,10 +251,11 @@ jobs:
           digest=$(sha256sum "${handoff}/native.patch")
           printf 'digest=%s\n' "${digest%% *}" >>"${GITHUB_OUTPUT:?}"
       - name: Upload version patch artifact
+        id: upload
         # GitHub exposes the runtime upload token to actions, not run steps.
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: prepared-version-bumps
+          name: ${{ inputs['require-current-attempt'] && format('prepared-version-bumps-{0}-{1}', github.run_id, github.run_attempt) || 'prepared-version-bumps' }}
           path: ${{ runner.temp }}/prepared-version-bump/native.patch
           retention-days: "1"
           if-no-files-found: error
@@ -216,6 +275,44 @@ jobs:
       release-sha: ${{ steps.release-state.outputs.release-sha }}
       source-date-epoch: ${{ steps.release-state.outputs.source-date-epoch }}
     steps:
+      - name: Require original current-attempt preparation producers before private effects
+        if: ${{ inputs['require-current-attempt'] }}
+        shell: bash
+        env:
+          CURRENT_RUN_ID: ${{ github.run_id }}
+          CURRENT_RUN_ATTEMPT: ${{ github.run_attempt }}
+          CONTEXT_SOURCE_SHA: ${{ github.sha }}
+          AUTHORIZED_SOURCE_SHA: ${{ inputs['authorized-source-sha'] }}
+          EXISTING_RELEASE_SHA: ${{ inputs['existing-release-sha'] }}
+          FULL_RESULT: ${{ needs.generate-full-changelog.result }}
+          FULL_RUN_ID: ${{ needs.generate-full-changelog.outputs.binding-run-id }}
+          FULL_RUN_ATTEMPT: ${{ needs.generate-full-changelog.outputs.binding-run-attempt }}
+          FULL_ARTIFACT_ID: ${{ needs.generate-full-changelog.outputs.artifact-id }}
+          FULL_ARTIFACT_NAME: ${{ needs.generate-full-changelog.outputs.artifact-name }}
+          MINIMAL_RESULT: ${{ needs.generate-minimal-changelog.result }}
+          MINIMAL_RUN_ID: ${{ needs.generate-minimal-changelog.outputs.binding-run-id }}
+          MINIMAL_RUN_ATTEMPT: ${{ needs.generate-minimal-changelog.outputs.binding-run-attempt }}
+          MINIMAL_ARTIFACT_ID: ${{ needs.generate-minimal-changelog.outputs.artifact-id }}
+          MINIMAL_ARTIFACT_NAME: ${{ needs.generate-minimal-changelog.outputs.artifact-name }}
+          PATCH_RESULT: ${{ needs.prepare-version-files.result }}
+          PATCH_RUN_ID: ${{ needs.prepare-version-files.outputs.binding-run-id }}
+          PATCH_RUN_ATTEMPT: ${{ needs.prepare-version-files.outputs.binding-run-attempt }}
+          PATCH_ARTIFACT_ID: ${{ needs.prepare-version-files.outputs.artifact-id }}
+          PATCH_ARTIFACT_NAME: ${{ needs.prepare-version-files.outputs.artifact-name }}
+        run: |
+          set -euo pipefail
+          [[ "$CURRENT_RUN_ID" =~ ^[1-9][0-9]*$ && "$CURRENT_RUN_ATTEMPT" =~ ^[1-9][0-9]*$ ]]
+          [[ "$CONTEXT_SOURCE_SHA" =~ ^[0-9a-f]{40}$ && "$AUTHORIZED_SOURCE_SHA" == "$CONTEXT_SOURCE_SHA" && -z "$EXISTING_RELEASE_SHA" ]]
+          check_producer() {
+            local role="$1" result="$2" run="$3" attempt="$4" id="$5" name="$6"
+            if [[ "$result" != success || "$run" != "$CURRENT_RUN_ID" || "$attempt" != "$CURRENT_RUN_ATTEMPT" || ! "$id" =~ ^[1-9][0-9]*$ || "$name" != "$role-$CURRENT_RUN_ID-$CURRENT_RUN_ATTEMPT" ]]; then
+              printf 'Refuse stale, missing or unsuccessful preparation producer: %s\n' "$role" >&2
+              return 1
+            fi
+          }
+          check_producer full-changelog "$FULL_RESULT" "$FULL_RUN_ID" "$FULL_RUN_ATTEMPT" "$FULL_ARTIFACT_ID" "$FULL_ARTIFACT_NAME"
+          check_producer minimal-changelog "$MINIMAL_RESULT" "$MINIMAL_RUN_ID" "$MINIMAL_RUN_ATTEMPT" "$MINIMAL_ARTIFACT_ID" "$MINIMAL_ARTIFACT_NAME"
+          check_producer prepared-version-bumps "$PATCH_RESULT" "$PATCH_RUN_ID" "$PATCH_RUN_ATTEMPT" "$PATCH_ARTIFACT_ID" "$PATCH_ARTIFACT_NAME"
       - name: Checkout immutable authorized source
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
@@ -249,6 +346,87 @@ jobs:
           TAG_NAME: ${{ steps.relctx.outputs.release-tag }}
           BRANCH: ${{ inputs.branch }}
         run: forge-ci validate tag commit --require-head --branch "$BRANCH"
+      - name: Download Full Changelog
+        if: ${{ !inputs['require-current-attempt'] && inputs['existing-release-sha'] == '' && fromJson(inputs['prepare-stage-plan-json']).targets.version_bump.runs }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: forge-ci artifact download --name full-changelog --dir "$RUNNER_TEMP/version-full-changelog"
+      - name: Download exact current full changelog
+        if: ${{ inputs['require-current-attempt'] }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ARTIFACT_ID: ${{ needs.generate-full-changelog.outputs.artifact-id }}
+          REPOSITORY: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+          REQUEST_SHA: ${{ github.sha }}
+          ARTIFACT_NAME: full-changelog-${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          test ! -e "$RUNNER_TEMP/version-full-changelog" && test ! -L "$RUNNER_TEMP/version-full-changelog"
+          forge-ci artifact download --artifact-id "$ARTIFACT_ID" --name "$ARTIFACT_NAME" --repository "$REPOSITORY" --run-id "$RUN_ID" --expected-run-head-sha "$REQUEST_SHA" --dir "$RUNNER_TEMP/version-full-changelog"
+      - name: Verify Full Changelog
+        if: ${{ inputs['existing-release-sha'] == '' && fromJson(inputs['prepare-stage-plan-json']).targets.version_bump.runs }}
+        run: |
+          set -euo pipefail
+          source_file="${RUNNER_TEMP:?}/version-full-changelog/CHANGELOG.md"
+          test -f "${source_file}" && test ! -L "${source_file}"
+          cp --remove-destination -- "${source_file}" CHANGELOG.md
+          forge-ci validate changelog --path CHANGELOG.md --required
+      - name: Download prepared version changes
+        if: ${{ !inputs['require-current-attempt'] && inputs['existing-release-sha'] == '' && fromJson(inputs['prepare-stage-plan-json']).targets.version_bump.runs }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: forge-ci artifact download --name prepared-version-bumps --dir "$RUNNER_TEMP/prepared-version-bumps"
+      - name: Download exact current prepared version changes
+        if: ${{ inputs['require-current-attempt'] }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ARTIFACT_ID: ${{ needs.prepare-version-files.outputs.artifact-id }}
+          REPOSITORY: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+          REQUEST_SHA: ${{ github.sha }}
+          ARTIFACT_NAME: prepared-version-bumps-${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          test ! -e "$RUNNER_TEMP/prepared-version-bumps" && test ! -L "$RUNNER_TEMP/prepared-version-bumps"
+          forge-ci artifact download --artifact-id "$ARTIFACT_ID" --name "$ARTIFACT_NAME" --repository "$REPOSITORY" --run-id "$RUN_ID" --expected-run-head-sha "$REQUEST_SHA" --dir "$RUNNER_TEMP/prepared-version-bumps"
+      - name: Require a regular version patch
+        if: ${{ inputs['existing-release-sha'] == '' && fromJson(inputs['prepare-stage-plan-json']).targets.version_bump.runs }}
+        run: test -f "$RUNNER_TEMP/prepared-version-bumps/native.patch" && test ! -L "$RUNNER_TEMP/prepared-version-bumps/native.patch"
+      - name: Apply complete version-bump plan
+        id: bump-plan
+        if: ${{ inputs['existing-release-sha'] == '' && fromJson(inputs['prepare-stage-plan-json']).targets.version_bump.runs }}
+        env:
+          PREPARE_STAGE_PLAN_JSON: ${{ inputs['prepare-stage-plan-json'] }}
+          VERSION: ${{ steps.relctx.outputs.version }}
+          MAVEN_CLI_OPTS: "--batch-mode --no-transfer-progress --errors --fail-at-end -Dstyle.color=always"
+          PATCH_DIGEST: ${{ needs.prepare-version-files.outputs.patch-digest }}
+        # Native tools ran only in prepare-version-files. The engine validates
+        # their patch; other ecosystems use its existing pure text writers.
+        run: forge-ci version bump-plan --patch "$RUNNER_TEMP/prepared-version-bumps/native.patch" --patch-sha256 "$PATCH_DIGEST"
+      - name: Download Minimal Changelog
+        if: ${{ !inputs['require-current-attempt'] && inputs['existing-release-sha'] == '' && fromJson(inputs['prepare-stage-plan-json']).targets.version_bump.runs }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: forge-ci artifact download --name minimal-changelog --dir "$RUNNER_TEMP/version-minimal-changelog"
+      - name: Download exact current minimal changelog
+        if: ${{ inputs['require-current-attempt'] }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ARTIFACT_ID: ${{ needs.generate-minimal-changelog.outputs.artifact-id }}
+          REPOSITORY: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+          REQUEST_SHA: ${{ github.sha }}
+          ARTIFACT_NAME: minimal-changelog-${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          test ! -e "$RUNNER_TEMP/version-minimal-changelog" && test ! -L "$RUNNER_TEMP/version-minimal-changelog"
+          forge-ci artifact download --artifact-id "$ARTIFACT_ID" --name "$ARTIFACT_NAME" --repository "$REPOSITORY" --run-id "$RUN_ID" --expected-run-head-sha "$REQUEST_SHA" --dir "$RUNNER_TEMP/version-minimal-changelog"
+      - name: Read Minimal Changelog
+        id: minimal-changelog
+        if: ${{ inputs['existing-release-sha'] == '' && fromJson(inputs['prepare-stage-plan-json']).targets.version_bump.runs }}
+        run: forge-ci validate changelog --path "$RUNNER_TEMP/version-minimal-changelog/minimal-changelog.txt"
+      # Admit the preparation inputs before either private signing setup path.
       - name: Import GPG key
         id: import-gpg
         if: ${{ inputs['git-signing-method'] != 'ssh' }}
@@ -268,47 +446,6 @@ jobs:
           GIT_COMMIT_GPGSIGN: "true"
           FORGE_CI_GIT_CONFIG_GLOBAL: "true"
         run: forge-ci release ssh setup
-      - name: Download Full Changelog
-        if: ${{ inputs['existing-release-sha'] == '' && fromJson(inputs['prepare-stage-plan-json']).targets.version_bump.runs }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: forge-ci artifact download --name full-changelog --dir "$RUNNER_TEMP/version-full-changelog"
-      - name: Verify Full Changelog
-        if: ${{ inputs['existing-release-sha'] == '' && fromJson(inputs['prepare-stage-plan-json']).targets.version_bump.runs }}
-        run: |
-          set -euo pipefail
-          source_file="${RUNNER_TEMP:?}/version-full-changelog/CHANGELOG.md"
-          test -f "${source_file}" && test ! -L "${source_file}"
-          cp --remove-destination -- "${source_file}" CHANGELOG.md
-          forge-ci validate changelog --path CHANGELOG.md --required
-      - name: Download prepared version changes
-        if: ${{ inputs['existing-release-sha'] == '' && fromJson(inputs['prepare-stage-plan-json']).targets.version_bump.runs }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: forge-ci artifact download --name prepared-version-bumps --dir "$RUNNER_TEMP/prepared-version-bumps"
-      - name: Require a regular version patch
-        if: ${{ inputs['existing-release-sha'] == '' && fromJson(inputs['prepare-stage-plan-json']).targets.version_bump.runs }}
-        run: test -f "$RUNNER_TEMP/prepared-version-bumps/native.patch" && test ! -L "$RUNNER_TEMP/prepared-version-bumps/native.patch"
-      - name: Apply complete version-bump plan
-        id: bump-plan
-        if: ${{ inputs['existing-release-sha'] == '' && fromJson(inputs['prepare-stage-plan-json']).targets.version_bump.runs }}
-        env:
-          PREPARE_STAGE_PLAN_JSON: ${{ inputs['prepare-stage-plan-json'] }}
-          VERSION: ${{ steps.relctx.outputs.version }}
-          MAVEN_CLI_OPTS: "--batch-mode --no-transfer-progress --errors --fail-at-end -Dstyle.color=always"
-          PATCH_DIGEST: ${{ needs.prepare-version-files.outputs.patch-digest }}
-        # Native tools ran only in prepare-version-files. The engine validates
-        # their patch; other ecosystems use its existing pure text writers.
-        run: forge-ci version bump-plan --patch "$RUNNER_TEMP/prepared-version-bumps/native.patch" --patch-sha256 "$PATCH_DIGEST"
-      - name: Download Minimal Changelog
-        if: ${{ inputs['existing-release-sha'] == '' && fromJson(inputs['prepare-stage-plan-json']).targets.version_bump.runs }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: forge-ci artifact download --name minimal-changelog --dir "$RUNNER_TEMP/version-minimal-changelog"
-      - name: Read Minimal Changelog
-        id: minimal-changelog
-        if: ${{ inputs['existing-release-sha'] == '' && fromJson(inputs['prepare-stage-plan-json']).targets.version_bump.runs }}
-        run: forge-ci validate changelog --path "$RUNNER_TEMP/version-minimal-changelog/minimal-changelog.txt"
       - name: Commit complete release preparation
         if: ${{ inputs['existing-release-sha'] == '' && fromJson(inputs['prepare-stage-plan-json']).targets.version_bump.runs }}
         env:
