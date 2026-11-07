@@ -37,8 +37,10 @@ engine_git() {
 [[ "$(engine_git rev-parse --show-toplevel)" == "$ENGINE_CHECKOUT" && "$(engine_git rev-parse --verify HEAD)" == "$ENGINE_COMMIT" ]] || fail 'wrong engine checkout'
 origin=$(engine_git config --local --no-includes --get remote.origin.url) || fail 'missing engine origin'
 [[ "${origin%.git}" == "$ENGINE_ORIGIN" ]] || fail 'wrong engine origin'
-files=(scripts/ci/engine-binary.sh .engine/bin/forge-ci-linux-amd64.sha256)
-if [[ "$mode" != build ]]; then
+files=(scripts/ci/engine-binary.sh .engine/bin/forge-ci-linux-amd64.sha256 scripts/ci/trusted-runtime-tools.sh)
+if [[ "$mode" == build ]]; then
+	files+=(go.mod go.sum)
+else
 	files+=(scripts/ci/trusted-bootstrap.sh .engine/bin/lib-forge-ci.sh)
 fi
 for relative in "${files[@]}"; do
@@ -52,6 +54,28 @@ done
 if [[ "$mode" == build ]]; then
 	[[ "${GO:-}" == /* && -x "$GO" ]] || fail 'approved absolute Go compiler required'
 	[[ ! -e "$DELIVERY_DIRECTORY" && ! -L "$DELIVERY_DIRECTORY" ]] || fail 'delivery directory already exists'
+	# Only the approved engine is present. Download module DATA, not consumer
+	# hooks/packages, with standard TLS and Go checksum-database verification.
+	# No inherited credentials, Go config, workspace, proxy or cache is admitted.
+	# Full source (including any local replacements) is an admin selection and
+	# pristine authenticated checkout prerequisite, not authenticated by Go sums.
+	module_work=$(mktemp -d "$RUNNER_TEMP/forge-ci-canonical-modules.XXXXXXXX")
+	trap 'chmod -R u+w -- "$module_work"; rm -rf -- "$module_work"' EXIT
+	mkdir -m0700 -- "$module_work/home" "$module_work/modules" "$module_work/build" "$module_work/tmp"
+	export GOMODCACHE=$module_work/modules GOCACHE=$module_work/build
+	module_env=(env -i PATH=/usr/bin:/bin "HOME=$module_work/home"
+		GOENV=off GOWORK=off GOTOOLCHAIN=local GOFLAGS= CGO_ENABLED=0
+		GOPROXY=https://proxy.golang.org GOSUMDB=sum.golang.org
+		"GOMODCACHE=$GOMODCACHE" "GOCACHE=$GOCACHE" "TMPDIR=$module_work/tmp"
+		GOMAXPROCS=2 GOOS=linux GOARCH=amd64)
+	pinned=go$(sed -n 's/^go \([0-9][0-9.]*\)$/\1/p' "$ENGINE_CHECKOUT/go.mod")
+	[[ "$("${module_env[@]}" "$GO" env GOVERSION)" == "$pinned" ]] || fail 'wrong preparation toolchain'
+	"${module_env[@]}" "$GO" -C "$ENGINE_CHECKOUT" mod download all
+	# Download must not repair an incomplete selected lock file. Missing/changed
+	# sums fail before ANY build/output, even if Go authenticated their retrieval.
+	for relative in go.mod go.sum; do
+		[[ "$(engine_git hash-object --no-filters -- "$ENGINE_CHECKOUT/$relative")" == "$(engine_git rev-parse "$ENGINE_COMMIT:$relative")" ]] || fail "module preparation changed $relative"
+	done
 	mkdir -m0700 -- "$DELIVERY_DIRECTORY"
 	/bin/bash "$ENGINE_CHECKOUT/scripts/ci/engine-binary.sh" build amd64 "$DELIVERY_DIRECTORY/forge-ci-linux-amd64"
 	/bin/bash "$ENGINE_CHECKOUT/scripts/ci/engine-binary.sh" verify amd64 "$DELIVERY_DIRECTORY/forge-ci-linux-amd64"

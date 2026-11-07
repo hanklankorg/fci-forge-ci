@@ -20,13 +20,30 @@ There is deliberately no invented published coordinate here. Supply:
 
 - `engine-repository`: approved owner/repository on `github.server_url`.
 - `engine-commit`: full lowercase 40-character GitHub engine commit.
-- `runtime-image`: approved native linux/amd64 image by `@sha256:...`.
+- `runtime-image`: approved native linux/amd64 **Go builder** by `@sha256:...`.
+- `receive-runtime-image`: separate approved native receiver by `@sha256:...`.
+  Empty reuses only the explicitly selected Go builder, for direct callers.
 
 These inputs must come from the protected administrator graph, never a PR,
 consumer plan, consumer action, or consumer-controlled repository variable.
 Format checks are **not** administrator authorization or image attestation.
-The workflow image input controls both jobs; this does not prove the host ran
-the image honestly. The fixed hosted runner/native Actions service is trusted.
+The builder and receiver image inputs control their respective jobs; neither
+proves the host ran the image honestly. The fixed hosted runner/native Actions
+service is trusted. Both effective selections are digest-validated in the
+container-free admission job before either image can start.
+
+The release orchestrator requires `canonical-builder-image` explicitly for
+every protected/classified route, including Go: product type is not known at
+this preflight boundary. It forwards this to the canonical workflow's existing
+`runtime-image`, and forwards the policy `runtime-image` separately to the
+receiver. Native routes without canonical bootstrap retain their defaults.
+A Go consumer may explicitly select the same qualified image for both roles.
+A Cargo consumer may use a Rust-only policy/producer runtime and a separate
+Go builder; it must not silently reuse the Rust image to compile the CLI.
+Neither a digest string nor successful Go qualification establishes Rust
+qualification. No combined Go+Rust image, new image schema or guessed SDK pin
+is required. The downstream selected canonical CLI is an independent binary;
+receivers need Git/gh/jq and later GPG/Cosign where their stage uses them, not Go.
 
 The selected engine commit must contain this delivery glue AND the separately
 security-reviewed `scripts/ci/trusted-bootstrap.sh` integration. That helper is
@@ -34,12 +51,12 @@ queued separately and is **not copied/reimplemented here**. At base f983f81f it
 is absent: selecting that old base fails closed, it is not a usable deployed
 coordinate. The eventual integrated full commit and workflow pin require fresh
 approval. Neither this candidate nor the Java/amd64 SDK 368 qualification
-qualifies the required Go/tooling image. Qualification must establish:
+qualifies either image profile. Qualification must establish:
 
 - native linux/amd64, `/bin/bash`, trusted `/usr/bin:/bin` tools including Git,
   `jq`, `gh`, `sha256sum`, `stat`, `realpath`, and native pinned Node Actions;
-- `/usr/local/go/bin/go` at the exact Go release in the approved engine's
-  `go.mod`, with its modules already available to the canonical recipe offline;
+- for the builder, `/usr/local/go/bin/go` at the exact Go release in the approved engine's
+  `go.mod`, with CA trust and network access for standard Go module preparation;
 - compatibility with the already pinned checkout/upload/download action versions.
 
 No Go/tool installer, `go install`, SDK binary selection or latest-ref fallback
@@ -54,7 +71,17 @@ The native artifact service uses its own job-scoped authenticated transport.
 1. `canonical-admit` validates explicit inputs before starting the selected
    image. No legacy build/signing job is called. No consumer checkout occurs.
 2. `canonical-build` checks out only the explicit engine commit, without LFS or
-   submodules. The existing `engine-binary.sh build amd64` recipe performs the
+   submodules. After origin/full-commit and committed recipe/checksum/module-file
+   checks, delivery glue runs only `go mod download all` in a cleared environment
+   with normal HTTPS proxy/TLS and default `sum.golang.org` verification. A fresh
+   private job-owned module cache and separate compiler cache are removed on exit.
+   It neither executes dependency/consumer hooks nor installs tools. Missing or
+   modified module files, failed downloads, or downloads changing `go.mod`/`go.sum`
+   stop before building or emitting upload inputs. The administrator must select
+   trusted full source, including any local replacements; Go sums do not
+   authenticate local replacements. Existing caches are not used or changed.
+   The existing `engine-binary.sh build amd64` recipe uses that prepared cache
+   for the
    pinned-toolchain/offline-module build, then its existing `verify` checks the
    result against **that checkout's** `.engine/bin` record. No CLI runs yet.
 3. The original build step records native `github.run_id`/`run_attempt` and
@@ -132,3 +159,12 @@ is exercised through the real recipe with an inert compiler fixture, not a
 claim that a real CLI build or image has been qualified. Test selection skips
 with an explicit dependency reason if neither integrated nor supplied helper
 is available. Static ordering checks cover the actual reusable workflow.
+
+`canonicalmodules_test.go` additionally uses real Go with tiny file-proxy module
+fixtures and known `go.sum` hashes. It removes the proxy after preparation and
+checks offline cache reuse through the unchanged recipe with inert compiler
+output. A local rejecting checksum service bounds missing-sum tests: this is
+not remote TLS/checksum-service authentication evidence. Failed fetches, altered
+or missing locks/checksums, and lock repair produce no build/upload inputs.
+Neither these tests nor this source fix qualify a cold protected runtime image;
+that still requires separate tool-image and end-to-end qualification.

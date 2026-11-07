@@ -18,6 +18,7 @@ import (
 	"github.com/diggsweden/forge-ci/internal/domain/config"
 	"github.com/diggsweden/forge-ci/internal/domain/pipeline"
 	"github.com/diggsweden/forge-ci/internal/domain/projecttype"
+	"github.com/diggsweden/forge-ci/internal/testutil/reporoot"
 	"github.com/stretchr/testify/require"
 )
 
@@ -118,9 +119,15 @@ esac
 	write(filepath.Join(source, "produce"), `#!/bin/bash
 set -eu
 test -z "${GITHUB_TOKEN+x}${GPG_SIGNING_KEY+x}${COSIGN_KEY+x}"
+test -z "${GH_TOKEN+x}${FORGE_CI_BIN+x}${FORGE_CI_PLAN+x}${GITHUB_ENV+x}${CARGO_REGISTRIES_CRATES_IO_TOKEN+x}"
+test "$HOME" = "${FORGE_CI_CLASSIFIED_OUTPUT%/*}/classified-product-home"
+test "$PATH" = /usr/local/go/bin:/usr/local/cargo/bin:/usr/local/bin:/usr/bin:/bin
+test "$RUSTUP_HOME" = /usr/local/rustup
+test "$CARGO_HOME" = "$HOME/.cargo"
 cp -a fixture/dist "$FORGE_CI_CLASSIFIED_OUTPUT/dist"
 `)
-	run(root, classifiedLeafStep(t, "producer", "Run administrator-selected").Run, "PRODUCER_PATH=produce", "GITHUB_TOKEN=must-not-reach-product", "COSIGN_KEY=must-not-reach-product")
+	write(filepath.Join(root, "forge-ci-approved-engine/scripts/ci/trusted-runtime-tools.sh"), string(reporoot.ReadFile(t, "scripts/ci/trusted-runtime-tools.sh")))
+	run(root, classifiedLeafStep(t, "producer", "Run administrator-selected").Run, "PRODUCER_PATH=produce", "GITHUB_TOKEN=must-not-reach-product", "COSIGN_KEY=must-not-reach-product", "GH_TOKEN=must-not-reach-product", "CARGO_REGISTRIES_CRATES_IO_TOKEN=must-not-reach-product", "FORGE_CI_BIN=/host/old-cli", "CARGO_HOME=/host/cache", "RUSTUP_HOME=/host/toolchain")
 	// Actual producer handoff block, including command-substitution fail-fast.
 	run(root, classifiedLeafStep(t, "producer", "Admit exact unsigned").Run)
 	output, err := os.ReadFile(filepath.Join(root, "output"))

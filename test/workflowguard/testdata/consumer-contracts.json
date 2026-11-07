@@ -88,6 +88,11 @@
         "required": true,
         "type": "string"
       },
+      "canonical-builder-image": {
+        "required": false,
+        "type": "string",
+        "default": ""
+      },
       "cargo-test-selections-json": {
         "required": false,
         "type": "string",

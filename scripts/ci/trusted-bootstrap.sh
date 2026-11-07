@@ -4,7 +4,7 @@
 
 # Trusted leaf exec glue, not a downloader or an identity-selection policy.
 # Invoke from an administrator-pinned copy, before consumer checkout/secrets.
-# See trusted-bootstrap.md for the delivery and runner trust prerequisites.
+# See docs/trusted-runtime-tools.md for tool placement and runner prerequisites.
 set -euo pipefail
 export PATH=/usr/bin:/bin
 unset FORGE_CI_BIN FORGE_CI_PATH FORGE_CI_BINARY_REF FORGE_CI_PLAN
@@ -40,7 +40,7 @@ actual_origin=$(engine_git config --local --no-includes --get remote.origin.url)
 # Whole-checkout cleanliness is the fresh trusted checkout caller's obligation;
 # do not use status/diff here (fsmonitor, filters and submodules can run code).
 # No selected-checkout shell is sourced until identity AND contents pass.
-for relative in .engine/bin/lib-forge-ci.sh .engine/bin/forge-ci-linux-amd64.sha256; do
+for relative in .engine/bin/lib-forge-ci.sh .engine/bin/forge-ci-linux-amd64.sha256 scripts/ci/trusted-runtime-tools.sh; do
 	file=$checkout/$relative
 	[[ -f "$file" && ! -L "$file" && "$(realpath -e -- "$file")" == "$file" ]] || fail "unsafe engine file: $relative"
 	mode=$(engine_git ls-tree "$commit" -- "$relative")
@@ -58,4 +58,6 @@ SIGNER_STRICT=1
 FORGE_CI_BIN=$binary
 verify_forge_ci || exit $?
 unset FORGE_CI_BIN
-exec "$HELPERS_ENGINE_VERIFIED" "$@"
+# Admit tool placement only AFTER the original absolute CLI's hash verification.
+# Never discover forge-ci on the image's PATH (which may contain an older SDK).
+exec /bin/bash -p "$checkout/scripts/ci/trusted-runtime-tools.sh" "$HELPERS_ENGINE_VERIFIED" "$@"

@@ -23,13 +23,13 @@ func TestTrustedBootstrap(t *testing.T) {
 		t.Skip("trusted leaf bootstrap intentionally requires native linux/amd64")
 	}
 
-	for _, scenario := range []string{"verified-new-file", "wrong-origin", "wrong-commit", "short-commit", "wrong-hash", "missing", "symlink", "symlink-parent", "nonexec", "directory", "dirty-helper", "hidden-helper-edit", "hidden-record-edit", "missing-record", "fsmonitor-verified", "fsmonitor-wrong-hash", "clean-filter-helper", "clean-filter-record", "unrelated-dirty"} {
+	for _, scenario := range []string{"verified-new-file", "wrong-origin", "wrong-commit", "short-commit", "wrong-hash", "missing", "symlink", "symlink-parent", "nonexec", "directory", "dirty-helper", "hidden-helper-edit", "hidden-record-edit", "missing-record", "fsmonitor-verified", "fsmonitor-wrong-hash", "clean-filter-helper", "clean-filter-record", "unrelated-dirty", "dirty-tools", "hidden-tools", "missing-tools", "linked-tools"} {
 		t.Run(scenario, func(t *testing.T) {
 			root := t.TempDir()
 			engine := filepath.Join(root, "engine")
 			delivery := filepath.Join(root, "delivery")
 
-			for _, dir := range []string{filepath.Join(engine, ".engine", "bin"), delivery} {
+			for _, dir := range []string{filepath.Join(engine, ".engine", "bin"), filepath.Join(engine, "scripts/ci"), delivery} {
 				if err := os.MkdirAll(dir, 0o700); err != nil {
 					t.Fatal(err)
 				}
@@ -51,7 +51,30 @@ func TestTrustedBootstrap(t *testing.T) {
 			library := filepath.Join(engine, ".engine", "bin", "lib-forge-ci.sh")
 			write(library, string(lib), 0o600)
 
+			tools, err := os.ReadFile("trusted-runtime-tools.sh")
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			toolHelper := filepath.Join(engine, "scripts/ci/trusted-runtime-tools.sh")
+			write(toolHelper, string(tools), 0o600)
+
 			body := "#!/bin/bash\nset -eu\nprintf 'verified:%s:%s:%s:%s:%s\\n' \"$1\" \"${FORGE_CI_BIN-unset}\" \"${FORGE_CI_PATH-unset}\" \"${FORGE_CI_BINARY_REF-unset}\" \"${FORGE_CI_PLAN-unset}\" >>\"$PROCESS_MARKER\"\nprintf '%s\\n' \"$ADMIN_INPUT\"\n"
+			if scenario == "verified-new-file" {
+				// Map the actual helper's fixed PATH into a disposable image-layout
+				// fixture. No host /usr writes, containers or production lookup seam.
+				body += runtimeToolLookupFixture
+
+				for name, directory := range map[string]string{"go": "/usr/local/go/bin", "cargo": "/usr/local/cargo/bin", "rustc": "/usr/local/cargo/bin", "gh": "/usr/local/bin", "cosign": "/usr/local/bin", "git-cliff": "/usr/local/bin", "forge-ci": "/usr/local/bin"} {
+					path := filepath.Join(root, "image", directory, name)
+					if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+						t.Fatal(err)
+					}
+
+					write(path, "#!/bin/bash\nprintf '%s\\n' '"+name+"' >>\"$TOOL_MARKER\"\n", 0o700)
+				}
+			}
+
 			binary := filepath.Join(delivery, "forge-ci-linux-amd64")
 			write(binary, body, 0o700)
 
@@ -97,6 +120,24 @@ func TestTrustedBootstrap(t *testing.T) {
 			}
 
 			switch scenario {
+			case "dirty-tools", "hidden-tools":
+				if scenario == "hidden-tools" {
+					git("update-index", "--assume-unchanged", "scripts/ci/trusted-runtime-tools.sh")
+				}
+
+				write(toolHelper, "printf sourced >>\"$PROCESS_MARKER\"\n"+string(tools), 0o600)
+			case "missing-tools":
+				if err := os.Remove(toolHelper); err != nil {
+					t.Fatal(err)
+				}
+			case "linked-tools":
+				if err := os.Rename(toolHelper, toolHelper+".real"); err != nil {
+					t.Fatal(err)
+				}
+
+				if err := os.Symlink(toolHelper+".real", toolHelper); err != nil {
+					t.Fatal(err)
+				}
 			case "wrong-origin":
 				origin = "https://unapproved.invalid/admin/engine"
 			case "wrong-commit":
@@ -164,7 +205,7 @@ func TestTrustedBootstrap(t *testing.T) {
 			}
 
 			cmd := exec.CommandContext(t.Context(), "/bin/bash", "--noprofile", "--norc", helper, engine, origin, commit, binary, "--", "--version")
-			cmd.Env = []string{"PATH=" + hostile, "HOME=" + root, "PROCESS_MARKER=" + marker, "ADMIN_INPUT=retained", "FORGE_CI_BIN=" + filepath.Join(hostile, "forge-ci"), "FORGE_CI_PATH=" + hostile, "FORGE_CI_BINARY_REF=old-sdk", "FORGE_CI_PLAN=/consumer/plan.json", "HELPERS_ENGINE_VERIFIED=" + binary, "SIGNER_STRICT=0", "GIT_DIR=/consumer/git", "GIT_WORK_TREE=/consumer", "GIT_CONFIG_COUNT=1", "GIT_CONFIG_KEY_0=remote.origin.url", "GIT_CONFIG_VALUE_0=https://hostile.invalid/engine"}
+			cmd.Env = []string{"PATH=" + hostile, "HOME=" + root, "PROCESS_MARKER=" + marker, "ADMIN_INPUT=retained", "FORGE_CI_BIN=" + filepath.Join(hostile, "forge-ci"), "FORGE_CI_PATH=" + hostile, "FORGE_CI_BINARY_REF=old-sdk", "FORGE_CI_PLAN=/consumer/plan.json", "HELPERS_ENGINE_VERIFIED=" + binary, "SIGNER_STRICT=0", "GIT_DIR=/consumer/git", "GIT_WORK_TREE=/consumer", "GIT_CONFIG_COUNT=1", "GIT_CONFIG_KEY_0=remote.origin.url", "GIT_CONFIG_VALUE_0=https://hostile.invalid/engine", "TEST_IMAGE_ROOT=" + filepath.Join(root, "image"), "TOOL_MARKER=" + filepath.Join(root, "tools"), "CARGO_HOME=/consumer/cache", "RUSTUP_HOME=/consumer/toolchain", "TRUSTED_TOOL_PATH=" + hostile}
 
 			out, runErr := cmd.CombinedOutput()
 			if invoked, err := os.ReadFile(gitMarker); !os.IsNotExist(err) {
@@ -180,6 +221,13 @@ func TestTrustedBootstrap(t *testing.T) {
 
 				if string(processes) != "verified:--version:unset:unset:unset:unset\n" || !strings.Contains(string(out), "retained") {
 					t.Fatalf("wrong executable/environment: %q output %s", processes, out)
+				}
+
+				if scenario == "verified-new-file" {
+					tools, err := os.ReadFile(filepath.Join(root, "tools"))
+					if err != nil || string(tools) != "gh\ngo\ncargo\nrustc\ncosign\ngit-cliff\n" {
+						t.Fatalf("approved image tools not reached (or SDK forge-ci executed): %q, %v", tools, err)
+					}
 				}
 			} else {
 				if runErr == nil {
@@ -212,7 +260,7 @@ func TestTrustedBootstrapOrdering(t *testing.T) {
 		`source "$checkout/.engine/bin/lib-forge-ci.sh"`,
 		`SIGNER_STRICT=1`,
 		`verify_forge_ci || exit $?`,
-		`exec "$HELPERS_ENGINE_VERIFIED" "$@"`,
+		`exec /bin/bash -p "$checkout/scripts/ci/trusted-runtime-tools.sh" "$HELPERS_ENGINE_VERIFIED" "$@"`,
 	} {
 		position := strings.Index(string(body), step)
 		if position <= previous {

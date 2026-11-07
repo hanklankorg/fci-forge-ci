@@ -81,7 +81,7 @@ func newCanonicalFixture(t *testing.T) *canonicalFixture {
 	// Test-only invocation marker delegates to the UNCHANGED reviewed helper.
 	canonicalWrite(t, filepath.Join(fixture.engine, "scripts/ci/trusted-bootstrap.sh"), "#!/bin/bash\nprintf helper >>\"$HELPER_MARKER\"\nexec /bin/bash '"+filepath.Join(fixture.engine, "actual-trusted-bootstrap.sh")+"' \"$@\"\n", 0o600)
 
-	for _, relative := range []string{"scripts/ci/engine-binary.sh", ".engine/bin/lib-forge-ci.sh"} {
+	for _, relative := range []string{"scripts/ci/engine-binary.sh", ".engine/bin/lib-forge-ci.sh", "scripts/ci/trusted-runtime-tools.sh"} {
 		body, err := os.ReadFile(filepath.Join("../..", relative))
 		if err != nil {
 			t.Fatal(err)
@@ -92,6 +92,7 @@ func newCanonicalFixture(t *testing.T) *canonicalFixture {
 
 	canonicalWrite(t, filepath.Join(fixture.engine, ".engine/bin/forge-ci-linux-amd64.sha256"), fmt.Sprintf("%x  bin/forge-ci\n", sha256.Sum256([]byte(fixture.cli))), 0o600)
 	canonicalWrite(t, filepath.Join(fixture.engine, "go.mod"), "module example.invalid/inert\n\ngo 1.26.4\n", 0o600)
+	canonicalWrite(t, filepath.Join(fixture.engine, "go.sum"), "", 0o600)
 	canonicalGit(t, fixture.engine, "init", "-q")
 	canonicalGit(t, fixture.engine, "remote", "add", "origin", "https://github.invalid/admin/engine.git")
 	canonicalGit(t, fixture.engine, "add", ".")
@@ -273,7 +274,7 @@ func TestCanonicalDeliveryProducer(t *testing.T) {
 	compiler := filepath.Join(fixture.root, "approved-inert-go")
 	// Exercise the EXISTING recipe/toolchain check without compiling the CLI or
 	// spending live-lane CPU. This is not a qualification/reproducibility claim.
-	canonicalWrite(t, compiler, "#!/bin/bash\nset -eu\nif [[ $1 == env ]]; then printf 'go1.26.4\\n'; exit; fi\nwhile [[ $# -gt 0 ]]; do if [[ $1 == -o ]]; then cp '"+cli+"' \"$2\"; exit; fi; shift; done\nexit 99\n", 0o700)
+	canonicalWrite(t, compiler, "#!/bin/bash\nset -eu\nif [[ $1 == env ]]; then printf 'go1.26.4\\n'; exit; fi\nif [[ $3 == mod && $4 == download && $5 == all ]]; then touch \"$GOMODCACHE/prepared\"; exit; fi\n[[ $GOPROXY == off && $GOSUMDB == off && -f $GOMODCACHE/prepared ]]\nwhile [[ $# -gt 0 ]]; do if [[ $1 == -o ]]; then cp '"+cli+"' \"$2\"; exit; fi; shift; done\nexit 99\n", 0o700)
 
 	fixture.env["GO"] = compiler
 	if out, err := fixture.run(t, "build"); err != nil {

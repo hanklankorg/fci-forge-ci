@@ -17,9 +17,8 @@ runs:
       env:
         GH_TOKEN: ${{ github.token }}
       run: |
-        export PATH=/usr/bin:/bin
         unset GH_DEBUG
-        gh api --hostname "${GITHUB_SERVER_URL#https://}" \
+        /bin/bash -p "$RUNNER_TEMP/forge-ci-approved-engine/scripts/ci/trusted-runtime-tools.sh" gh api --hostname "${GITHUB_SERVER_URL#https://}" \
           "repos/$GITHUB_REPOSITORY/actions/artifacts/$PRODUCER_ARTIFACT_ID" >"$RUNNER_TEMP/forge-ci-canonical-metadata.json"
     - name: Admit exact metadata before extraction
       shell: /bin/bash --noprofile --norc -peuo pipefail {0}
