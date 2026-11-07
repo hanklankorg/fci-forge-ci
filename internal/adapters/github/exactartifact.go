@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"path"
 	"strconv"
 	"strings"
 
@@ -58,6 +59,8 @@ func (p *Provider) downloadExactArtifact(ctx context.Context, in provider.RunArt
 		return provider.RunArtifactInfo{}, err
 	}
 
+	limits := exactArchiveLimits(in, artifact)
+
 	location, response, err := client.Actions.DownloadArtifact(ctx, owner, repo, artifactID, maxArtifactRedirects)
 	if err != nil {
 		return provider.RunArtifactInfo{}, fmt.Errorf("resolve exact artifact archive: %w", httpretry.SafeError(classifyArtifactResponse(response, err)))
@@ -68,7 +71,7 @@ func (p *Provider) downloadExactArtifact(ctx context.Context, in provider.RunArt
 	}
 
 	written, count, err := downloadAndExtractZipChecked(ctx, exactArtifactDownloadClient(p.httpClient()), location.String(), in.Dir,
-		domainartifact.MaxTotalBytes, domainartifact.MaxFileCount, observation.ArchiveDigest, true)
+		limits.expanded, limits.entries, observation.ArchiveDigest, true, limits)
 	if err != nil {
 		return provider.RunArtifactInfo{}, err
 	}
@@ -79,6 +82,10 @@ func (p *Provider) downloadExactArtifact(ctx context.Context, in provider.RunArt
 func bindExactArtifact(in provider.RunArtifactDownload, repository *gogithub.Repository, artifact *gogithub.Artifact, artifactID, runID int64) (*provider.RunArtifactObservation, error) {
 	if artifact == nil || artifact.GetID() != artifactID || artifact.GetName() != in.Name || artifact.Expired == nil || artifact.GetExpired() {
 		return nil, fmt.Errorf("exact artifact ID/name/expiry does not match the expected live artifact: %w", errs.ErrValidation)
+	}
+
+	if err := validateExactRepositoryAndSize(in, repository, artifact); err != nil {
+		return nil, err
 	}
 
 	run := artifact.WorkflowRun
@@ -98,18 +105,49 @@ func bindExactArtifact(in provider.RunArtifactDownload, repository *gogithub.Rep
 	}, nil
 }
 
-func validateExactArtifactZip(reader *zip.ReadCloser, exact bool) error {
+func validateExactRepositoryAndSize(in provider.RunArtifactDownload, repository *gogithub.Repository, artifact *gogithub.Artifact) error {
+	if in.ExpectedRepositoryID != "" && strconv.FormatInt(repository.GetID(), 10) != in.ExpectedRepositoryID {
+		return fmt.Errorf("artifact repository ID differs from trusted created repository: %w", errs.ErrValidation)
+	}
+
+	if in.Limits != nil && (artifact.SizeInBytes == nil || artifact.GetSizeInBytes() <= 0 || artifact.GetSizeInBytes() > in.Limits.MaxArchiveBytes) {
+		return fmt.Errorf("exact artifact metadata size is missing or exceeds case archive budget: %w", errs.ErrValidation)
+	}
+
+	return nil
+}
+
+func validateExactArtifactZip(reader *zip.ReadCloser, exact bool, limits artifactArchiveLimits) error {
 	if !exact {
 		return nil
 	}
 
-	if len(reader.File) > domainartifact.MaxFileCount {
+	if len(reader.File) > limits.entries {
 		return fmt.Errorf("exact artifact ZIP exceeds entry budget: %w", errs.ErrValidation)
 	}
 
 	seen := make(map[string]bool, len(reader.File))
+
+	if limits.expanded < 0 {
+		return fmt.Errorf("invalid expanded ZIP budget: %w", errs.ErrValidation)
+	}
+
+	remaining := uint64(limits.expanded)
+
 	for _, entry := range reader.File {
 		name := strings.TrimSuffix(entry.Name, "/")
+
+		if limits.bounded {
+			if name == "." || path.Clean(name) != name || strings.ContainsAny(name, ":\x00") || (!entry.Mode().IsRegular() && !entry.FileInfo().IsDir()) {
+				return fmt.Errorf("bounded artifact ZIP requires canonical regular paths: %w", errs.ErrValidation)
+			}
+
+			if entry.UncompressedSize64 > remaining {
+				return fmt.Errorf("bounded artifact ZIP exceeds expanded budget: %w", errs.ErrValidation)
+			}
+
+			remaining -= entry.UncompressedSize64
+		}
 
 		destination, err := domainartifact.SafeJoin(".", name)
 		if err != nil {

@@ -351,7 +351,12 @@ func downloadAndExtractZip(ctx context.Context, client *http.Client, url, dir st
 
 // The exact-ID path verifies the API's archive digest (when provided) and
 // refuses duplicate ZIP paths before creating any extraction staging.
-func downloadAndExtractZipChecked(ctx context.Context, client *http.Client, url, dir string, maxBytes int64, maxFiles int, digest string, exact bool) (int64, int, error) {
+func downloadAndExtractZipChecked(ctx context.Context, client *http.Client, url, dir string, maxBytes int64, maxFiles int, digest string, exact bool, options ...artifactArchiveLimits) (int64, int, error) {
+	limits := artifactArchiveLimits{compressed: domainartifact.MaxArchiveBytes, expanded: maxBytes, entries: maxFiles, declared: -1}
+	if len(options) != 0 {
+		limits = options[0]
+	}
+
 	// The zip is bounded by progress, not wall time: a large artifact must not
 	// be cut off by the API client's whole-request Timeout.
 	ctx, transfer := httpretry.StartTransfer(ctx, httpretry.ClientTimeout())
@@ -378,8 +383,13 @@ func downloadAndExtractZipChecked(ctx context.Context, client *http.Client, url,
 		return 0, 0, fmt.Errorf("download artifact: HTTP %d: %w", resp.StatusCode, cls)
 	}
 
-	if resp.ContentLength > domainartifact.MaxArchiveBytes {
-		return 0, 0, fmt.Errorf("download artifact body exceeds %d bytes: %w", domainartifact.MaxArchiveBytes, errs.ErrValidation)
+	compressedLimit := limits.compressed
+	if limits.bounded {
+		compressedLimit = min(compressedLimit, limits.declared)
+	}
+
+	if resp.ContentLength > compressedLimit {
+		return 0, 0, fmt.Errorf("download artifact body exceeds %d bytes: %w", compressedLimit, errs.ErrValidation)
 	}
 
 	tmp, err := os.CreateTemp(runcontext.TempRoot(os.Getenv), "forge-ci-artifact-*.zip")
@@ -392,7 +402,7 @@ func downloadAndExtractZipChecked(ctx context.Context, client *http.Client, url,
 	defer func() { _ = os.Remove(tmpPath) }()
 
 	hash := sha256.New()
-	size, err := domainartifact.CopyAtMost(io.MultiWriter(tmp, hash), resp.Body, domainartifact.MaxArchiveBytes)
+	size, err := copyArtifactBytes(ctx, io.MultiWriter(tmp, hash), resp.Body, compressedLimit, limits.bounded)
 	err = transfer.Err(err)
 
 	if cerr := tmp.Close(); err == nil {
@@ -403,10 +413,18 @@ func downloadAndExtractZipChecked(ctx context.Context, client *http.Client, url,
 		return 0, 0, fmt.Errorf("write temp zip: %w", err)
 	}
 
+	if limits.bounded && size != limits.declared {
+		return 0, 0, fmt.Errorf("artifact archive differs from metadata size: %w", errs.ErrValidation)
+	}
+
 	if err := verifyArtifactArchiveDigest(hex.EncodeToString(hash.Sum(nil)), digest); err != nil {
 		return 0, 0, err
 	}
 
+	return installArtifactZIP(ctx, tmpPath, dir, size, maxBytes, maxFiles, exact, limits)
+}
+
+func installArtifactZIP(ctx context.Context, tmpPath, dir string, size, maxBytes int64, maxFiles int, exact bool, limits artifactArchiveLimits) (int64, int, error) {
 	zr, err := zip.OpenReader(tmpPath)
 	if err != nil {
 		// Classified, because an unclassified error here exits 70, which tells
@@ -419,7 +437,7 @@ func downloadAndExtractZipChecked(ctx context.Context, client *http.Client, url,
 
 	defer func() { _ = zr.Close() }()
 
-	if err := validateExactArtifactZip(zr, exact); err != nil {
+	if err := validateExactArtifactZip(zr, exact, limits); err != nil {
 		return 0, 0, err
 	}
 
@@ -430,8 +448,12 @@ func downloadAndExtractZipChecked(ctx context.Context, client *http.Client, url,
 
 	defer func() { _ = stage.Close() }()
 
-	bytesWritten, count, err := extractZipInto(zr, stage.Root(), maxBytes, maxFiles)
+	bytesWritten, count, err := extractZipInto(ctx, zr, stage.Root(), maxBytes, maxFiles, limits.bounded)
 	if err != nil {
+		return 0, 0, err
+	}
+
+	if err := ctx.Err(); err != nil {
 		return 0, 0, err
 	}
 
@@ -446,7 +468,12 @@ func downloadAndExtractZipChecked(ctx context.Context, client *http.Client, url,
 // bytes and file count. Path safety (traversal, escape, backslash, abs) is
 // the shared domain/artifact.SafeJoin guard — the same one the Forgejo
 // per-file path uses. Symlink entries are rejected outright.
-func extractZipInto(zr *zip.ReadCloser, root *os.Root, maxBytes int64, maxFiles int) (int64, int, error) {
+func extractZipInto(ctx context.Context, zr *zip.ReadCloser, root *os.Root, maxBytes int64, maxFiles int, hardLimit bool) (int64, int, error) {
+	maxEntries := domainartifact.MaxFileCount
+	if hardLimit {
+		maxEntries = maxFiles
+	}
+
 	var (
 		totalBytes int64
 		count      int
@@ -454,9 +481,13 @@ func extractZipInto(zr *zip.ReadCloser, root *os.Root, maxBytes int64, maxFiles 
 	)
 
 	for _, f := range zr.File { //nolint:varnamelen // idiomatic short name (testing/http/io conventions).
+		if err := ctx.Err(); err != nil {
+			return 0, 0, err
+		}
+
 		entries++
-		if entries > domainartifact.MaxFileCount {
-			return 0, 0, fmt.Errorf("zip exceeds %d entries: %w", domainartifact.MaxFileCount, errs.ErrValidation)
+		if entries > maxEntries {
+			return 0, 0, fmt.Errorf("zip exceeds %d entries: %w", maxEntries, errs.ErrValidation)
 		}
 
 		if f.Mode()&fs.ModeSymlink != 0 {
@@ -482,28 +513,16 @@ func extractZipInto(zr *zip.ReadCloser, root *os.Root, maxBytes int64, maxFiles 
 			return 0, 0, fmt.Errorf("zip exceeds remaining artifact file budget: %w", errs.ErrValidation)
 		}
 
-		remainingBytes := maxBytes - totalBytes
-		if remainingBytes < 0 {
-			return 0, 0, fmt.Errorf("zip exceeds remaining artifact byte budget: %w", errs.ErrValidation)
-		}
-
-		remainingLimit := uint64(remainingBytes)
-		if f.UncompressedSize64 > uint64(domainartifact.MaxFileBytes) || f.UncompressedSize64 > remainingLimit {
-			return 0, 0, fmt.Errorf("zip entry %q exceeds extraction limits: %w", f.Name, errs.ErrValidation)
-		}
-
-		declaredBytes := int64(f.UncompressedSize64)
-		if totalErr := domainartifact.ValidateTotals(totalBytes, count, declaredBytes); totalErr != nil {
-			return 0, 0, fmt.Errorf("zip entry %q: %w", f.Name, totalErr)
+		limit, err := zipExtractionLimit(f, totalBytes, maxBytes, count, hardLimit)
+		if err != nil {
+			return 0, 0, err
 		}
 
 		if mkErr := root.MkdirAll(filepath.Dir(dest), 0o755); mkErr != nil {
 			return 0, 0, fmt.Errorf("mkdir parent of %q: %w", dest, mkErr)
 		}
 
-		limit := min(domainartifact.MaxFileBytes, maxBytes-totalBytes)
-
-		n, err := writeZipFile(root, f, dest, limit)
+		n, err := writeZipFile(ctx, root, f, dest, limit, hardLimit)
 		if err != nil {
 			return 0, 0, err
 		}
@@ -515,7 +534,30 @@ func extractZipInto(zr *zip.ReadCloser, root *os.Root, maxBytes int64, maxFiles 
 	return totalBytes, count, nil
 }
 
-func writeZipFile(root *os.Root, f *zip.File, dest string, maxBytes int64) (int64, error) {
+func zipExtractionLimit(file *zip.File, totalBytes, maxBytes int64, count int, hardLimit bool) (int64, error) {
+	remaining := maxBytes - totalBytes
+	if remaining < 0 {
+		return 0, fmt.Errorf("zip exceeds remaining artifact byte budget: %w", errs.ErrValidation)
+	}
+
+	if file.UncompressedSize64 > uint64(domainartifact.MaxFileBytes) || file.UncompressedSize64 > uint64(remaining) {
+		return 0, fmt.Errorf("zip entry %q exceeds extraction limits: %w", file.Name, errs.ErrValidation)
+	}
+
+	declared := int64(file.UncompressedSize64)
+	if err := domainartifact.ValidateTotals(totalBytes, count, declared); err != nil {
+		return 0, fmt.Errorf("zip entry %q: %w", file.Name, err)
+	}
+
+	limit := min(domainartifact.MaxFileBytes, remaining)
+	if hardLimit {
+		limit = min(limit, declared)
+	}
+
+	return limit, nil
+}
+
+func writeZipFile(ctx context.Context, root *os.Root, f *zip.File, dest string, maxBytes int64, bounded bool) (int64, error) {
 	in, err := f.Open()
 	if err != nil {
 		return 0, fmt.Errorf("open zip entry %q: %w", f.Name, err)
@@ -541,7 +583,7 @@ func writeZipFile(root *os.Root, f *zip.File, dest string, maxBytes int64) (int6
 		}
 	}()
 
-	written, copyErr := domainartifact.CopyAtMost(out, in, maxBytes)
+	written, copyErr := copyArtifactBytes(ctx, out, in, maxBytes, bounded)
 	closeErr := out.Close()
 
 	switch {
