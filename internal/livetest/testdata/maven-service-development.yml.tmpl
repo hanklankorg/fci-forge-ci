@@ -11,6 +11,7 @@ jobs:
     with:
       branch: @BRANCH@
       artifacts-config: .forge-ci/service-development.yml
+      artifact-job-image-java: @IMAGE@
       forge-ci-repository: ${{ vars.FORGE_CI_REPOSITORY }}
       forge-ci-sha: @PIN@
       runner-label: ${{ vars.CI_RUNNER_LABEL_CONTAINER }}

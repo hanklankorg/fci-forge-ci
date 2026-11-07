@@ -23,10 +23,11 @@ func TestMavenServiceDevelopmentPreservesSource(t *testing.T) {
 		t.Run(format, func(t *testing.T) {
 			root, git := stageTestRepo(t, format)
 			for path, body := range map[string]string{
-				"pom.xml":                "<project><artifactId>different-service</artifactId><version>9.2.0</version></project>",
-				"Containerfile":          "FROM example.invalid/java\nCOPY original.jar /app.jar\n",
-				"src/main/App.java":      "// original business code\n",
-				"development/checks.xml": "<rules/>",
+				".forge-ci/artifacts.yml": "containers:\n  - name: service\n    container-file: Containerfile\n    context: .\n    platforms: linux/amd64\n",
+				"pom.xml":                 "<project><artifactId>different-service</artifactId><version>9.2.0</version></project>",
+				"Containerfile":           "FROM example.invalid/java\nCOPY . /src\nRUN cd /src && mvn package\n",
+				"src/main/App.java":       "// original business code\n",
+				"development/checks.xml":  "<rules/>",
 			} {
 				stageTestWrite(t, root, path, body, 0644)
 			}

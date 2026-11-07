@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -157,7 +158,12 @@ func runForgejoMavenServiceCase(t *testing.T, root string, private bool) {
 		t.Fatal(err)
 	}
 
-	if err = frozen.Validate(); err != nil || frozen.SourceSHA != head || frozen.SourceBranch != config.Branch || len(frozen.Artifacts) != 0 || len(frozen.Builds) != 1 || frozen.Builds[0].Arch != "amd64" {
+	expected := livetest.MavenServiceDevelopmentPlan(t, consumer, snapshotimage.Input{
+		SourceSHA: head, SourceBranch: config.Branch, Tag: frozen.Tag, ImageRepository: image,
+		SourceDateEpoch: frozen.SourceDateEpoch, Publish: true,
+	})
+	if err = frozen.Validate(); err != nil || frozen.SourceSHA != head || frozen.SourceBranch != config.Branch ||
+		!reflect.DeepEqual(frozen, expected) || len(frozen.Builds) != 1 || frozen.Builds[0].Arch != "amd64" {
 		t.Fatalf("wrong frozen service plan: %+v: %v", frozen, err)
 	}
 
@@ -219,5 +225,5 @@ func runForgejoMavenServiceCase(t *testing.T, root string, private bool) {
 		t.Fatal("no actual checked source JAR")
 	}
 
-	t.Logf("admitted=%s policy=%s selected=%s branch=%s engine=%s image=%s readiness=%s; checked JARs=%d; Containerfile rebuilt independently, no JAR/image byte-equality claim", admitted, main, head, config.Branch, layer.Commit, receipt.Ref, config.ReadinessURL, count)
+	t.Logf("admitted=%s policy=%s selected=%s branch=%s engine=%s image=%s readiness=%s; checked JARs=%d producers=%d; declared build route preserved, no checked-JAR/image byte-equality claim", admitted, main, head, config.Branch, layer.Commit, receipt.Ref, config.ReadinessURL, count, len(expected.Artifacts))
 }
