@@ -197,6 +197,37 @@ ephemeral signed-request and isolated signer lifecycle.
 
 ## Archive reuse and capability gaps
 
+### Same-product lifecycle acceptance is separate
+
+The intended product flow is PR/MR, a **published development snapshot in unsigned
+mode**, a human-signed release request, secret-free build/tests, scan/handoff,
+trusted signing/publication and public readback. Ephemeral checks are not publication.
+The new `published-snapshot-forgejo.cases` profile reuses the native Maven-service
+trial, not these CLI adapters; it is standalone and does not link lifecycle stages.
+It verifies source/image/digest/readiness, not signature/attestation absence or scan
+readbacks. See `docs/live-campaigns.md` for its deliberately narrow supported road.
+
+| Product lane | Remaining requirement |
+| --- | --- |
+| Full GoReleaser product on Forgejo/GitLab | Preserve the previously accepted 81-name inventory; fresh linked lifecycle evidence still required |
+| Hosted GitHub full GoReleaser product | Unsupported by reduced Go/Cargo fixtures: needs the full producer, classified unsigned handoff and package-GPG acceptance |
+| Native Nano | Full product DAG remains incomplete; native GNU amd64 Cargo is not equivalent |
+
+Do not substitute this fixture's executable and identity files for the full product
+inventory or manufacture golden artifacts to make an unsupported lane pass.
+Comparability requires the same immutable original product source/object format,
+producer, platform/flavor sets and effective gates. Use existing `release.FileManifest`
+roles for exact expected-set readback, not counts alone. Only compare reproducible
+payload bytes with equal actual build inputs; provider/repository/run identities in
+signed provenance legitimately differ. Preserve prepared-release/request relationships,
+failure blocking, mutation/preseed rejection, checksums, SBOM pins, provenance,
+Cosign, applicable package-GPG and OCI readback. Missing capabilities remain blockers.
+
+Forge CI owns acceptance scenarios and retains bounded failure evidence before
+guarded cleanup. Existing fixture origins, caller acknowledgements, resource budgets
+and admission locks remain authoritative; original product repositories are never
+push destinations. Fresh guarded live runs are still required per supported lane.
+
 `rust-job.Containerfile` is the maintained request-check/build role layered on
 an operator-reviewed immutable Rust tool image (`SOURCE_IMAGE`, supplied by the
 operator, not a floating default). It adds SSH request verification and gettext

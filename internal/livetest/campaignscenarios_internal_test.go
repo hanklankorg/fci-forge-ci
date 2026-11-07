@@ -5,12 +5,48 @@ package livetest
 
 import (
 	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/diggsweden/forge-ci/internal/domain/errs"
 )
+
+// A release-only plan cannot stand in for a development snapshot, and the
+// hosted GitHub road cannot enter this local campaign launcher.
+func TestCampaignCannotRelabelPartialTrialsAsProductLifecycle(t *testing.T) {
+	t.Parallel()
+
+	for _, provider := range []string{campaignForgejo, campaignGitLab} {
+		t.Run(provider, func(t *testing.T) {
+			t.Parallel()
+
+			for _, event := range []string{TrialDevRelease, "snapshot", "checks-only"} {
+				t.Run(event, func(t *testing.T) {
+					t.Parallel()
+
+					dir, cases := newCampaign(t, "CAMPAIGN_COMMIT="+campaignHead+"\n", "scenario TestFirst\nconsumer same-product "+event+"\n")
+					if err := os.MkdirAll(filepath.Join(dir, "demos", "same-product"), 0o700); err != nil {
+						t.Fatal(err)
+					}
+
+					plan, err := PlanCampaignLane(dir, provider, cases, campaignHead, CampaignRun{})
+					if !errors.Is(err, errs.ErrValidation) || !strings.Contains(err.Error(), "consumer event") || len(plan.Cases) != 0 {
+						t.Fatalf("unsupported snapshot event left executable cases: plan=%+v err=%v", plan, err)
+					}
+				})
+			}
+		})
+	}
+
+	dir, cases := newCampaign(t, "CAMPAIGN_COMMIT="+campaignHead+"\n", "scenario TestFirst\n")
+
+	plan, err := PlanCampaignLane(dir, "github", cases, campaignHead, CampaignRun{})
+	if !errors.Is(err, errs.ErrValidation) || len(plan.Cases) != 0 {
+		t.Fatalf("hosted GitHub entered the local campaign road: plan=%+v err=%v", plan, err)
+	}
+}
 
 func TestCampaignScenariosUseRecipesWithExplicitBoundedInputs(t *testing.T) {
 	t.Parallel()

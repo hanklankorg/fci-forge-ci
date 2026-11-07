@@ -231,16 +231,25 @@ func campaignCaseArgs(dir, provider string, env map[string]string, words []strin
 		return nil, fmt.Errorf("a case is consumer or scenario: %w", errs.ErrValidation)
 	}
 
+	events := "pull-request or release"
+	if len(words) > 1 && campaignSupportsPublishedSnapshot(provider, words[1]) {
+		events += " or " + campaignPublishedSnapshot
+	}
+
 	if len(words) < 3 {
-		return nil, fmt.Errorf("want consumer <demo> <pull-request|release> [key=value ...]: %w", errs.ErrValidation)
+		return nil, fmt.Errorf("want consumer <demo> <%s> [key=value ...]: %w", events, errs.ErrValidation)
 	}
 
 	if !campaignDemo.MatchString(words[1]) || !isDir(filepath.Join(dir, "demos", words[1])) {
 		return nil, fmt.Errorf("no such demo in %s: %w", filepath.Join(dir, "demos"), errs.ErrValidation)
 	}
 
+	if words[2] == campaignPublishedSnapshot {
+		return campaignSnapshotRecipe(dir, provider, env, words)
+	}
+
 	if words[2] != "pull-request" && words[2] != "release" {
-		return nil, fmt.Errorf("a consumer event is pull-request or release: %w", errs.ErrValidation)
+		return nil, fmt.Errorf("a consumer event is %s: %w", events, errs.ErrValidation)
 	}
 
 	archives, settings, err := campaignSettings(provider, env, words[3:])
