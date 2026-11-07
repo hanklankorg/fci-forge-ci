@@ -447,6 +447,12 @@ func importRootBasePayload(t *testing.T, fixture *rootBaseFixture) []imageledger
 
 	require.NoError(t, fixture.publish(t.Context()))
 
+	return importPublishedBasePayload(t, fixture)
+}
+
+func importPublishedBasePayload(t *testing.T, fixture *rootBaseFixture) []imageledger.Entry {
+	t.Helper()
+
 	digest, err := apprelease.CanonicalPayloadDigest("payload")
 	require.NoError(t, err)
 

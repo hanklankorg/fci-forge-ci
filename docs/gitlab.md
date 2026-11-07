@@ -1231,6 +1231,76 @@ Before enabling those paths:
   between stages, including signed handoffs, before changing the general native
   refusal or activating any production policy.
 
+### Cold child BASE stage (not scheduled or activated)
+
+`container base-images child-base plan/build/publish` is a separate narrow
+boundary for exactly one cold parent-bearing BASE and its complete native
+platform partition. It does not loosen `root-base` admission or the general
+native BASE refusal. No production YAML selects it.
+
+Each verb requires `--parent-base-json` using the existing immediate-parent
+shape, for example `{"ref":"registry.example/shared/base@sha256:...","input_id":"..."}`
+(both hashes must be full lowercase SHA-256 values). The protected caller must
+first verify the parent's signature and lineage with the existing
+`base-images validate`, the pinned trust key, expected source/workflow and
+current opaque parent input ID. Digest transport alone is not publisher
+authentication. Cross-repository verified parent facts are allowed; no recursive
+verification or product graph discovery is added.
+
+The resolved consumer plan must contain exactly that `parent_base` in image
+`provenance-json`. Every architecture must declare one `registry-inputs` entry
+mapping the same explicit build argument to the same digest-pinned parent, with
+one identical matching `build-args` value. The child input ID must differ from
+the parent's. Missing, conflicting or unsupported projections, multiple/mixed
+images, moving tags and architecture caches are refused before effects.
+`base-ref` is not used for this lineage contract.
+
+The workflow supplies the existing common job flags plus the explicit parent
+projection to all three verbs. `plan --plan consumer-plan.json --output plan.json
+--runner-archs ...` freezes an admitted plan; it does not compute graph IDs.
+For each architecture, use existing `release-images fetch-build-inputs` with its
+admitted `--build-json` and explicit administrative `--auth-file` to populate
+`--inputs-dir inputs/<name>-arch-<arch>`. Fetching executes no consumer code.
+Then `child-base build --inputs-dir inputs --arch ... --metadata-dir layouts
+--created ...` uses Buildah and verified local parent layouts without registry
+credentials. It refuses omitted prepared inputs; source manifest and selected
+platform membership pins are checked before any native builder import.
+
+The checkout `--release-sha` is not an override of a plan's effective
+image/build `revision`. Content revision, source commit, child input ID and
+parent input ID remain distinct. Protected callers must independently approve
+the exact source, plan and effective revisions, not accept producer declarations
+as such approval. This unit adds no global release override or protected plan
+admission policy.
+
+`child-base publish --layouts-dir layouts --output-dir handoff/payload` uses the
+same complete-set layout admission, independent pre-gate digest pins, scans and
+unsigned publication core as the root boundary. Replacing both valid layout
+bytes and their records after gates still fails before the first upload. The
+canonical `dist/` plus `premade-sboms/` transport and independent staging are
+unchanged. Existing import retains `parent_base`; existing signing with
+`--evidence-root verified-payload` uses the pinned producer SBOM bytes and
+preserves that lineage in the signed statement.
+
+Existing `base-images validate --base-inputs-json ...` can compare the signed
+child against an independently supplied expectation:
+
+```json
+[{"flavor":"opaque-child","base_input_id":"<child-ID>","parent_base":{"ref":"<verified-parent-digest-ref>","input_id":"<parent-ID>"}}]
+```
+
+This is verification support, not a claim of expected-parent promotion support.
+The separately reviewed promotion expectation unit must be integrated and tested
+with that explicit expectation before any protected child-stage promotion
+guarantee. Never silently drop the parent expectation for a child stage.
+
+Remaining work is protected source/plan and key-free evidence admission,
+authenticated completed-stage fan-in, reviewed YAML `needs`/trust-lane scheduling
+and signed handoffs, expected-parent promotion integration, warm/cache selection
+and multi-stage/mixed/dependent-release composition. Product policy continues
+to own graph selection and hashing. No whole-Nano DAG or production acceptance
+is claimed by these offline native-boundary tests.
+
 ### Package publication
 
 The Catalog publish components are separate from the native release and run

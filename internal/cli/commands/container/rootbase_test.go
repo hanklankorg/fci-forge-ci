@@ -15,13 +15,16 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/google/go-containerregistry/pkg/name"
 	"github.com/google/go-containerregistry/pkg/registry"
 	"github.com/google/go-containerregistry/pkg/v1/empty"
 	"github.com/google/go-containerregistry/pkg/v1/layout"
 	"github.com/google/go-containerregistry/pkg/v1/mutate"
+	"github.com/google/go-containerregistry/pkg/v1/remote"
 	"github.com/stretchr/testify/require"
 
 	"github.com/diggsweden/forge-ci/internal/adapters/ociregistry"
+	appbaseimages "github.com/diggsweden/forge-ci/internal/app/baseimages"
 	rootcli "github.com/diggsweden/forge-ci/internal/cli"
 	"github.com/diggsweden/forge-ci/internal/domain/pipeline"
 	"github.com/diggsweden/forge-ci/internal/testutil/mockbinary"
@@ -31,6 +34,16 @@ import (
 // Real CLI and OCI transport, exclusively on loopback. The builder, scanners
 // and signing tool are inert: this proves composition, not their efficacy.
 func TestRootBaseNativeCLIJourney(t *testing.T) {
+	nativeBaseCLIJourney(t, false)
+}
+
+func TestChildBaseNativeCLIJourney(t *testing.T) {
+	nativeBaseCLIJourney(t, true)
+}
+
+func nativeBaseCLIJourney(t *testing.T, child bool) {
+	t.Helper()
+
 	env := testenv.New(t)
 	t.Chdir(env.Temp)
 
@@ -79,9 +92,42 @@ func TestRootBaseNativeCLIJourney(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, path.AppendImage(image))
 
+	parent := appbaseimages.BaseImageParent{}
+	stage, extra := "root-base", []string{}
+	checkoutSHA := revision
+
+	if child {
+		// Only a loopback fixture is seeded. Its signature/trust acceptance is
+		// the protected caller's separate responsibility, not this producer.
+		parentImage, parentErr := mutate.AppendLayers(image)
+		require.NoError(t, parentErr)
+		parentName, parentErr := name.NewTag(host + "/shared/parent:fixture")
+		require.NoError(t, parentErr)
+		require.NoError(t, remote.Write(parentName, parentImage, remote.WithContext(t.Context())))
+		hash, parentErr := parentImage.Digest()
+		require.NoError(t, parentErr)
+
+		parent = appbaseimages.BaseImageParent{Ref: host + "/shared/parent@" + hash.String(), InputID: strings.Repeat("e", 64)}
+		plan.Images[0].ProvenanceJSON = fmt.Sprintf(`{"parent_base":{"ref":%q,"input_id":%q}}`, parent.Ref, parent.InputID)
+		plan.Images[0].Revision, plan.Builds[0].Revision = revision, revision
+		checkoutSHA = strings.Repeat("c", 40)
+		plan.Builds[0].BuildArgs = "PARENT_IMAGE=" + parent.Ref
+		plan.Builds[0].RegistryInputs = map[string]string{"PARENT_IMAGE": parent.Ref}
+		body, err = json.Marshal(plan)
+		require.NoError(t, err)
+		write("consumer-plan.json", body)
+
+		projection, parentErr := json.Marshal(parent)
+		require.NoError(t, parentErr)
+
+		stage, extra = "child-base", []string{"--parent-base-json", string(projection)}
+	}
+
 	bins := mockbinary.New(t)
 	bins.OnPath()
 	bins.Add("buildah", fmt.Sprintf(`
+test -z "${REGISTRY_TOKEN:-}${COSIGN_KEY:-}${COSIGN_PASSWORD:-}" || exit 93
+if [ "$1" = pull ]; then printf 'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n'; fi
 if [ "$1" = push ]; then
   for arg in "$@"; do
     case "$arg" in oci:*) dest=${arg#oci:}; dest=${dest%%:*}; mkdir -p "$dest"; cp -R -- %q/. "$dest/";; esac
@@ -98,13 +144,14 @@ if [ "$1" = attest ]; then
     case "$1" in --type) shift; kind=$1;; --predicate) shift; predicate=$1;; esac
     shift
   done
-  if [ "$kind" = slsaprovenance1 ]; then cp -- "$predicate" %q; fi
+	  if [ "$kind" = slsaprovenance1 ]; then cp -- "$predicate" %q; fi
+	  if [ "$kind" = cyclonedx ]; then cp -- "$predicate" %q; fi
 fi
 if [ "$1" = verify-attestation ]; then
   printf '{"payload":"'
   { printf '{"predicateType":"https://slsa.dev/provenance/v1","predicate":'; cat %q; printf '}'; } | base64 | tr -d '\n'
   printf '"}\n'
-fi`, captured, captured))
+fi`, captured, captured+".sbom", captured))
 
 	run := func(args ...string) string {
 		t.Helper()
@@ -129,12 +176,29 @@ fi`, captured, captured))
 		return string(capturedOutput) + output.String()
 	}
 
-	job := []string{"--image-repository", source, "--release-tag", "v1.2.3", "--release-sha", revision,
-		"--server-url", "https://source.example", "--repository", "org/app"}
-	run(append([]string{"container", "base-images", "root-base", "plan", "--plan", "consumer-plan.json", "--output", "plan.json", "--runner-archs", "amd64"}, job...)...)
-	run(append([]string{"container", "base-images", "root-base", "build", "--plan", "plan.json", "--arch", "amd64", "--metadata-dir", "layouts", "--created", baseStartedOn}, job...)...)
+	job := make([]string, 0, 10+len(extra))
+	job = append(job, "--image-repository", source, "--release-tag", "v1.2.3", "--release-sha", checkoutSHA,
+		"--server-url", "https://source.example", "--repository", "org/app")
+	job = append(job, extra...)
+	run(append([]string{"container", "base-images", stage, "plan", "--plan", "consumer-plan.json", "--output", "plan.json", "--runner-archs", "amd64"}, job...)...)
+	buildArgs := append([]string{"container", "base-images", stage, "build", "--plan", "plan.json", "--arch", "amd64", "--metadata-dir", "layouts", "--created", baseStartedOn}, job...)
+
+	if child {
+		require.NoError(t, os.Mkdir("inputs", 0o700))
+
+		buildJSON, encodeErr := json.Marshal(plan.Builds[0])
+		require.NoError(t, encodeErr)
+		run("container", "release-images", "fetch-build-inputs", "--build-json", string(buildJSON), "--release-sha", checkoutSHA,
+			"--server-url", "https://source.example", "--repository", "org/app", "--inputs-dir", "inputs/root-arch-amd64", "--auth-file", "auth.json")
+		require.Empty(t, bins.Invocations("buildah"), "credentialed fetch must not execute a builder")
+
+		buildArgs = append(buildArgs, "--inputs-dir", "inputs")
+		refuseReplacedPreparedParent(t, bins, buildArgs)
+	}
+
+	run(buildArgs...)
 	require.Empty(t, bins.Invocations("syft"))
-	run(append([]string{"container", "base-images", "root-base", "publish", "--plan", "plan.json", "--layouts-dir", "layouts", "--output-dir", "payload", "--auth-file", "auth.json"}, job...)...)
+	run(append([]string{"container", "base-images", stage, "publish", "--plan", "plan.json", "--layouts-dir", "layouts", "--output-dir", "payload", "--auth-file", "auth.json"}, job...)...)
 
 	digest := strings.TrimSpace(run("release", "dist-digest", "--canonical-payload", "--dist-dir", "payload"))
 	write("digest", []byte(digest))
@@ -151,11 +215,23 @@ fi`, captured, captured))
 	before := len(bins.Invocations("syft"))
 
 	run(append([]string{"container", "base-images", "sign", "--ledger", "verified/dist/base-images-publication.json", "--evidence-root", "verified",
-		"--workflow", "bases.yml", "--source-sha", revision, "--started-on", baseStartedOn, "--method", "kms", "--key", "env://COSIGN_KEY"}, common...)...)
+		"--workflow", "bases.yml", "--source-sha", checkoutSHA, "--started-on", baseStartedOn, "--method", "kms", "--key", "env://COSIGN_KEY"}, common...)...)
 	require.Len(t, bins.Invocations("syft"), before, "trusted signer must not rescan")
+
+	retainedSBOM, err := os.ReadFile("verified/premade-sboms/base-sbom-opaque.cyclonedx.json")
+	require.NoError(t, err)
+	signedSBOM, err := os.ReadFile(captured + ".sbom")
+	require.NoError(t, err)
+	require.Equal(t, retainedSBOM, signedSBOM)
 	write("trusted.pub", []byte("inert-public-key"))
 
 	keyHash := fmt.Sprintf("%x", sha256.Sum256([]byte("inert-public-key")))
+	if child {
+		verifyChildCLI(t, run, bins, parent, destination, id, keyHash, common)
+
+		return
+	}
+
 	output := run(append([]string{"container", "base-images", "promote", "--ledger", "verified/dist/base-images-publication.json",
 		"--expected-workflow", "bases.yml", "--cosign-public-key-path", "trusted.pub", "--cosign-public-key-sha256", keyHash}, common...)...)
 
