@@ -21,7 +21,7 @@ require (
 	github.com/urfave/cli/v3 v3.14.0
 	github.com/vifraa/gopom v1.0.0
 	gitlab.com/gitlab-org/api/client-go v1.46.0
-	golang.org/x/crypto v0.58.0
+	golang.org/x/crypto v0.58.1-0.20261009181718-2f1f834330b2
 	golang.org/x/mod v0.42.0
 	golang.org/x/sync v0.24.0
 	golang.org/x/sys v0.49.0
