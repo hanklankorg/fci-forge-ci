@@ -41,7 +41,10 @@ type VerifyReleaseTagInput struct {
 	Token         runcontext.Credential
 	// ExpectedParent, when set, requires the release commit to be the single
 	// child of that commit: the caller prepared exactly one commit on top of
-	// the source it authorised.
+	// the source it authorised. Also re-read release-request/<Tag> on the
+	// original remote: its object must match the local request, and its peeled
+	// commit must equal this explicitly authorised SHA. This is freshness and
+	// source binding, not a replacement for signed-request authorization.
 	ExpectedParent string
 	// ChangelogOnly admits exactly a CHANGELOG.md change and binds the local
 	// release-request/<tag> to ExpectedParent, for a tested prepare candidate.
@@ -81,6 +84,10 @@ func VerifyReleaseTag(ctx context.Context, git tagVerifyGit, out io.Writer, in V
 
 	if in.ExpectedParent != "" && !domaingit.ValidCommitSHA(in.ExpectedParent) {
 		return fmt.Errorf("verify-release-tag: expected-parent must be a full lowercase commit ID: %w", errs.ErrUsage)
+	}
+
+	if in.ExpectedParent == in.ReleaseSHA {
+		return fmt.Errorf("verify-release-tag: prepared release must differ from the authorised request source: %w", errs.ErrValidation)
 	}
 
 	if in.ChangelogOnly && in.ExpectedParent == "" {
@@ -135,7 +142,7 @@ func VerifyReleaseTag(ctx context.Context, git tagVerifyGit, out io.Writer, in V
 		return fmt.Errorf("verify-release-tag: remote tag %s points to %s, not release-sha %s: %w", in.Tag, tagCommit, in.ReleaseSHA, errs.ErrValidation)
 	}
 
-	if err = verifyPreparedSource(ctx, git, in); err != nil {
+	if err = verifyPreparedSource(ctx, git, in, repoURL); err != nil {
 		return err
 	}
 
@@ -158,7 +165,7 @@ func VerifyReleaseTag(ctx context.Context, git tagVerifyGit, out io.Writer, in V
 	return nil
 }
 
-func verifyPreparedSource(ctx context.Context, git tagVerifyGit, in VerifyReleaseTagInput) error {
+func verifyPreparedSource(ctx context.Context, git tagVerifyGit, in VerifyReleaseTagInput, repository string) error {
 	if in.ExpectedParent == "" {
 		return nil
 	}
@@ -173,6 +180,10 @@ func verifyPreparedSource(ctx context.Context, git tagVerifyGit, in VerifyReleas
 			in.ReleaseSHA, in.ExpectedParent, parents, errs.ErrValidation)
 	}
 
+	if err := verifyPreparedRequest(ctx, git, in, repository); err != nil {
+		return err
+	}
+
 	if in.ChangelogOnly {
 		return verifyChangelogOnly(ctx, git, in)
 	}
@@ -180,8 +191,11 @@ func verifyPreparedSource(ctx context.Context, git tagVerifyGit, in VerifyReleas
 	return nil
 }
 
-func verifyChangelogOnly(ctx context.Context, git tagVerifyGit, in VerifyReleaseTagInput) error {
-	request, err := git.RevParse(ctx, "refs/tags/release-request/"+in.Tag+"^{commit}")
+func verifyPreparedRequest(ctx context.Context, git tagVerifyGit, in VerifyReleaseTagInput, repository string) error {
+	requestTag := version.ReleaseRequestPrefix + in.Tag
+	requestRef := "refs/tags/" + requestTag
+
+	request, err := git.RevParse(ctx, requestRef+"^{commit}")
 	if err != nil {
 		return fmt.Errorf("verify-release-tag: resolve release request: %w", err)
 	}
@@ -190,6 +204,33 @@ func verifyChangelogOnly(ctx context.Context, git tagVerifyGit, in VerifyRelease
 		return fmt.Errorf("verify-release-tag: release request does not match the tested commit: %w", errs.ErrValidation)
 	}
 
+	localObject, err := git.RevParse(ctx, requestRef)
+	if err != nil {
+		return fmt.Errorf("verify-release-tag: resolve local request object: %w", err)
+	}
+
+	remoteObject, err := git.RemoteTagObjectAtURL(ctx, repository, requestTag, in.Token)
+	if err != nil {
+		return fmt.Errorf("verify-release-tag: resolve remote request object: %w", err)
+	}
+
+	if !domaingit.ValidCommitSHA(localObject) || !domaingit.ValidCommitSHA(remoteObject) || localObject != remoteObject {
+		return fmt.Errorf("verify-release-tag: local release request object does not match remote object: %w", errs.ErrValidation)
+	}
+
+	remoteCommit, err := git.RemoteTagCommit(ctx, repository, requestTag, in.Token)
+	if err != nil {
+		return fmt.Errorf("verify-release-tag: resolve remote request commit: %w", err)
+	}
+
+	if remoteCommit != in.ExpectedParent {
+		return fmt.Errorf("verify-release-tag: remote release request does not match the authorised source: %w", errs.ErrValidation)
+	}
+
+	return nil
+}
+
+func verifyChangelogOnly(ctx context.Context, git tagVerifyGit, in VerifyReleaseTagInput) error {
 	changed, err := git.ChangedPaths(ctx, in.ExpectedParent, in.ReleaseSHA)
 	if err != nil {
 		return fmt.Errorf("verify-release-tag: inspect prepared changes: %w", err)
@@ -221,6 +262,8 @@ func verifyChangelogAndBump(ctx context.Context, git tagVerifyGit, in VerifyRele
 		switch {
 		case path == "CHANGELOG.md":
 			changelog = true
+		case in.VersionBump == projecttype.Cargo && path != pathpkg.Base(path):
+			return fmt.Errorf("verify-release-tag: Cargo prepare requires root version files, got %q: %w", path, errs.ErrValidation)
 		case slices.Contains(files, pathpkg.Base(path)):
 			bumped = append(bumped, path)
 		default:
