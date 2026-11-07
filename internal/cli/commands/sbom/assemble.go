@@ -67,6 +67,7 @@ EXAMPLES:
 			&cli.BoolFlag{Name: "create-zip", Usage: "additionally bundle the layers into a release-attached zip"},
 			// Plan mode (per-artifact matrix; was `sbom generate artifacts`).
 			&cli.StringFlag{Name: "plan", Sources: cli.EnvVars("CONFIG_PLAN_JSON"), Usage: "typed config-plan JSON: assemble one layer set per artifact in the plan (from \"config parse-artifacts\")"},
+			&cli.StringFlag{Name: "acquisition-dir", Sources: cli.EnvVars("ACQUISITION_DIR"), Usage: "plan mode: use only this fresh producer tree for build BOMs, artifact scans, and generated outputs; requires --version"},
 			&cli.StringFlag{Name: "sboms", Value: "all", Sources: cli.EnvVars("SBOMS"), Usage: "plan mode: sboms enum (\"all\", \"build,source\", …) selecting which layers to produce per artifact"},
 			// Multi-artifact container mode (was `sbom generate container`).
 			&cli.StringFlag{Name: "image-name", Sources: cli.EnvVars("IMAGE_NAME"), Usage: "container mode: base image name without tag/digest; with --image-digest forms the syft target"},
@@ -120,6 +121,7 @@ func runAssembleMode(ctx context.Context, cmd *cli.Command) error {
 			SBOMs:          cmd.String("sboms"),
 			Version:        cmd.String("version"),
 			WorkingDir:     cmd.String(flagWorkingDir),
+			AcquisitionDir: cmd.String("acquisition-dir"),
 		})
 	case cmd.String("image-name") != "" || cmd.String("image-digest") != "":
 		return appsbom.GenerateContainer(ctx, scanner, maven.New(), git.New(), os.Stderr, os.Stderr, appsbom.GenerateContainerInput{

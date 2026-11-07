@@ -48,6 +48,9 @@ type AssembleInput struct {
 	ReleaseFilesDir          string
 	ReleaseArtifactsDir      string
 	SBOMDir                  string
+	// AcquisitionDir is the fresh producer tree emitted by download-artifacts
+	// --isolated. Source checkout contents remain attachment-only in this mode.
+	AcquisitionDir string
 }
 
 type assemblyCollector struct {
@@ -59,6 +62,7 @@ type assemblyCollector struct {
 	// than threaded through every collect* helper.
 	releaseFilesDir     string
 	releaseArtifactsDir string
+	acquisitionDir      string
 	assets              []domainrelease.AssemblyFile
 	sboms               []domainrelease.AssemblyFile
 	assetByName         map[string]domainrelease.AssemblyFile
@@ -113,16 +117,14 @@ func Assemble(out io.Writer, in AssembleInput) (*domainrelease.Assembly, error) 
 		return nil, err
 	}
 
-	for _, dir := range append([]string{releaseArtifactsDir, sbomDir}, plannedSBOMRoots(cfg)...) {
-		if !pathsafe.Relative(dir) {
-			return nil, fmt.Errorf("assembly source directory must be workspace-relative: %q: %w", dir, errs.ErrValidation)
-		}
+	if err := validateAssemblySources(cfg, in.AcquisitionDir, releaseArtifactsDir, sbomDir); err != nil {
+		return nil, err
+	}
 
-		root, rootErr := pathsafe.OpenRoot(dir)
-		if rootErr == nil {
-			_ = root.Close()
-		} else if !errors.Is(rootErr, fs.ErrNotExist) {
-			return nil, rootErr
+	if in.AcquisitionDir != "" {
+		releaseArtifactsDir = filepath.Join(in.AcquisitionDir, releaseArtifactsDir)
+		for index := range transfer.Items {
+			transfer.Items[index].Path = filepath.Join(in.AcquisitionDir, transfer.Items[index].Path)
 		}
 	}
 
@@ -134,6 +136,7 @@ func Assemble(out io.Writer, in AssembleInput) (*domainrelease.Assembly, error) 
 		sbomsDir:            sbomsDir,
 		releaseFilesDir:     releaseFilesDir,
 		releaseArtifactsDir: releaseArtifactsDir,
+		acquisitionDir:      in.AcquisitionDir,
 		assetByName:         make(map[string]domainrelease.AssemblyFile),
 		sbomByName:          make(map[string]domainrelease.AssemblyFile),
 		seenSBOMSrc:         make(map[string]struct{}),
@@ -175,6 +178,47 @@ func Assemble(out io.Writer, in AssembleInput) (*domainrelease.Assembly, error) 
 	}
 
 	return asm, nil
+}
+
+func validateAssemblySources(cfg pipeline.ConfigPlan, acquisitionDir, artifactsDir, sbomDir string) error {
+	sourceDirs := []string{artifactsDir, sbomDir}
+	if acquisitionDir == "" {
+		sourceDirs = append(sourceDirs, plannedSBOMRoots(cfg)...)
+	} else {
+		if !filepath.IsAbs(acquisitionDir) {
+			return fmt.Errorf("acquisition-dir must be absolute: %w", errs.ErrValidation)
+		}
+
+		if err := validateAcquisitionRoot(acquisitionDir); err != nil {
+			return err
+		}
+
+		root, err := pathsafe.OpenRoot(acquisitionDir)
+		if err != nil {
+			return err
+		}
+
+		_ = root.Close()
+	}
+
+	for _, dir := range sourceDirs {
+		if !pathsafe.Relative(dir) {
+			return fmt.Errorf("assembly source directory must be workspace-relative: %q: %w", dir, errs.ErrValidation)
+		}
+
+		if acquisitionDir != "" {
+			dir = filepath.Join(acquisitionDir, dir)
+		}
+
+		root, err := pathsafe.OpenRoot(dir)
+		if err == nil {
+			_ = root.Close()
+		} else if !errors.Is(err, fs.ErrNotExist) {
+			return err
+		}
+	}
+
+	return nil
 }
 
 // stage validates both destinations and source overlap before clearing either.
@@ -352,15 +396,25 @@ func collectAttachmentAssets(c *assemblyCollector, patterns string) error {
 	return nil
 }
 
-func collectAssemblySBOMs(c *assemblyCollector, cfg pipeline.ConfigPlan, sbomDir string) error {
+func collectAssemblySBOMs(collector *assemblyCollector, cfg pipeline.ConfigPlan, sbomDir string) error {
+	if collector.acquisitionDir != "" {
+		// Only acquired members and outputs generated from them, never source
+		// fixtures. Visit analyzed-container inputs first to preserve their role.
+		if err := walkSBOMRoot(collector, filepath.Join(collector.acquisitionDir, sbomDir), assemblySourceAnalyzedContainerSBOM); err != nil {
+			return err
+		}
+
+		return walkSBOMRoot(collector, collector.acquisitionDir, assemblySourceGeneratedSBOM)
+	}
+
 	roots := plannedSBOMRoots(cfg)
 	for _, root := range roots {
-		if err := walkSBOMRoot(c, root, assemblySourceGeneratedSBOM); err != nil {
+		if err := walkSBOMRoot(collector, root, assemblySourceGeneratedSBOM); err != nil {
 			return err
 		}
 	}
 
-	return walkSBOMRoot(c, sbomDir, assemblySourceAnalyzedContainerSBOM)
+	return walkSBOMRoot(collector, sbomDir, assemblySourceAnalyzedContainerSBOM)
 }
 
 //nolint:varnamelen // c is the assembly collector threaded through every collect* helper; a longer name only adds noise.
@@ -374,7 +428,11 @@ func walkSBOMRoot(c *assemblyCollector, root, kind string) error {
 	}
 
 	releaseFilesAbs := absOrSelf(c.releaseFilesDir)
+
 	releaseArtifactsAbs := absOrSelf(c.releaseArtifactsDir)
+	if c.acquisitionDir != "" {
+		releaseArtifactsAbs = "" // acquired producer SBOMs are legitimate inputs too
+	}
 
 	return filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {

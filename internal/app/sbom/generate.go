@@ -92,6 +92,10 @@ type GenerateInput struct {
 	FS             fs.FS
 	ContainerImage string // analyzed-container target
 	CreateZip      bool
+	// RequireFreshOutputs prevents generated release evidence from overwriting
+	// acquired producer members that already have a canonical SBOM filename.
+	RequireFreshOutputs bool
+	generatedOutputs    map[string]bool // invocation-local; never a producer receipt
 }
 
 // BuildSBOMGenerator produces a build-layer CycloneDX bom.json on demand, for

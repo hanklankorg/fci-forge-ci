@@ -3727,6 +3727,7 @@ EXAMPLE:
 
 | Flag | Description | Type | Default | Env vars |
 |------|-------------|------|---------|----------|
+| `--acquisition-dir` | fresh external producer tree from release download-artifacts --isolated; source checkout is attachment-only | string | `""` | `$ACQUISITION_DIR` |
 | `--config-plan-json` | typed config plan JSON emitted by config parse-artifacts (required) | string | `""` | `$CONFIG_PLAN_JSON` |
 | `--artifact-transfer-plan-json` | typed artifact-transfer plan JSON used by release download-artifacts (required) | string | `""` | `$ARTIFACT_TRANSFER_PLAN_JSON` |
 | `--attach-artifacts` | comma/newline-separated workspace-relative extra release asset globs | string | `""` | `$ATTACH_ARTIFACTS` |
@@ -3894,6 +3895,7 @@ EXAMPLE (as a workflow step):
 
 | Flag | Description | Type | Default | Env vars |
 |------|-------------|------|---------|----------|
+| `--isolated` | acquire into a fresh directory outside the checkout; emit acquisition-dir for assembly (runner cleans it at job end) | bool | `false` | n/a |
 | `--artifact-transfer-plan-json` | typed transfer plan JSON listing which CI artifacts to download | string | `""` | `$ARTIFACT_TRANSFER_PLAN_JSON` |
 | `--run-id` | CI run ID artifacts are downloaded from | string | `""` | `$CI_RUN_ID`, `$FORGEJO_RUN_ID`, `$GITHUB_RUN_ID` |
 | `--repository` | "owner/repo" the run belongs to | string | `""` | `$REPOSITORY`, `$CI_REPO`, `$CI_PROJECT_PATH`, `$FORGEJO_REPOSITORY`, `$FORGEJO_REPO`, `$GITHUB_REPOSITORY` |
@@ -4946,6 +4948,7 @@ EXAMPLES:
 | `--container-image` | container image to analyze (required for the analyzed-container layer) | string | `""` | n/a |
 | `--create-zip` | additionally bundle the layers into a release-attached zip | bool | `false` | n/a |
 | `--plan` | typed config-plan JSON: assemble one layer set per artifact in the plan (from "config parse-artifacts") | string | `""` | `$CONFIG_PLAN_JSON` |
+| `--acquisition-dir` | plan mode: use only this fresh producer tree for build BOMs, artifact scans, and generated outputs; requires --version | string | `""` | `$ACQUISITION_DIR` |
 | `--sboms` | plan mode: sboms enum ("all", "build,source", …) selecting which layers to produce per artifact | string | `"all"` | `$SBOMS` |
 | `--image-name` | container mode: base image name without tag/digest; with --image-digest forms the syft target | string | `""` | `$IMAGE_NAME` |
 | `--image-digest` | container mode: sha256:… digest pinning the exact image manifest | string | `""` | `$IMAGE_DIGEST` |

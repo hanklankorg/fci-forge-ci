@@ -76,6 +76,7 @@ func lineageFindings(workflows map[string]lineageWorkflow) ([]string, int) {
 			for reason := range exactIDLineageProofs(workflow, jobName) {
 				proven[reason] = true
 			}
+
 			for _, reason := range unresolved {
 				if proven[reason] {
 					resolved++

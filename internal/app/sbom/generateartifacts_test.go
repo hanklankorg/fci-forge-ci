@@ -17,7 +17,73 @@ import (
 	"github.com/diggsweden/forge-ci/internal/domain/errs"
 	"github.com/diggsweden/forge-ci/internal/domain/projecttype"
 	"github.com/diggsweden/forge-ci/internal/testutil/testfs"
+	"github.com/stretchr/testify/require"
 )
+
+func TestGenerateArtifacts_AcquisitionNeverHarvestsSourceFixtures(t *testing.T) {
+	fsys := testfs.NewReal(t)
+	fsys.Chdir()
+	fsys.WriteFile("packages/app/bom.json", []byte(`{"bomFormat":"CycloneDX","source":"fixture"}`))
+	fsys.WriteFile("packages/app/fixture-sbom.spdx.json", []byte(`{"source":"fixture"}`))
+
+	acquired := testfs.NewReal(t)
+	acquired.WriteFile("release-artifacts/bom.json", []byte(`{"bomFormat":"CycloneDX","source":"producer"}`))
+
+	plan := sbomPlanJSON(t, sbomConfigPlan(t,
+		config.Artifact{Name: "app", ProjectType: projecttype.NPM, WorkingDirectory: "packages/app", SBOMs: "build"}))
+	err := appsbom.GenerateArtifacts(t.Context(), &fakeSyft{}, nil, &fakeGit{sha: "abc1234"}, io.Discard, io.Discard, appsbom.GenerateArtifactsInput{
+		ConfigPlanJSON: plan, SBOMs: "build", Version: "1.2.3", AcquisitionDir: acquired.Root,
+	})
+	require.NoError(t, err)
+
+	output := "app-1.2.3-abc1234-build-sbom.cyclonedx.json"
+	body, err := os.ReadFile(acquired.Path(output))
+	require.NoError(t, err)
+	require.JSONEq(t, `{"bomFormat":"CycloneDX","source":"producer"}`, string(body))
+	// A retry/new generation must not replace a canonical producer/output file.
+	err = appsbom.GenerateArtifacts(t.Context(), &fakeSyft{}, nil, &fakeGit{sha: "abc1234"}, io.Discard, io.Discard, appsbom.GenerateArtifactsInput{
+		ConfigPlanJSON: plan, SBOMs: "build", Version: "1.2.3", AcquisitionDir: acquired.Root,
+	})
+	require.ErrorIs(t, err, errs.ErrValidation)
+
+	preserved, readErr := os.ReadFile(acquired.Path(output))
+	require.NoError(t, readErr)
+	require.Equal(t, body, preserved)
+
+	_, err = os.Stat(fsys.Path("packages/app/" + output))
+	require.ErrorIs(t, err, os.ErrNotExist)
+
+	// An explicitly requested build layer cannot silently fall back to the
+	// source-only BOM when the producer did not upload its build BOM.
+	require.NoError(t, os.Remove(acquired.Path("release-artifacts/bom.json")))
+	require.NoError(t, os.Remove(acquired.Path(output)))
+	err = appsbom.GenerateArtifacts(t.Context(), &fakeSyft{}, nil, &fakeGit{sha: "abc1234"}, io.Discard, io.Discard, appsbom.GenerateArtifactsInput{
+		ConfigPlanJSON: plan, SBOMs: "build", Version: "1.2.3", AcquisitionDir: acquired.Root,
+	})
+	require.ErrorIs(t, err, errs.ErrMissingInput)
+}
+
+func TestGenerateArtifacts_AcquisitionSupportsMultipleArtifactScans(t *testing.T) {
+	fsys := testfs.NewReal(t)
+	fsys.Chdir()
+
+	acquired := testfs.NewReal(t)
+	acquired.WriteFile("release-artifacts/target/app.jar", []byte("actual producer"))
+
+	plan := sbomPlanJSON(t, sbomConfigPlan(t,
+		config.Artifact{Name: "one", ProjectType: projecttype.Maven, WorkingDirectory: "packages/one", SBOMs: "analyzed-artifact"},
+		config.Artifact{Name: "two", ProjectType: projecttype.Maven, WorkingDirectory: "packages/two", SBOMs: "analyzed-artifact"}))
+	scanner := &fakeSyft{}
+	err := appsbom.GenerateArtifacts(t.Context(), scanner, nil, &fakeGit{sha: "abc1234"}, io.Discard, io.Discard, appsbom.GenerateArtifactsInput{
+		ConfigPlanJSON: plan, SBOMs: "analyzed-artifact", Version: "1.2.3", AcquisitionDir: acquired.Root,
+	})
+	require.NoError(t, err)
+	require.Len(t, scanner.calls, 2)
+
+	for _, call := range scanner.calls {
+		require.Equal(t, acquired.Path("release-artifacts/target/app.jar"), call.target)
+	}
+}
 
 func TestGenerateArtifacts_ConfigPlanUsesArtifactWorkingDirectories(t *testing.T) {
 	fsys := testfs.NewReal(t)

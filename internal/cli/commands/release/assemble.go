@@ -23,6 +23,7 @@ EXAMPLE:
    CONFIG_PLAN_JSON="$(forge-ci config parse-artifacts)" \
    forge-ci release assemble --project-name app --version 1.2.3 --release-artifacts-dir dist`,
 		Flags: []cli.Flag{
+			&cli.StringFlag{Name: "acquisition-dir", Sources: cli.EnvVars("ACQUISITION_DIR"), Usage: "fresh external producer tree from release download-artifacts --isolated; source checkout is attachment-only"},
 			&cli.StringFlag{Name: "config-plan-json", Required: true, Sources: cli.EnvVars("CONFIG_PLAN_JSON"), Usage: "typed config plan JSON emitted by config parse-artifacts"},
 			&cli.StringFlag{Name: flagArtifactTransferPlanJSON, Required: true, Sources: cli.EnvVars("ARTIFACT_TRANSFER_PLAN_JSON"), Usage: "typed artifact-transfer plan JSON used by release download-artifacts"},
 			&cli.StringFlag{Name: flagAttachArtifacts, Sources: cli.EnvVars("ATTACH_ARTIFACTS"), Usage: "comma/newline-separated workspace-relative extra release asset globs"},
@@ -35,6 +36,7 @@ EXAMPLE:
 		},
 		Action: func(_ context.Context, cmd *cli.Command) error {
 			_, err := apprelease.Assemble(os.Stderr, apprelease.AssembleInput{
+				AcquisitionDir:           cmd.String("acquisition-dir"),
 				ConfigPlanJSON:           cmd.String("config-plan-json"),
 				ArtifactTransferPlanJSON: cmd.String(flagArtifactTransferPlanJSON),
 				AttachArtifacts:          cmd.String(flagAttachArtifacts),

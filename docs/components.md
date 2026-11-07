@@ -392,6 +392,16 @@ fresh remote request/final tag identity before private operations. Metadata step
 make no explicit consumer-tool/action calls, but require trusted runner Git startup
 configuration/templates; they do not force hooks off. See [prepared request binding](prepared-request-binding.md).
 
+**Migration — release attachments:** Producer artifacts are now acquired in a
+fresh directory disjoint from the source checkout. Planned producer binaries,
+including extracted binaries, are still assembled and published. Implicit
+attachments from checkout-resident `release-artifacts/binaries/` have been
+removed: declare source-tree extras explicitly with workspace-relative
+`attach-artifacts` patterns (for example, `release-extra/**/*.txt`). Source SBOM
+fixtures are no longer discovered automatically; a source SBOM explicitly selected
+as an attachment remains an attachment, not producer SBOM evidence. Git metadata
+and release changelog handling are unchanged.
+
 #### `validate-release-prerequisites.yml`
 Validates release requirements (called automatically by orchestrator).
 

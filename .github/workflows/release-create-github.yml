@@ -227,23 +227,14 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: forge-ci artifact download --name release-changelog --dir .
       - name: Download planned release artifacts
+        id: acquisition
         env:
           ARTIFACT_TRANSFER_PLAN_JSON: ${{ inputs['artifact-transfer-plan-json'] }}
           GH_TOKEN: ${{ github.token }}
           REPOSITORY: ${{ github.repository }}
-        run: forge-ci release download-artifacts
-      - name: Compute effective attach-artifacts (auto-include extracted binaries)
-        # If extract.binary produced any files under ./release-artifacts/binaries/,
-        # append a glob so they get checksummed, signed, and attached to the
-        # GitHub Release alongside the user-specified globs. Without this,
-        # callers who declare extract.binary in artifacts.yml would see binaries
-        # only as run-page CI artefacts (90-day retention) but not on the
-        # permanent Release page — silent footgun. The append is non-destructive
-        # to the user's own attach-artifacts input.
-        id: attach-effective
-        env:
-          USER_ATTACH: ${{ inputs['attach-artifacts'] }}
-        run: forge-ci release attachments plan
+        # Source checkout is metadata/explicit-attachment input only. Never
+        # merge producer downloads with checkout-resident output/cache trees.
+        run: forge-ci release download-artifacts --isolated
       - name: Resolve release metadata
         id: release-metadata
         env:
@@ -256,12 +247,16 @@ jobs:
           CONFIG_PLAN_JSON: ${{ inputs['config-plan-json'] }}
           VERSION: ${{ steps.release-metadata.outputs.version-no-v }}
           SBOMS: ${{ inputs.sboms }}
-        run: forge-ci sbom assemble
+          ACQUISITION_DIR: ${{ steps.acquisition.outputs.acquisition-dir }}
+        run: forge-ci sbom assemble --version "$VERSION"
       - name: Assemble release files
         env:
           CONFIG_PLAN_JSON: ${{ inputs['config-plan-json'] }}
           ARTIFACT_TRANSFER_PLAN_JSON: ${{ inputs['artifact-transfer-plan-json'] }}
-          ATTACH_ARTIFACTS: ${{ steps.attach-effective.outputs.attach-artifacts }}
+          # Extracted producer binaries are already collected by assembly.
+          # Only a caller's explicit patterns authorize source attachments.
+          ATTACH_ARTIFACTS: ${{ inputs['attach-artifacts'] }}
+          ACQUISITION_DIR: ${{ steps.acquisition.outputs.acquisition-dir }}
           PROJECT_NAME: ${{ steps.release-metadata.outputs.project-name }}
           VERSION: ${{ steps.release-metadata.outputs.version }}
           RELEASE_ASSEMBLY: .forge-ci/release-assembly.json

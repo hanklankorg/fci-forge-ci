@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"path/filepath"
 	"strings"
 
@@ -64,7 +65,15 @@ func generateDualSBOMs(
 	layerName, customBasename string,
 ) error {
 	spdxFile := domainsbom.Filename(customBasename, subj.name, subj.version, layerName, domainsbom.FormatSPDX)
+
 	cdxFile := domainsbom.Filename(customBasename, subj.name, subj.version, layerName, domainsbom.FormatCycloneDX)
+	if deps.ws.freshOutputs {
+		for _, name := range []string{spdxFile, cdxFile} {
+			if _, err := deps.ws.host.Lstat(name); !errors.Is(err, fs.ErrNotExist) && !deps.ws.generatedOutputs[deps.ws.outputPath(name)] {
+				return fmt.Errorf("generated SBOM output must be fresh %s: %w", name, errs.ErrValidation)
+			}
+		}
+	}
 
 	if err := deps.syft.Generate(ctx, scanTarget, map[string]string{
 		"spdx-json":      deps.ws.outputPath(spdxFile),
@@ -84,6 +93,9 @@ func generateDualSBOMs(
 		}
 
 		_, _ = fmt.Fprintf(deps.w, "   %s %s (scanned)\n", clicolor.Check(deps.w), f)
+		if deps.ws.generatedOutputs != nil {
+			deps.ws.generatedOutputs[deps.ws.outputPath(f)] = true
+		}
 	}
 
 	return nil
