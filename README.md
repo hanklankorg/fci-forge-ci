@@ -19,39 +19,35 @@ signing, SLSA provenance and pinned third-party actions yourself.
 
 ## Quick Start
 
-Which repositories you need depends on what you are doing. This repository is
-enough to adopt Forge CI, build the engine and run its unit tests. To run
-external compatibility checks, also check out
-[forge-ci-blackbox-tests](https://github.com/diggsweden/forge-ci-blackbox-tests),
-the external black-box suite that runs the real binary against fixtures and
-toolchains, with no forge involved. Forge CI's own live consumer trials run real
-pull requests and releases on local GitLab and Forgejo instances and on hosted
-GitHub. These trials additionally need a Forge Lab; see [Testing](docs/testing.md).
-
-Install the CLI, then add pull/merge-request checks and release configuration
-for your forge. GitHub, GitLab and Forgejo use their own CI syntax.
+Install the CLI, let it write your repository's CI files, then follow
+`forge-ci setup status` to a first release.
 
 ### Install
 
 ```bash
-mise use -g github:diggsweden/forge-ci@0.91.13
+mise use -g github:diggsweden/forge-ci@0.93.2
 forge-ci --version
 ```
 
 This installs the released CLI globally; no Go toolchain is required.
 Alternatively, download the archive for your platform from the
-[release page](https://github.com/diggsweden/forge-ci/releases/tag/v0.91.13)
+[release page](https://github.com/diggsweden/forge-ci/releases/tag/v0.93.2)
 and follow [Artifact Verification](docs/verification.md) before installation.
 Source builds are covered in [Development](docs/DEVELOPMENT.md).
 
-`forge-ci init <repo-url>` writes a project's first CI files;
-`forge-ci doctor` checks local configuration.
+### Write the CI files
 
-### Choose your forge and preview initialization
+From your project's root, preview what `init` would write, then write it:
 
-The URL is the **Forge CI template repository**, not your application's remote.
-It also determines the generated CI layout: `init` does not infer the forge from
-your application's Git remote or a global `--provider` selection.
+```bash
+forge-ci init https://github.com/diggsweden/forge-ci --dry-run
+forge-ci init https://github.com/diggsweden/forge-ci
+```
+
+The URL is the **Forge CI template repository**, not your application's
+remote; use your organization's fork or mirror instead when it has one. It
+decides the generated CI layout: `init` does not infer the forge from your
+application's Git remote.
 
 | Your forge | Template source | Generated CI location |
 |---|---|---|
@@ -60,106 +56,61 @@ your application's Git remote or a global `--provider` selection.
 | Forgejo | Your instance's Forge CI mirror, declaring `forge: forgejo` | `.forgejo/workflows/` |
 
 Outside `github.com`, the mirror's operator must put that `forge` value in
-`.forge-ci/consumer-defaults.yml` at the selected release tag.
-Without it, initialization refuses rather than guessing from the hostname.
+`.forge-ci/consumer-defaults.yml` at the selected release tag; the
+[GitLab](docs/gitlab.md#getting-started) and
+[Forgejo](docs/forgejo.md#getting-started) guides say how. Without it,
+initialization refuses rather than guessing from the hostname.
 
-From your project directory, choose **one** of the following previews.
-Replace the example URL with the published template repository your
-organization uses:
+The preview picks an example from your build files, pins the newest release,
+and lists the files it would create, any existing-file conflicts, and the
+values left for you to fill in. Existing files are never replaced. Use
+`--example` to choose another example and `--ref` to select another release.
+`init` writes no linter configuration; Nanolinter's defaults and the required
+lint floor apply until you add a `nanolinter.toml`.
+[Your first pull-request check](docs/tutorial-first-pull-request.md) walks
+through this step by step.
 
-```bash
-# GitHub
-forge-ci init https://github.com/YOUR-ORG/forge-ci --dry-run
-
-# GitLab — mirror defaults must declare forge: gitlab
-forge-ci init https://gitlab.example.com/team/forge-ci --dry-run
-
-# Forgejo — mirror defaults must declare forge: forgejo
-forge-ci init https://forge.example/examplescope/forge-ci --dry-run
-```
-
-The preview reports the target directory, resolved release and commit, selected
-example, proposed files, existing-file conflicts, and remaining placeholders.
-Check that its reported forge and proposed file locations match your project.
-It fetches templates into temporary storage but writes no project files.
-Conflicts return a nonzero status; existing files are never replaced.
-Use `--example` to choose an example and `--ref` to select an available release.
-After review, repeat without `--dry-run`, retaining the reported release and example.
-Preview and generation fetch the source independently; preview is not a saved
-execution plan.
-
-Linter configuration files are optional customizations: init does not create
-or modify Nanolinter or MegaLinter configs. The `lint-engine` input selects the
-engine (Nanolinter by default in the GitHub PR workflow); without a config file,
-the selected engine uses its defaults and the workflow's required lint floor
-still applies. The [examples](examples/README.md) include configs you can copy
-to customize those defaults.
-Nanolinter performs its own lookup: root `nanolinter.toml`, then
-`development/nanolinter.toml`, then built-in defaults.
-
-### GitHub: Pull-request checks
-
-The following manual examples are for GitHub only.
-Use the [GitLab guide](docs/gitlab.md#getting-started) or
-[Forgejo guide](docs/forgejo.md#getting-started) for those CI systems.
-Replace `diggsweden/forge-ci` in the GitHub examples with your selected template
-repository and pin an available release consistently.
-
-One caller workflow runs lint and security scans on every PR. Add your
-own test job alongside it:
-
-```yaml
-# .github/workflows/pr.yml
-on:
-  pull_request:
-permissions:
-  contents: read
-jobs:
-  pr-checks:
-    uses: diggsweden/forge-ci/.github/workflows/pullrequest-orchestrator.yml@v0.91.13
-    permissions:
-      actions: read
-      contents: read
-    with:
-      forge-ci-binary-ref: v0.91.13
-      project-type: go  # maven, npm, gradle, cargo, ...
-```
-
-### GitHub: Release
-
-Push a signed tag — the flow builds, signs, publishes and creates the
-final version tag:
-
-```yaml
-# .github/workflows/release.yml
-on:
-  push:
-    tags: ["release-request/v*"]
-permissions:
-  contents: read
-jobs:
-  release:
-    uses: diggsweden/forge-ci/.github/workflows/release-orchestrator.yml@v0.91.13
-    permissions:
-      contents: write
-      packages: write
-      id-token: write  # Sigstore keyless signing
-      actions: read
-    secrets:
-      RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
-      RELEASE_SSH_SIGNING_KEY: ${{ secrets.RELEASE_SSH_SIGNING_KEY }}
-    with:
-      branch: main
-      forge-ci-binary-ref: v0.91.13
-```
+### Follow the steps to a first release
 
 ```bash
-git tag -s release-request/v1.0.0 -m "Release v1.0.0"
-git push origin release-request/v1.0.0
+forge-ci setup status
 ```
 
-GitLab and Forgejo use the same two flows through their own CI syntax —
-see the [examples](examples/README.md) for complete per-forge files.
+It lists every step from no Forge CI files to a first release, marks the ones
+the repository shows are done, and names the command for each:
+
+```text
+[x] 1. Write the Forge CI files
+[ ] 2. Fill in the example values
+       run: forge-ci doctor   (lists each value with file:line and how to find it)
+[ ] 3. List who may sign releases
+       run: forge-ci setup signer --principal <your email> --public-key ~/.ssh/id_ed25519.pub   (and again for the release bot)
+[?] 4. Create the release secrets
+       run: forge-ci setup secrets
+...
+[?] 9. Request the release
+       run: forge-ci setup release-request v0.1.0   (checks your signing setup, prints the git commands)
+```
+
+`[?]` marks steps the repository cannot show, such as secrets stored on the
+forge; check those yourself. Run `setup status` again after each step.
+
+A release starts when you push a signed `release-request/vX.Y.Z` tag. The
+release workflow validates it, then creates the final `vX.Y.Z` tag itself;
+never create or push the final tag yourself. Two kinds of keys are involved:
+your own key signs the request tag, and the release bot's keys, stored as
+`RELEASE_*` secrets, sign the release commit, the final tag and the artifacts.
+The allowed-signers file `setup signer` writes must list both.
+
+### Without init
+
+The [examples](examples/README.md) hold the complete caller files for each
+ecosystem and forge; copy one and replace every placeholder its header lists.
+The [GitHub](docs/github.md#getting-started),
+[GitLab](docs/gitlab.md#getting-started) and
+[Forgejo](docs/forgejo.md#getting-started) guides describe this route.
+`forge-ci doctor` and `forge-ci setup status` work the same on hand-copied
+files.
 
 ## Using Forge CI
 
@@ -188,6 +139,14 @@ Start with the [Documentation Index](docs/README.md) for the full map.
   [Threat Model](docs/threat-model.md)
 
 ## Working on Forge CI
+
+This repository is enough to build the engine and run its unit tests. External
+compatibility checks also need
+[forge-ci-blackbox-tests](https://github.com/diggsweden/forge-ci-blackbox-tests),
+which runs the real binary against fixtures and toolchains, with no forge
+involved. Live consumer trials run real pull requests and releases on local
+GitLab and Forgejo instances and on hosted GitHub, and additionally need a
+Forge Lab; see [Testing](docs/testing.md).
 
 - **[Development](docs/DEVELOPMENT.md)** • Source checkout, installing the CLI
   from it, prerequisites, checks and branch testing

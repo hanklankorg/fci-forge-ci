@@ -55,7 +55,9 @@ Still to fill in before running
   .github/workflows/release-workflow.yml:49  FIXME-release-bot
 
 How to fill them
-  ...
+  PIN_DIGEST           the lint image's digest: forge-ci container manifest digest --anonymous --ref <image>:<tag>, then write @sha256:<digest>
+  FIXME                a value only you know; the comment above the line says which (bot-name: the release bot's display name)
+  FIXME-release-bot    the release bot's email; it must be the principal of the bot key's line in .forge-ci/allowed_signers (forge-ci setup signer --principal <email> --public-key <bot key>.pub)
 forge-ci doctor fails until they are filled; values only the release workflow reads warn until then.
 
 No project files were written. Templates were fetched into temporary storage.
@@ -153,10 +155,12 @@ Once the check is green, merge. Every later pull request against `main` or
 
 - **A release** is the second workflow you just committed. It starts when you
   push a signed `release-request/vX.Y.Z` tag, and it needs secrets and a
-  signing allowlist first: [set up release signing secrets](quickstart-setup-secrets.md),
-  then [Secrets and tokens](github.md#secrets-and-tokens),
-  [protect the release tags](github.md#protect-the-release-tags) and
-  [Release authorisation](verification.md#release-authorisation).
+  signing allowlist first. Run `forge-ci setup status`: it lists the
+  remaining steps and the command for each (`setup signer`, `setup secrets`,
+  `setup release-request`). Also [protect the release tags](github.md#protect-the-release-tags);
+  [Secrets and tokens](github.md#secrets-and-tokens) and
+  [Release authorisation](verification.md#release-authorisation) are the
+  reference.
 - **A container instead of binaries:** the [Go service example](../examples/go-service/)
   and [Ecosystems](ecosystems.md) explain artifact-first against
   container-first.

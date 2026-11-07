@@ -20,6 +20,11 @@ configure a runner, publish a release, or create API/registry tokens.
 For a local inventory of release credential names and caller mappings, run
 `forge-ci doctor --requirements`; see [coverage and limitations](setup-requirements.md).
 
+**Short path:** in your repository, `forge-ci setup secrets` lists the
+secrets your release workflows need, what each must allow, and the command
+that stores it; `forge-ci setup signer` adds a public key to the allowed
+signers. Use this guide for the keys those secrets hold.
+
 ## Prefer non-exportable keys or short-lived signing identities
 
 For a production setup, prefer these approaches over copying long-lived private

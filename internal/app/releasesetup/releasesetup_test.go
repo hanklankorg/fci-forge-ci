@@ -192,7 +192,7 @@ func TestChecklistFollowsTheRepository(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if len(steps) != 8 || steps[0].State != releasesetup.StepTodo || !strings.Contains(steps[0].Command, "forge-ci init") {
+	if len(steps) != 9 || steps[0].State != releasesetup.StepTodo || !strings.Contains(steps[0].Command, "forge-ci init") {
 		t.Fatalf("empty repository: steps = %+v", steps)
 	}
 
@@ -227,6 +227,12 @@ func TestChecklistFollowsTheRepository(t *testing.T) {
 	// pull request rather than found out after a red test merged green.
 	if s := steps[5]; s.State != releasesetup.StepManual || !strings.Contains(s.Detail, "blocks") || !strings.Contains(s.Command, "admin-policy") {
 		t.Errorf("enforcement step = %+v", s)
+	}
+
+	// The request tag is the release approval, so its protection comes before
+	// the first request.
+	if s := steps[7]; s.State != releasesetup.StepManual || !strings.Contains(s.Detail, "release-request/*") || !strings.Contains(steps[8].Title, "Request the release") {
+		t.Errorf("tag protection step = %+v, then %q", s, steps[8].Title)
 	}
 }
 

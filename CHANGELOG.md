@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `forge-ci setup status` adds a step to protect the release tags before the
+  first release request. The README Quick Start and the forge guides now lead
+  from `init` to `setup status`, and the README pins the current release.
 - Admit exact or namespace-qualified workflow dependencies with
   `platform dependency`: require one job, an admitted result and explicit output
   presence before downstream reusable calls consume producer facts.

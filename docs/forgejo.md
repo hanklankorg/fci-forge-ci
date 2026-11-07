@@ -227,6 +227,11 @@ It still fetches release templates into temporary storage, but writes no project
 files. Conflicts return nonzero. Repeat without `--dry-run` using the reported
 `--ref` and `--example` after reviewing the proposal.
 
+Then run `forge-ci setup status`: it lists the steps from here to a first
+release, marks the ones the repository shows are done, and names the command
+for each. In a repository with only Forgejo workflows, `forge-ci setup signer`
+writes `.forgejo/release-allowed-signers`.
+
 The organization's mirror can make `forge-ci init <mirror URL>` write a
 consumer's files with every pin filled in. The operator commits
 `.forge-ci/consumer-defaults.yml` to the mirror; init reads it at the release
@@ -1759,7 +1764,7 @@ Shared runtime planning and candidate collection live in
   before downloading artifacts, and reuses the multiarch-image metadata validator
   to bind each candidate to its repository, architecture and run tag. It emits
   the smoke matrix only after the complete candidate set passes. Downloads use
-   the existing provider-neutral run-artifact API and private temporary storage.
+  the existing provider-neutral run-artifact API and private temporary storage.
 - `verify-smoke` checks a downloaded native receipt against its exact source,
   target, architecture and digest-pinned candidate. Strict, bounded JSON reads
   refuse malformed or unknown fields; a green job for older candidate bytes is

@@ -51,7 +51,7 @@ func Checklist(ctx context.Context, root, repo, commit string) ([]Step, error) {
 		return found && c.Severity == appdoctor.SeverityOK, c.Message
 	}
 
-	steps := make([]Step, 0, 8)
+	steps := make([]Step, 0, 9)
 
 	filesDone, filesDetail := ok(appdoctor.CheckCIWorkflows)
 	steps = append(steps, step("Write the Forge CI files", filesDone, filesDetail,
@@ -89,6 +89,12 @@ func Checklist(ctx context.Context, root, repo, commit string) ([]Step, error) {
 		Step{
 			Title: "Commit, open a pull request and merge", State: StepManual,
 			Detail: "the pull-request workflow runs on it; the release runs from the merged default branch",
+		},
+		Step{
+			Title: "Protect the release tags", State: StepManual,
+			Detail: "in the forge's tag rules, let only the people who release create release-request/* tags, and let nobody move or delete v* tags (the rolling v*-pre excepted); " +
+				"the release workflow creates v* tags itself, so leave their creation open to it",
+			Command: "forge-ci docs github   (Protect the release tags; GitLab and Forgejo call them protected tags)",
 		},
 		Step{
 			Title: "Request the release", State: StepManual,

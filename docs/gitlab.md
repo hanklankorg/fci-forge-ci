@@ -98,6 +98,11 @@ It still fetches release templates into temporary storage, but writes no project
 files. Conflicts return nonzero. Repeat without `--dry-run` using the reported
 `--ref` and `--example` after reviewing the proposal.
 
+Then run `forge-ci setup status`: it lists the steps from here to a first
+release, marks the ones the repository shows are done, and names the command
+for each. GitLab takes the allowed signers as the `request-allowed-signers`
+input, so run `forge-ci setup signer --dry-run` and paste the line it prints.
+
 Automatic release selection accepts both Catalog tags such as `0.90.0` and
 prefixed tags such as `v0.90.0`, choosing the highest stable version.
 Prereleases and build-metadata tags are excluded from automatic selection.

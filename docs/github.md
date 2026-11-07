@@ -85,6 +85,12 @@ all existing-file conflicts and returns nonzero if generation would be blocked;
 remaining placeholders are reported for review, not a claim of runnable CI.
 Repeat without `--dry-run` using the previewed `--ref` and `--example` to generate.
 
+Then run `forge-ci setup status`. It lists the steps from here to a first
+release, marks the ones the repository shows are done, and names the command
+for each: `doctor` for the values left to fill in, `setup signer` for the
+allowlist, `setup secrets` for the secrets, and `setup release-request` for the
+signed request tag. It works the same on files copied by hand.
+
 By hand:
 
 1. **Pick an example** from [`examples/`](../examples/README.md) for your
@@ -101,9 +107,11 @@ By hand:
 3. **Pin the references.** `uses: ...@v0.90.0`, `forge-ci-binary-ref` and any
    `runtime-image*` override move together; see
    [Advanced Pinning Recipe](runtime-images.md#advanced-pinning-recipe).
-4. **Set the [secrets](#secrets-and-tokens)** your release plan selects, and
+4. **Set the [secrets](#secrets-and-tokens)** your release plan selects
+   (`forge-ci setup secrets` lists them), and
    [protect the release tags](#protect-the-release-tags).
-5. **Commit the release allowlist** your signing policy needs; see
+5. **Commit the release allowlist** your signing policy needs
+   (`forge-ci setup signer` writes its lines); see
    [Release Authorisation](verification.md#release-authorisation).
 6. **Release** by pushing a signed request tag:
 
