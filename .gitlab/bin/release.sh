@@ -414,7 +414,10 @@ rc_collect_release_images() {
 rc_images_publish() {
 	local images="${RC_WORK}/images" auth_file="${RC_WORK}/registry-auth.json"
 	# The pinned job image must carry Syft. Never download a scanner here.
-	command -v syft >/dev/null || { echo 'ERROR: Images: publish requires Syft in job-image.' >&2; return 1; }
+	command -v syft >/dev/null || {
+		echo 'ERROR: Images: publish requires Syft in job-image.' >&2
+		return 1
+	}
 	rc_release_checkout
 	rc_read_handoff "${CI_PROJECT_DIR}/_release-build" || return
 	# shellcheck source=scripts/bootstrap/install-trivy.sh
@@ -469,7 +472,10 @@ rc_read_handoff() {
 		return
 		;;
 	dist) ;;
-	*) echo "ERROR: unsupported handoff mode '${mode}'." >&2; return 1 ;;
+	*)
+		echo "ERROR: unsupported handoff mode '${mode}'." >&2
+		return 1
+		;;
 	esac
 	rc_engine release validate-dist --dist-dir "${directory}/dist" --digest-file "${directory}/digest" \
 		--manifest-root . --stage-dir dist || return
