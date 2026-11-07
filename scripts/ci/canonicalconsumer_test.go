@@ -48,7 +48,7 @@ func TestCanonicalConsumerRealHelpers(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			for target, source := range map[string]string{"scripts/ci/engine-binary.sh": "engine-binary.sh", "scripts/ci/trusted-bootstrap.sh": "trusted-bootstrap.sh", "scripts/ci/canonical-consumer.sh": "canonical-consumer.sh", ".engine/bin/lib-forge-ci.sh": "../../.engine/bin/lib-forge-ci.sh"} {
+			for target, source := range map[string]string{"scripts/ci/engine-binary.sh": "engine-binary.sh", "scripts/ci/trusted-bootstrap.sh": "trusted-bootstrap.sh", "scripts/ci/trusted-runtime-tools.sh": "trusted-runtime-tools.sh", "scripts/ci/canonical-consumer.sh": "canonical-consumer.sh", ".engine/bin/lib-forge-ci.sh": "../../.engine/bin/lib-forge-ci.sh"} {
 				body, err := os.ReadFile(source)
 				if err != nil {
 					t.Fatal(err)

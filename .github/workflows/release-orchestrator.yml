@@ -175,6 +175,11 @@ on:
         required: false
         default: ""
         type: string
+      canonical-builder-image:
+        description: "Administrator-approved Go-qualified image@sha256 digest for canonical CLI build only. Required for protected/classified routes; no fallback to policy or product runtimes."
+        required: false
+        default: ""
+        type: string
       runtime-image-java:
         description: "forge-ci Java runtime image for Maven/Gradle jobs. Empty uses the resolved forge-ci version."
         required: false
@@ -396,7 +401,8 @@ jobs:
     with:
       engine-repository: ${{ needs.resolve-bootstrap.outputs.forge-ci-repository }}
       engine-commit: ${{ inputs['forge-ci-binary-ref'] }}
-      runtime-image: ${{ inputs['runtime-image'] }}
+      runtime-image: ${{ inputs['canonical-builder-image'] }}
+      receive-runtime-image: ${{ inputs['runtime-image'] }}
   parse-config:
     needs: [resolve-bootstrap, canonical-cli]
     if: ${{ !failure() && !cancelled() && ((!inputs['require-canonical-bootstrap'] && inputs['release-file-mode'] != 'classified-files') || needs.canonical-cli.result == 'success') }}

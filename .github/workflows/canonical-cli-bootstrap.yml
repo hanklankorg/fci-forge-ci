@@ -16,8 +16,13 @@ on: # yamllint disable-line rule:truthy
         required: true
         type: string
       runtime-image:
-        description: "Approved native linux/amd64 image@sha256 digest qualifying Go, gh/jq and native Actions"
+        description: "Administrator-approved native linux/amd64 Go builder image@sha256 digest with authenticated cold-module preparation support and native Actions"
         required: true
+        type: string
+      receive-runtime-image:
+        description: "Administrator-approved receiver image@sha256 digest qualifying gh/jq and native Actions; empty reuses the Go-qualified builder, never a product image fallback"
+        required: false
+        default: ""
         type: string
       artifact-retention-days:
         required: false
@@ -51,11 +56,13 @@ jobs:
           ENGINE_REPOSITORY: ${{ inputs.engine-repository }}
           ENGINE_COMMIT: ${{ inputs.engine-commit }}
           RUNTIME_IMAGE: ${{ inputs.runtime-image }}
+          RECEIVE_RUNTIME_IMAGE: ${{ inputs.receive-runtime-image || inputs.runtime-image }}
         run: |
           set -euo pipefail
           [[ "$ENGINE_REPOSITORY" =~ ^[A-Za-z0-9_-][A-Za-z0-9_.-]*/[A-Za-z0-9_-][A-Za-z0-9_.-]*$ ]]
           [[ "$ENGINE_COMMIT" =~ ^[0-9a-f]{40}$ ]]
           [[ "$RUNTIME_IMAGE" =~ ^[a-z0-9][a-z0-9./:_-]*@sha256:[0-9a-f]{64}$ ]]
+          [[ "$RECEIVE_RUNTIME_IMAGE" =~ ^[a-z0-9][a-z0-9./:_-]*@sha256:[0-9a-f]{64}$ ]]
   canonical-build:
     needs: canonical-admit
     runs-on: ubuntu-26.04
@@ -87,7 +94,10 @@ jobs:
           persist-credentials: false
           submodules: false
           lfs: false
-      - name: Canonical key-free build and original producer capture
+      # Delivery glue admits approved identity and committed module/checksum
+      # files, prepares a private authenticated module cache, THEN calls the
+      # unchanged offline recipe. Upload remains success-only after verification.
+      - name: Canonical key-free module preparation, build and original producer capture
         id: build
         shell: bash
         env:
@@ -108,7 +118,7 @@ jobs:
     runs-on: ubuntu-26.04
     timeout-minutes: 10
     container:
-      image: ${{ inputs.runtime-image }}
+      image: ${{ inputs.receive-runtime-image || inputs.runtime-image }}
     permissions:
       contents: read
       actions: read
@@ -120,7 +130,7 @@ jobs:
       ENGINE_REPOSITORY: ${{ inputs.engine-repository }}
       ENGINE_COMMIT: ${{ inputs.engine-commit }}
       ENGINE_ORIGIN: ${{ github.server_url }}/${{ inputs.engine-repository }}
-      RUNTIME_IMAGE: ${{ inputs.runtime-image }}
+      RUNTIME_IMAGE: ${{ inputs.receive-runtime-image || inputs.runtime-image }}
       PRODUCER_ARTIFACT_ID: ${{ needs.canonical-build.outputs.artifact-id }}
       PRODUCER_ARTIFACT_NAME: ${{ needs.canonical-build.outputs.artifact-name }}
       PRODUCER_RUN_ID: ${{ needs.canonical-build.outputs.run-id }}
@@ -147,9 +157,8 @@ jobs:
           GH_HOST: ${{ github.server_url }}
         run: |
           set -euo pipefail
-          export PATH=/usr/bin:/bin
           unset GH_DEBUG
-          gh api --hostname "${GH_HOST#https://}" \
+          /bin/bash -p "$ENGINE_CHECKOUT/scripts/ci/trusted-runtime-tools.sh" gh api --hostname "${GH_HOST#https://}" \
             "repos/$GITHUB_REPOSITORY/actions/artifacts/$PRODUCER_ARTIFACT_ID" >"$RUNNER_TEMP/forge-ci-canonical-metadata.json"
       - name: Admit exact artifact metadata before download
         shell: bash

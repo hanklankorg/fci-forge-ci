@@ -206,9 +206,10 @@ jobs:
           umask 077
           mkdir "$RUNNER_TEMP/classified-product" "$RUNNER_TEMP/classified-product-home"
           cd "$source_root" || exit
-          env -i PATH=/usr/local/bin:/usr/bin:/bin HOME="$RUNNER_TEMP/classified-product-home" \
+          /usr/bin/env -i HOME="$RUNNER_TEMP/classified-product-home" \
             SOURCE_DATE_EPOCH="$SOURCE_DATE_EPOCH" RELEASE_SHA="$PREPARED_SHA" TAG_NAME="$TAG" \
-            FORGE_CI_CLASSIFIED_OUTPUT="$RUNNER_TEMP/classified-product" "$script"
+            FORGE_CI_CLASSIFIED_OUTPUT="$RUNNER_TEMP/classified-product" \
+            /bin/bash -p "$RUNNER_TEMP/forge-ci-approved-engine/scripts/ci/trusted-runtime-tools.sh" "$script"
       - name: Admit exact unsigned producer workspace and record digest
         id: handoff
         shell: /bin/bash --noprofile --norc -peuo pipefail {0}
