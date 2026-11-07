@@ -15,12 +15,15 @@ import (
 	"github.com/diggsweden/forge-ci/internal/cli/deps"
 )
 
+const configPlanJSONFlag = "config-plan-json"
+
 // New returns the `plan` subgroup.
 func New() *cli.Command {
 	return &cli.Command{
 		Name:  "plan",
 		Usage: "typed release, snapshot-release, and pull-request plan composition",
 		Commands: []*cli.Command{
+			validateClassifiedFilesCmd(),
 			validateTestSelectionsCmd(),
 			releaseCmd(),
 			releaseExportsCmd(),
@@ -84,7 +87,7 @@ EXAMPLE:
 Composition does not execute a release or establish signing/publication readiness.`,
 		Flags: []cli.Flag{
 			&cli.StringFlag{Name: "repository-visibility", Sources: cli.EnvVars("REPOSITORY_VISIBILITY"), Usage: "public, private, internal or unknown; unknown requires explicit public-transparency consent"},
-			&cli.StringFlag{Name: "config-plan-json", Sources: cli.EnvVars("CONFIG_PLAN_JSON"), Usage: "typed config-plan JSON (output of 'config parse-artifacts')"},
+			&cli.StringFlag{Name: configPlanJSONFlag, Sources: cli.EnvVars("CONFIG_PLAN_JSON"), Usage: "typed config-plan JSON (output of 'config parse-artifacts')"},
 			&cli.StringFlag{Name: "branch", Sources: cli.EnvVars("BRANCH"), Usage: "git branch the release is being built from"},
 			&cli.StringFlag{Name: "tag", Required: true, Sources: cienv.Tag(), Usage: "release tag (e.g. v1.2.3)"},
 			&cli.StringFlag{Name: "file-pattern", Sources: cli.EnvVars("FILE_PATTERN"), Usage: "git pathspecs the version-bump commit stages"},
@@ -102,7 +105,7 @@ Composition does not execute a release or establish signing/publication readines
 			return deps.FromCmd(ctx, cmd, func(d *deps.Deps) error {
 				_, err := appplan.Release(ctx, d.OutputSink, d.SummarySink, appplan.ReleaseInput{
 					RepositoryVisibility:            cmd.String("repository-visibility"),
-					ConfigPlanJSON:                  cmd.String("config-plan-json"),
+					ConfigPlanJSON:                  cmd.String(configPlanJSONFlag),
 					Branch:                          cmd.String("branch"),
 					RefName:                         cmd.String("tag"),
 					FilePattern:                     cmd.String("file-pattern"),
@@ -137,7 +140,7 @@ EXAMPLE:
    CONFIG_PLAN_JSON="$config_plan" forge-ci --runner local --json plan snapshot-release \
      --project-type go --branch main`,
 		Flags: []cli.Flag{
-			&cli.StringFlag{Name: "config-plan-json", Sources: cli.EnvVars("CONFIG_PLAN_JSON"), Usage: "typed config-plan JSON (output of 'config parse-artifacts')"},
+			&cli.StringFlag{Name: configPlanJSONFlag, Sources: cli.EnvVars("CONFIG_PLAN_JSON"), Usage: "typed config-plan JSON (output of 'config parse-artifacts')"},
 			&cli.StringFlag{Name: "project-type", Sources: cli.EnvVars("PROJECT_TYPE"), Usage: "primary ecosystem of the project (maven/npm/go/cargo/…)"},
 			&cli.StringFlag{Name: "branch", Sources: cli.EnvVars("BRANCH"), Usage: "git branch the snapshot-release is being built from"},
 			&cli.StringFlag{Name: "release-sha", Sources: cli.EnvVars("RELEASE_SHA"), Usage: "commit SHA the snapshot-release is anchored to"},
@@ -159,7 +162,7 @@ EXAMPLE:
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			return deps.FromCmd(ctx, cmd, func(d *deps.Deps) error {
 				_, err := appplan.SnapshotRelease(ctx, d.OutputSink, appplan.SnapshotReleaseInput{
-					ConfigPlanJSON:        cmd.String("config-plan-json"),
+					ConfigPlanJSON:        cmd.String(configPlanJSONFlag),
 					ProjectType:           cmd.String("project-type"),
 					Branch:                cmd.String("branch"),
 					ReleaseSHA:            cmd.String("release-sha"),
