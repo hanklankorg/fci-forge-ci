@@ -30,7 +30,7 @@ func rootBaseGroup() *cli.Command {
 	return &cli.Command{
 		Name:     "root-base",
 		Usage:    "cold single-root native BASE boundary; no parent, mixed or warm graph support",
-		Commands: []*cli.Command{rootBasePlanCmd(), build, rootBasePublishCmd()},
+		Commands: []*cli.Command{rootBasePlanCmd(), build, rootBasePublishCmd(), rootBaseAdmissionCmd(false), rootBaseAdmissionCmd(true)},
 	}
 }
 

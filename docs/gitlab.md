@@ -1211,6 +1211,68 @@ root to signing. No production job selects this mode, and it is not a signed
 handoff protocol: producer publication ledgers remain forbidden. The existing
 dist-only release workflow and general native BASE refusal are unchanged.
 
+#### Read-only independent root admission
+
+The root-only `admit-plan` and `admit-payload` commands are available for a
+future protected composition; no production job calls them. They do not acquire
+registry credentials or signing keys and do not execute tools, write files or
+regenerate SBOMs.
+
+`admit-plan` requires an independently approved SHA-256 of the **exact frozen
+plan bytes**, the staging image repository, and two explicit source tuples:
+
+- `--source`, `--source-sha`, `--workflow`: observed facts obtained from the
+  independently authenticated producer context;
+- `--expected-source`, `--expected-source-sha`, `--expected-workflow`: the
+  protected caller's approved HTTPS source URL, checkout commit and workflow.
+
+It compares those tuples and the exact plan digest, then applies the existing
+cold-single-root admission. The approved plan bytes constrain every image and
+build revision, own input ID, tag and provenance field. A content revision may
+intentionally differ from the source checkout commit: they are **not** equated.
+An absent revision retains the existing source-commit fallback; the caller must
+pass the approved source commit to subsequent root build/publish commands.
+Plan normalization changes bytes: approve the exact frozen file that the later
+jobs consume, not a different serialization of its source input.
+
+`admit-payload` takes the same flags plus `--evidence-root` and
+`--expected-payload-digest`. It verifies the entire canonical unsigned workspace,
+requires `dist/` to contain only `base-images.json`, admits exactly one base entry,
+and checks that all its plan-owned fields agree with the approved plan. Only its
+published image ref/digest and SBOM pin are publication results. It then uses the
+signer's existing evidence reader to verify the retained nonempty JSON-object
+SBOM against that pin. Missing pins never trigger regeneration.
+This remains the root ledger's first selected platform inventory, not an
+aggregate index BOM or a recursive graph guarantee. The canonical payload digest
+also binds retained inventories/scans, without interpreting their findings again.
+
+```bash
+# All approval/observed variables below must come from the independent sources
+# described above. Never approve a producer's plan by hashing it in the signer.
+forge-ci container base-images root-base admit-payload \
+  --plan frozen-root-plan.json --expected-plan-sha256 "$APPROVED_PLAN_SHA256" \
+  --image-repository "$APPROVED_STAGING_REPOSITORY" \
+  --source "$AUTHENTICATED_SOURCE" --source-sha "$AUTHENTICATED_COMMIT" \
+  --workflow "$AUTHENTICATED_WORKFLOW" \
+  --expected-source "$APPROVED_SOURCE" --expected-source-sha "$APPROVED_COMMIT" \
+  --expected-workflow "$APPROVED_WORKFLOW" \
+  --evidence-root verified-payload --expected-payload-digest "$PUBLISHER_PAYLOAD_DIGEST"
+```
+
+This comparison is **not producer authentication**. The future protected caller
+must authenticate the exact publisher project/pipeline/job, protected policy
+revision and source checkout independently, bind the observed tuple and payload
+digest to that producer, and supply its approvals outside producer control.
+Checking self-declared equal facts or a self-declared plan hash grants no trust.
+These commands do not inspect a Git checkout or prove how image bytes were built.
+
+Run plan admission before using a frozen plan for native build/publication, and
+payload admission before import and before loading any private key. Keep the
+verified workspace private and immutable between admission and signing, pass its
+explicit evidence root to signing, and retain separate credential lanes. An
+admission receipt is not a durable authorization token. Existing root verbs do
+not silently acquire these expectations, and no general BASE refusal is relaxed.
+
 #### Exact next unit (not supported here)
 
 Parents, multiple/mixed images, warm reuse and architecture caches are refused

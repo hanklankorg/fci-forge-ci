@@ -952,6 +952,48 @@ EXAMPLE:
 
 cold single-root native BASE boundary; no parent, mixed or warm graph support
 
+##### `forge-ci container base-images root-base admit-payload`
+
+check a cold root canonical handoff, approved plan, sole root ledger and producer SBOM pins (read-only)
+
+```
+No credentials, registry access, key loading, writes or SBOM regeneration. The caller must authenticate the exact producer project/pipeline/job and policy revision, obtain observed source facts from that authenticated context, and supply independently protected expectations. Comparing caller-supplied facts is not producer authentication. Exact plan approval constrains content revisions without requiring them to equal the checkout commit. Run before import or signing; success grants no signing authority.
+```
+
+| Flag | Description | Type | Default | Env vars |
+|------|-------------|------|---------|----------|
+| `--plan` | exact approved frozen root plan file (required) | string | `""` | n/a |
+| `--image-repository` | exact unsigned staging repository (required) | string | `""` | n/a |
+| `--expected-plan-sha256` | independently approved SHA-256 of exact plan bytes; never a producer self-approval (required) | string | `""` | n/a |
+| `--source` | independently authenticated producer source repository URL (not inferred from plan) (required) | string | `""` | n/a |
+| `--source-sha` | authenticated producer checkout commit, distinct from opaque plan content revision (required) | string | `""` | n/a |
+| `--workflow` | authenticated producer workflow path (required) | string | `""` | n/a |
+| `--expected-source` | protected caller's approved HTTPS source repository URL (required) | string | `""` | n/a |
+| `--expected-source-sha` | protected caller's approved checkout commit (required) | string | `""` | n/a |
+| `--expected-workflow` | protected caller's approved producer workflow path (required) | string | `""` | n/a |
+| `--evidence-root` | verified canonical unsigned workspace containing dist/base-images.json and premade-sboms/ (required) | string | `""` | n/a |
+| `--expected-payload-digest` | canonical payload SHA-256 from the authenticated exact publisher job; not source authentication (required) | string | `""` | n/a |
+
+##### `forge-ci container base-images root-base admit-plan`
+
+check a cold root plan against independent exact-byte and source expectations (read-only)
+
+```
+No credentials, registry access, key loading, writes or SBOM regeneration. The caller must authenticate the exact producer project/pipeline/job and policy revision, obtain observed source facts from that authenticated context, and supply independently protected expectations. Comparing caller-supplied facts is not producer authentication. Exact plan approval constrains content revisions without requiring them to equal the checkout commit. Run before import or signing; success grants no signing authority.
+```
+
+| Flag | Description | Type | Default | Env vars |
+|------|-------------|------|---------|----------|
+| `--plan` | exact approved frozen root plan file (required) | string | `""` | n/a |
+| `--image-repository` | exact unsigned staging repository (required) | string | `""` | n/a |
+| `--expected-plan-sha256` | independently approved SHA-256 of exact plan bytes; never a producer self-approval (required) | string | `""` | n/a |
+| `--source` | independently authenticated producer source repository URL (not inferred from plan) (required) | string | `""` | n/a |
+| `--source-sha` | authenticated producer checkout commit, distinct from opaque plan content revision (required) | string | `""` | n/a |
+| `--workflow` | authenticated producer workflow path (required) | string | `""` | n/a |
+| `--expected-source` | protected caller's approved HTTPS source repository URL (required) | string | `""` | n/a |
+| `--expected-source-sha` | protected caller's approved checkout commit (required) | string | `""` | n/a |
+| `--expected-workflow` | protected caller's approved producer workflow path (required) | string | `""` | n/a |
+
 ##### `forge-ci container base-images root-base build`
 
 build one admitted root base's native architecture without registry writes
