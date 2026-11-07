@@ -36,6 +36,7 @@ func verifyTagCmd() *cli.Command {
 			&cli.StringFlag{Name: "repo-url", Sources: cli.EnvVars("REPO_URL"), Usage: "remote repository URL for ls-remote (defaults to origin)"},
 			&cli.StringFlag{Name: "expected-parent", Sources: cli.EnvVars("RELEASE_REQUEST_SHA"), Usage: "require the single child of this authorised source SHA and freshly bind the exact remote release-request/<tag> object and peeled commit; signed-request authorization remains separate"},
 			&cli.BoolFlag{Name: "changelog-only", Usage: "require exactly a CHANGELOG.md change from --expected-parent, and bind release-request/<tag> to that tested commit"},
+			&cli.BoolFlag{Name: "request-is-release", Sources: cli.EnvVars("RELEASE_REQUEST_IS_RELEASE"), Usage: "explicit no-bump route: require release-sha to equal expected-parent, retaining remote request binding; incompatible with prepared-change profiles"},
 			&cli.StringFlag{Name: "version-bump", Usage: "with --changelog-only, also admit this project type's version bump (maven/npm/cargo), checked as a version substitution to the tag's version"},
 			clitoken.FileFlag("Read token for a private repository."),
 		},
@@ -50,14 +51,15 @@ func verifyTagCmd() *cli.Command {
 			}
 
 			return apprelease.VerifyReleaseTag(ctx, git.New(), os.Stderr, apprelease.VerifyReleaseTagInput{
-				ReleasePolicy:  cmd.String("release-policy"),
-				ReleaseSHA:     cmd.String(flagReleaseSHA),
-				Tag:            cmd.String(flagTag),
-				RepoURL:        cmd.String("repo-url"),
-				ExpectedParent: cmd.String("expected-parent"),
-				ChangelogOnly:  cmd.Bool("changelog-only"),
-				VersionBump:    projecttype.Type(cmd.String("version-bump")),
-				Token:          token,
+				ReleasePolicy:    cmd.String("release-policy"),
+				ReleaseSHA:       cmd.String(flagReleaseSHA),
+				Tag:              cmd.String(flagTag),
+				RepoURL:          cmd.String("repo-url"),
+				ExpectedParent:   cmd.String("expected-parent"),
+				RequestIsRelease: cmd.Bool("request-is-release"),
+				ChangelogOnly:    cmd.Bool("changelog-only"),
+				VersionBump:      projecttype.Type(cmd.String("version-bump")),
+				Token:            token,
 			})
 		},
 	}

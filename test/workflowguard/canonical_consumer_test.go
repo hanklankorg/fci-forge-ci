@@ -8,6 +8,7 @@ import (
 	"maps"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -118,6 +119,13 @@ func TestCanonicalConsumerWorkflowGraph(t *testing.T) {
 			require.GreaterOrEqual(t, len(job.Steps), 4)
 
 			offset := 0
+			if file == "release-orchestrator.yml" && (name == "parse-config" || name == "validate-release-tag") {
+				offset = 1
+
+				require.Equal(t, "Require original immutable request source", job.Steps[0].Name)
+				require.Empty(t, job.Steps[0].Uses)
+			}
+
 			if file == "release-prepare-stage.yml" && name != "summarize-prepare-stage" {
 				offset = 1
 
@@ -170,7 +178,7 @@ func TestCanonicalConsumerWorkflowGraph(t *testing.T) {
 	}
 
 	root := readCanonicalConsumerWorkflow(t, "release-orchestrator.yml")
-	require.Equal(t, "${{ needs.canonical-cli.outputs.artifact-id }}", root.Jobs["parse-config"].Steps[0].Env["PRODUCER_ARTIFACT_ID"])
+	require.Equal(t, "${{ needs.canonical-cli.outputs.artifact-id }}", root.Jobs["parse-config"].Steps[1].Env["PRODUCER_ARTIFACT_ID"])
 
 	for _, caller := range []string{"validate-prerequisites", "execute-prepare-stage"} {
 		require.Contains(t, root.Jobs[caller].Needs, "canonical-cli")
@@ -196,6 +204,7 @@ func TestCanonicalConsumerNativeCommandsSecretsAndReadCaps(t *testing.T) {
 
 		var original canonicalConsumerWorkflow
 		require.NoError(t, yaml.Unmarshal(body, &original))
+		applyLateRequestBindingDelta(file, &original)
 		require.Equal(t, original.Permissions, current.Permissions, "no workflow-global expansion")
 		require.Equal(t, original.On.Call.Secrets, current.On.Call.Secrets)
 
@@ -266,6 +275,32 @@ func TestCanonicalConsumerNativeCommandsSecretsAndReadCaps(t *testing.T) {
 				require.True(t, found, file+name+step.Name)
 			}
 		}
+	}
+}
+
+// Keep the bootstrap transplant's historical comparison, with only the native
+// late-authorization delta admitted. Dedicated late-boundary guards assert the
+// replacement checks, their original-Q binding and ordering before private use.
+func applyLateRequestBindingDelta(file string, original *canonicalConsumerWorkflow) {
+	switch file {
+	case "release-orchestrator.yml":
+		original.Jobs["create-release"].Secrets["RELEASE_GPG_PUBLIC_KEY"] = "${{ secrets.RELEASE_GPG_PUBLIC_KEY }}"
+
+		for _, step := range original.Jobs["validate-release-tag"].Steps {
+			if step.Name == "Validate remote final tag object and commit" {
+				step.Env["RELEASE_REQUEST_SHA"] = "${{ github.sha }}"
+				step.Env["RELEASE_REQUEST_IS_RELEASE"] = "${{ !fromJson(needs.parse-config.outputs['prepare-stage-plan-json']).targets.version_bump.runs }}"
+			}
+		}
+	case "release-create-github.yml":
+		original.On.Call.Secrets["RELEASE_GPG_PUBLIC_KEY"] = map[string]any{
+			"description": "Public verification material only, for final-tag signature checks", "required": false,
+		}
+		publisher := original.Jobs["create-release"]
+		publisher.Steps = slices.DeleteFunc(publisher.Steps, func(step canonicalConsumerStep) bool {
+			return step.Name == "Checkout exact release source" || step.Name == "Revalidate release tag before publication"
+		})
+		original.Jobs["create-release"] = publisher
 	}
 }
 

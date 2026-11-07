@@ -382,6 +382,16 @@ Creates GitHub releases with assets.
 
 Usually called by `release-orchestrator.yml`, but can also be used directly by advanced consumers that want lower-level release composition.
 
+Direct callers must supply `authorized-source-sha` from the original trusted
+request event (Q), independently of the immutable prepared `checkout-ref` (P).
+Set `request-is-release: true` only for an explicitly planned no-bump release
+(P must equal Q), and propagate `require-allowlisted-signer` from release policy.
+GPG final tags need the public-only `RELEASE_GPG_PUBLIC_KEY` secret. The signer
+and publisher recheck request signatures with Q's committed trust material and
+fresh remote request/final tag identity before private operations. Metadata steps
+make no explicit consumer-tool/action calls, but require trusted runner Git startup
+configuration/templates; they do not force hooks off. See [prepared request binding](prepared-request-binding.md).
+
 #### `validate-release-prerequisites.yml`
 Validates release requirements (called automatically by orchestrator).
 
