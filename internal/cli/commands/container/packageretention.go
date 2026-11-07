@@ -15,6 +15,7 @@ import (
 	"github.com/diggsweden/forge-ci/internal/adapters/github"
 	"github.com/diggsweden/forge-ci/internal/adapters/ociregistry"
 	appcontainer "github.com/diggsweden/forge-ci/internal/app/container"
+	"github.com/diggsweden/forge-ci/internal/cli/dryrun"
 	"github.com/diggsweden/forge-ci/internal/cli/regflags"
 	domaincontainer "github.com/diggsweden/forge-ci/internal/domain/container"
 	"github.com/diggsweden/forge-ci/internal/domain/errs"
@@ -78,7 +79,7 @@ EXAMPLE:
 			&cli.StringFlag{Name: flagRecentTags, Value: defaultRecentTags, Sources: cli.EnvVars("PACKAGE_RETENTION_RECENT_TAGS"), Usage: "regular expression of tags of which the newest --recent-count versions are kept"},
 			&cli.IntFlag{Name: flagRecentCount, Value: 10, Sources: cli.EnvVars("PACKAGE_RETENTION_RECENT_COUNT"), Usage: "how many of the newest --recent-tags versions to keep"},
 			&cli.IntFlag{Name: flagMaxDelete, Value: 100, Sources: cli.EnvVars("PACKAGE_RETENTION_MAX_DELETE"), Usage: "refuse a package that would lose more versions than this (0 disables the bound)"},
-			&cli.BoolFlag{Name: flagDryRun, Value: true, Sources: cli.EnvVars("PACKAGE_RETENTION_DRY_RUN"), Usage: "report what would be deleted without deleting it"},
+			dryrun.DeletionFlag("PACKAGE_RETENTION_DRY_RUN"),
 			&cli.StringFlag{Name: flagPackagesTokenFile, Usage: "file holding the GitHub token (default: $GH_TOKEN, then $GITHUB_TOKEN)"},
 			regflags.UsernameFor("the user the token logs in to ghcr.io as, to read manifests"),
 		},

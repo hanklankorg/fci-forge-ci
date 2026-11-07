@@ -116,7 +116,8 @@ see their guides.
    authentication, the signing methods, and target-specific credentials such
    as Maven Central or Google Play.
 
-5. **Create release:**
+5. **Create release:** `forge-ci setup release-request v1.0.0` checks your
+   signing setup and prints these commands once it passes:
    ```bash
    git tag -s release-request/v1.0.0 -m "Release v1.0.0"
    git push origin release-request/v1.0.0

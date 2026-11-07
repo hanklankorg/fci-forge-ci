@@ -4,10 +4,37 @@ How to verify the artifacts these workflows produce (checksums,
 signatures, SBOM attestations, and SLSA provenance), and how the
 matching guarantees are generated on the producing side.
 
-> **Current source versus release pins:** `v0.90.0` examples identify a historical
-> baseline, not the current source revision. Confirm matching workflows, CLI
-> assets and runtime images before adoption. For unreleased changes, follow
+> **Which version to pin:** snippets here pin `v0.90.0`; replace it with the
+> release you install, as [Which version to pin](README.md#documentation-index)
+> describes. For unreleased changes, follow
 > [Branch Testing](runtime-images.md#branch-testing).
+
+## Verify the forge-ci CLI before you install it
+
+Each forge-ci release signs its `checksums.txt` keyless; the Sigstore bundle
+is `checksums.txt.bundle`. Verify the bundle with
+[cosign](https://docs.sigstore.dev/cosign/system_config/installation/), then
+check the archive against the verified checksums:
+
+```bash
+VERSION=v0.93.2   # the release you install
+gh release download "$VERSION" --repo diggsweden/forge-ci \
+  -p "forge-ci_${VERSION#v}_linux_amd64.tar.gz" -p checksums.txt -p checksums.txt.bundle
+
+cosign verify-blob \
+  --bundle checksums.txt.bundle \
+  --certificate-identity "https://github.com/diggsweden/forge-ci/.github/workflows/release-binary.yml@refs/tags/release-request/${VERSION}" \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  checksums.txt
+
+sha256sum --check --ignore-missing checksums.txt
+```
+
+Both commands must succeed before you unpack the archive. Without `gh`,
+download the same three files from the release page. The identity is the
+workflow that built the release, at the signed request tag that started it.
+The binary's provenance is checked the same way; see
+[Verify the binary SLSA provenance](#verify-the-binary-slsa-provenance-portable-cosign).
 
 ## GitHub CLI signing boundary
 

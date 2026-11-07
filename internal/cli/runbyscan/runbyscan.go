@@ -100,9 +100,12 @@ func Scan(root string, paths []string) (map[string][]string, error) {
 
 // Invoked returns the known command paths body invokes: the longest run of
 // command words after the binary, skipping --flags, line continuations and
-// quotes, that names a known path.
+// quotes, that names a known path. Comment lines do not run anything: a
+// workflow comment that shows consumers a command must not make it a step.
 func Invoked(body string, known map[string]bool) []string {
 	var out []string
+
+	body = withoutCommentLines(body)
 
 	for _, loc := range invocation.FindAllStringIndex(body, -1) {
 		words := commandWords(body[loc[1]:])
@@ -123,6 +126,19 @@ func Invoked(body string, known map[string]bool) []string {
 	}
 
 	return out
+}
+
+// withoutCommentLines blanks every line whose first non-blank character is
+// "#", in YAML and in shell alike, keeping the line count.
+func withoutCommentLines(body string) string {
+	lines := strings.Split(body, "\n")
+	for i, line := range lines {
+		if strings.HasPrefix(strings.TrimSpace(line), "#") {
+			lines[i] = ""
+		}
+	}
+
+	return strings.Join(lines, "\n")
 }
 
 func commandWords(rest string) []string {

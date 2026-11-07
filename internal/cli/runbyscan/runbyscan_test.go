@@ -13,7 +13,7 @@ import (
 func TestInvokedFindsTheLongestKnownPath(t *testing.T) {
 	t.Parallel()
 
-	known := map[string]bool{"build go run": true, "artifact download": true, "release publish": true, "platform checkout": true}
+	known := map[string]bool{"build go run": true, "artifact download": true, "release publish": true, "platform checkout": true, "validate container-signature": true}
 
 	body := `
 run: forge-ci build go run --enforce-application-tests="$X"
@@ -22,7 +22,10 @@ run: |
     --name x
   "${FORGE_CI_BIN}" --log-level debug release publish --tag v1
   ./cli-prebuilt/forge-ci platform checkout
-uses: diggsweden/forge-ci/.github/workflows/release-orchestrator.yml@v1
+  # consumers verify with:
+  #   forge-ci validate container-signature ghcr.io/o/i@sha256:x
+# forge-ci validate container-signature in a YAML comment
+uses:diggsweden/forge-ci/.github/workflows/release-orchestrator.yml@v1
 description: "forge-ci runtime image carrying Go"
 `
 

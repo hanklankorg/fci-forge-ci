@@ -564,6 +564,15 @@ func TestBinary_ValidateAuthRegistry_SecretIsUsedButNeverWritten(t *testing.T) {
 	}
 }
 
+// writeCIWorkflow gives a doctor fixture the CI entry point the "CI
+// workflows present" check requires, so the test isolates the check it is
+// about. The workflow calls no reusable workflow and requests no id-token.
+func writeCIWorkflow(fsys *testfs.Real) {
+	fsys.WriteFile(filepath.Join(".github", "workflows", "ci.yml"), []byte(
+		"on: push\njobs:\n  ci:\n    runs-on: ubuntu-latest\n    steps:\n      - run: forge-ci doctor\n",
+	))
+}
+
 func TestBinary_Doctor_OKWhenMinimalRepoIsClean(t *testing.T) {
 	_ = testenv.New(t)
 	bin := buildBinary(t)
@@ -574,6 +583,7 @@ func TestBinary_Doctor_OKWhenMinimalRepoIsClean(t *testing.T) {
 	fsys.WriteFile(filepath.Join(".forge-ci", "artifacts.yml"), []byte(
 		"artifacts:\n  - name: x\n    project-type: meta\n",
 	))
+	writeCIWorkflow(fsys)
 
 	stdout, stderr, code := runBinary(t, bin, "doctor", "--root", fsys.Root)
 	if code != 0 {
@@ -638,6 +648,8 @@ func TestBinary_Doctor_ArtifactsFlagOverride(t *testing.T) {
 
 	// Put the artifacts.yml in a non-standard location and point
 	// --artifacts at it.
+	writeCIWorkflow(fsys)
+
 	customPath := filepath.Join(fsys.Root, "custom-artifacts.yml")
 	if err := os.WriteFile(customPath, []byte(
 		"artifacts:\n  - name: x\n    project-type: meta\n",
@@ -736,6 +748,7 @@ func TestBinary_Doctor_JSONReportIsConsistent(t *testing.T) {
 	fsys.WriteFile(filepath.Join(".forge-ci", "artifacts.yml"), []byte(
 		"artifacts:\n  - name: x\n    project-type: meta\nsign:\n  method: sigstore\n",
 	))
+	writeCIWorkflow(fsys)
 
 	stdout, stderr, code := runBinary(t, bin, "--json", "doctor", "--root", fsys.Root)
 	if code != 1 {

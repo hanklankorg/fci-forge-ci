@@ -946,7 +946,7 @@ EXAMPLE:
 | `--registry` | the forge's own registry host, when it is not the host of --server-url (GitLab's $CI_REGISTRY); the login goes to the image repository's host, and a repository on any other host has its tags deleted through that registry | string | `""` | `$CONTAINER_REGISTRY` |
 | `--release-images` | newline- or comma-separated digest-pinned release image refs whose bases must be kept | string | `""` | `$RELEASE_IMAGES` |
 | `--max-delete` | maximum unreferenced base-input IDs per pass; all flavor tags of each ID are removed (0 disables the bound) | int | `20` | `$BASE_IMAGES_MAX_DELETE` |
-| `--dry-run` | report what would be deleted without deleting it | bool | `true` | `$BASE_IMAGES_PRUNE_DRY_RUN` |
+| `--dry-run` | report what would be deleted without deleting it (default: true; pass --dry-run=false to delete) | bool | `true` | `$BASE_IMAGES_PRUNE_DRY_RUN` |
 | `--local-registry` | list and delete through a plain OCI registry (bases kept beside the runner) instead of the forge package API | bool | `false` | `$BASE_IMAGES_LOCAL_REGISTRY` |
 | `--auth-file` | registry auth file for attestation verification and registry access | string | `""` | `$FORGE_CI_REGISTRY_AUTH_FILE` |
 
@@ -1989,7 +1989,7 @@ EXAMPLE:
 | `--recent-tags` | regular expression of tags of which the newest --recent-count versions are kept | string | `"^sha-[0-9a-f]+$"` | `$PACKAGE_RETENTION_RECENT_TAGS` |
 | `--recent-count` | how many of the newest --recent-tags versions to keep | int | `10` | `$PACKAGE_RETENTION_RECENT_COUNT` |
 | `--max-delete` | refuse a package that would lose more versions than this (0 disables the bound) | int | `100` | `$PACKAGE_RETENTION_MAX_DELETE` |
-| `--dry-run` | report what would be deleted without deleting it | bool | `true` | `$PACKAGE_RETENTION_DRY_RUN` |
+| `--dry-run` | report what would be deleted without deleting it (default: true; pass --dry-run=false to delete) | bool | `true` | `$PACKAGE_RETENTION_DRY_RUN` |
 | `--token-file` | file holding the GitHub token (default: $GH_TOKEN, then $GITHUB_TOKEN) | string | `""` | n/a |
 | `--registry-username` | the user the token logs in to ghcr.io as, to read manifests | string | `""` | `$REGISTRY_USER` |
 
@@ -2900,7 +2900,8 @@ EXAMPLES:
 
 Exit codes:
    0   — all checks pass or are warnings
-   1   — at least one FAIL check (ExitCodeValidation)
+   1   — at least one FAIL check
+   66  — the --root directory does not exist
 ```
 
 | Flag | Description | Type | Default | Env vars |
@@ -3795,7 +3796,7 @@ EXAMPLE:
 | `--keep` | how many of the newest published releases keep every file (required) | int | `0` | `$RELEASE_ASSET_RETENTION` |
 | `--keep-files` | regular expression of the file names older releases keep | string | `"(?i)(checksums\\.txt\|sha256sums)\|\\.(bundle\|sig\|asc\|pem\|intoto\\.jsonl?)$\|\\.(sbom\|cyclonedx\|spdx)\\.json$\|^(sbom-[a-z0-9][a-z0-9._-]*\|release-plan)\\.json$"` | `$RELEASE_ASSET_RETENTION_KEEP_FILES` |
 | `--max-delete` | refuse a pass that would delete more files than this (0 disables the bound) | int | `200` | `$RELEASE_ASSET_RETENTION_MAX_DELETE` |
-| `--dry-run` | report what would be deleted without deleting it | bool | `true` | `$RELEASE_ASSET_RETENTION_DRY_RUN` |
+| `--dry-run` | report what would be deleted without deleting it (default: true; pass --dry-run=false to delete) | bool | `true` | `$RELEASE_ASSET_RETENTION_DRY_RUN` |
 
 ### `forge-ci release attachments`
 
@@ -5165,7 +5166,8 @@ check your signing setup for a release request and print the git commands that m
 A release starts when a signed release-request/vX.Y.Z tag is pushed; the
 release workflow, not you, then creates vX.Y.Z. This checks that git signs
 tags with an SSH key the repository's allowed-signers file lists, and that
-neither tag exists, then prints the two git commands. It does not run them.
+neither tag exists in this clone (fetch the tags first: it does not ask
+the remote), then prints the two git commands. It does not run them.
 It exits 1 while a check fails.
 ```
 
@@ -5570,7 +5572,7 @@ EXAMPLE:
 
 | Flag | Description | Type | Default | Env vars |
 |------|-------------|------|---------|----------|
-| `--method` | verification method: sigstore or kms. gpg is rejected — OpenPGP cannot verify OCI signatures. | string | `""` | `$SIGN_METHOD` |
+| `--method` | verification method: sigstore or kms. gpg is rejected — OpenPGP cannot verify OCI signatures. (required) | string | `""` | `$SIGN_METHOD` |
 | `--cert-identity-regexp` | regexp the Fulcio cert identity must match for --method=sigstore (matched against the full identity URL; example: ^https://github\.com/<owner>/<repo>/) | string | `""` | `$CERT_IDENTITY_REGEXP` |
 | `--cert-oidc-issuer` | OIDC issuer URL the Fulcio cert must claim for --method=sigstore | string | `""` | `$CERT_OIDC_ISSUER` |
 | `--key` | cosign --key reference for --method=kms verification: KMS URI or local pubkey file path | string | `""` | `$SIGN_KEY` |

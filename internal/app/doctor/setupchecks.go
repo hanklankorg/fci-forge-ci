@@ -8,6 +8,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 
@@ -290,4 +291,60 @@ func placeholderFiles(root, artifactsPath string) ([]string, string) {
 	artifactsRel := filepath.ToSlash(rel)
 
 	return append([]string{artifactsRel}, files...), artifactsRel
+}
+
+// CheckRequestSignature names the Forgejo request-signature check.
+const CheckRequestSignature = "release-request signature checked"
+
+// requestSignatureOff matches a Forgejo workflow input that turns the
+// request-tag signature check off, quoted or not, with a trailing comment.
+var requestSignatureOff = regexp.MustCompile(`^\s*verify-release-request-signature:\s*["']?false["']?\s*(#.*)?$`)
+
+// checkRequestSignatureVerified warns while a Forgejo workflow passes
+// verify-release-request-signature: 'false'. The Forgejo examples ship it off
+// until the repository commits its allowed-signers file, and nothing else
+// says when to turn it on. ok is false when no Forgejo workflow sets it.
+func checkRequestSignatureVerified(root string) (Check, bool) {
+	var off []string
+
+	set := false
+
+	for _, rel := range ciFiles(root) {
+		if !strings.HasPrefix(rel, ".forgejo/workflows/") {
+			continue
+		}
+
+		body, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(rel))) //nolint:gosec // repository CI files under the inspected root.
+		if err != nil {
+			continue
+		}
+
+		for i, line := range strings.Split(string(body), "\n") {
+			if !strings.Contains(line, "verify-release-request-signature:") || strings.HasPrefix(strings.TrimSpace(line), "#") {
+				continue
+			}
+
+			set = true
+
+			if requestSignatureOff.MatchString(line) {
+				off = append(off, fmt.Sprintf("%s:%d", rel, i+1))
+			}
+		}
+	}
+
+	switch {
+	case !set:
+		return Check{}, false
+	case len(off) == 0:
+		return Check{Name: CheckRequestSignature, Severity: SeverityOK, Message: "the Forgejo release verifies the release-request tag's signature"}, true
+	}
+
+	return Check{
+		Name:     CheckRequestSignature,
+		Severity: SeverityWarn,
+		Message: fmt.Sprintf("verify-release-request-signature is false in %s: anyone who can push a release-request tag starts a release",
+			listed(off)),
+		Remediation: "commit the allowed-signers file (`forge-ci setup signer` writes it), then set " +
+			"verify-release-request-signature: 'true'; see forge-ci docs forgejo",
+	}, true
 }

@@ -9,7 +9,10 @@ set -euo pipefail
 export PATH=/usr/bin:/bin
 unset FORGE_CI_BIN FORGE_CI_PATH FORGE_CI_BINARY_REF FORGE_CI_PLAN
 
-fail() { printf 'trusted-bootstrap: %s\n' "$1" >&2; exit 69; }
+fail() {
+	printf 'trusted-bootstrap: %s\n' "$1" >&2
+	exit 69
+}
 [[ $# -ge 6 && "$5" == -- ]] || fail 'expected CHECKOUT HTTPS_ORIGIN FULL_COMMIT ABSOLUTE_BINARY -- CLI_ARGUMENT...'
 checkout=$1 origin=$2 commit=$3 binary=$4
 shift 5
@@ -49,7 +52,9 @@ done
 # reset the verifier cache; no caller-supplied digest or cached verification.
 # shellcheck source=../../.engine/bin/lib-forge-ci.sh
 source "$checkout/.engine/bin/lib-forge-ci.sh"
+# shellcheck disable=SC2034 # Read by verify_forge_ci in lib-forge-ci.sh.
 SIGNER_STRICT=1
+# shellcheck disable=SC2034 # Read by verify_forge_ci in lib-forge-ci.sh.
 FORGE_CI_BIN=$binary
 verify_forge_ci || exit $?
 unset FORGE_CI_BIN

@@ -1,12 +1,14 @@
 # Documentation Index
 
-This index separates end-user documentation by purpose. The examples and docs
-target the 0.90.0 Go-backed workflow contract.
+This index separates end-user documentation by purpose.
 
-> **Current source versus release pins:** `v0.90.0` examples identify a historical
-> baseline, not the current source revision. Confirm the selected workflow, CLI
-> assets and runtime images are available and compatible before adoption. For
-> unreleased changes, follow the reviewed-branch procedure in
+> **Which version to pin:** the examples and the snippets in these guides pin
+> `v0.90.0`. `forge-ci init` copies the examples of the newest release and pins
+> that release instead. When you copy files by hand, take them from the tag of
+> the release you install (the README's Install section names it), and replace
+> every `v0.90.0` with that tag: the `uses:` references, `forge-ci-binary-ref`
+> and any `runtime-image*` override move together. For unreleased changes,
+> follow the reviewed-branch procedure in
 > [Runtime Images](runtime-images.md#branch-testing).
 
 New to Forge CI? Start with [Your first pull-request check](tutorial-first-pull-request.md).
@@ -28,6 +30,8 @@ Solve a specific task.
 
 - [Release signing secrets](quickstart-setup-secrets.md) - Linux key setup and
   hardware-backed/keyless signing guidance.
+- [Release setup requirements](setup-requirements.md) - What `forge-ci doctor --requirements`
+  reports: the credentials and settings your release workflows use.
 - [Publishing](publishing.md) - Configure Maven Central, GitHub Packages, containers, App Store Connect, and Google Play.
 - [Gradle publishing](gradle-publishing.md) - Export JVM publications, sign files and observe Central deployment state.
 - [Private dependencies](private-dependencies.md) - Opt into scoped dependency-read credentials for npm, Maven and Gradle.
