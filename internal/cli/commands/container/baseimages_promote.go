@@ -31,10 +31,18 @@ or --all-images-json for the existing metadata contract, never both.
 
 Every image must be in the one base-image repository, --expected-repository
 or the one derived from --server-url and --repository; the login goes to its
-registry.`,
+registry.
+
+Optional --base-inputs-json constrains every promoted flavor's own input ID and
+parent_base in the same verified child SLSA statement. Its flavors must exactly
+match the target image flavors: missing and extra entries are rejected before login.
+Independently verifying
+that parent (including cross-repository parents) remains the caller's duty.
+Omitting it preserves legacy checks; it does not assert absence of a parent.`,
 		Flags: append(baseImagesCommonFlags(),
 			&cli.StringFlag{Name: flagLedger, Usage: "publication base-image ledger to admit and project; exclusive with --all-images-json"},
 			&cli.StringFlag{Name: "all-images-json", Sources: cli.EnvVars("ALL_IMAGES_JSON"), Usage: "JSON array of base image metadata to verify/promote"},
+			&cli.StringFlag{Name: flagBaseInputsJSON, Sources: cli.EnvVars("BASE_INPUTS_JSON"), Usage: "optional JSON array mapping every promoted flavor to expected base_input_id and caller-verified parent_base {ref,input_id}"},
 			&cli.StringFlag{Name: flagBaseInputID, Sources: cli.EnvVars("BASE_INPUT_ID"), Usage: "optional single sha256 base input ID expected for every image"},
 			regflags.Username(),
 			regflags.PasswordFile(),
@@ -54,6 +62,26 @@ registry.`,
 				return err
 			}
 
+			var baseInputs []appbaseimages.BaseInput
+			if cmd.IsSet(flagBaseInputsJSON) {
+				baseInputs, err = parseBaseInputs(cmd.String(flagBaseInputsJSON))
+				if err != nil {
+					return err
+				}
+			}
+
+			in := appbaseimages.BaseImagePromoteInput{
+				Images: images, BaseInputs: baseInputs,
+				BaseInputID:        cmd.String(flagBaseInputID),
+				ExpectedRepository: common.ExpectedRepository,
+				ExpectedSource:     common.ExpectedSource,
+				ExpectedWorkflow:   common.ExpectedWorkflow,
+				CosignPublicKey:    common.PublicKeyPath,
+			}
+			if err := appbaseimages.ValidateBaseImagePromotion(in); err != nil {
+				return err
+			}
+
 			return deps.FromCmd(ctx, cmd, func(dep *deps.Deps) error {
 				return withBaseImagesDockerConfig(func(authFile string) error {
 					if err := common.login(authFile); err != nil {
@@ -64,14 +92,7 @@ registry.`,
 						ociregistry.WithAuthFile(authFile),
 						cosign.NewIsolated("DOCKER_CONFIG"),
 						os.Stderr,
-						appbaseimages.BaseImagePromoteInput{
-							Images:             images,
-							BaseInputID:        cmd.String(flagBaseInputID),
-							ExpectedRepository: common.ExpectedRepository,
-							ExpectedSource:     common.ExpectedSource,
-							ExpectedWorkflow:   common.ExpectedWorkflow,
-							CosignPublicKey:    common.PublicKeyPath,
-						})
+						in)
 					if err != nil {
 						return err
 					}

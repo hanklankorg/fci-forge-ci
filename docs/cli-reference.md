@@ -800,6 +800,13 @@ or --all-images-json for the existing metadata contract, never both.
 Every image must be in the one base-image repository, --expected-repository
 or the one derived from --server-url and --repository; the login goes to its
 registry.
+
+Optional --base-inputs-json constrains every promoted flavor's own input ID and
+parent_base in the same verified child SLSA statement. Its flavors must exactly
+match the target image flavors: missing and extra entries are rejected before login.
+Independently verifying
+that parent (including cross-repository parents) remains the caller's duty.
+Omitting it preserves legacy checks; it does not assert absence of a parent.
 ```
 
 | Flag | Description | Type | Default | Env vars |
@@ -815,6 +822,7 @@ registry.
 | `--cosign-public-key-sha256` | expected sha256 digest of the trusted Cosign public key | string | `""` | `$COSIGN_PUBLIC_KEY_SHA256` |
 | `--ledger` | publication base-image ledger to admit and project; exclusive with --all-images-json | string | `""` | n/a |
 | `--all-images-json` | JSON array of base image metadata to verify/promote | string | `""` | `$ALL_IMAGES_JSON` |
+| `--base-inputs-json` | optional JSON array mapping every promoted flavor to expected base_input_id and caller-verified parent_base {ref,input_id} | string | `""` | `$BASE_INPUTS_JSON` |
 | `--base-input-id` | optional single sha256 base input ID expected for every image | string | `""` | `$BASE_INPUT_ID` |
 | `--registry-username` | registry username; the password is read from --registry-password-file or $REGISTRY_TOKEN / $REGISTRY_PASSWORD | string | `""` | `$REGISTRY_USER` |
 | `--registry-password-file` | file containing the registry password/token ("-" reads stdin); defaults to $REGISTRY_TOKEN then $REGISTRY_PASSWORD. The password never appears in argv. | string | `""` | n/a |

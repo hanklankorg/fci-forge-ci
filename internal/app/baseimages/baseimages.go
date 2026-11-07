@@ -90,6 +90,11 @@ type BaseImageVerifyExistingResult struct {
 
 // BaseImagePromoteInput drives PromoteBaseImages.
 type BaseImagePromoteInput struct {
+	// BaseInputs optionally constrains each image's own ID and caller-verified
+	// parent projection. Nil preserves legacy behavior, not a no-parent claim.
+	// When non-nil its flavors must exactly match the normalized image flavors;
+	// parents are not recursively verified.
+	BaseInputs         []BaseInput
 	Images             []BaseImageMetadata
 	BaseInputID        string
 	ExpectedRepository string
