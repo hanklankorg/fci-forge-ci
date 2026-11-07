@@ -420,6 +420,16 @@ jobs:
       # names, image tags or stable/draft classification.
       release-tag: ${{ steps.relctx.outputs.release-tag }}
     steps:
+      - &required-native-request-source
+        name: Require original immutable request source
+        shell: bash
+        env:
+          RELEASE_REQUEST_SHA: ${{ github.sha }}
+        run: |
+          if [[ ! "$RELEASE_REQUEST_SHA" =~ ^([0-9a-f]{40}|[0-9a-f]{64})$ ]]; then
+            printf '%s\n' 'original request source must be a full lowercase SHA-1 or SHA-256 object ID' >&2
+            exit 1
+          fi
       - &canonical-context
         name: Require original canonical success and approved identity
         if: ${{ inputs['require-canonical-bootstrap'] }}
@@ -622,6 +632,7 @@ jobs:
       binding-run-id: ${{ github.run_id }}
       binding-run-attempt: ${{ github.run_attempt }}
     steps:
+      - *required-native-request-source
       - *canonical-context
       - *canonical-checkout
       - *canonical-consume
@@ -639,6 +650,8 @@ jobs:
         env:
           RELEASE_POLICY: ${{ inputs['release-policy'] }}
           RELEASE_SHA: ${{ needs.execute-prepare-stage.outputs.release-sha }}
+          RELEASE_REQUEST_SHA: ${{ github.sha }}
+          RELEASE_REQUEST_IS_RELEASE: ${{ !fromJson(needs.parse-config.outputs['prepare-stage-plan-json']).targets.version_bump.runs }}
           TAG_NAME: ${{ needs.parse-config.outputs.release-tag }}
           GITHUB_TOKEN: ${{ github.token }}
         run: forge-ci release validate-tag
@@ -814,8 +827,12 @@ jobs:
       RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
       RELEASE_COSIGN_PRIVATE_KEY: ${{ secrets.RELEASE_COSIGN_PRIVATE_KEY }}
       RELEASE_COSIGN_PASSPHRASE: ${{ secrets.RELEASE_COSIGN_PASSPHRASE }}
+      RELEASE_GPG_PUBLIC_KEY: ${{ secrets.RELEASE_GPG_PUBLIC_KEY }}
     uses: ./.github/workflows/release-create-github.yml
     with:
+      authorized-source-sha: ${{ github.sha }}
+      request-is-release: ${{ !fromJson(needs.parse-config.outputs['prepare-stage-plan-json']).targets.version_bump.runs }}
+      require-allowlisted-signer: ${{ fromJson(needs.parse-config.outputs['release-plan-json']).policy.require_allowlisted_signer }}
       release-policy: ${{ inputs['release-policy'] }}
       release-name: "${{ needs.parse-config.outputs.release-tag }}"
       checkout-ref: ${{ needs.execute-prepare-stage.outputs.release-sha }}

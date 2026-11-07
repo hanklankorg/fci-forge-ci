@@ -46,6 +46,10 @@ type VerifyReleaseTagInput struct {
 	// commit must equal this explicitly authorised SHA. This is freshness and
 	// source binding, not a replacement for signed-request authorization.
 	ExpectedParent string
+	// RequestIsRelease selects the explicit no-bump route: the release must
+	// equal ExpectedParent, rather than be its child. Request freshness still
+	// applies. It cannot be combined with a prepared-change profile.
+	RequestIsRelease bool
 	// ChangelogOnly admits exactly a CHANGELOG.md change and binds the local
 	// release-request/<tag> to ExpectedParent, for a tested prepare candidate.
 	ChangelogOnly bool
@@ -86,8 +90,8 @@ func VerifyReleaseTag(ctx context.Context, git tagVerifyGit, out io.Writer, in V
 		return fmt.Errorf("verify-release-tag: expected-parent must be a full lowercase commit ID: %w", errs.ErrUsage)
 	}
 
-	if in.ExpectedParent == in.ReleaseSHA {
-		return fmt.Errorf("verify-release-tag: prepared release must differ from the authorised request source: %w", errs.ErrValidation)
+	if err := validateRequestRoute(in); err != nil {
+		return err
 	}
 
 	if in.ChangelogOnly && in.ExpectedParent == "" {
@@ -165,9 +169,29 @@ func VerifyReleaseTag(ctx context.Context, git tagVerifyGit, out io.Writer, in V
 	return nil
 }
 
+func validateRequestRoute(in VerifyReleaseTagInput) error {
+	if in.RequestIsRelease {
+		if in.ExpectedParent == "" || in.ChangelogOnly || in.VersionBump != "" {
+			return fmt.Errorf("verify-release-tag: request-is-release requires expected-parent and no prepared-change profile: %w", errs.ErrUsage)
+		}
+
+		if in.ExpectedParent != in.ReleaseSHA {
+			return fmt.Errorf("verify-release-tag: no-bump release must equal the authorised request source: %w", errs.ErrValidation)
+		}
+	} else if in.ExpectedParent == in.ReleaseSHA {
+		return fmt.Errorf("verify-release-tag: prepared release must differ from the authorised request source: %w", errs.ErrValidation)
+	}
+
+	return nil
+}
+
 func verifyPreparedSource(ctx context.Context, git tagVerifyGit, in VerifyReleaseTagInput, repository string) error {
 	if in.ExpectedParent == "" {
 		return nil
+	}
+
+	if in.RequestIsRelease {
+		return verifyPreparedRequest(ctx, git, in, repository)
 	}
 
 	parents, err := git.CommitParents(ctx, in.ReleaseSHA)

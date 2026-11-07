@@ -39,6 +39,18 @@ name: Create GitHub Release
 on:
   workflow_call: # yamllint disable-line rule:truthy
     inputs:
+      authorized-source-sha:
+        description: "Original immutable request commit Q from trusted event context, never assembly metadata"
+        required: true
+        type: string
+      request-is-release:
+        description: "Explicit no-bump route: require P=Q instead of a prepared child"
+        default: false
+        type: boolean
+      require-allowlisted-signer:
+        description: "Preserve the native request signer allowlist policy from the release plan"
+        default: false
+        type: boolean
       release-policy:
         description: "Accepted release versions: stable or stable-prerelease"
         type: string
@@ -126,6 +138,9 @@ on:
         type: string
     # All `required: false` — `secrets: inherit` callers unchanged.
     secrets:
+      RELEASE_GPG_PUBLIC_KEY:
+        description: "Public verification material only, for final-tag signature checks"
+        required: false
       RELEASE_GPG_PRIVATE_KEY:
         description: "Armored OpenPGP private key (used when sign.method=gpg in artifacts.yml)"
         required: false
@@ -292,6 +307,18 @@ jobs:
       # Deterministic OpenPGP signatures use the release commit's time.
       SOURCE_DATE_EPOCH: ${{ needs.assemble-release.outputs.source-date-epoch }}
     steps:
+      - &required-request-source
+        name: Require original immutable request source
+        shell: bash
+        env:
+          RELEASE_REQUEST_SHA: ${{ inputs['authorized-source-sha'] }}
+        # workflow_call required:true does not reject an explicitly empty string.
+        # No fallback to the prepared source, event defaults or assembly claims.
+        run: |
+          if [[ ! "$RELEASE_REQUEST_SHA" =~ ^([0-9a-f]{40}|[0-9a-f]{64})$ ]]; then
+            printf '%s\n' 'authorized-source-sha must be a full lowercase SHA-1 or SHA-256 object ID' >&2
+            exit 1
+          fi
       - name: Harden GitHub runner
         uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
         with:
@@ -341,6 +368,44 @@ jobs:
         env:
           RELEASE_ASSEMBLY: .forge-ci/release-assembly.json
         run: forge-ci release validate-assembly
+      - &request-metadata
+        name: Checkout immutable request trust metadata
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          CHECKOUT_REF: ${{ inputs['authorized-source-sha'] }}
+        # Metadata only; no explicit consumer action/build-tool calls. Git startup
+        # config/templates must be trusted: this path does not force hooksPath.
+        # Keep Q's trust material separate from the prepared checkout P.
+        run: forge-ci platform checkout --workspace "$RUNNER_TEMP/release-request-metadata" --sparse .forge-ci --fetch-all-refs
+      - &release-metadata
+        name: Checkout immutable release validation metadata
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          CHECKOUT_REF: ${{ inputs['checkout-ref'] }}
+        run: forge-ci platform checkout --workspace "$RUNNER_TEMP/release-source-metadata" --sparse .forge-ci --fetch-all-refs
+      - &late-authorization
+        name: Revalidate request authority and final source at private boundary
+        working-directory: ${{ runner.temp }}/release-source-metadata
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          RELEASE_SHA: ${{ inputs['checkout-ref'] }}
+          RELEASE_REQUEST_SHA: ${{ inputs['authorized-source-sha'] }}
+          RELEASE_REQUEST_IS_RELEASE: ${{ inputs['request-is-release'] }}
+          TAG_NAME: ${{ inputs['release-name'] }}
+          REQUIRE_ALLOWLISTED_SIGNER: ${{ inputs['require-allowlisted-signer'] }}
+          REQUIRE_VALID_SIGNATURE: "true"
+          ALLOWED_SIGNERS_FILE: ${{ runner.temp }}/release-request-metadata/.forge-ci/allowed_signers
+          ALLOWED_GPG_KEYS_FILE: ${{ runner.temp }}/release-request-metadata/.forge-ci/allowed_gpg_keys.asc
+          RELEASE_GPG_PUBLIC_KEY: ${{ secrets.RELEASE_GPG_PUBLIC_KEY }}
+        run: |
+          set -euo pipefail
+          forge-ci validate tag signature --tag "release-request/$TAG_NAME"
+          # The bot's final GPG signature uses the configured public release
+          # key, not the human request's GPG allowlist. SSH retains its list.
+          forge-ci validate tag signature --tag "$TAG_NAME" --require-allowlisted-signer=false --allowed-gpg-keys-file /dev/null
+          # Last read before key setup/publication: remote request object AND
+          # peeled Q, exact final P and supersession. Not an atomic remote lease.
+          forge-ci release validate-tag --expected-parent "$RELEASE_REQUEST_SHA"
       - name: Import GPG key
         # GPG agent setup is only needed when artifact signing uses the
         # GPG backend. Sigstore (keyless OIDC) and KMS (cosign + external
@@ -351,7 +416,7 @@ jobs:
         # intent ("import the key") rather than hard-coding the method name.
         if: ${{ inputs['sign-artifacts'] && fromJSON(inputs['config-plan-json']).sign.imports_gpg_key }}
         # No git signing configuration: this job signs files, not commits,
-        # and has no checkout for git config to write to.
+        # and never configures Git signing in the metadata checkouts.
         id: import-gpg
         env:
           GPG_PRIVATE_KEY: ${{ secrets.RELEASE_GPG_PRIVATE_KEY }}
@@ -444,17 +509,12 @@ jobs:
     env:
       RELEASE_POLICY: ${{ inputs['release-policy'] }}
     steps:
+      - *required-request-source
       - name: Harden GitHub runner
         uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
         with:
           egress-policy: ${{ inputs['egress-policy'] }}
           allowed-endpoints: ${{ inputs['egress-allowed-endpoints'] }}
-      - name: Checkout exact release source
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
-        with:
-          ref: ${{ needs.assemble-release.outputs.release-sha }}
-          fetch-depth: 0
-          persist-credentials: false
       - name: Checkout forge-ci bootstrap installers
         id: forge-ci-bootstrap
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
@@ -481,12 +541,9 @@ jobs:
         env:
           EXPECTED_DIGEST: ${{ needs.sign-release.outputs.digest }}
         run: forge-ci release validate-dist --dist-dir signed-release --manifest-root . --expected-digest "$EXPECTED_DIGEST"
-      - name: Revalidate release tag before publication
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-          RELEASE_SHA: ${{ needs.assemble-release.outputs.release-sha }}
-          TAG_NAME: ${{ inputs['release-name'] }}
-        run: forge-ci release validate-tag --release-policy "$RELEASE_POLICY"
+      - *request-metadata
+      - *release-metadata
+      - *late-authorization
       - name: Create GitHub Release
         working-directory: signed-release
         env:

@@ -50,3 +50,50 @@ bootstrap selection and the eventual classified policy/producer/sign/publish
 graph remain separate reviewed units. No workflow or production pin changes here.
 Integration requires canonical CLI binaries/checksums built from the actual
 combined source; earlier-source hashes must not be copied forward.
+
+## Native GitHub late boundaries
+
+The native orchestrator carries the original event `github.sha` as Q to its
+final-tag gate and `release-create-github.yml`, separately from prepared P and
+assembly outputs. The release leaf requires an immutable `authorized-source-sha`;
+it never derives authority from downloaded assembly assertions.
+
+After canonical engine bootstrap, the signing and publishing jobs use separate
+engine-created sparse metadata checkouts at Q (public trust files) and P (Git
+objects). These steps make no explicit consumer script, build-tool or local-action calls.
+These Git operations require trusted runner Git startup configuration and
+templates; the checkout adapter does not force `core.hooksPath=/dev/null`, so
+this metadata path is not a hooks sandbox.
+Immediately before private key setup and immediately before publication, the
+native GPG/SSH signature validator verifies the request with Q's trust files and
+the configured allowlist requirement. The final signature is verified too (GPG
+uses only the configured public release key). The last command rereads the exact
+remote request object/peeled Q, exact final object/commit P, and supersession via
+`release validate-tag --expected-parent Q`. Only the source-read job token and
+public verification material are in scope for these checks.
+
+Before bootstrap/metadata checkout or request/final-tag validation in either
+consumer job, a workflow scalar gate requires Q to be exactly 40 or 64 lowercase
+hex characters (SHA-1 or SHA-256). Empty, whitespace, short and malformed values
+fail explicitly, without falling back to the event, prepared P or assembly
+metadata. The orchestrator applies the same gate to the original event SHA
+before its initial checkout and final-tag validation. Git checkout and the
+existing native validators then establish object/ref equality in the actual
+repository. Optional-Q legacy CLI calls retain their existing behavior; the
+workflow's required-Q contract does not change that CLI default.
+
+The explicit no-bump plan sets `RELEASE_REQUEST_IS_RELEASE=true` (CLI
+`--request-is-release`). This requires P=Q and still checks remote request
+identity; it is not an optional parentage bypass for prepared children. This
+mode requires Q and rejects prepared-change profiles. Ordinary prepared and
+recovery routes retain the single-child rule. An exact-P publication retry
+reuses the signed payload and reruns these checks without requiring a new P or
+an absent final tag. Existing `--changelog-only`/`--version-bump` profiles remain
+unchanged for callers selecting them; the general native multi-artifact prepare
+plan is not silently restricted to the root Go/Cargo file-only profile.
+
+These are fresh observations, not an atomic remote lease or a substitute for
+authorization. A revoked/deleted request, retagged annotation (even at the same
+Q), invalid/unsigned request, moved final P or superseding final tag refuses
+before the corresponding private operation. This change does not activate a
+classified route, production pin, or new trust root.

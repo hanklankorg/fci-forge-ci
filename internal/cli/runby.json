@@ -174,7 +174,7 @@
   "validate signing-privacy": [".github/workflows/publish-container.yml",".github/workflows/slsa-attestor.yml"],
   "validate tag commit": [".forgejo/workflows/prepare-release.yml",".github/workflows/release-prepare-stage.yml"],
   "validate tag release-guard": [".forgejo/actions/guard-release-tag",".forgejo/workflows/prepare-release.yml",".github/workflows/generate-changelog.yml",".github/workflows/publish-maven-central.yml",".github/workflows/publish-maven-github.yml"],
-  "validate tag signature": [".github/workflows/release-orchestrator.yml"],
+  "validate tag signature": [".github/workflows/release-create-github.yml",".github/workflows/release-orchestrator.yml"],
   "validate workflow input-defaults": [".github/workflows/self-pullrequest.yml"],
   "version apply-bump": [".forgejo/actions/prepare-release",".forgejo/workflows/prepare-release.yml",".github/workflows/version-bump.yml"],
   "version bump": [".forgejo/workflows/prepare-release.yml",".github/workflows/version-bump.yml"],

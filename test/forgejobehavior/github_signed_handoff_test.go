@@ -64,6 +64,10 @@ func TestGitHubPublisherReusesDigestBoundSignedPayload(t *testing.T) {
 		}
 
 		for _, value := range step.Env {
+			if value == "${{ secrets.RELEASE_GPG_PUBLIC_KEY }}" {
+				continue // Public-only tag verification is not signing authority.
+			}
+
 			if strings.Contains(value, "secrets.RELEASE_GPG_") || strings.Contains(value, "secrets.RELEASE_COSIGN_") {
 				t.Fatal("publisher receives signing material")
 			}
@@ -81,7 +85,7 @@ func TestGitHubPublisherReusesDigestBoundSignedPayload(t *testing.T) {
 	stage := find(signer.Steps, "Stage signed release payload")
 	verify := find(publisher.Steps, "Verify signed release payload")
 	download := find(publisher.Steps, "Download signed release payload")
-	lease := find(publisher.Steps, "Revalidate release tag before publication")
+	lease := find(publisher.Steps, "Revalidate request authority and final source at private boundary")
 	publish := find(publisher.Steps, "Create GitHub Release")
 
 	if signer.Outputs["digest"] != "${{ steps.signed-state.outputs.digest }}" || verify.Env["EXPECTED_DIGEST"] != "${{ needs.sign-release.outputs.digest }}" || download.Env["DOWNLOAD_NAME"] != "${{ needs.sign-release.outputs.artifact-name }}" ||
@@ -89,7 +93,7 @@ func TestGitHubPublisherReusesDigestBoundSignedPayload(t *testing.T) {
 		t.Fatal("handoff is not bound to signer outputs")
 	}
 
-	if lease.Env["RELEASE_SHA"] != "${{ needs.assemble-release.outputs.release-sha }}" || publish.WorkingDirectory != "signed-release" {
+	if lease.Env["RELEASE_SHA"] != "${{ inputs['checkout-ref'] }}" || lease.Env["RELEASE_REQUEST_SHA"] != "${{ inputs['authorized-source-sha'] }}" || publish.WorkingDirectory != "signed-release" {
 		t.Fatal("publisher is not bound to prepared source and verified payload")
 	}
 
