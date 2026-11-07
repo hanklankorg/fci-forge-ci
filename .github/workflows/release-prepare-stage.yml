@@ -67,6 +67,12 @@ on:
         description: "OpenSSH private key for signing the release commit + tag when git-signing-method=ssh"
         required: false
     outputs:
+      binding-run-id:
+        description: "Run captured by the original release-state producer, not the summary"
+        value: ${{ jobs.version-bump.outputs.binding-run-id }}
+      binding-run-attempt:
+        description: "Attempt captured by the original release-state producer, not the summary"
+        value: ${{ jobs.version-bump.outputs.binding-run-attempt }}
       stage-ran:
         description: Prepare stage ran at least one version bump path
         value: ${{ jobs.summarize-prepare-stage.outputs.stage-ran }}
@@ -205,6 +211,8 @@ jobs:
       actions: read
       contents: write
     outputs:
+      binding-run-id: ${{ github.run_id }}
+      binding-run-attempt: ${{ github.run_attempt }}
       release-sha: ${{ steps.release-state.outputs.release-sha }}
       source-date-epoch: ${{ steps.release-state.outputs.source-date-epoch }}
     steps:

@@ -1,0 +1,26 @@
+# SPDX-FileCopyrightText: 2026 Digg - Agency for Digital Government
+# SPDX-License-Identifier: CC0-1.0
+# Inert receiving-job template, NOT a callable or deployed workflow.
+# Repeat this gate for every required needs job; never interpolate untrusted
+# values into shell source or map private secrets before the gates.
+name: Inert prerequisite binding receiver
+jobs:
+  receiver:
+    needs: [prerequisite]
+    steps:
+      - name: Require original successful current-attempt prerequisite
+        env:
+          EXPECTED_RUN: ${{ github.run_id }}
+          EXPECTED_ATTEMPT: ${{ github.run_attempt }}
+          PREREQUISITE_RESULT: ${{ needs.prerequisite.result }}
+          CAPTURED_RUN: ${{ needs.prerequisite.outputs.binding-run-id }}
+          CAPTURED_ATTEMPT: ${{ needs.prerequisite.outputs.binding-run-attempt }}
+        run: |
+          set -eu
+          test "$PREREQUISITE_RESULT" = success
+          test -n "$EXPECTED_RUN"
+          test -n "$EXPECTED_ATTEMPT"
+          test "$CAPTURED_RUN" = "$EXPECTED_RUN"
+          test "$CAPTURED_ATTEMPT" = "$EXPECTED_ATTEMPT"
+      - name: Inert stand-in for later secret mapping
+        run: 'printf admitted > "$EFFECT_FILE"'

@@ -132,6 +132,12 @@ on:
         description: "Token with security-events:write for SARIF upload"
         required: false
     outputs:
+      binding-run-id:
+        description: "Run captured by the original prerequisite validation job"
+        value: ${{ jobs.validate.outputs.binding-run-id }}
+      binding-run-attempt:
+        description: "Attempt captured by the original prerequisite validation job"
+        value: ${{ jobs.validate.outputs.binding-run-attempt }}
       existing-release-sha:
         description: "Verified existing final-tag commit for an exact-tag recovery, otherwise empty"
         value: ${{ jobs.validate.outputs.existing-release-sha }}
@@ -150,6 +156,8 @@ jobs:
     runs-on: ubuntu-26.04
     timeout-minutes: 15
     outputs:
+      binding-run-id: ${{ github.run_id }}
+      binding-run-attempt: ${{ github.run_attempt }}
       existing-release-sha: ${{ steps.prerequisites.outputs.existing-release-sha }}
     container:
       image: ${{ inputs['runtime-image'] || needs.resolve-bootstrap.outputs['runtime-image'] }}
