@@ -27,7 +27,7 @@ func fixtureTool(t *testing.T, name string) string {
 func TestAdapterShellFormat(t *testing.T) {
 	tool := fixtureTool(t, "shfmt")
 	for _, file := range []string{"prepare.sh", "check-release.sh", "build-release.sh", "verify-rust-job.sh"} {
-		if output, err := exec.CommandContext(t.Context(), tool, "-d", file).CombinedOutput(); err != nil {
+		if output, err := exec.CommandContext(t.Context(), tool, "-i", "2", "-d", file).CombinedOutput(); err != nil {
 			t.Fatalf("shfmt %s: %v\n%s", file, err, output)
 		}
 	}

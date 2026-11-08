@@ -21,58 +21,58 @@ readonly SYFT_SHA256_DARWIN_AMD64="e2e5831cbabaec9a36fe65c34755c1113982c842a685e
 readonly SYFT_SHA256_DARWIN_ARM64="1217c258bd5eb91ef3189cf22a82e02f9cac07e4ce934350f428e93aff674625"
 
 install_syft() {
-	local install_dir raw_os raw_arch platform os arch asset sha256 archive version
-	install_dir="$(ci_install_dir syft)"
-	if [[ -L "$install_dir" || (-e "$install_dir" && ! -d "$install_dir") ]]; then
-		printf 'ERROR: Syft install directory is not a real directory: %s\n' "$install_dir" >&2
-		return 1
-	fi
-	mkdir -p "$install_dir"
-	chmod 0700 "$install_dir"
-	version="${SYFT_VERSION#v}"
-	raw_os="${OS:-$(uname -s)}"
-	raw_arch="${ARCH:-$(uname -m)}"
-	platform="$(ci_normalize_os "$raw_os")/$(ci_normalize_arch "$raw_arch")" || true
+  local install_dir raw_os raw_arch platform os arch asset sha256 archive version
+  install_dir="$(ci_install_dir syft)"
+  if [[ -L "$install_dir" || (-e "$install_dir" && ! -d "$install_dir") ]]; then
+    printf 'ERROR: Syft install directory is not a real directory: %s\n' "$install_dir" >&2
+    return 1
+  fi
+  mkdir -p "$install_dir"
+  chmod 0700 "$install_dir"
+  version="${SYFT_VERSION#v}"
+  raw_os="${OS:-$(uname -s)}"
+  raw_arch="${ARCH:-$(uname -m)}"
+  platform="$(ci_normalize_os "$raw_os")/$(ci_normalize_arch "$raw_arch")" || true
 
-	case "$platform" in
-	linux/amd64)
-		os=linux
-		arch=amd64
-		sha256="$SYFT_SHA256_LINUX_AMD64"
-		;;
-	linux/arm64)
-		os=linux
-		arch=arm64
-		sha256="$SYFT_SHA256_LINUX_ARM64"
-		;;
-	darwin/amd64)
-		os=darwin
-		arch=amd64
-		sha256="$SYFT_SHA256_DARWIN_AMD64"
-		;;
-	darwin/arm64)
-		os=darwin
-		arch=arm64
-		sha256="$SYFT_SHA256_DARWIN_ARM64"
-		;;
-	*)
-		printf 'ERROR: unsupported platform for Syft: %s/%s\n' "$raw_os" "$raw_arch" >&2
-		return 1
-		;;
-	esac
-	asset="syft_${version}_${os}_${arch}.tar.gz"
-	archive="$install_dir/$asset"
+  case "$platform" in
+  linux/amd64)
+    os=linux
+    arch=amd64
+    sha256="$SYFT_SHA256_LINUX_AMD64"
+    ;;
+  linux/arm64)
+    os=linux
+    arch=arm64
+    sha256="$SYFT_SHA256_LINUX_ARM64"
+    ;;
+  darwin/amd64)
+    os=darwin
+    arch=amd64
+    sha256="$SYFT_SHA256_DARWIN_AMD64"
+    ;;
+  darwin/arm64)
+    os=darwin
+    arch=arm64
+    sha256="$SYFT_SHA256_DARWIN_ARM64"
+    ;;
+  *)
+    printf 'ERROR: unsupported platform for Syft: %s/%s\n' "$raw_os" "$raw_arch" >&2
+    return 1
+    ;;
+  esac
+  asset="syft_${version}_${os}_${arch}.tar.gz"
+  archive="$install_dir/$asset"
 
-	printf "Installing Syft SBOM generator (version: %s)...\n" "${SYFT_VERSION}"
-	if ! ci_download_verified "https://github.com/anchore/syft/releases/download/${SYFT_VERSION}/${asset}" "$archive" "$sha256" ||
-		! tar -xzf "$archive" -C "$install_dir" syft; then
-		rm -f "$archive" "$install_dir/syft"
-		printf "ERROR: Failed to install Syft %s\n" "${SYFT_VERSION}" >&2
-		return 1
-	fi
-	rm -f "$archive"
+  printf "Installing Syft SBOM generator (version: %s)...\n" "${SYFT_VERSION}"
+  if ! ci_download_verified "https://github.com/anchore/syft/releases/download/${SYFT_VERSION}/${asset}" "$archive" "$sha256" ||
+    ! tar -xzf "$archive" -C "$install_dir" syft; then
+    rm -f "$archive" "$install_dir/syft"
+    printf "ERROR: Failed to install Syft %s\n" "${SYFT_VERSION}" >&2
+    return 1
+  fi
+  rm -f "$archive"
 
-	ci_prepend_path "$install_dir"
-	ci_require_command syft Syft || return 1
-	ci_print_installed "Syft" "$(syft version --output json 2>/dev/null | grep -o '"version":[[:space:]]*"[^"]*"' | cut -d'"' -f4)"
+  ci_prepend_path "$install_dir"
+  ci_require_command syft Syft || return 1
+  ci_print_installed "Syft" "$(syft version --output json 2>/dev/null | grep -o '"version":[[:space:]]*"[^"]*"' | cut -d'"' -f4)"
 }

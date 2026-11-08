@@ -16,28 +16,28 @@ test ! -e "$output"
 
 auth_file=
 if [[ "${1:-image}" != snapshot && -n "${REGISTRY_PASSWORD:-}" ]]; then
-	auth_file=/kaniko/.docker/config.json
-	printf '%s' "$REGISTRY_PASSWORD" | forge-ci container login --registry "$CONTAINER_REGISTRY" \
-		--registry-username "$REGISTRY_USER" --registry-password-file - --auth-file "$auth_file"
+  auth_file=/kaniko/.docker/config.json
+  printf '%s' "$REGISTRY_PASSWORD" | forge-ci container login --registry "$CONTAINER_REGISTRY" \
+    --registry-username "$REGISTRY_USER" --registry-password-file - --auth-file "$auth_file"
 fi
 unset REGISTRY_PASSWORD REGISTRY_TOKEN GH_TOKEN GITHUB_TOKEN ACTIONS_RUNTIME_TOKEN ACTIONS_RESULTS_URL
 
 case "${1:-image}" in
 image | extract)
-	if [[ "${1:-image}" == image ]]; then
-		export FORGE_CI_PLAN=/kaniko/tools/plan.json
-	else
-		unset FORGE_CI_PLAN
-	fi
-	exec forge-ci container build --image-builder kaniko --auth-file "$auth_file" \
-		--output-dir "$output" --enforce-vulnerabilities="${ADMIN_VULNERABILITIES:-false}"
-	;;
+  if [[ "${1:-image}" == image ]]; then
+    export FORGE_CI_PLAN=/kaniko/tools/plan.json
+  else
+    unset FORGE_CI_PLAN
+  fi
+  exec forge-ci container build --image-builder kaniko --auth-file "$auth_file" \
+    --output-dir "$output" --enforce-vulnerabilities="${ADMIN_VULNERABILITIES:-false}"
+  ;;
 snapshot)
-	unset FORGE_CI_PLAN
-	exec forge-ci container snapshot-images build --image-builder kaniko \
-		--plan /kaniko/tools/plan.json --dependencies-file snapshot-dependencies.json \
-		--name "$IMAGE_NAME" --arch "$IMAGE_ARCH" --metadata-dir snapshot-layouts \
-		--server-url "$GITHUB_SERVER_URL" --repository "$GITHUB_REPOSITORY"
-	;;
+  unset FORGE_CI_PLAN
+  exec forge-ci container snapshot-images build --image-builder kaniko \
+    --plan /kaniko/tools/plan.json --dependencies-file snapshot-dependencies.json \
+    --name "$IMAGE_NAME" --arch "$IMAGE_ARCH" --metadata-dir snapshot-layouts \
+    --server-url "$GITHUB_SERVER_URL" --repository "$GITHUB_REPOSITORY"
+  ;;
 *) exit 64 ;;
 esac

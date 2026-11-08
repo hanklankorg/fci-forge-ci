@@ -30,14 +30,14 @@ cp -- "${package}" dist/
 cp -- bom.json "dist/hello-npm-service-${RELEASE_VERSION}.cdx.json"
 
 if ! forge-ci release notes --changelog-file CHANGELOG.md \
-	--release-version "${RELEASE_TAG}" --target-file dist/release-notes.md; then
-	forge-ci release notes --source-file /dev/null/absent --target-file dist/release-notes.md \
-		--release-version "${RELEASE_TAG}" --release-commit "${RELEASE_SHA}"
+  --release-version "${RELEASE_TAG}" --target-file dist/release-notes.md; then
+  forge-ci release notes --source-file /dev/null/absent --target-file dist/release-notes.md \
+    --release-version "${RELEASE_TAG}" --release-commit "${RELEASE_SHA}"
 fi
 
 forge-ci release files declare \
-	--asset 'dist/*.tgz' \
-	--sbom "dist/hello-npm-service-${RELEASE_VERSION}.cdx.json"
+  --asset 'dist/*.tgz' \
+  --sbom "dist/hello-npm-service-${RELEASE_VERSION}.cdx.json"
 
 printf 'Release handoff files (bytes, path relative to dist):\n'
 find dist -type f -printf '%s\t%P\n' | LC_ALL=C sort -k2

@@ -5,5 +5,5 @@
 # Bind the runtime handoff's artifact name and retention to the shared owner.
 set -euo pipefail
 exec forge-ci artifact upload --name "${1:?artifact name required}" \
-	--dir "${2:?evidence directory required}" --retention-days 30 \
-	--if-no-files error --verify-readback
+  --dir "${2:?evidence directory required}" --retention-days 30 \
+  --if-no-files error --verify-readback

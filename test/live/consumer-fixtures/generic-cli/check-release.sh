@@ -9,16 +9,16 @@ set -euo pipefail
 kind=$(cat .gitlab/generic-cli-kind)
 case "${kind}" in
 go)
-	export GOTOOLCHAIN=local
-	test "$(go env GOVERSION)" = go1.27.3
-	exec go run ./test/live/consumer-fixtures/generic-cli/checksource
-	;;
+  export GOTOOLCHAIN=local
+  test "$(go env GOVERSION)" = go1.27.3
+  exec go run ./test/live/consumer-fixtures/generic-cli/checksource
+  ;;
 cargo)
-	test "$(rustc --version | cut -d ' ' -f2)" = 1.99.1
-	just _build-verify-binary check-tools
-	just --fmt --check
-	nano=./target/release/nanolinter
-	;;
+  test "$(rustc --version | cut -d ' ' -f2)" = 1.99.1
+  just _build-verify-binary check-tools
+  just --fmt --check
+  nano=./target/release/nanolinter
+  ;;
 *) exit 1 ;;
 esac
 # Refuse an old/excluded-check overlay rather than mislabel its coverage.

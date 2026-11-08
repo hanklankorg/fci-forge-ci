@@ -18,38 +18,38 @@ auth_dir=$(mktemp -d)
 auth="$auth_dir/config.json"
 trap 'rm -rf -- "$auth_dir"' EXIT
 printf '%s' "$REGISTRY_PASSWORD" | forge-ci container login --registry "${IMAGE_REF%%/*}" \
-	--registry-username "$REGISTRY_USER" --registry-password-file - --auth-file "$auth"
+  --registry-username "$REGISTRY_USER" --registry-password-file - --auth-file "$auth"
 mkdir development-artifacts .fixture-layouts
 mkdir development-artifacts/linux-amd64
 labels=$(printf 'org.opencontainers.image.revision=%s\norg.opencontainers.image.version=%s' "$SOURCE_SHA" "$FIXTURE_VERSION")
 
 for role in worker api-service load-generator; do
-	parent=".fixture-layouts/$role"
-	layout="$parent/amd64"
-	mkdir "$parent"
-	forge-ci container build --mode oci --file Containerfile --context . \
-		--target "$role" --platform linux/amd64 --output-dir "$layout" \
-		--image-ref "$IMAGE_REF" --auth-file "$auth" --labels "$labels"
-	forge-ci container layout record --layout-dir "$layout" \
-		--image-ref "$IMAGE_REF" --source-sha "$SOURCE_SHA" --platform linux/amd64
-	case "$role" in
-	worker) paths='worker,usr/local/bin/key-tool' ;;
-	api-service) paths='api-service' ;;
-	load-generator) paths='usr/local/bin/load-generator' ;;
-	esac
-	forge-ci container layout extract-files --layout-dir "$layout" \
-		--output-dir development-artifacts/linux-amd64 --paths "$paths"
-	cp "$layout/forge-ci-image.json" "development-artifacts/$role-image.json"
+  parent=".fixture-layouts/$role"
+  layout="$parent/amd64"
+  mkdir "$parent"
+  forge-ci container build --mode oci --file Containerfile --context . \
+    --target "$role" --platform linux/amd64 --output-dir "$layout" \
+    --image-ref "$IMAGE_REF" --auth-file "$auth" --labels "$labels"
+  forge-ci container layout record --layout-dir "$layout" \
+    --image-ref "$IMAGE_REF" --source-sha "$SOURCE_SHA" --platform linux/amd64
+  case "$role" in
+  worker) paths='worker,usr/local/bin/key-tool' ;;
+  api-service) paths='api-service' ;;
+  load-generator) paths='usr/local/bin/load-generator' ;;
+  esac
+  forge-ci container layout extract-files --layout-dir "$layout" \
+    --output-dir development-artifacts/linux-amd64 --paths "$paths"
+  cp "$layout/forge-ci-image.json" "development-artifacts/$role-image.json"
 done
 
 # Publish only after every image has built, scanned and yielded its executables.
 for role in worker api-service load-generator; do
-	forge-ci container layout publish --layouts-dir ".fixture-layouts/$role" \
-		--image-ref "$IMAGE_REF" --source-sha "$SOURCE_SHA" \
-		--platforms linux/amd64 --auth-file "$auth"
+  forge-ci container layout publish --layouts-dir ".fixture-layouts/$role" \
+    --image-ref "$IMAGE_REF" --source-sha "$SOURCE_SHA" \
+    --platforms linux/amd64 --auth-file "$auth"
 done
 forge-ci container suffix-extracted-binaries \
-	--binaries-dir development-artifacts/linux-amd64 --arch amd64 \
-	--expected-names worker,key-tool,api-service,load-generator
+  --binaries-dir development-artifacts/linux-amd64 --arch amd64 \
+  --expected-names worker,key-tool,api-service,load-generator
 bash ci/receipt.sh
 printf 'Rust development smoke passed at %s\n' "$SOURCE_SHA"

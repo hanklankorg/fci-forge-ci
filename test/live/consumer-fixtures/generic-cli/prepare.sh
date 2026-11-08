@@ -33,8 +33,8 @@ sha256) [[ "${expected}" =~ ^[0-9a-f]{64}$ ]] ;;
 *) exit 1 ;;
 esac
 for path in .gitlab .chglog .forgejo .forgejo/workflows; do
-	mode=$(git -C "${source_root}" ls-tree "${expected}" -- "${path}" | cut -d ' ' -f1)
-	test -z "${mode}" || test "${mode}" = 040000
+  mode=$(git -C "${source_root}" ls-tree "${expected}" -- "${path}" | cut -d ' ' -f1)
+  test -z "${mode}" || test "${mode}" = 040000
 done
 recipe=$(dirname -- "$(realpath -- "$0")")
 engine=$(realpath -- "${recipe}/../../../..")
@@ -45,59 +45,59 @@ git -C "${destination}" remote remove origin
 test "$(git -C "${destination}" rev-parse --show-object-format)" = "${format}"
 git -C "${destination}" read-tree "${expected}"
 stage() {
-	local path=$1 blob
-	blob=$(git -C "${destination}" hash-object -w --stdin)
-	git -C "${destination}" update-index --add --cacheinfo "100644,${blob},${path}"
+  local path=$1 blob
+  blob=$(git -C "${destination}" hash-object -w --stdin)
+  git -C "${destination}" update-index --add --cacheinfo "100644,${blob},${path}"
 }
 stage_license() {
-	printf 'SPDX-FileCopyrightText: %s\nSPDX-License-Identifier: CC0-1.0\n' "$2" | stage "$1.license"
+  printf 'SPDX-FileCopyrightText: %s\nSPDX-License-Identifier: CC0-1.0\n' "$2" | stage "$1.license"
 }
 stage .gitlab/build-release.sh <"${recipe}/build-release.sh"
 stage .gitlab/check-release.sh <"${recipe}/check-release.sh"
 printf '%s\n' "${kind}" | stage .gitlab/generic-cli-kind
 if [ "${kind}" = go ]; then
-	# Carry the exact original Git tree as data, not history or a source tar.
-	# The Go check owner verifies its tree identity before running its full gate.
-	git -C "${destination}" read-tree --prefix=.gitlab/generic-cli-original-source/ "${expected}"
-	printf '%s\n' buildah-integration | stage .gitlab/generic-cli-checks
-	stage_license .gitlab/generic-cli-checks '2026 Digg - Agency for Digital Government'
+  # Carry the exact original Git tree as data, not history or a source tar.
+  # The Go check owner verifies its tree identity before running its full gate.
+  git -C "${destination}" read-tree --prefix=.gitlab/generic-cli-original-source/ "${expected}"
+  printf '%s\n' buildah-integration | stage .gitlab/generic-cli-checks
+  stage_license .gitlab/generic-cli-checks '2026 Digg - Agency for Digital Government'
 fi
 jq -n --arg commit "${expected}" --arg tree "$(git -C "${source_root}" rev-parse "${expected}^{tree}")" --arg objectFormat "$(git -C "${source_root}" rev-parse --show-object-format)" \
-	'{commit:$commit,tree:$tree,objectFormat:$objectFormat,lintPolicy:"informational",excludedChecks:[],coverageLimitation:"Full Nanolinter plan runs diagnostically; its findings are not an acceptance gate. Prior findings, including 64 KICS findings, remain unresolved. Application tests/build/release/signatures/payload verification remain blocking; not a full original just verify pass."}' | stage .gitlab/generic-cli-source.json
+  '{commit:$commit,tree:$tree,objectFormat:$objectFormat,lintPolicy:"informational",excludedChecks:[],coverageLimitation:"Full Nanolinter plan runs diagnostically; its findings are not an acceptance gate. Prior findings, including 64 KICS findings, remain unresolved. Application tests/build/release/signatures/payload verification remain blocking; not a full original just verify pass."}' | stage .gitlab/generic-cli-source.json
 for path in .gitlab/generic-cli-kind .gitlab/generic-cli-source.json; do
-	stage_license "${path}" '2026 Digg - Agency for Digital Government'
+  stage_license "${path}" '2026 Digg - Agency for Digital Government'
 done
 for path in .chglog/config-keepachangelog.yml .chglog/CHANGELOG-keepachangelog.tpl .chglog/config-minimal.yml .chglog/CHANGELOG-minimal.tpl; do
-	stage "${path}" <"${engine}/test/live/demos/hello-maven/consumer/${path}"
+  stage "${path}" <"${engine}/test/live/demos/hello-maven/consumer/${path}"
 done
 # Templates were covered by the engine's demo annotation, which does not travel
 # with this overlay. Carry their original attribution explicitly.
 for path in .chglog/CHANGELOG-keepachangelog.tpl .chglog/CHANGELOG-minimal.tpl; do
-	stage_license "${path}" '2026 Digg - Agency for Digital Government'
+  stage_license "${path}" '2026 Digg - Agency for Digital Government'
 done
 if [ "${forge}" = forgejo ]; then
-	# The native trial admits only this release workflow, not unrelated source
-	# workflows pinned to a different engine. Remove them only from our index.
-	git -C "${destination}" ls-files .forgejo/workflows | while IFS= read -r path; do
-		git -C "${destination}" update-index --force-remove -- "${path}"
-	done
-	workflow=$(<"${recipe}/forgejo-release.yml")
-	engine_sha=$(git -C "${engine}" rev-parse HEAD)
-	workflow=${workflow//ENGINE_SHA/${engine_sha}}
-	if [ "${kind}" = cargo ]; then
-		workflow=${workflow//VERSION_BUMP/cargo}
-		workflow=${workflow//BUMP_IMAGE/\$\{\{ vars.CI_JOB_IMAGE \}\}}
-		workflow=${workflow//IS_GO/false}
-	else
-		workflow=${workflow//VERSION_BUMP/\'\'}
-		workflow=${workflow//BUMP_IMAGE/\'\'}
-		workflow=${workflow//IS_GO/true}
-	fi
-	printf '%s\n' "${workflow}" | stage .forgejo/workflows/release.yml
+  # The native trial admits only this release workflow, not unrelated source
+  # workflows pinned to a different engine. Remove them only from our index.
+  git -C "${destination}" ls-files .forgejo/workflows | while IFS= read -r path; do
+    git -C "${destination}" update-index --force-remove -- "${path}"
+  done
+  workflow=$(<"${recipe}/forgejo-release.yml")
+  engine_sha=$(git -C "${engine}" rev-parse HEAD)
+  workflow=${workflow//ENGINE_SHA/${engine_sha}}
+  if [ "${kind}" = cargo ]; then
+    workflow=${workflow//VERSION_BUMP/cargo}
+    workflow=${workflow//BUMP_IMAGE/\$\{\{ vars.CI_JOB_IMAGE \}\}}
+    workflow=${workflow//IS_GO/false}
+  else
+    workflow=${workflow//VERSION_BUMP/\'\'}
+    workflow=${workflow//BUMP_IMAGE/\'\'}
+    workflow=${workflow//IS_GO/true}
+  fi
+  printf '%s\n' "${workflow}" | stage .forgejo/workflows/release.yml
 fi
 tree=$(git -C "${destination}" write-tree)
 commit=$(printf 'test: disposable generic CLI release adapter\n' |
-	git -C "${destination}" -c user.name='CLI fixture' -c user.email=fixture@localhost commit-tree "${tree}")
+  git -C "${destination}" -c user.name='CLI fixture' -c user.email=fixture@localhost commit-tree "${tree}")
 # read-tree populated the index, not the worktree. A non-forced checkout
 # preserves these missing files as local deletions. Force is confined to this
 # newly created private clone, whose destination was required to be absent.

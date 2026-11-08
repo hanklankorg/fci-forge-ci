@@ -11,24 +11,24 @@ set -euo pipefail
 # archives, SBOMs and checksums, but before signing or upload. Compare the actual
 # payload about to be signed.
 [[ $# == 7 && $1 == release && $2 == sign && $3 == --method=sigstore &&
-	$4 == --no-checksums-file && $5 == --no-release-artifacts-dir && $6 == --file ]] || {
-	printf 'Expected checksum-only signing arguments.\n' >&2
-	exit 2
+  $4 == --no-checksums-file && $5 == --no-release-artifacts-dir && $6 == --file ]] || {
+  printf 'Expected checksum-only signing arguments.\n' >&2
+  exit 2
 }
 manifest=$7
 [[ ${manifest##*/} == checksums.txt && -f $manifest && ! -L $manifest ]] || exit 2
 directory=$(dirname -- "$manifest")
 if [[ -n ${FORGE_CI_RELEASE_REFERENCE:-} ]]; then
-	reference=$(realpath -e -- "$FORGE_CI_RELEASE_REFERENCE")
-	[[ $reference != "$(realpath -e -- "$directory")" ]] || {
-		printf 'Release reference must be a separate rebuild directory.\n' >&2
-		exit 2
-	}
-	bash "$(dirname -- "${BASH_SOURCE[0]}")/verify-reproducible.sh" --compare "$reference" "$directory"
+  reference=$(realpath -e -- "$FORGE_CI_RELEASE_REFERENCE")
+  [[ $reference != "$(realpath -e -- "$directory")" ]] || {
+    printf 'Release reference must be a separate rebuild directory.\n' >&2
+    exit 2
+  }
+  bash "$(dirname -- "${BASH_SOURCE[0]}")/verify-reproducible.sh" --compare "$reference" "$directory"
 elif [[ ${GORELEASER_CURRENT_TAG:-} == *-pre ]]; then
-	printf 'Pre-release %s: reproducible final-tag comparison skipped\n' "$GORELEASER_CURRENT_TAG" >&2
+  printf 'Pre-release %s: reproducible final-tag comparison skipped\n' "$GORELEASER_CURRENT_TAG" >&2
 else
-	: "${FORGE_CI_RELEASE_REFERENCE:?Prepare an unsigned final-tag rebuild before signing}"
+  : "${FORGE_CI_RELEASE_REFERENCE:?Prepare an unsigned final-tag rebuild before signing}"
 fi
 # Reuse the release owner's exact subject coverage and digest validation. The
 # unsigned GoReleaser producer supplies artifacts.json; this step executes none.

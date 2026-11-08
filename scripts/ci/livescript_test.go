@@ -794,7 +794,7 @@ func TestRunLiveTests_HeaderInputsAreTheVerdictsInputs(t *testing.T) {
 
 	script := string(reporoot.ReadFile(t, "scripts/ci/run-live-tests.sh"))
 
-	_, loop, found := strings.Cut(script, "\tfor input in ")
+	_, loop, found := strings.Cut(script, "\n  for input in ")
 	loop, _, ended := strings.Cut(loop, "; do")
 
 	if !found || !ended {

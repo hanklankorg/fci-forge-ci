@@ -15,7 +15,7 @@ test "$(git rev-parse HEAD)" = "${RELEASE_SHA}"
 
 maven_opts=(--batch-mode --no-transfer-progress --errors)
 BUILD_TYPE=app MAVEN_CLI_OPTS="${maven_opts[*]}" CYCLONEDX_MAVEN_VERSION=2.9.1 JAVA_VERSION=25 \
-	forge-ci build maven run --expect-version "${RELEASE_VERSION}"
+  forge-ci build maven run --expect-version "${RELEASE_VERSION}"
 
 jar="target/hello-maven-${RELEASE_VERSION}.jar"
 test -f "${jar}"
@@ -24,13 +24,13 @@ cp -- "${jar}" dist/
 cp -- target/bom.json "dist/hello-maven-${RELEASE_VERSION}.cdx.json"
 
 if ! forge-ci release notes --changelog-file CHANGELOG.md \
-	--release-version "${RELEASE_TAG}" --target-file dist/release-notes.md; then
-	forge-ci release notes --source-file /dev/null/absent --target-file dist/release-notes.md \
-		--release-version "${RELEASE_TAG}" --release-commit "${RELEASE_SHA}"
+  --release-version "${RELEASE_TAG}" --target-file dist/release-notes.md; then
+  forge-ci release notes --source-file /dev/null/absent --target-file dist/release-notes.md \
+    --release-version "${RELEASE_TAG}" --release-commit "${RELEASE_SHA}"
 fi
 forge-ci release files declare \
-	--asset 'dist/*.jar' \
-	--sbom "dist/hello-maven-${RELEASE_VERSION}.cdx.json"
+  --asset 'dist/*.jar' \
+  --sbom "dist/hello-maven-${RELEASE_VERSION}.cdx.json"
 
 printf 'Release handoff files (bytes, path relative to dist):\n'
 find dist -type f -printf '%s\t%P\n' | LC_ALL=C sort -k2

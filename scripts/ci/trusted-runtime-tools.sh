@@ -12,7 +12,7 @@ export RUSTUP_HOME=/usr/local/rustup
 # state belongs to this job's HOME (a fresh private HOME for the product step).
 export CARGO_HOME=${HOME:?}/.cargo
 [[ $# -gt 0 && "$1" != forge-ci ]] || {
-	printf 'trusted-runtime-tools: explicit command required; forge-ci must be verified and absolute\n' >&2
-	exit 69
+  printf 'trusted-runtime-tools: explicit command required; forge-ci must be verified and absolute\n' >&2
+  exit 69
 }
 exec "$@"

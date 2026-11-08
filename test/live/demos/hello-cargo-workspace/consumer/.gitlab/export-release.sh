@@ -15,8 +15,8 @@ set -euo pipefail
 test "$(git rev-parse HEAD)" = "${RELEASE_SHA}"
 
 forge-ci container build --mode local --target export-binaries \
-	--file Containerfile --context . --platform "${EXPORT_PLATFORM}" \
-	--output-dir "dist/linux-${EXPORT_ARCH}"
+  --file Containerfile --context . --platform "${EXPORT_PLATFORM}" \
+  --output-dir "dist/linux-${EXPORT_ARCH}"
 forge-ci container suffix-extracted-binaries \
-	--binaries-dir "dist/linux-${EXPORT_ARCH}" --arch "${EXPORT_ARCH}" \
-	--expected-names "hello-worker,hello-keytool"
+  --binaries-dir "dist/linux-${EXPORT_ARCH}" --arch "${EXPORT_ARCH}" \
+  --expected-names "hello-worker,hello-keytool"

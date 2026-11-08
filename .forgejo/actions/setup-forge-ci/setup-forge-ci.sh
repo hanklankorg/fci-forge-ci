@@ -13,11 +13,11 @@ set -euo pipefail
 
 engine_root=${1:-}
 fail() {
-	printf 'ERROR: setup-forge-ci: %s\n' "$1" >&2
-	exit "${2:-1}"
+  printf 'ERROR: setup-forge-ci: %s\n' "$1" >&2
+  exit "${2:-1}"
 }
 [[ "${engine_root}" == /* && -d "${engine_root}" && ! -L "${engine_root}" ]] ||
-	fail 'engine root must be an absolute, real directory'
+  fail 'engine root must be an absolute, real directory'
 
 script_dir=$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck source=../../../.engine/bin/lib-forge-ci.sh
@@ -32,32 +32,32 @@ true | false) ;;
 *) fail 'add-to-path must be true or false' ;;
 esac
 if [[ -n "${EXPECTED_SHA256:-}" && ! "${EXPECTED_SHA256}" =~ ^[0-9a-f]{64}$ ]]; then
-	fail 'expected-sha256 must be 64 lowercase hexadecimal characters'
+  fail 'expected-sha256 must be 64 lowercase hexadecimal characters'
 fi
 verify_forge_ci || exit 1
 binary=${HELPERS_ENGINE_VERIFIED}
 sha256=${HELPERS_ENGINE_SHA256}
 if [[ -n "${EXPECTED_SHA256:-}" && "${EXPECTED_SHA256}" != "${sha256}" ]]; then
-	fail 'forge-ci does not match expected-sha256'
+  fail 'forge-ci does not match expected-sha256'
 fi
 
 status=0
 version=$("${binary}" --version) || status=$?
 ((status == 0)) || fail "forge-ci --version failed (exit ${status})" "${status}"
 if [[ -z "${version}" || "${version}" == *[$'\n\r']* || "${#version}" -gt 256 ]]; then
-	fail 'forge-ci returned unsafe or empty version output'
+  fail 'forge-ci returned unsafe or empty version output'
 fi
 
 if [[ "${ADD_TO_PATH:-true}" == true ]]; then
-	path_file=${FORGEJO_PATH:-${GITHUB_PATH:-}}
-	[[ -n "${path_file}" ]] || fail 'neither FORGEJO_PATH nor GITHUB_PATH is available'
-	# The directory of the verified binary: a later step finds it there, and
-	# the action's own directory does not outlive this step.
-	printf '%s\n' "${binary%/*}" >>"${path_file}"
+  path_file=${FORGEJO_PATH:-${GITHUB_PATH:-}}
+  [[ -n "${path_file}" ]] || fail 'neither FORGEJO_PATH nor GITHUB_PATH is available'
+  # The directory of the verified binary: a later step finds it there, and
+  # the action's own directory does not outlive this step.
+  printf '%s\n' "${binary%/*}" >>"${path_file}"
 fi
 output_file=${FORGEJO_OUTPUT:-${GITHUB_OUTPUT:-}}
 if [[ -n "${output_file}" ]]; then
-	printf 'binary-path=%s\nsha256=%s\nversion=%s\n' "${binary}" "${sha256}" "${version}" >>"${output_file}"
+  printf 'binary-path=%s\nsha256=%s\nversion=%s\n' "${binary}" "${sha256}" "${version}" >>"${output_file}"
 fi
 # The version string is the same for every build of the layer; the digest
 # says which one this is.

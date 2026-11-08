@@ -30,7 +30,7 @@ YAML
 raplp --file "$scratch/api.yaml" --logDiagnostic "$scratch/diagnostics.json" >"$scratch/lint.log" 2>&1
 cat "$scratch/lint.log"
 if ! test -s "$scratch/diagnostics.json"; then
-	printf '%s\n' 'APP_FINDING: installed raplp produced no diagnostic report; inspect packed API/document/ruleset resources' >&2
-	exit 1
+  printf '%s\n' 'APP_FINDING: installed raplp produced no diagnostic report; inspect packed API/document/ruleset resources' >&2
+  exit 1
 fi
 printf '%s\n' 'INSTALLED_NPM_APPLICATION_OK'

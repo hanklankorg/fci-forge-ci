@@ -12,5 +12,5 @@ cargo test --locked --offline
 cargo build --release --bins --locked --offline
 cargo build --release --example receipt --locked --offline
 for name in worker key-tool api-service load-generator; do
-	test "$("target/release/$name" --version)" = "$name ${FIXTURE_VERSION:-0.1.0}"
+  test "$("target/release/$name" --version)" = "$name ${FIXTURE_VERSION:-0.1.0}"
 done

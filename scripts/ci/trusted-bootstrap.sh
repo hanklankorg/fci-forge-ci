@@ -10,8 +10,8 @@ export PATH=/usr/bin:/bin
 unset FORGE_CI_BIN FORGE_CI_PATH FORGE_CI_BINARY_REF FORGE_CI_PLAN
 
 fail() {
-	printf 'trusted-bootstrap: %s\n' "$1" >&2
-	exit 69
+  printf 'trusted-bootstrap: %s\n' "$1" >&2
+  exit 69
 }
 [[ $# -ge 6 && "$5" == -- ]] || fail 'expected CHECKOUT HTTPS_ORIGIN FULL_COMMIT ABSOLUTE_BINARY -- CLI_ARGUMENT...'
 checkout=$1 origin=$2 commit=$3 binary=$4
@@ -28,8 +28,8 @@ shift 5
 # hooks, or traverse submodules. Disable paging and lazy object fetching too.
 # This is not authentication of an arbitrary attacker-supplied Git database.
 engine_git() {
-	env -i PATH=/usr/bin:/bin HOME=/nonexistent GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null GIT_NO_LAZY_FETCH=1 \
-		git --no-pager --no-replace-objects -C "$checkout" "$@"
+  env -i PATH=/usr/bin:/bin HOME=/nonexistent GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null GIT_NO_LAZY_FETCH=1 \
+    git --no-pager --no-replace-objects -C "$checkout" "$@"
 }
 [[ "$(engine_git rev-parse --show-toplevel)" == "$checkout" ]] || fail 'not the engine checkout root'
 [[ "$(engine_git rev-parse --verify HEAD)" == "$commit" ]] || fail 'engine checkout commit differs from approval'
@@ -41,11 +41,11 @@ actual_origin=$(engine_git config --local --no-includes --get remote.origin.url)
 # do not use status/diff here (fsmonitor, filters and submodules can run code).
 # No selected-checkout shell is sourced until identity AND contents pass.
 for relative in .engine/bin/lib-forge-ci.sh .engine/bin/forge-ci-linux-amd64.sha256 scripts/ci/trusted-runtime-tools.sh; do
-	file=$checkout/$relative
-	[[ -f "$file" && ! -L "$file" && "$(realpath -e -- "$file")" == "$file" ]] || fail "unsafe engine file: $relative"
-	mode=$(engine_git ls-tree "$commit" -- "$relative")
-	[[ "$mode" == '100644 blob '* || "$mode" == '100755 blob '* ]] || fail "engine file is not a committed regular file: $relative"
-	[[ "$(engine_git hash-object --no-filters -- "$file")" == "$(engine_git rev-parse "$commit:$relative")" ]] || fail "engine file differs from approved commit: $relative"
+  file=$checkout/$relative
+  [[ -f "$file" && ! -L "$file" && "$(realpath -e -- "$file")" == "$file" ]] || fail "unsafe engine file: $relative"
+  mode=$(engine_git ls-tree "$commit" -- "$relative")
+  [[ "$mode" == '100644 blob '* || "$mode" == '100755 blob '* ]] || fail "engine file is not a committed regular file: $relative"
+  [[ "$(engine_git hash-object --no-filters -- "$file")" == "$(engine_git rev-parse "$commit:$relative")" ]] || fail "engine file differs from approved commit: $relative"
 done
 
 # Existing hash owner, strict override, no fetch fallback. Source-time globals

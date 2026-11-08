@@ -19,9 +19,9 @@ name=hello-cargo-container
 
 mkdir -p dist
 if ! forge-ci release notes --changelog-file CHANGELOG.md \
-	--release-version "${RELEASE_TAG}" --target-file dist/release-notes.md; then
-	forge-ci release notes --source-file /dev/null/absent --target-file dist/release-notes.md \
-		--release-version "${RELEASE_TAG}" --release-commit "${RELEASE_SHA}"
+  --release-version "${RELEASE_TAG}" --target-file dist/release-notes.md; then
+  forge-ci release notes --source-file /dev/null/absent --target-file dist/release-notes.md \
+    --release-version "${RELEASE_TAG}" --release-commit "${RELEASE_SHA}"
 fi
 
 # extract.binary: the export jobs' binaries, dist/linux-<arch>/<name>-linux-<arch>.

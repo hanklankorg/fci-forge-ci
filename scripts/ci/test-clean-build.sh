@@ -6,7 +6,7 @@
 # Called by `just test-unit`; docs/DEVELOPMENT.md also runs it directly.
 set -euo pipefail
 usage() {
-	printf 'Usage: %s [-h|--help]\nChecks that just clean-build removes only the default bin/ and dist/.\n' "${0##*/}"
+  printf 'Usage: %s [-h|--help]\nChecks that just clean-build removes only the default bin/ and dist/.\n' "${0##*/}"
 }
 case ${1-} in
 '') ;;

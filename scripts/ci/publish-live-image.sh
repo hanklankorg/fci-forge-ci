@@ -30,18 +30,18 @@ kind=${1:-}
 forge_lab=${2:-}
 archive=${3:-}
 if [[ $# -lt 2 || $# -gt 3 || ! "$kind" =~ ^(signer|kaniko-job|buildah-job)$ || "$forge_lab" != /* || ! -f "$forge_lab/justfile" ||
-	($# -eq 3 && "$archive" != /*) ]]; then
-	printf 'usage: %s <signer|kaniko-job|buildah-job> <absolute path of a Forge Lab checkout> [<absolute archive path>]\n' "$0" >&2
-	exit 2
+  ($# -eq 3 && "$archive" != /*) ]]; then
+  printf 'usage: %s <signer|kaniko-job|buildah-job> <absolute path of a Forge Lab checkout> [<absolute archive path>]\n' "$0" >&2
+  exit 2
 fi
 
 missing=()
 for tool in podman git "${GO:-go}" just; do
-	command -v "$tool" >/dev/null 2>&1 || missing+=("$tool")
+  command -v "$tool" >/dev/null 2>&1 || missing+=("$tool")
 done
 ((${#missing[@]} == 0)) || {
-	printf 'live: required tools are not on PATH: %s\n' "${missing[*]}" >&2
-	exit 2
+  printf 'live: required tools are not on PATH: %s\n' "${missing[*]}" >&2
+  exit 2
 }
 
 # What each image is built from. The image is keyed by the commit, so these
@@ -50,18 +50,18 @@ done
 source_url=
 case "$kind" in
 signer)
-	context=$repo_root
-	image_inputs=(containers/signer .forgejo/scripts/verify-signer-toolchain.sh)
-	;;
+  context=$repo_root
+  image_inputs=(containers/signer .forgejo/scripts/verify-signer-toolchain.sh)
+  ;;
 kaniko-job)
-	context=$repo_root/containers/kaniko-job
-	image_inputs=(containers/kaniko-job)
-	source_url=$(cd -- "$repo_root" && "${GO:-go}" run ./internal/livetest/preflight consumer-trial-layer) || exit 2
-	;;
+  context=$repo_root/containers/kaniko-job
+  image_inputs=(containers/kaniko-job)
+  source_url=$(cd -- "$repo_root" && "${GO:-go}" run ./internal/livetest/preflight consumer-trial-layer) || exit 2
+  ;;
 buildah-job)
-	context=$repo_root/containers/buildah-job
-	image_inputs=(containers/buildah-job)
-	;;
+  context=$repo_root/containers/buildah-job
+  image_inputs=(containers/buildah-job)
+  ;;
 esac
 
 # The image is for the lab's runners, whose architecture the contract states,
@@ -70,18 +70,18 @@ esac
 # native rather than emulated.
 runner_arch=$(cd -- "$repo_root" && "${GO:-go}" run ./internal/livetest/preflight runner-arch) || exit 2
 engine_arch=$(podman info --format '{{.Host.Arch}}') || {
-	printf 'live: cannot ask podman for its host architecture\n' >&2
-	exit 2
+  printf 'live: cannot ask podman for its host architecture\n' >&2
+  exit 2
 }
 if [[ "$engine_arch" != "$runner_arch" ]]; then
-	printf 'live: the lab runners are linux/%s and the %s build runs the image; use a podman engine on a native %s host (this engine is %s)\n' "$runner_arch" "$kind" "$runner_arch" "$engine_arch" >&2
-	exit 2
+  printf 'live: the lab runners are linux/%s and the %s build runs the image; use a podman engine on a native %s host (this engine is %s)\n' "$runner_arch" "$kind" "$runner_arch" "$engine_arch" >&2
+  exit 2
 fi
 
 if [[ -n "$(git -C "$repo_root" status --porcelain --untracked-files=all -- "${image_inputs[@]}")" ]]; then
-	printf 'live: the %s image inputs have uncommitted changes; commit or stash them first:\n' "$kind" >&2
-	git -C "$repo_root" status --short --untracked-files=all -- "${image_inputs[@]}" >&2
-	exit 2
+  printf 'live: the %s image inputs have uncommitted changes; commit or stash them first:\n' "$kind" >&2
+  git -C "$repo_root" status --short --untracked-files=all -- "${image_inputs[@]}" >&2
+  exit 2
 fi
 commit=$(git -C "$repo_root" rev-parse --verify HEAD)
 
@@ -93,13 +93,13 @@ image="localhost/forge-ci-live-$kind:$commit"
 labels=(--label "org.opencontainers.image.revision=$commit")
 [[ -z "$source_url" ]] || labels+=(--label "org.opencontainers.image.source=$source_url")
 if podman image exists "$image" && [[ -z "$source_url" ||
-	"$(podman image inspect --format '{{index .Labels "org.opencontainers.image.source"}}' "$image")" == "$source_url" ]]; then
-	printf 'live: reusing the %s image built for %s\n' "$kind" "$commit" >&2
+  "$(podman image inspect --format '{{index .Labels "org.opencontainers.image.source"}}' "$image")" == "$source_url" ]]; then
+  printf 'live: reusing the %s image built for %s\n' "$kind" "$commit" >&2
 else
-	podman build --platform "linux/$runner_arch" \
-		--file "$repo_root/containers/$kind/Containerfile" \
-		"${labels[@]}" \
-		--tag "$image" "$context" >&2
+  podman build --platform "linux/$runner_arch" \
+    --file "$repo_root/containers/$kind/Containerfile" \
+    "${labels[@]}" \
+    --tag "$image" "$context" >&2
 fi
 
 # Forge Lab publishes under the account's own owner, on the road and registry
@@ -107,8 +107,8 @@ fi
 # reference as its one line of standard output. The package name is outside
 # the fci- prefix, so a prefix reset on the lab does not delete the image.
 just --justfile "$forge_lab/justfile" --working-directory "$forge_lab" \
-	publish-image --account forgeci "forge-ci-live-$kind" "$image"
+  publish-image --account forgeci "forge-ci-live-$kind" "$image"
 if [[ -n "$archive" ]]; then
-	rm -f -- "$archive"
-	podman save --quiet --format docker-archive --output "$archive" "$image"
+  rm -f -- "$archive"
+  podman save --quiet --format docker-archive --output "$archive" "$image"
 fi

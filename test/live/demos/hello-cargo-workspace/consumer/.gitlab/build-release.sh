@@ -18,15 +18,15 @@ test "$(git rev-parse HEAD)" = "${RELEASE_SHA}"
 
 mkdir -p dist
 if ! forge-ci release notes --changelog-file CHANGELOG.md \
-	--release-version "${RELEASE_TAG}" --target-file dist/release-notes.md; then
-	forge-ci release notes --source-file /dev/null/absent --target-file dist/release-notes.md \
-		--release-version "${RELEASE_TAG}" --release-commit "${RELEASE_SHA}"
+  --release-version "${RELEASE_TAG}" --target-file dist/release-notes.md; then
+  forge-ci release notes --source-file /dev/null/absent --target-file dist/release-notes.md \
+    --release-version "${RELEASE_TAG}" --release-commit "${RELEASE_SHA}"
 fi
 
 # extract.binary: the export jobs' binaries, dist/linux-<arch>/<name>-linux-<arch>.
 forge-ci release files declare \
-	--asset "dist/linux-*/hello-worker-linux-*" \
-	--asset "dist/linux-*/hello-keytool-linux-*"
+  --asset "dist/linux-*/hello-worker-linux-*" \
+  --asset "dist/linux-*/hello-keytool-linux-*"
 
 printf 'Release handoff files (bytes, path relative to dist):\n'
 find dist -type f -printf '%s\t%P\n' | LC_ALL=C sort -k2

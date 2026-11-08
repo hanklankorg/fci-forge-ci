@@ -11,7 +11,7 @@ rustup target list --installed | grep -Fx x86_64-unknown-linux-gnu
 # Includes the original inert VM-controller contract prerequisites. Hypervisors
 # are mocked by that test; do not install them in the job image.
 for tool in bash git jq just ssh ssh-keygen cc pkg-config msgfmt msgmerge ps tar sha256sum timeout; do
-	command -v "${tool}"
+  command -v "${tool}"
 done
 ps -p "$$" -o pid= >/dev/null
 test -d /opt/kics/assets/queries/dockerfile

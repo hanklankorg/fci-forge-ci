@@ -6,8 +6,8 @@
 set -euo pipefail
 mkdir -p trial-runtime
 keytool -genkeypair -alias trial-issuer -keyalg EC -groupname secp256r1 \
-	-dname 'CN=Disposable CI Trial' -validity 1 -storetype PKCS12 \
-	-keystore trial-runtime/issuer.p12 -storepass trial-only -keypass trial-only -noprompt
+  -dname 'CN=Disposable CI Trial' -validity 1 -storetype PKCS12 \
+  -keystore trial-runtime/issuer.p12 -storepass trial-only -keypass trial-only -noprompt
 cat >trial-runtime/runtime.env <<'SETTINGS'
 WUA_KEYSTORE_PATH=file:/trial/issuer.p12
 WUA_KEYSTORE_PASSWORD=trial-only

@@ -85,6 +85,7 @@ exclude = '\.containerignore$'
 [linters.go-golangci]
 timeout_secs = 300
 
-# Shell sources use tabs; do not depend on the tool's bundled default.
+# Shell sources indent with two spaces; stated so the result does not
+# depend on the tool's bundled default.
 [linters.shell-format.settings]
-"shfmt.indent" = 0
+"shfmt.indent" = 2

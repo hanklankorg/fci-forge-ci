@@ -16,13 +16,13 @@ repo_root=$(CDPATH='' cd -- "$script_dir/../.." && pwd -P)
 go_bin=${GO:-go}
 
 usage() {
-	printf 'usage: %s full\n       %s focused <go-test-run-filter>\n' "$0" "$0" >&2
-	exit 2
+  printf 'usage: %s full\n       %s focused <go-test-run-filter>\n' "$0" "$0" >&2
+  exit 2
 }
 
 print_help() {
-	printf 'usage: %s full\n       %s focused <go-test-run-filter>\n' "$0" "$0"
-	cat <<'EOF'
+  printf 'usage: %s full\n       %s focused <go-test-run-filter>\n' "$0" "$0"
+  cat <<'EOF'
 
 Runs the live-forge conformance tier against the Forge Lab: preflight the lab
 contract and host tools, build the product, run the suite, keep a
@@ -57,18 +57,18 @@ profile=${1:-}
 scenario=
 case "$profile" in
 -h | --help)
-	print_help
-	exit 0
-	;;
+  print_help
+  exit 0
+  ;;
 full) [[ $# -eq 1 ]] || usage ;;
 focused)
-	[[ $# -eq 2 && -n "$2" ]] || usage
-	scenario=$2
-	;;
+  [[ $# -eq 2 && -n "$2" ]] || usage
+  scenario=$2
+  ;;
 -*)
-	printf 'live: unknown option: %s\n' "$1" >&2
-	usage
-	;;
+  printf 'live: unknown option: %s\n' "$1" >&2
+  usage
+  ;;
 *) usage ;;
 esac
 export FORGE_CI_LIVE_PROFILE="$profile"
@@ -76,9 +76,9 @@ provider_scope=${FORGE_CI_LIVE_PROVIDER:-all}
 case "$provider_scope" in
 all | gitlab | forgejo) ;;
 *)
-	printf 'live: FORGE_CI_LIVE_PROVIDER must be all, gitlab or forgejo\n' >&2
-	exit 2
-	;;
+  printf 'live: FORGE_CI_LIVE_PROVIDER must be all, gitlab or forgejo\n' >&2
+  exit 2
+  ;;
 esac
 export FORGE_CI_LIVE_PROVIDER="$provider_scope"
 
@@ -106,40 +106,40 @@ exec 9>"$lock_dir/live.lock"
 lock_mode=-x
 [[ "$provider_scope" == all ]] || lock_mode=-s
 flock "$lock_mode" -n 9 || {
-	printf 'live: another live run holds %s; wait for it to finish\n' "$lock_dir/live.lock" >&2
-	exit 2
+  printf 'live: another live run holds %s; wait for it to finish\n' "$lock_dir/live.lock" >&2
+  exit 2
 }
 if [[ "$provider_scope" != all ]]; then
-	exec 7>"$lock_dir/live-$provider_scope.lock"
-	flock -n 7 || {
-		printf 'live: another %s live run holds %s; wait for it to finish\n' "$provider_scope" "$lock_dir/live-$provider_scope.lock" >&2
-		exit 2
-	}
+  exec 7>"$lock_dir/live-$provider_scope.lock"
+  flock -n 7 || {
+    printf 'live: another %s live run holds %s; wait for it to finish\n' "$provider_scope" "$lock_dir/live-$provider_scope.lock" >&2
+    exit 2
+  }
 fi
 
 # Redacts credentials by shape, because the log is written before any
 # scenario runs and cannot know the values: forge token prefixes, credential
 # headers, URL userinfo, credential flags, and credential-named keys.
 sanitize_live_log() {
-	# Bash resets SIGINT when it forks pipeline commands. Install the ignore
-	# in this child and exec the reader so cancellation cannot close the log.
-	trap '' INT TERM
-	LC_ALL=C exec sed -u -E \
-		-e 's/\x1b\[[0-?]*[ -/]*[@-~]//g' \
-		-e 's/(gh[pousr]_[A-Za-z0-9_]{20,}|github_pat_[A-Za-z0-9_]{20,}|glpat-[A-Za-z0-9_-]{20,})/[REDACTED]/g' \
-		-e 's/((Authorization|Proxy-Authorization|PRIVATE-TOKEN|JOB-TOKEN|X-Registry-Auth):[[:space:]]*((Basic|Bearer|token)[[:space:]]*)?)[^[:space:]"]+/\1[REDACTED]/Ig' \
-		-e 's/((Set-)?Cookie:[[:space:]]*).*/\1[REDACTED]/Ig' \
-		-e 's#(://)[^/@[:space:]]+@#\1[REDACTED]@#g' \
-		-e 's/(--?(password|passwd|token|secret)[[:space:]]+)[^[:space:]]+/\1[REDACTED]/Ig' \
-		-e "s/((\\bauth|token|password|passwd|secret|client_secret)[\"']?[[:space:]]*[:=][[:space:]]*[\"']?)[^,\"'[:space:]}]+/\\1[REDACTED]/Ig"
+  # Bash resets SIGINT when it forks pipeline commands. Install the ignore
+  # in this child and exec the reader so cancellation cannot close the log.
+  trap '' INT TERM
+  LC_ALL=C exec sed -u -E \
+    -e 's/\x1b\[[0-?]*[ -/]*[@-~]//g' \
+    -e 's/(gh[pousr]_[A-Za-z0-9_]{20,}|github_pat_[A-Za-z0-9_]{20,}|glpat-[A-Za-z0-9_-]{20,})/[REDACTED]/g' \
+    -e 's/((Authorization|Proxy-Authorization|PRIVATE-TOKEN|JOB-TOKEN|X-Registry-Auth):[[:space:]]*((Basic|Bearer|token)[[:space:]]*)?)[^[:space:]"]+/\1[REDACTED]/Ig' \
+    -e 's/((Set-)?Cookie:[[:space:]]*).*/\1[REDACTED]/Ig' \
+    -e 's#(://)[^/@[:space:]]+@#\1[REDACTED]@#g' \
+    -e 's/(--?(password|passwd|token|secret)[[:space:]]+)[^[:space:]]+/\1[REDACTED]/Ig' \
+    -e "s/((\\bauth|token|password|passwd|secret|client_secret)[\"']?[[:space:]]*[:=][[:space:]]*[\"']?)[^,\"'[:space:]}]+/\\1[REDACTED]/Ig"
 }
 
 # The log survives the run under the XDG state directory (30-day retention),
 # because the live tier is human-invoked and has no CI artifact to retrieve.
 log_root=${FORGE_CI_LIVE_EVIDENCE_ROOT:-${XDG_STATE_HOME:-$HOME/.local/state}/forge-ci/live-runs}
 [[ "$log_root" == /* ]] || {
-	printf 'FORGE_CI_LIVE_EVIDENCE_ROOT must be absolute, got %q\n' "$log_root" >&2
-	exit 2
+  printf 'FORGE_CI_LIVE_EVIDENCE_ROOT must be absolute, got %q\n' "$log_root" >&2
+  exit 2
 }
 install -d -m 0700 -- "$log_root"
 find "$log_root" -mindepth 1 -maxdepth 1 -type d -name '20??????T??????Z-*' -mtime +30 -exec rm -rf -- {} +
@@ -162,24 +162,24 @@ trap 'rm -rf -- "$state"' EXIT
 # suite that compiles its own binary proves something about the source it
 # happened to see, not about the artifact the release flow produces.
 (
-	cd -- "$repo_root"
-	CGO_ENABLED=0 "$go_bin" build -trimpath -buildvcs=false -o "$state/forge-ci-host" ./cmd/forge-ci
-	CGO_ENABLED=0 GOOS=linux GOARCH="$runner_arch" "$go_bin" build -trimpath -buildvcs=false \
-		-o "$state/forge-ci-runner" ./cmd/forge-ci
-	CGO_ENABLED=0 GOOS=linux GOARCH="$runner_arch" "$go_bin" build -trimpath -buildvcs=false \
-		-o "$state/credential-proxy" ./internal/livetest/credentialproxy
-	CGO_ENABLED=0 GOOS=linux GOARCH="$runner_arch" "$go_bin" build -trimpath -buildvcs=false \
-		-o "$state/probe-json" ./internal/livetest/probejson
-	# The Forgejo layer's binary, as its jobs download it: the build of the
-	# runners' architecture that the tree's checksum names, which the layer
-	# scenarios publish to the lab.
-	bash scripts/ci/engine-binary.sh build "$runner_arch" "$state/forge-ci-layer"
-	chmod 500 "$state/forge-ci-host" "$state/forge-ci-runner" "$state/credential-proxy" "$state/probe-json"
-	"$state/forge-ci-host" --version >/dev/null
-	# Run the compiled suites directly: the go test driver's signal handling
-	# can terminate a test before its cancellation-aware cleanup runs.
-	install -d -m 0700 -- "$state/tests"
-	"$go_bin" test -c -tags=live -buildvcs=false -o "$state/tests/" ./internal/livetest/... 9>&-
+  cd -- "$repo_root"
+  CGO_ENABLED=0 "$go_bin" build -trimpath -buildvcs=false -o "$state/forge-ci-host" ./cmd/forge-ci
+  CGO_ENABLED=0 GOOS=linux GOARCH="$runner_arch" "$go_bin" build -trimpath -buildvcs=false \
+    -o "$state/forge-ci-runner" ./cmd/forge-ci
+  CGO_ENABLED=0 GOOS=linux GOARCH="$runner_arch" "$go_bin" build -trimpath -buildvcs=false \
+    -o "$state/credential-proxy" ./internal/livetest/credentialproxy
+  CGO_ENABLED=0 GOOS=linux GOARCH="$runner_arch" "$go_bin" build -trimpath -buildvcs=false \
+    -o "$state/probe-json" ./internal/livetest/probejson
+  # The Forgejo layer's binary, as its jobs download it: the build of the
+  # runners' architecture that the tree's checksum names, which the layer
+  # scenarios publish to the lab.
+  bash scripts/ci/engine-binary.sh build "$runner_arch" "$state/forge-ci-layer"
+  chmod 500 "$state/forge-ci-host" "$state/forge-ci-runner" "$state/credential-proxy" "$state/probe-json"
+  "$state/forge-ci-host" --version >/dev/null
+  # Run the compiled suites directly: the go test driver's signal handling
+  # can terminate a test before its cancellation-aware cleanup runs.
+  install -d -m 0700 -- "$state/tests"
+  "$go_bin" test -c -tags=live -buildvcs=false -o "$state/tests/" ./internal/livetest/... 9>&-
 ) 7>&- 9>&-
 packages=$(cd -- "$repo_root" && "$go_bin" list -tags=live -f '{{if or .TestGoFiles .XTestGoFiles}}{{.Dir}}{{end}}' ./internal/livetest/... 7>&- 9>&-)
 
@@ -194,21 +194,21 @@ export FORGE_CI_LIVE_LAYER_BIN="$state/forge-ci-layer"
 started_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 source_commit=$(git -C "$repo_root" rev-parse --verify HEAD 2>/dev/null || printf 'unavailable')
 {
-	printf 'started_at=%s\n' "$started_at"
-	printf 'source_commit=%s\n' "$source_commit"
-	printf 'profile=%s\n' "$profile"
-	printf 'provider=%s\n' "$provider_scope"
-	printf 'scenario=%q\n' "$scenario"
-	# What a consumer recipe was given, so the run can be repeated from its
-	# log. A setting names a variable or a secret and never carries a secret.
-	# An external registry's token stays in its file; its path and user are logged.
-	# livetest.LiveRunInputs is this list for verdict.json; a test keeps the two equal.
-	for input in FORGE_CI_LIVE_DEMO FORGE_CI_LIVE_CONSUMER FORGE_CI_LIVE_CONSUMER_EVENT FORGE_CI_LIVE_CONSUMER_SETTINGS FORGE_CI_LIVE_CONSUMER_VISIBILITY FORGE_CI_LIVE_IMAGE_PLAN_JOB_IMAGE \
-		FORGE_CI_LIVE_EXTERNAL_REGISTRY_TOKEN_FILE FORGE_CI_LIVE_EXTERNAL_REGISTRY_USER FORGE_CI_LIVE_GITLAB_IMAGE_BUILDER FORGE_CI_LIVE_FORGEJO_IMAGE_BUILDER \
-		FORGE_CI_LIVE_ADMIN_LINT FORGE_CI_LIVE_ADMIN_VULNERABILITIES FORGE_CI_LIVE_ADMIN_APPLICATION_TESTS FORGE_CI_LIVE_ADMIN_REPRODUCIBLE_BUILDS; do
-		[[ -z "${!input:-}" ]] || printf '%s=%q\n' "${input,,}" "${!input}"
-	done
-	printf '%s\n' "$preflight_report"
+  printf 'started_at=%s\n' "$started_at"
+  printf 'source_commit=%s\n' "$source_commit"
+  printf 'profile=%s\n' "$profile"
+  printf 'provider=%s\n' "$provider_scope"
+  printf 'scenario=%q\n' "$scenario"
+  # What a consumer recipe was given, so the run can be repeated from its
+  # log. A setting names a variable or a secret and never carries a secret.
+  # An external registry's token stays in its file; its path and user are logged.
+  # livetest.LiveRunInputs is this list for verdict.json; a test keeps the two equal.
+  for input in FORGE_CI_LIVE_DEMO FORGE_CI_LIVE_CONSUMER FORGE_CI_LIVE_CONSUMER_EVENT FORGE_CI_LIVE_CONSUMER_SETTINGS FORGE_CI_LIVE_CONSUMER_VISIBILITY FORGE_CI_LIVE_IMAGE_PLAN_JOB_IMAGE \
+    FORGE_CI_LIVE_EXTERNAL_REGISTRY_TOKEN_FILE FORGE_CI_LIVE_EXTERNAL_REGISTRY_USER FORGE_CI_LIVE_GITLAB_IMAGE_BUILDER FORGE_CI_LIVE_FORGEJO_IMAGE_BUILDER \
+    FORGE_CI_LIVE_ADMIN_LINT FORGE_CI_LIVE_ADMIN_VULNERABILITIES FORGE_CI_LIVE_ADMIN_APPLICATION_TESTS FORGE_CI_LIVE_ADMIN_REPRODUCIBLE_BUILDS; do
+    [[ -z "${!input:-}" ]] || printf '%s=%q\n' "${input,,}" "${!input}"
+  done
+  printf '%s\n' "$preflight_report"
 } >"$log"
 
 filter=()
@@ -217,13 +217,13 @@ filter=()
 # Keep the logger alive during cancellation so cleanup failures reach the
 # durable evidence. Neither it nor test children inherit either live lock.
 exec 8> >(
-	exec 7>&-
-	exec 9>&-
-	trap '' INT TERM
-	sanitize_live_log | (
-		trap '' INT TERM
-		exec tee -a "$log"
-	)
+  exec 7>&-
+  exec 9>&-
+  trap '' INT TERM
+  sanitize_live_log | (
+    trap '' INT TERM
+    exec tee -a "$log"
+  )
 )
 logger_pid=$!
 suite_pid=
@@ -232,12 +232,12 @@ trap 'interrupted=1; if [[ -n "$suite_pid" ]]; then kill -TERM "$suite_pid" 2>/d
 
 # A trapped signal interrupts bash's wait before the child finishes cleanup.
 wait_for_child() {
-	local pid=$1 code
-	while true; do
-		wait "$pid"
-		code=$?
-		if ! kill -0 "$pid" 2>/dev/null; then return "$code"; fi
-	done
+  local pid=$1 code
+  while true; do
+    wait "$pid"
+    code=$?
+    if ! kill -0 "$pid" 2>/dev/null; then return "$code"; fi
+  done
 }
 
 # Packages remain serial within the selected scope. Preserve each test
@@ -247,20 +247,20 @@ wait_for_child() {
 set +e
 status=0
 while IFS= read -r package; do
-	[[ -n "$package" ]] || continue
-	[[ "$interrupted" -eq 0 ]] || break
-	printf 'FORGE_CI_LIVE_PACKAGE_BEGIN %s\n' "$package" >&8
-	(
-		cd -- "$package" || exit
-		exec "$state/tests/${package##*/}.test" -test.paniconexit0 -test.count=1 -test.timeout=3h -test.v "${filter[@]}" 7>&- 9>&- 8>&-
-	) >&8 2>&1 &
-	suite_pid=$!
-	wait_for_child "$suite_pid"
-	code=$?
-	suite_pid=
-	printf 'FORGE_CI_LIVE_PACKAGE_END %s\n' "$package" >&8
-	if [[ "$code" -ne 0 ]]; then status=$code; fi
-	if [[ "$code" -eq 130 ]]; then interrupted=1; fi
+  [[ -n "$package" ]] || continue
+  [[ "$interrupted" -eq 0 ]] || break
+  printf 'FORGE_CI_LIVE_PACKAGE_BEGIN %s\n' "$package" >&8
+  (
+    cd -- "$package" || exit
+    exec "$state/tests/${package##*/}.test" -test.paniconexit0 -test.count=1 -test.timeout=3h -test.v "${filter[@]}" 7>&- 9>&- 8>&-
+  ) >&8 2>&1 &
+  suite_pid=$!
+  wait_for_child "$suite_pid"
+  code=$?
+  suite_pid=
+  printf 'FORGE_CI_LIVE_PACKAGE_END %s\n' "$package" >&8
+  if [[ "$code" -ne 0 ]]; then status=$code; fi
+  if [[ "$code" -eq 130 ]]; then interrupted=1; fi
 done <<<"$packages"
 exec 8>&-
 wait_for_child "$logger_pid"
@@ -275,11 +275,11 @@ set -e
 # read from the redacted log and given the run's header as values, not as the
 # shell-quoted text the log holds.
 classification=$(cd -- "$repo_root" && FORGE_CI_LIVE_RUN_STARTED_AT="$started_at" FORGE_CI_LIVE_RUN_SOURCE_COMMIT="$source_commit" \
-	FORGE_CI_LIVE_RUN_SCENARIO="$scenario" "$go_bin" run ./internal/livetest/preflight classify-run "$status" "$log" 7>&- 9>&-) || classification='1 failed'
+  FORGE_CI_LIVE_RUN_SCENARIO="$scenario" "$go_bin" run ./internal/livetest/preflight classify-run "$status" "$log" 7>&- 9>&-) || classification='1 failed'
 read -r status verdict <<<"$classification"
 if [[ "$interrupted" -ne 0 ]]; then
-	status=130
-	verdict=interrupted
+  status=130
+  verdict=interrupted
 fi
 printf 'Live result: %s\n' "$verdict"
 printf 'Live log: %s (retained for 30 days)\n' "$log"

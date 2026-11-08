@@ -131,7 +131,7 @@ func TestSnapshotPublicationAlwaysInstallsTheScanner(t *testing.T) {
 	_, tools, found := strings.Cut(string(forgejo), "snapshot_evidence_tools() {")
 	tools, _, _ = strings.Cut(tools, "\n}\n")
 
-	if !found || strings.Contains(tools, "--field scan") || !strings.Contains(tools, "\tinstall_trivy\n") {
+	if !found || strings.Contains(tools, "--field scan") || !strings.Contains(tools, "\n  install_trivy\n") {
 		t.Fatalf("the Forgejo/GitLab snapshot scanner install is conditional:\n%s", tools)
 	}
 }

@@ -159,7 +159,7 @@ func TestPrepareMaterializesPrivateSnapshot(t *testing.T) {
 			t.Run("quality-preflight", func(t *testing.T) {
 				shfmt, reuse := fixtureTool(t, "shfmt"), fixtureTool(t, "reuse")
 				for _, file := range []string{".gitlab/build-release.sh", ".gitlab/check-release.sh"} {
-					cmd := exec.CommandContext(t.Context(), shfmt, "-d", filepath.Join(destination, file))
+					cmd := exec.CommandContext(t.Context(), shfmt, "-i", "2", "-d", filepath.Join(destination, file))
 					if out, err := cmd.CombinedOutput(); err != nil {
 						t.Fatalf("generated shell format: %v\n%s", err, out)
 					}
