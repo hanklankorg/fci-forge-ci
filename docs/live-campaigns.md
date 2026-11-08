@@ -200,6 +200,13 @@ container/readiness runner, because readiness runs the published digest with Pod
 Budget that runner and the builder before launch; this profile claims native Linux
 amd64 only, not ARM images or a multi-platform product matrix.
 
+Fresh scratch-repository bindings keep `CI_IMAGE_BUILDER=buildah` explicit and omit
+its empty optional `CI_IMAGE_BUILDER_JOB_IMAGE`: Forgejo requires nonempty Actions
+variable values, and Buildah uses the privileged runner's default image. This is
+not an update/unset operation on an existing repository. A nonempty image remains
+unchanged; Kaniko still requires its qualified digest image and reviewed archive.
+Conflicting bindings and other empty required values refuse the complete merge.
+
 The recipe calls the existing guarded launcher and
 `TestForgejoLayer_ConsumerDevelopment` / `runForgejoMavenServiceDevelopment`.
 It fixes branch `development`, readiness `/health`, an empty optional runtime

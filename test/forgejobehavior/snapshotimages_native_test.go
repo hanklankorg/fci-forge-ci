@@ -24,6 +24,66 @@ func snapshotTestEnvironment(t *testing.T, extra ...string) []string {
 	return append(os.Environ(), append([]string{"PATH=" + testenv.GNUPath(t, "realpath") + ":" + os.Getenv("PATH")}, extra...)...)
 }
 
+func TestSnapshotNativeBuilderCoordinatesKeepBuildahOnTheRunnerDefault(t *testing.T) {
+	body, err := os.ReadFile(filepath.Join(reporoot.Path(t), ".forgejo/workflows/snapshot-images.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var workflow struct {
+		Jobs map[string]struct {
+			Steps []struct {
+				Run string `yaml:"run"`
+			} `yaml:"steps"`
+		} `yaml:"jobs"`
+	}
+	if err = yaml.Unmarshal(body, &workflow); err != nil {
+		t.Fatal(err)
+	}
+
+	program := workflow.Jobs["coordinates"].Steps[0].Run
+	image := "registry.invalid/job@sha256:" + strings.Repeat("a", 64)
+
+	for _, tc := range []struct {
+		name, builder, image, want string
+		refused                    bool
+	}{
+		{name: "buildah default", builder: "buildah", want: "builder_job_image=\n"},
+		{name: "buildah ignores inherited image", builder: "buildah", image: image, want: "builder_job_image=\n"},
+		{name: "kaniko pinned image", builder: "kaniko", image: image, want: "builder_job_image=" + image + "\n"},
+		{name: "kaniko missing image", builder: "kaniko", refused: true},
+		{name: "kaniko mutable image", builder: "kaniko", image: "registry.invalid/job:latest", refused: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := testfs.NewReal(t).Root
+			output := filepath.Join(dir, "output")
+			cmd := exec.CommandContext(t.Context(), testBash(t), "--noprofile", "--norc", "-c", program)
+			cmd.Dir = dir
+			cmd.Env = snapshotTestEnvironment(t, "HELPERS_REPOSITORY_INPUT=fixture/engine", "SERVER_URL=https://forge.example",
+				"BUILDER_INPUT="+tc.builder, "BUILDER_JOB_IMAGE_INPUT="+tc.image, "FORGEJO_OUTPUT="+output,
+				"ARTIFACT_JOB_IMAGE_GO_INPUT=", "ARTIFACT_JOB_IMAGE_JAVA_INPUT=", "ARTIFACT_JOB_IMAGE_NODE_INPUT=", "ARTIFACT_JOB_IMAGE_RUST_INPUT=")
+
+			logs, runErr := cmd.CombinedOutput()
+			if tc.refused {
+				if _, statErr := os.Stat(output); runErr == nil || !os.IsNotExist(statErr) {
+					t.Fatalf("invalid image produced partial coordinates: %v %v", runErr, statErr)
+				}
+
+				return
+			}
+
+			if runErr != nil {
+				t.Fatalf("native builder admission: %v\n%s", runErr, logs)
+			}
+
+			result, readErr := os.ReadFile(output)
+			if readErr != nil || !strings.Contains(string(result), tc.want) || !strings.Contains(string(result), "builder="+tc.builder+"\n") {
+				t.Fatalf("wrong native coordinates: %v\n%s", readErr, result)
+			}
+		})
+	}
+}
+
 func TestSnapshotNativeContextDelegatesRestoreAndPropagatesRefusal(t *testing.T) {
 	for _, refused := range []bool{false, true} {
 		t.Run(strconv.FormatBool(refused), func(t *testing.T) {

@@ -19,6 +19,7 @@ import (
 	"codefloe.com/itiquette/forge-lab-contract/labcontract"
 	"golang.org/x/mod/semver"
 
+	"github.com/diggsweden/forge-ci/internal/domain/container"
 	"github.com/diggsweden/forge-ci/internal/domain/errs"
 	"github.com/diggsweden/forge-ci/internal/domain/provider"
 )
@@ -436,7 +437,10 @@ type ConsumerPlan struct {
 
 // MergeConsumerVariables binds the trial's runtime values without overwriting
 // conflicting consumer-plan values. Neither input is modified; errors name the
-// variable, never its value.
+// variable, never its value. These are create-only bindings for fresh scratch
+// repositories, not updates: no stale repository value is retained or deleted.
+// Buildah's empty optional job image means the runner default, not an Actions
+// variable with an empty value (which Forgejo refuses). Other empty bindings fail.
 func MergeConsumerVariables(plan, runtime map[string]string) (map[string]string, error) {
 	result := make(map[string]string, len(plan)+len(runtime))
 	maps.Copy(result, plan)
@@ -448,6 +452,27 @@ func MergeConsumerVariables(plan, runtime map[string]string) (map[string]string,
 		}
 
 		result[key] = value
+	}
+
+	if builder, found := result["CI_IMAGE_BUILDER"]; found {
+		switch builder {
+		case ImageBuilderBuildah:
+			if result["CI_IMAGE_BUILDER_JOB_IMAGE"] == "" {
+				delete(result, "CI_IMAGE_BUILDER_JOB_IMAGE")
+			}
+		case ImageBuilderKaniko:
+			if !container.ValidDigestReference(result["CI_IMAGE_BUILDER_JOB_IMAGE"]) {
+				return nil, fmt.Errorf("consumer variable CI_IMAGE_BUILDER_JOB_IMAGE requires a digest-pinned Kaniko job image: %w", errs.ErrValidation)
+			}
+		default:
+			return nil, fmt.Errorf("consumer variable CI_IMAGE_BUILDER requires a supported builder: %w", errs.ErrValidation)
+		}
+	}
+
+	for _, key := range sortedKeys(result) {
+		if result[key] == "" {
+			return nil, fmt.Errorf("consumer variable %s requires a nonempty value: %w", key, errs.ErrValidation)
+		}
 	}
 
 	return result, nil
