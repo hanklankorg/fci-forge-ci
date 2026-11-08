@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # SPDX-FileCopyrightText: 2026 Digg - Agency for Digital Government
 # SPDX-License-Identifier: CC0-1.0
+# Live fixture adapter: the merge-request and release-candidate checks for a
+# Go or Cargo consumer, run by Forge CI's check job.
 set -euo pipefail
 # Acceptance policy: the full Nanolinter plan is diagnostic. Application tests,
 # setup, compiler checks and the non-Nanolinter parts of lint remain blocking.

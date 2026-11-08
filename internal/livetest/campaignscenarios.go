@@ -72,7 +72,7 @@ func campaignBuildImageProbe(env map[string]string, words []string) ([]string, e
 		return nil, fmt.Errorf("build-image probe takes build-archive= alone: %w", errs.ErrValidation)
 	}
 
-	return []string{"test-live-gitlab-build-image-capability", archives["build-archive"]}, nil
+	return []string{"test-live-gitlab-buildah", archives["build-archive"]}, nil
 }
 
 func campaignScenarioCheckout(settings []string) (string, []string, error) {

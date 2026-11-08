@@ -315,7 +315,7 @@ What this tier cannot show is the runner: how Forgejo expands a called
 workflow, resolves `vars`, or schedules the jobs. That is acceptance on a real
 instance, and the [live tier](#the-live-tier) runs it: its `LAYER` scenarios
 serve this checkout's `.forgejo/` from a scratch repository on the lab and run
-consumer-shaped workflows against it, and `just test-live-forgejo-consumer` runs a
+consumer-shaped workflows against it, and `just test-live-consumer forgejo` runs a
 real consumer checkout's own workflow against it; see
 [Trying a consumer](#trying-a-consumer).
 
@@ -361,10 +361,10 @@ setup, evidence and cleanup.
 
 | Forge / event | Command | Preparation |
 |---|---|---|
-| Forgejo PR or release | `just test-live-forgejo-consumer <checkout> <pull-request\|release> [setting ...]` | Local `forgeci` contract and runner; consumer job image; signer image for releases |
-| GitLab MR | `just test-live-gitlab-consumer <checkout> <image-archive>` | Local `forgeci` contract and runner; prepared MR job image archive |
-| GitLab release | `just test-live-gitlab-consumer-release <checkout> job-archive=<archive> build-archive=<archive> signer-archive=<archive> [setting ...]` | Local contract, prepared image archives and guarded full-release runner profile |
-| GitHub PR, development build or release | `just test-live-github-consumer <org-id> <checkout> <pull-request\|dev-release\|release> [setting ...]` | Forge Lab's hosted `github run` session, consumer workflow fixtures and public engine images |
+| Forgejo PR or release | `just test-live-consumer forgejo <checkout> <pull-request\|release> [setting ...]` | Local `forgeci` contract and runner; consumer job image; signer image for releases |
+| GitLab MR | `just test-live-consumer gitlab <checkout> pull-request job-archive=<image-archive>` | Local `forgeci` contract and runner; prepared MR job image archive |
+| GitLab release | `just test-live-consumer gitlab <checkout> release job-archive=<archive> build-archive=<archive> signer-archive=<archive> [setting ...]` | Local contract, prepared image archives and guarded full-release runner profile |
+| GitHub PR, development build or release | `just test-live-consumer github <checkout> <pull-request\|dev-release\|release> org=<org-id> [setting ...]` | Forge Lab's hosted `github run` session, consumer workflow fixtures and public engine images |
 
 See [Forgejo trials](#trying-a-consumer), [GitLab acceptance](#gitlab-live-acceptance)
 and [GitHub trials](#trying-a-consumer-on-github). `just test-live` is the local
@@ -393,7 +393,7 @@ just lab --account forgeci --fixtures --runners gitlab forgejo
 # Here: the contract and CA check alone, in seconds, before anything heavier.
 just test-live-preflight full
 # A consumer's own workflow against this checkout, both visibilities.
-just test-live-forgejo-consumer /absolute/consumer pull-request CI_JOB_IMAGE=<digest reference>
+just test-live-consumer forgejo /absolute/consumer pull-request CI_JOB_IMAGE=<digest reference>
 # A kept demo: make one, see what exists, delete one when done with.
 just demo forgejo hello-maven version=0.2.0 CI_JOB_IMAGE=<reference>
 just demo-list forgejo
@@ -742,7 +742,7 @@ minutes, and a failure prints every job with its status and the end of the log
 of each that did not succeed. The release scenario needs a signer image:
 
 ```text
-export FORGE_CI_LIVE_SIGNER_IMAGE="$(just test-live-signer-image /path/to/forge-lab)"
+export FORGE_CI_LIVE_SIGNER_IMAGE="$(just test-live-image signer /path/to/forge-lab)"
 just test-live 'TestForgejoLayer_.*'
 ```
 
@@ -787,7 +787,7 @@ tiny native linux/amd64 `FROM scratch` images, and no product release or signer 
 It uses the ordinary restricted runner with the admitted Kaniko job image:
 
 ```text
-export FORGE_CI_LIVE_IMAGE_PLAN_JOB_IMAGE="$(just test-live-kaniko-job-image /absolute/forge-lab)"
+export FORGE_CI_LIVE_IMAGE_PLAN_JOB_IMAGE="$(just test-live-image kaniko-job /absolute/forge-lab)"
 just test-live '^TestForgejoLayer_ResolvedImagePlan$'
 ```
 
@@ -823,15 +823,15 @@ Nanolinter flavor build, signed-base reuse, or product runtime smoke checks.
 
 #### Trying a consumer
 
-`just test-live-forgejo-consumer` answers one question before an engine commit is
+`just test-live-consumer forgejo` answers one question before an engine commit is
 published anywhere: does this repository still pass its own workflow with the
 layer of this checkout?
 
 ```text
-just test-live-forgejo-consumer <consumer-checkout> <pull-request|release> [setting ...]
+just test-live-consumer forgejo <consumer-checkout> <pull-request|release> [setting ...]
 
-just test-live-forgejo-consumer /absolute/myapp pull-request CI_JOB_IMAGE=<digest reference>
-just test-live-forgejo-consumer /absolute/myapp release
+just test-live-consumer forgejo /absolute/myapp pull-request CI_JOB_IMAGE=<digest reference>
+just test-live-consumer forgejo /absolute/myapp release
 ```
 
 It is `TestForgejoLayer_ConsumerTrial` behind `just test-live`'s script, so
@@ -903,8 +903,8 @@ separate repositories, and a cross-format push into one repository is not a
 supported migration route. GitHub.com remains a separate, unproven live tier.
 
 ```text
-FORGE_CI_LIVE_CONSUMER_VISIBILITY=private just test-live-forgejo-consumer /absolute/myapp pull-request CI_JOB_IMAGE=<digest reference>
-FORGE_CI_LIVE_CONSUMER_VISIBILITY=private just test-live-forgejo-consumer /absolute/myapp release
+FORGE_CI_LIVE_CONSUMER_VISIBILITY=private just test-live-consumer forgejo /absolute/myapp pull-request CI_JOB_IMAGE=<digest reference>
+FORGE_CI_LIVE_CONSUMER_VISIBILITY=private just test-live-consumer forgejo /absolute/myapp release
 ```
 
 **What is rewritten** is read from the consumer's workflows under
@@ -979,7 +979,7 @@ report on this one.
   ```text
   FORGE_CI_LIVE_EXTERNAL_REGISTRY_TOKEN_FILE=$HOME/.config/forge-lab/example-org-packages.pat \
   FORGE_CI_LIVE_EXTERNAL_REGISTRY_USER=<github user> \
-    just test-live-forgejo-consumer /absolute/nanolinter-clone release RELEASE_PLATFORMS=linux/amd64 \
+    just test-live-consumer forgejo /absolute/nanolinter-clone release RELEASE_PLATFORMS=linux/amd64 \
       IMAGE_REPOSITORY=ghcr.io/example-org/<unique name> \
       image=ghcr.io/example-org/<unique name>:v0.0.1-go
   ```
@@ -1089,15 +1089,15 @@ otherwise:
 
 ```text
 # 1. The signer image of this commit; keep the reference it prints.
-export FORGE_CI_LIVE_SIGNER_IMAGE="$(just test-live-signer-image /absolute/forge-lab)"
+export FORGE_CI_LIVE_SIGNER_IMAGE="$(just test-live-image signer /absolute/forge-lab)"
 
 # 2. In Forge Lab: the consumer's job image; pass what it prints as CI_JOB_IMAGE=.
 just publish-image --account forgeci <package> <local image>
 
 # 3. The trial, using a consumer checkout prepared for the lab.
-just test-live-forgejo-consumer /absolute/consumer release
+just test-live-consumer forgejo /absolute/consumer release
 # For a consumer whose workflow supports platform selection:
-just test-live-forgejo-consumer /absolute/consumer release RELEASE_PLATFORMS=linux/amd64
+just test-live-consumer forgejo /absolute/consumer release RELEASE_PLATFORMS=linux/amd64
 ```
 
 **Image builds** on Compose are tried in two cells, each public and private
@@ -1111,16 +1111,16 @@ like every trial, and each needs `FORGE_CI_LIVE_SIGNER_IMAGE` as above:
   unless `CI_IMAGE_BUILDER=kaniko`, so the image builds go there:
 
   ```text
-  just test-live-forgejo-consumer /absolute/consumer release
+  just test-live-consumer forgejo /absolute/consumer release
   ```
 
 - **Restricted runner, kaniko.** Nothing more to start. The image builds run
   on the restricted runner in the kaniko job image of this commit, which
-  `just test-live-kaniko-job-image` builds and publishes:
+  `just test-live-image kaniko-job` builds and publishes:
 
   ```text
-  just test-live-forgejo-consumer /absolute/consumer release CI_IMAGE_BUILDER=kaniko \
-    CI_IMAGE_BUILDER_JOB_IMAGE="$(just test-live-kaniko-job-image /absolute/forge-lab)"
+  just test-live-consumer forgejo /absolute/consumer release CI_IMAGE_BUILDER=kaniko \
+    CI_IMAGE_BUILDER_JOB_IMAGE="$(just test-live-image kaniko-job /absolute/forge-lab)"
   ```
 
   A run admits the job image only when its source label names the repository
@@ -1228,7 +1228,7 @@ just buildah-job-image-archive /absolute/images                  # writes forge-
 
 # The signer image of this commit (Forgejo takes the reference it prints,
 # GitLab an archive of it).
-export FORGE_CI_LIVE_SIGNER_IMAGE=$(just test-live-signer-image /absolute/forge-lab)
+export FORGE_CI_LIVE_SIGNER_IMAGE=$(just test-live-image signer /absolute/forge-lab)
 podman save --format docker-archive -o /absolute/images/signer.tar localhost/forge-ci-live-signer:$(git rev-parse HEAD)
 ```
 
@@ -1276,7 +1276,7 @@ forge; trials never use the name.
 
 |  | Trial | Kept for diagnosis | Demo |
 |---|---|---|---|
-| Recipe | `test-live-forgejo-consumer` | the same, with `FORGE_CI_LIVE_KEEP_SCRATCH=1` | `demo <forge>`; `demo-list`, `demo-delete` |
+| Recipe | `test-live-consumer forgejo` | the same, with `FORGE_CI_LIVE_KEEP_SCRATCH=1` | `demo <forge>`; `demo-list`, `demo-delete` |
 | Lab account | `forgeci` | `forgeci` | `demo` |
 | Repository | `fci-consumer-trial` | `fci-consumer-trial`, archived | Forgejo: `demo/demo-<name>` and its layer `demo/demo-<name>-forge-ci`; GitLab: `demo/demo-<name>` and its helpers `demo/demo-<name>-release-*`; GitHub: `<prefix>demo-<name>` in the test organization |
 | Afterwards | deleted | kept until the next trial resets it | kept until `demo-delete` |
@@ -1425,11 +1425,11 @@ Forge Lab; the trial creates its own repositories, so the session prepares
 none), which writes the private context `FORGE_LAB_GITHUB_CONTEXT` names:
 
 ```text
-just test-live-github-consumer <org-id> /absolute/myapp pull-request
-just test-live-github-consumer <org-id> /absolute/myapp dev-release
-just test-live-github-consumer <org-id> /absolute/myapp release version=0.1.0 image=myapp
-just test-live-github-consumer <org-id> /absolute/workspace release version=0.1.0 image=worker,keytool,bff
-just test-live-github-consumer <org-id> /absolute/myapp release RELEASE_PLATFORMS=linux/amd64,linux/arm64
+just test-live-consumer github /absolute/myapp pull-request org=<org-id>
+just test-live-consumer github /absolute/myapp dev-release org=<org-id>
+just test-live-consumer github /absolute/myapp release org=<org-id> version=0.1.0 image=myapp
+just test-live-consumer github /absolute/workspace release org=<org-id> version=0.1.0 image=worker,keytool,bff
+just test-live-consumer github /absolute/myapp release org=<org-id> RELEASE_PLATFORMS=linux/amd64,linux/arm64
 ```
 
 A trial builds `linux/amd64` only unless `RELEASE_PLATFORMS=` states otherwise,
@@ -1765,10 +1765,10 @@ or pass `platform checkout --object-format sha256` to avoid metadata discovery.
 ##### Trying a consumer MR gate
 
 ```text
-just test-live-gitlab-consumer /absolute/clean-consumer /absolute/job-image.tar [/absolute/lint-image.tar]
+just test-live-consumer gitlab /absolute/clean-consumer pull-request job-archive=/absolute/job-image.tar [lint-archive=/absolute/lint-image.tar]
 ```
 
-This command and `test-live-gitlab-consumer-release` run both public and private
+This command and its `release` event run both public and private
 consumer cases by default. `FORGE_CI_LIVE_CONSUMER_VISIBILITY=public|private` narrows a
 development rerun; unset or `both` runs the pair. Each repository is created with
 the selected visibility, verified before
@@ -1835,12 +1835,12 @@ For a clean committed consumer with `.gitlab/check-release.sh` and
 `.gitlab/build-release.sh`, use:
 
 ```sh
-just test-live-gitlab-consumer-release /absolute/clean-consumer \
+just test-live-consumer gitlab /absolute/clean-consumer release \
   job-archive=/absolute/check-image.tar build-archive=/absolute/build-image.tar \
   signer-archive=/absolute/signer-image.tar
 
 # Maven consumer: put the requested version in the prepared release commit.
-just test-live-gitlab-consumer-release /absolute/maven-consumer \
+just test-live-consumer gitlab /absolute/maven-consumer release \
   job-archive=/absolute/check-image.tar build-archive=/absolute/build-image.tar \
   signer-archive=/absolute/signer-image.tar version=0.2.0 version-bump=maven
 ```
@@ -1936,7 +1936,7 @@ the default, the Buildah job image named by
 builds and saves it); under kaniko the kaniko job image named by
 `FORGE_CI_LIVE_KANIKO_JOB_IMAGE_ARCHIVE`. The build archive stays the
 consumer's build tools. A `job-user=65532:65532` setting runs the release's
-`job-image` jobs as the runtime images' `nonroot`. `just test-live-kaniko-job-image` builds
+`job-image` jobs as the runtime images' `nonroot`. `just test-live-image kaniko-job` builds
 `localhost/forge-ci-live-kaniko-job:<commit>`. A run admits a kaniko job image
 only when its source label names the engine project the layer runs from, a
 scratch project of each scenario's own, so the harness labels the image with
@@ -1944,13 +1944,13 @@ that project as it pushes it; the source label the recipe gives it for the
 Forgejo trial does not matter here.
 
 ```text
-just test-live-kaniko-job-image /absolute/forge-lab >/dev/null
+just test-live-image kaniko-job /absolute/forge-lab >/dev/null
 podman save --format docker-archive -o /absolute/images/kaniko-job.tar \
   "localhost/forge-ci-live-kaniko-job:$(git rev-parse HEAD)"
 
 FORGE_CI_LIVE_GITLAB_IMAGE_BUILDER=kaniko \
 FORGE_CI_LIVE_KANIKO_JOB_IMAGE_ARCHIVE=/absolute/images/kaniko-job.tar \
-  just test-live-gitlab-consumer-release /absolute/clean-consumer \
+  just test-live-consumer gitlab /absolute/clean-consumer release \
   job-archive=/absolute/check-image.tar build-archive=/absolute/build-image.tar \
   signer-archive=/absolute/signer-image.tar
 ```

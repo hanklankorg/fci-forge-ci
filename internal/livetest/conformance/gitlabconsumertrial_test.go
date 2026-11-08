@@ -33,7 +33,7 @@ func TestGitLabLayer_ConsumerTrial(t *testing.T) {
 
 	root := os.Getenv(consumerCheckoutEnv)
 	if root == "" {
-		t.Skip("use just test-live-gitlab-consumer <checkout> <prepared-job-image.tar>")
+		t.Skip("use just test-live-consumer gitlab <checkout> pull-request job-archive=<prepared-job-image.tar>")
 	}
 
 	for _, visibility := range livetest.ConsumerVisibilities(t) {

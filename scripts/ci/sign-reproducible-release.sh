@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 # SPDX-FileCopyrightText: 2026 Digg - Agency for Digital Government
 # SPDX-License-Identifier: CC0-1.0
+# Compares the release payload with the final-tag rebuild, validates the
+# checksums, then runs the given `forge-ci release sign` command. Run by
+# GoReleaser's signs step (.goreleaser.yml) and by the GitHub release workflows
+# (release-binary.yml, build-cli.yml) after GoReleaser.
 set -euo pipefail
 
 # GitHub's release workflows invoke this after GoReleaser has produced unsigned

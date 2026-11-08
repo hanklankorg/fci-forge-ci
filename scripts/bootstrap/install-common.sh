@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # SPDX-FileCopyrightText: 2026 Digg - Agency for Digital Government
 # SPDX-License-Identifier: CC0-1.0
+# Shared helpers (install directory, OS and architecture normalization),
+# sourced by the other bootstrap installers; not run on its own.
 
 ci_install_dir() {
 	local tool="$1"

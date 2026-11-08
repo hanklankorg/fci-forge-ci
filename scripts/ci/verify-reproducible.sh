@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 # SPDX-FileCopyrightText: 2026 Digg - Agency for Digital Government
 # SPDX-License-Identifier: CC0-1.0
+# Rebuilds the release twice from clean clones of HEAD and compares the
+# GoReleaser payloads with `forge-ci release files compare`; --release-reference
+# builds and keeps an unsigned final-tag reference instead. Run by
+# `just verify-reproducible`, by release-binary.yml (--release-reference) and
+# directly per docs/verification.md.
+# Usage: verify-reproducible.sh [--compare FIRST_DIST SECOND_DIST | --release-reference TAG OUTPUT]
 set -euo pipefail
 
 # Keep this inventory in step with .goreleaser.yml. Checking the inventory as
@@ -20,6 +26,14 @@ compare() {
 }
 
 release_tag='' reference=''
+usage() {
+	printf 'Usage: %s [--compare FIRST_DIST SECOND_DIST | --release-reference TAG OUTPUT]\n' "$0"
+}
+
+if [[ $# == 1 && ($1 == -h || $1 == --help) ]]; then
+	usage
+	exit
+fi
 if [[ $# == 3 && $1 == --compare ]]; then
 	compare "$2" "$3"
 	exit
@@ -30,7 +44,7 @@ elif [[ $# == 3 && $1 == --release-reference ]]; then
 		exit 2
 	}
 elif (($# != 0)); then
-	printf 'Usage: %s [--compare FIRST_DIST SECOND_DIST | --release-reference TAG OUTPUT]\n' "$0" >&2
+	usage >&2
 	exit 2
 fi
 

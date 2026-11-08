@@ -2029,9 +2029,9 @@ your copy at the commit, with a disposable lab that meets
 [the live tier's contract](testing.md#running-it):
 
 ```text
-just test-live-forgejo-consumer /path/to/consumer pull-request \
+just test-live-consumer forgejo /path/to/consumer pull-request \
   CI_JOB_IMAGE=<image-on-the-lab>
-just test-live-forgejo-consumer /path/to/consumer release
+just test-live-consumer forgejo /path/to/consumer release
 ```
 
 The command pushes HEAD of the consumer checkout to a scratch repository on

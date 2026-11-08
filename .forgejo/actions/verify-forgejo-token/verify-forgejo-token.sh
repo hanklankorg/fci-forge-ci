@@ -2,6 +2,8 @@
 # SPDX-FileCopyrightText: 2026 Digg - Agency for Digital Government
 #
 # SPDX-License-Identifier: CC0-1.0
+# The verify-forgejo-token action: checks a Forgejo API token with
+# `forge-ci validate auth token` and reports a rejection or a redacted diagnostic.
 
 set -euo pipefail
 

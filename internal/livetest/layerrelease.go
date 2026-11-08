@@ -28,7 +28,7 @@ import (
 // of work that belongs to a commit and not to a test.
 
 // signerImageEnv names the digest-pinned signer image the release scenarios
-// run their signer jobs in. `just test-live-signer-image` builds it from this
+// run their signer jobs in. `just test-live-image signer` builds it from this
 // checkout, publishes it to the lab registry and prints the value.
 const signerImageEnv = "FORGE_CI_LIVE_SIGNER_IMAGE"
 
@@ -50,14 +50,14 @@ func SignerImage(tb TB) (string, bool) {
 
 	image := os.Getenv(signerImageEnv)
 	if image == "" {
-		tb.Logf("SKIP: %s is not set; run `just test-live-signer-image <forge-lab checkout>` and pass the reference it prints", signerImageEnv)
+		tb.Logf("SKIP: %s is not set; run `just test-live-image signer <forge-lab checkout>` and pass the reference it prints", signerImageEnv)
 
 		return "", false
 	}
 
 	host, _, _ := strings.Cut(image, "/")
 	if !digestPinnedImage.MatchString(image) || disposableImageHost(host) != nil {
-		tb.Fatalf("livetest: %s must be a digest-pinned image on a lab registry, as `just test-live-signer-image` prints it", signerImageEnv)
+		tb.Fatalf("livetest: %s must be a digest-pinned image on a lab registry, as `just test-live-image signer` prints it", signerImageEnv)
 	}
 
 	return image, true

@@ -150,7 +150,7 @@ func (run CampaignRun) caseSettings(args []string) (map[string]string, error) {
 		return run.withBuilder(builder), nil
 	}
 
-	if len(args) != 0 && args[0] == "test-live-gitlab-build-image-capability" {
+	if len(args) != 0 && args[0] == "test-live-gitlab-buildah" {
 		if run.BuilderSelector != "" && run.BuilderSelector != ImageBuilderBuildah {
 			return nil, fmt.Errorf("build-image capability probes Buildah; select a Buildah lane: %w", errs.ErrValidation)
 		}
@@ -158,11 +158,11 @@ func (run CampaignRun) caseSettings(args []string) (map[string]string, error) {
 		return run.withBuilder(ImageBuilderBuildah), nil
 	}
 
-	if len(args) < 3 || args[0] != "test-live-forgejo-consumer" {
+	if len(args) < 4 || args[0] != "test-live-consumer" || args[1] != campaignForgejo {
 		return run.Settings, nil
 	}
 
-	trial, err := ParseTrialSettings(args[2], args[3:])
+	trial, err := ParseTrialSettings(args[3], args[4:])
 	if err != nil {
 		return nil, err
 	}

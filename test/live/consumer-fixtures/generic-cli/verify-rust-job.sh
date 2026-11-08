@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # SPDX-FileCopyrightText: 2026 Digg - Agency for Digital Government
 # SPDX-License-Identifier: CC0-1.0
+# Checks the Rust job image's user, toolchain and tools; installed into the
+# image by rust-job.Containerfile.
 set -euo pipefail
 test "$(id -u):$(id -g)" = 65532:65532
 test "${CARGO_BUILD_JOBS:-}" = 2

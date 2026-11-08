@@ -96,7 +96,7 @@ scenario TestThird
 		{
 			Text: "consumer hello-go-cli release CI_JOB_IMAGE=@JOB_IMAGE_GO CI_IMAGE_BUILDER_JOB_IMAGE=@KANIKO_JOB_IMAGE SOURCE_SHA=@layer-commit",
 			Args: []string{
-				"test-live-forgejo-consumer", filepath.Join(dir, "demos", "hello-go-cli"), "release",
+				"test-live-consumer", "forgejo", filepath.Join(dir, "demos", "hello-go-cli"), "release",
 				"CI_JOB_IMAGE=lab/nanolinter-go@sha256:cc=d", "CI_IMAGE_BUILDER_JOB_IMAGE=lab/kaniko@sha256:bb", "SOURCE_SHA=@layer-commit",
 			},
 		},
@@ -133,18 +133,17 @@ func TestPlanCampaignLane_MapsAGitLabConsumerToItsRecipes(t *testing.T) {
 		t.Errorf("env %q, want %q", plan.Env, want)
 	}
 
-	// The merge request takes its lint archive as the recipe's last
-	// argument, the release as its first setting; a gate that does not lint
-	// takes none.
+	// Both take the lint archive as the setting lint-archive=; a gate that
+	// does not lint takes none.
 	checkout := filepath.Join(dir, "demos", "hello-maven")
 	if len(plan.Cases) != 3 ||
-		!slices.Equal(plan.Cases[0].Args, []string{"test-live-gitlab-consumer", checkout, "/c/java.tar", "/c/lint-java.tar"}) ||
+		!slices.Equal(plan.Cases[0].Args, []string{"test-live-consumer", "gitlab", checkout, "pull-request", "job-archive=/c/java.tar", "lint-archive=/c/lint-java.tar"}) ||
 		!slices.Equal(plan.Cases[1].Args, []string{
-			"test-live-gitlab-consumer-release", checkout,
+			"test-live-consumer", "gitlab", checkout, "release",
 			"job-archive=/c/java.tar", "build-archive=/b.tar", "signer-archive=/c/signer.tar",
 			"lint-archive=/c/lint-java.tar", "version-bump=maven", "job-user=65532:65532",
 		}) ||
-		!slices.Equal(plan.Cases[2].Args, []string{"test-live-gitlab-consumer", filepath.Join(dir, "demos", "hello-go-cli"), "/c/java.tar"}) {
+		!slices.Equal(plan.Cases[2].Args, []string{"test-live-consumer", "gitlab", filepath.Join(dir, "demos", "hello-go-cli"), "pull-request", "job-archive=/c/java.tar"}) {
 		t.Fatalf("cases %q", plan.Cases)
 	}
 }

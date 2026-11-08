@@ -20,7 +20,7 @@ import (
 	"github.com/diggsweden/forge-ci/internal/livetest"
 )
 
-// What `just test-live-forgejo-consumer` hands over: the checkout, the event, and the
+// What `just test-live-consumer forgejo` hands over: the checkout, the event, and the
 // caller's settings, one per line.
 const (
 	consumerCheckoutEnv = "FORGE_CI_LIVE_CONSUMER"
@@ -57,7 +57,7 @@ func TestForgejoLayer_ConsumerTrial(t *testing.T) {
 
 	root := os.Getenv(consumerCheckoutEnv)
 	if root == "" {
-		t.Skip("no consumer checkout is named; run `just test-live-forgejo-consumer <checkout> <pull-request|release>`")
+		t.Skip("no consumer checkout is named; run `just test-live-consumer forgejo <checkout> <pull-request|release>`")
 	}
 
 	visibilities := livetest.ConsumerVisibilities(t)

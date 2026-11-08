@@ -2,6 +2,10 @@
 # SPDX-FileCopyrightText: 2026 Digg - Agency for Digital Government
 #
 # SPDX-License-Identifier: CC0-1.0
+# Checks that a signer image has the required tools, none of the forbidden
+# ones, and the layer's recorded forge-ci binary. Run in every signer job:
+# runtime-images, sign-and-publish-release, sign-container-images and the
+# verify/promote base-image workflows.
 
 set -euo pipefail
 

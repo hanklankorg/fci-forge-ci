@@ -53,10 +53,10 @@ func TestCampaignScenariosUseRecipesWithExplicitBoundedInputs(t *testing.T) {
 
 	for _, tc := range []struct{ name, extra, recipe string }{
 		{"TestGitLabRelease_ConsumerBranchProtection", "checkout=@NATIVE_CONSUMER", "test-live-gitlab-branch-protection"},
-		{"TestGitLabRelease_BuildImageCapability", "build-archive=@BUILD_PROBE_ARCHIVE", "test-live-gitlab-build-image-capability"},
-		{"TestGitLabRelease_ConsumerTrial", "checkout=@NATIVE_CONSUMER job-archive=/job build-archive=/build signer-archive=/signer", "test-live-gitlab-consumer-release"},
-		{"TestGitLabRelease_RejectsPreseededProvenance", "checkout=@NATIVE_CONSUMER job-archive=/job build-archive=/build signer-archive=/signer", "test-live-gitlab-consumer-release"},
-		{"TestGitLabRelease_ConsumerInterruptedRecovery", "checkout=@NATIVE_CONSUMER job-archive=/job build-archive=/build signer-archive=/signer version=0.3.0", "test-live-gitlab-consumer-release"},
+		{"TestGitLabRelease_BuildImageCapability", "build-archive=@BUILD_PROBE_ARCHIVE", "test-live-gitlab-buildah"},
+		{"TestGitLabRelease_ConsumerTrial", "checkout=@NATIVE_CONSUMER job-archive=/job build-archive=/build signer-archive=/signer", "test-live-consumer"},
+		{"TestGitLabRelease_RejectsPreseededProvenance", "checkout=@NATIVE_CONSUMER job-archive=/job build-archive=/build signer-archive=/signer", "test-live-consumer"},
+		{"TestGitLabRelease_ConsumerInterruptedRecovery", "checkout=@NATIVE_CONSUMER job-archive=/job build-archive=/build signer-archive=/signer version=0.3.0", "test-live-consumer"},
 		{"TestGitLabWorkflow_InterruptedJob", "", "test-live-gitlab-interrupted-job"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -70,7 +70,7 @@ func TestCampaignScenariosUseRecipesWithExplicitBoundedInputs(t *testing.T) {
 				t.Fatalf("scenario recipe plan=%+v err=%v", plan, err)
 			}
 
-			if tc.recipe == "test-live-gitlab-consumer-release" && !strings.Contains(strings.Join(plan.Cases[0].Args, "\n"), "scenario="+tc.name) {
+			if tc.recipe == "test-live-consumer" && !strings.Contains(strings.Join(plan.Cases[0].Args, "\n"), "scenario="+tc.name) {
 				t.Fatal("consumer case selected a different test")
 			}
 		})

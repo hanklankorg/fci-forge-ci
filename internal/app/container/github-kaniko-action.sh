@@ -1,6 +1,8 @@
 #!/kaniko/tools/bash
 # SPDX-FileCopyrightText: 2026 Digg - Agency for Digital Government
 # SPDX-License-Identifier: CC0-1.0
+# Entrypoint of the disposable GitHub Docker action that runs a kaniko image,
+# extract or snapshot build through the CLI; embedded by githubaction.go.
 set -euo pipefail
 export PATH="/kaniko/tools:$PATH"
 export CI_IMAGE_BUILDER=kaniko

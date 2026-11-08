@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # SPDX-FileCopyrightText: 2026 Digg - Agency for Digital Government
 # SPDX-License-Identifier: CC0-1.0
+# Live-case oracle (operator.env): installs the retained npm package into a
+# scratch prefix and checks the installed CLI.
+# Usage: installed-oracle.sh PACKAGES_DIR
 set -euo pipefail
 packages=$1
 set -- "$packages"/*.tgz

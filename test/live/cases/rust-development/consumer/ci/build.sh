@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # SPDX-FileCopyrightText: 2026 Digg - Agency for Digital Government
 # SPDX-License-Identifier: CC0-1.0
+# Live fixture: tests and builds the static Rust binaries offline and checks
+# their versions. Called by produce.sh.
 set -euo pipefail
 
 test "$(uname -s)" = Linux

@@ -28,7 +28,7 @@ import (
 	"github.com/diggsweden/forge-ci/internal/testutil/reporoot"
 )
 
-// What `just test-live-github-consumer` hands over.
+// What `just test-live-consumer github` hands over.
 const (
 	organizationEnv = "FORGE_CI_LIVE_GITHUB_ORG_ID"
 	checkoutEnv     = "FORGE_CI_LIVE_CONSUMER"
@@ -56,7 +56,7 @@ func TestGitHubLayer_ConsumerTrial(t *testing.T) {
 
 	root := os.Getenv(checkoutEnv)
 	if root == "" {
-		t.Skip("no consumer checkout is named; run `just test-live-github-consumer <org-id> <checkout> <pull-request|dev-release|release>`")
+		t.Skip("no consumer checkout is named; run `just test-live-consumer github <checkout> <pull-request|dev-release|release> org=<org-id>`")
 	}
 
 	organizationID, err := strconv.ParseInt(os.Getenv(organizationEnv), 10, 64)

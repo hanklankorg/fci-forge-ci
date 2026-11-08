@@ -346,7 +346,7 @@ func TestGitHubSourceImageConsumerPullRequest(t *testing.T) {
 		return
 	}
 
-	output, consumerErr := trial.output(reporoot.Path(t), "just", "--justfile", reporoot.Path(t)+"/justfile", "test-live-github-consumer", strconv.FormatInt(id, 10), os.Getenv("FORGE_CI_LIVE_CONSUMER"), "pull-request", "fixtures=tests/live/github", "RELEASE_PLATFORMS=linux/amd64", "nanolinter-image="+digestReference.String())
+	output, consumerErr := trial.output(reporoot.Path(t), "just", "--justfile", reporoot.Path(t)+"/justfile", "test-live-consumer", "github", os.Getenv("FORGE_CI_LIVE_CONSUMER"), "pull-request", "org="+strconv.FormatInt(id, 10), "fixtures=tests/live/github", "RELEASE_PLATFORMS=linux/amd64", "nanolinter-image="+digestReference.String())
 	if err := writeSnapshotEvidence(snapshotEvidenceRoot(), "source-image-consumer-pr.log", []byte(strings.ReplaceAll(output, trial.token, "[REDACTED]"))); err != nil {
 		t.Fatal(err)
 	}

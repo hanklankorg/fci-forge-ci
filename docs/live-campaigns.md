@@ -235,9 +235,9 @@ The normal consumer release recipe also selects these exact scenarios with
 
 | Scenario | Recipe/input |
 |---|---|
-| `TestGitLabRelease_ConsumerTrial` | `test-live-gitlab-consumer-release`; default scenario |
+| `TestGitLabRelease_ConsumerTrial` | `test-live-consumer gitlab <checkout> release`; default scenario |
 | `TestGitLabRelease_ConsumerBranchProtection` | `test-live-gitlab-branch-protection <checkout>`; no job images |
-| `TestGitLabRelease_BuildImageCapability` | `test-live-gitlab-build-image-capability <build archive>`; specifically Buildah and a privileged runner |
+| `TestGitLabRelease_BuildImageCapability` | `test-live-gitlab-buildah <build archive>`; specifically Buildah and a privileged runner |
 | `TestGitLabRelease_RejectsPreseededProvenance` | Consumer release recipe with `scenario=TestGitLabRelease_RejectsPreseededProvenance`; the harness adds the inert provenance fixture in its private index |
 | `TestGitLabRelease_ConsumerInterruptedRecovery` | Consumer release recipe with `scenario=TestGitLabRelease_ConsumerInterruptedRecovery version=0.3.0`; reviewed single-image policy-owned release consumer required |
 | `TestGitLabWorkflow_InterruptedJob` | `test-live-gitlab-interrupted-job`; manual observed-signal proof |

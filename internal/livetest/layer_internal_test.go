@@ -71,7 +71,7 @@ func TestSignerImage_IsADigestPinnedLabImageOrASkip(t *testing.T) {
 			t.Errorf("%s: SignerImage = %q, %t", name, image, ok)
 		}
 
-		if test.skipped && !strings.Contains(tb.logs[0], "just test-live-signer-image") {
+		if test.skipped && !strings.Contains(tb.logs[0], "just test-live-image signer") {
 			t.Errorf("%s: the skip does not name the recipe: %q", name, tb.logs)
 		}
 	}

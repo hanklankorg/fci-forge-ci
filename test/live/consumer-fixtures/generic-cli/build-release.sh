@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # SPDX-FileCopyrightText: 2026 Digg - Agency for Digital Government
 # SPDX-License-Identifier: CC0-1.0
+# Live fixture adapter: the release build into dist/ for a Go or Cargo
+# consumer. Needs RELEASE_VERSION, RELEASE_TAG and RELEASE_SHA.
 set -euo pipefail
 umask 077
 : "${RELEASE_VERSION:?}" "${RELEASE_TAG:?}" "${RELEASE_SHA:?}"

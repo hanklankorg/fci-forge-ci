@@ -40,7 +40,7 @@ private temporary root so Unix socket limits do not depend on Buildah path depth
 
 Operator: prepare a new clean checkout with the normal four arguments plus
 `forgejo`, then use `FORGE_CI_LIVE_CONSUMER_VISIBILITY=public just
-test-live-forgejo-consumer /absolute/prepared-checkout release version=0.8.6
+test-live-consumer forgejo /absolute/prepared-checkout release version=0.8.6
 CI_AUTH_IMAGE=<reviewed-digest-pinned-restricted-job-image>
 CI_JOB_IMAGE=<reviewed-digest-pinned-native-Rust-job-image>`.
 Exact filter: `^TestForgejoLayer_ConsumerTrial$`. Cargo bump is configured by
@@ -182,7 +182,7 @@ From the engine root, the existing SDK command is:
 
 ```sh
 FORGE_CI_LIVE_CONSUMER_VISIBILITY=public \
-just test-live-gitlab-consumer-release /absolute/prepared-checkout \
+just test-live-consumer gitlab /absolute/prepared-checkout release \
   job-archive=/absolute/reviewed-job.tar build-archive=/absolute/reviewed-build.tar \
   signer-archive=/absolute/reviewed-signer.tar version=0.0.1
 ```

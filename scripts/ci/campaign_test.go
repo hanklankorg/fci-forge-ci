@@ -153,7 +153,7 @@ func TestCampaignLane_RunsThePlanInOrderAndRecordsEachCase(t *testing.T) {
 
 	stderr, status := lane.run(t, "forgejo", "unset", "FORGE_CI_LIVE_LINT_IMAGE_ARCHIVE",
 		"env", "FORGE_CI_LIVE_PROVIDER=forgejo", "env", "FORGE_CI_LIVE_SIGNER_IMAGE=lab/signer@sha256:aa",
-		"case", "consumer hello-go-cli release A=b c", "4", "test-live-forgejo-consumer", "/c/demos/hello-go-cli", "release", "A=b c",
+		"case", "consumer hello-go-cli release A=b c", "5", "test-live-consumer", "forgejo", "/c/demos/hello-go-cli", "release", "A=b c",
 		"case", "scenario TestFails", "2", "test-live", "^TestFails$",
 		"case", "scenario TestThird", "2", "test-live", "^TestThird$")
 	if status != 1 {
@@ -169,7 +169,7 @@ func TestCampaignLane_RunsThePlanInOrderAndRecordsEachCase(t *testing.T) {
 	justfile := "--justfile " + filepath.Join(reporoot.Path(t), "justfile")
 
 	want := []string{
-		justfile + " test-live-forgejo-consumer /c/demos/hello-go-cli release A=b c",
+		justfile + " test-live-consumer forgejo /c/demos/hello-go-cli release A=b c",
 		justfile + " test-live ^TestFails$",
 		justfile + " test-live ^TestThird$",
 	}

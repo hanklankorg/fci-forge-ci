@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # SPDX-FileCopyrightText: 2026 Digg - Agency for Digital Government
 # SPDX-License-Identifier: CC0-1.0
+# Live fixture: the native provider job's development build. Runs build.sh,
+# builds and scans the images and writes development-artifacts/.
 set -euo pipefail
 
 # Run only in the native provider job. Registry destination and credentials come

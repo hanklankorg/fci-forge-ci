@@ -361,10 +361,9 @@ func campaignSettings(provider string, env map[string]string, words []string) (m
 	return archives, settings, nil
 }
 
-// consumerRecipe is the consumer recipe of provider and event, with its
-// arguments. A GitLab merge request takes its lint archive as the recipe's
-// optional last argument, a release as the setting lint-archive=, which the
-// recipe takes out of the trial's settings.
+// consumerRecipe is the test-live-consumer invocation of provider and event.
+// On GitLab the image archives are settings the recipe takes out of the
+// trial's settings, as `just demo gitlab` does.
 func consumerRecipe(provider, event, checkout string, archives map[string]string, settings []string) ([]string, error) {
 	lint, lints := archives[campaignLintArchive]
 	images := len(archives)
@@ -375,15 +374,15 @@ func consumerRecipe(provider, event, checkout string, archives map[string]string
 
 	switch {
 	case provider == campaignForgejo:
-		return append([]string{"test-live-forgejo-consumer", checkout, event}, settings...), nil
+		return append([]string{"test-live-consumer", campaignForgejo, checkout, event}, settings...), nil
 	case event == "pull-request":
 		if images != 1 || archives["job-archive"] == "" || len(settings) != 0 {
 			return nil, fmt.Errorf("a GitLab merge request takes job-archive= and lint-archive= alone: %w", errs.ErrValidation)
 		}
 
-		args := []string{"test-live-gitlab-consumer", checkout, archives["job-archive"]}
+		args := []string{"test-live-consumer", campaignGitLab, checkout, event, "job-archive=" + archives["job-archive"]}
 		if lints {
-			args = append(args, lint)
+			args = append(args, campaignLintArchive+"="+lint)
 		}
 
 		return args, nil
@@ -393,7 +392,7 @@ func consumerRecipe(provider, event, checkout string, archives map[string]string
 		}
 
 		args := []string{
-			"test-live-gitlab-consumer-release", checkout,
+			"test-live-consumer", campaignGitLab, checkout, event,
 			"job-archive=" + archives["job-archive"],
 			"build-archive=" + archives["build-archive"],
 			"signer-archive=" + archives["signer-archive"],
