@@ -263,9 +263,11 @@ lifecycle when it fails, with their acceptance owners unchanged:
    release and the bot's deploy key; `development` still points at the change.
 
 On Forgejo the event takes the release's settings but `workflow=`,
-`next-version=` and `interrupt-after=`; `CI_JOB_IMAGE`, pinned by digest, is
-also the Java image the snapshot builds the service with. It builds with
-Buildah for now: the campaign's kaniko job image is labelled for the consumer
+`next-version=` and `interrupt-after=`; `CI_JOB_IMAGE`, pinned by digest, is a
+nanolinter image of the java flavour, the `job-image=java:` the campaign
+publishes: the demo's lint and build jobs run in it, and the snapshot builds
+the service with it. A plain Java runtime image fails the lint job on the
+forge, "nanolinter is not on PATH". It builds with Buildah for now: the campaign's kaniko job image is labelled for the consumer
 trial's layer repository, which a lifecycle's layer is not, so
 `CI_IMAGE_BUILDER=kaniko` is refused before anything is created. It needs what
 the published snapshot and a Forgejo release need: the contract's

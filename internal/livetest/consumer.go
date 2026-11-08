@@ -213,9 +213,11 @@ func ParseTrialSettings(event string, words []string) (TrialSettings, error) {
 	return settings, nil
 }
 
-// lifecycleJobImage is the variable a lifecycle's development phase takes the
-// Java job image from, the image its service snapshot builds with: the same
-// image the consumer's own workflows run in.
+// lifecycleJobImage is the variable the consumer's pull-request jobs run in
+// and a lifecycle's development phase builds the service with: one nanolinter
+// image of the java flavour, which carries nanolinter, its check tools, a JDK
+// and Maven. A plain Java runtime image fails the demo's lint job on the
+// forge, "nanolinter is not on PATH".
 const lifecycleJobImage = "CI_JOB_IMAGE"
 
 // ResolvedVariables returns the caller's variables with the two references
@@ -246,7 +248,7 @@ func (settings *TrialSettings) ResolvedVariables(layerCommit, requestCommit stri
 // publishes its own, as the standalone snapshot does.
 func (settings *TrialSettings) lifecycleImages() error {
 	if !container.ValidDigestReference(settings.Variables[lifecycleJobImage]) {
-		return fmt.Errorf("%s requires %s=<digest reference>, the Java job image its development phase builds the service with: %w", TrialLifecycle, lifecycleJobImage, errs.ErrValidation)
+		return fmt.Errorf("%s requires %s=<digest reference>: a nanolinter image of the java flavour, the image the consumer's lint and build jobs run in and its development phase builds the service with: %w", TrialLifecycle, lifecycleJobImage, errs.ErrValidation)
 	}
 
 	if settings.Variables["CI_IMAGE_BUILDER"] == ImageBuilderKaniko {

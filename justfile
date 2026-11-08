@@ -935,12 +935,14 @@ test-live-image kind forge_lab:
 # demo alone: a pull request on branch development, its native merge, the
 # service development snapshot dispatched on the merged main, and a signed
 # release request from it. It takes the release's settings but workflow=,
-# next-version= and interrupt-after=, needs what a release needs, builds
-# with Buildah only for now, and CI_JOB_IMAGE, pinned by digest, is also the
-# Java image the snapshot builds the service with. docs/live-campaigns.md,
-# Lifecycle, has the rest.
+# next-version= and interrupt-after=, needs what a release needs, and builds
+# with Buildah only for now. CI_JOB_IMAGE, pinned by digest, is a nanolinter
+# image of the java flavour (nanolinter, its check tools, a JDK and Maven):
+# the demo's lint and build jobs run in it, and the snapshot builds the
+# service with it. A plain Java runtime image fails the lint job on the
+# forge. docs/live-campaigns.md, Lifecycle, has the rest.
 #
-#   just test-live-consumer forgejo /absolute/hello-maven-service/consumer lifecycle CI_JOB_IMAGE=<digest reference> RELEASE_PLATFORMS=linux/amd64
+#   just test-live-consumer forgejo /absolute/hello-maven-service/consumer lifecycle CI_JOB_IMAGE=<nanolinter java image, digest reference> RELEASE_PLATFORMS=linux/amd64
 #
 # gitlab, on the lab, with prepared Docker image archives as settings, as for
 # `just demo gitlab`. pull-request runs the consumer's own MR gate and takes

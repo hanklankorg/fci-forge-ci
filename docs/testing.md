@@ -833,11 +833,13 @@ just test-live-consumer forgejo <consumer-checkout> <pull-request|release|lifecy
 
 just test-live-consumer forgejo /absolute/myapp pull-request CI_JOB_IMAGE=<digest reference>
 just test-live-consumer forgejo /absolute/myapp release
-just test-live-consumer forgejo /absolute/hello-maven-service/consumer lifecycle CI_JOB_IMAGE=<digest reference>
+just test-live-consumer forgejo /absolute/hello-maven-service/consumer lifecycle CI_JOB_IMAGE=<nanolinter java image, digest reference>
 ```
 
 `lifecycle` is the Maven service demo's linked flow, pull request to merge to
-development snapshot to release, `TestForgejoLayer_ConsumerLifecycle`;
+development snapshot to release, `TestForgejoLayer_ConsumerLifecycle`. Its
+`CI_JOB_IMAGE` is a nanolinter image of the java flavour, the one image the
+demo's lint and build jobs run in and the snapshot builds the service with;
 docs/live-campaigns.md, Lifecycle, describes its phases and limits.
 
 It is `TestForgejoLayer_ConsumerTrial` behind `just test-live`'s script, so
