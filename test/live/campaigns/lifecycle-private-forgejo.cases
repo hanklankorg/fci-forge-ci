@@ -1,0 +1,27 @@
+# SPDX-FileCopyrightText: 2026 Digg - Agency for Digital Government
+# SPDX-License-Identifier: CC0-1.0
+
+# The lifecycle of the Maven service demo in one private scratch repository,
+# building with kaniko: the k3s campaigns' profile, private and kaniko on the
+# ordinary runner, for the linked flow lifecycle-forgejo.cases runs public
+# with Buildah. The kaniko job image is the campaign's, labelled for the
+# consumer trial's layer repository, which every event of the trial, the
+# lifecycle included, runs its workflows from. Prepare with forgejo=<this
+# file> and job-image=java:<reviewed local image>; CI_JOB_IMAGE is also the
+# Java image the snapshot builds the service with. From the caller,
+# FORGE_CI_LIVE_CONSUMER_VISIBILITY=private and
+# FORGE_CI_LIVE_FORGEJO_IMAGE_BUILDER=kaniko. The service's readiness runs the
+# published image with Podman, so the lab needs the contract's
+# container/readiness runner whichever builder builds the image: Forge Lab's
+# Compose road with its full-release runners, not k3s. amd64 runners only for
+# now.
+#
+#   just campaign-lane <dir> forgejo test/live/campaigns/lifecycle-private-forgejo.cases
+setting visibility=private
+setting image-builder=kaniko
+setting admin-lint=false
+setting admin-vulnerabilities=false
+setting admin-application-tests=false
+setting admin-reproducible-builds=false
+
+consumer hello-maven-service lifecycle CI_JOB_IMAGE=@JOB_IMAGE_JAVA RELEASE_PLATFORMS=linux/amd64 CI_IMAGE_BUILDER=kaniko CI_IMAGE_BUILDER_JOB_IMAGE=@KANIKO_JOB_IMAGE

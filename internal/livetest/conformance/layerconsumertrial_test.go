@@ -397,13 +397,28 @@ func newConsumerRepos(t *testing.T, target livetest.Target, consumer livetest.Co
 		return layer, livetest.NewDemoRepo(t, target, livetest.DemoRepo(demo), consumer.ObjectFormat, false)
 	}
 
-	layer := livetest.PushLayer(t, target, livetest.NewPublicScratchRepo(t, target, livetest.LayerScenario(name), livetest.ReadLayerAnonymously))
+	return newConsumerLayer(t, target, name), newConsumerRepo(t, target, consumer, name, private)
+}
+
+// newConsumerLayer serves the layer under test from the scratch repository
+// of LayerScenario(name), public as every engine layer is.
+func newConsumerLayer(t *testing.T, target livetest.Target, name string) livetest.Layer {
+	t.Helper()
+
+	return livetest.PushLayer(t, target, livetest.NewPublicScratchRepo(t, target, livetest.LayerScenario(name), livetest.ReadLayerAnonymously))
+}
+
+// newConsumerRepo makes the consumer's scratch repository, in the consumer's
+// object format and the run's visibility.
+func newConsumerRepo(t *testing.T, target livetest.Target, consumer livetest.Consumer, name string, private bool) string {
+	t.Helper()
+
 	repo := livetest.NewBareScratchRepo(t, target, name, consumer.ObjectFormat, private)
 
 	// A consumer's release publishes under names of its own choosing.
 	livetest.SweepPackagesAfter(t, target, repo)
 
-	return layer, repo
+	return repo
 }
 
 // requireDemoReady refuses a demo that could not show both halves.

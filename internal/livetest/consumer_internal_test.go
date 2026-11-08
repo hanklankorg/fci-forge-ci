@@ -113,6 +113,13 @@ func TestParseTrialSettings_ReadsTheCallersWords(t *testing.T) {
 	if defaults, err := ParseTrialSettings(TrialLifecycle, []string{"CI_JOB_IMAGE=" + snapshotJobImage}); err != nil || defaults.Workflow != trialReleaseWorkflow || defaults.Version != "0.0.1" {
 		t.Errorf("a lifecycle with the job image alone = %+v, %v", defaults, err)
 	}
+
+	// A lifecycle selects its builder as the other events do: kaniko is the
+	// consumer's CI_IMAGE_BUILDER with the campaign's job image.
+	kaniko, err := ParseTrialSettings(TrialLifecycle, []string{"CI_JOB_IMAGE=" + snapshotJobImage, "CI_IMAGE_BUILDER=kaniko", "CI_IMAGE_BUILDER_JOB_IMAGE=" + snapshotJobImage})
+	if err != nil || kaniko.Variables["CI_IMAGE_BUILDER"] != ImageBuilderKaniko || kaniko.Variables["CI_IMAGE_BUILDER_JOB_IMAGE"] != snapshotJobImage {
+		t.Errorf("a lifecycle with kaniko = %+v, %v", kaniko, err)
+	}
 }
 
 func TestConsumerTrialLayerURL_IsTheForgejoScratchLayer(t *testing.T) {
@@ -174,7 +181,6 @@ func TestParseTrialSettings_RefusesWhatItCannotMean(t *testing.T) {
 		"interrupt of a lifecycle":         {event: TrialLifecycle, words: []string{"CI_JOB_IMAGE=" + snapshotJobImage, "interrupt-after=Build"}},
 		"lifecycle without a job image":    {event: TrialLifecycle},
 		"lifecycle with a floating image":  {event: TrialLifecycle, words: []string{"CI_JOB_IMAGE=registry.invalid/java:latest"}},
-		"lifecycle with kaniko":            {event: TrialLifecycle, words: []string{"CI_JOB_IMAGE=" + snapshotJobImage, "CI_IMAGE_BUILDER=kaniko", "CI_IMAGE_BUILDER_JOB_IMAGE=" + snapshotJobImage}},
 	} {
 		if settings, err := ParseTrialSettings(test.event, test.words); !errors.Is(err, errs.ErrValidation) {
 			t.Errorf("%s: ParseTrialSettings = %+v, %v; want a validation refusal", name, settings, err)

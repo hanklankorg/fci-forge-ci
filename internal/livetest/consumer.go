@@ -71,8 +71,12 @@ const (
 
 // ConsumerTrial is the scenario name of a Forgejo consumer trial's scratch
 // repositories: the consumer's copy, and LayerScenario of it for the layer
-// under test that its workflows call. ConsumerLifecycle is the same for a
-// lifecycle.
+// under test that its workflows call. ConsumerLifecycle names a lifecycle's
+// consumer copy, on either forge. On Forgejo a lifecycle serves the layer
+// from the trial's layer repository: a run admits a kaniko job image only
+// for the repository its source label names, and the campaign prepares one,
+// labelled for that repository (ConsumerTrialLayerURL), so every event of a
+// consumer trial runs its workflows from it.
 const (
 	ConsumerTrial     = "consumer-trial"
 	ConsumerLifecycle = "consumer-lifecycle"
@@ -83,9 +87,9 @@ const (
 func LayerScenario(scenario string) string { return scenario + "-layer" }
 
 // ConsumerTrialLayerURL is the web URL of the repository a Forgejo consumer
-// trial pushes the layer under test to, for the publisher of the lab's kaniko
-// job image: a run admits that image only when its source label names the
-// repository the layer's workflows run from.
+// trial pushes the layer under test to, whichever its event, for the
+// publisher of the lab's kaniko job image: a run admits that image only when
+// its source label names the repository the layer's workflows run from.
 func ConsumerTrialLayerURL() (string, error) {
 	lab, err := currentLabContract()
 	if err != nil {
@@ -238,19 +242,14 @@ func (settings *TrialSettings) ResolvedVariables(layerCommit, requestCommit stri
 	return resolved
 }
 
-// lifecycleImages holds a lifecycle to the images its development phase can
-// build with, before anything is created: the Java job image pinned by
-// digest, and Buildah. The campaign's kaniko job image is labelled for the
-// consumer trial's layer repository, which a lifecycle's layer is not, so a
-// lifecycle's snapshot would refuse it; kaniko waits for a lifecycle that
-// publishes its own, as the standalone snapshot does.
+// lifecycleImages holds a lifecycle to the Java job image its development
+// phase builds the service with, pinned by digest, before anything is
+// created. The image builder is the consumer's CI_IMAGE_BUILDER, as in every
+// consumer trial event; a kaniko job image is held to its digest where the
+// trial's is (MergeConsumerVariables) and to its source label by the run.
 func (settings *TrialSettings) lifecycleImages() error {
 	if !container.ValidDigestReference(settings.Variables[lifecycleJobImage]) {
 		return fmt.Errorf("%s requires %s=<digest reference>, the Java job image its development phase builds the service with: %w", TrialLifecycle, lifecycleJobImage, errs.ErrValidation)
-	}
-
-	if settings.Variables["CI_IMAGE_BUILDER"] == ImageBuilderKaniko {
-		return fmt.Errorf("%s builds with Buildah for now: the campaign's kaniko job image is labelled for the consumer trial's layer repository, not a lifecycle's; leave CI_IMAGE_BUILDER=kaniko out: %w", TrialLifecycle, errs.ErrValidation)
 	}
 
 	return nil

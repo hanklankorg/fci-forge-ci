@@ -837,7 +837,8 @@ just test-live-consumer forgejo /absolute/hello-maven-service/consumer lifecycle
 ```
 
 `lifecycle` is the Maven service demo's linked flow, pull request to merge to
-development snapshot to release, `TestForgejoLayer_ConsumerLifecycle`;
+development snapshot to release, `TestForgejoLayer_ConsumerLifecycle`, in the
+scratch repository `fci-consumer-lifecycle` with the layer served as below;
 docs/live-campaigns.md, Lifecycle, describes its phases and limits.
 
 It is `TestForgejoLayer_ConsumerTrial` behind `just test-live`'s script, so

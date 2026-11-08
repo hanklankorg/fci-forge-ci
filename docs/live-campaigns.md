@@ -232,12 +232,21 @@ is not a validation entry point for this profile. No scenario is duplicated ther
 
 `test/live/campaigns/lifecycle-forgejo.cases` and
 `test/live/campaigns/lifecycle-gitlab.cases` run the linked flow of one
-consumer in one scratch repository, the `lifecycle` event:
+consumer in one scratch repository, the `lifecycle` event, public and with
+Buildah, the published snapshot's profile:
 
 ```text
 consumer hello-maven-service lifecycle CI_JOB_IMAGE=@JOB_IMAGE_JAVA CI_IMAGE_BUILDER=buildah RELEASE_PLATFORMS=linux/amd64
 consumer hello-maven-service lifecycle job-archive=@FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_JAVA build-archive=@FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_JAVA signer-archive=@FORGE_CI_LIVE_SIGNER_IMAGE_ARCHIVE lint-archive=@LINT_IMAGE_ARCHIVE_JAVA version=0.2.0 version-bump=maven job-user=65532:65532
 ```
+
+`test/live/campaigns/lifecycle-private-forgejo.cases` and
+`test/live/campaigns/lifecycle-private-gitlab.cases` run the same flow in
+the k3s campaigns' profile, private and with kaniko on the ordinary runner
+(`FORGE_CI_LIVE_CONSUMER_VISIBILITY=private` and the provider's image-builder
+selector set to `kaniko` by the caller); the Forgejo case adds
+`CI_IMAGE_BUILDER=kaniko CI_IMAGE_BUILDER_JOB_IMAGE=@KANIKO_JOB_IMAGE`, the
+GitLab case is the public one's under the lane's builder.
 
 The same reader, `key=value` words and `@NAME` expansion as the other consumer
 events; only the event word is new. On Forgejo the phases, each ending the
@@ -264,12 +273,15 @@ lifecycle when it fails, with their acceptance owners unchanged:
 
 On Forgejo the event takes the release's settings but `workflow=`,
 `next-version=` and `interrupt-after=`; `CI_JOB_IMAGE`, pinned by digest, is
-also the Java image the snapshot builds the service with. It builds with
-Buildah for now: the campaign's kaniko job image is labelled for the consumer
-trial's layer repository, which a lifecycle's layer is not, so
-`CI_IMAGE_BUILDER=kaniko` is refused before anything is created. It needs what
-the published snapshot and a Forgejo release need: the contract's
-container/readiness runner, `FORGE_CI_LIVE_SIGNER_IMAGE`, ssh-keygen and gpg.
+also the Java image the snapshot builds the service with. It selects its
+builder as the other events do, with the consumer's `CI_IMAGE_BUILDER`, and
+runs in the consumer trial's layer repository (`fci-consumer-trial-layer`,
+beside its own `fci-consumer-lifecycle`): a run admits a kaniko job image only
+for the repository its source label names, and the campaign's is labelled for
+that one, so one prepared image serves every event. It needs what the
+published snapshot and a Forgejo release need: the contract's
+container/readiness runner, whichever builder builds the image,
+`FORGE_CI_LIVE_SIGNER_IMAGE`, ssh-keygen and gpg.
 
 On GitLab (`TestGitLabLayer_ConsumerLifecycle`) the same five phases run in
 one project under one pinned policy file, whose includes serve the three
