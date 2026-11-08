@@ -52,7 +52,7 @@ func TestCampaignScenariosUseRecipesWithExplicitBoundedInputs(t *testing.T) {
 	t.Parallel()
 
 	for _, tc := range []struct{ name, extra, recipe string }{
-		{"TestGitLabRelease_ConsumerBranchProtection", "checkout=@NATIVE_CONSUMER", "test-live-gitlab-consumer-branch-protection"},
+		{"TestGitLabRelease_ConsumerBranchProtection", "checkout=@NATIVE_CONSUMER", "test-live-gitlab-branch-protection"},
 		{"TestGitLabRelease_BuildImageCapability", "build-archive=@BUILD_PROBE_ARCHIVE", "test-live-gitlab-build-image-capability"},
 		{"TestGitLabRelease_ConsumerTrial", "checkout=@NATIVE_CONSUMER job-archive=/job build-archive=/build signer-archive=/signer", "test-live-gitlab-consumer-release"},
 		{"TestGitLabRelease_RejectsPreseededProvenance", "checkout=@NATIVE_CONSUMER job-archive=/job build-archive=/build signer-archive=/signer", "test-live-gitlab-consumer-release"},

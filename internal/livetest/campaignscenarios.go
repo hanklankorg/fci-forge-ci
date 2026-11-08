@@ -113,7 +113,7 @@ func campaignConsumerScenarioArgs(env map[string]string, words []string, release
 			return nil, fmt.Errorf("branch protection takes checkout= alone: %w", errs.ErrValidation)
 		}
 
-		return []string{"test-live-gitlab-consumer-branch-protection", checkout}, nil
+		return []string{"test-live-gitlab-branch-protection", checkout}, nil
 	}
 
 	remaining = append(remaining, "scenario="+release)

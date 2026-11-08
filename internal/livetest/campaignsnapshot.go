@@ -42,5 +42,5 @@ func campaignSnapshotRecipe(dir, provider string, env map[string]string, words [
 		return nil, fmt.Errorf("published unsigned snapshot requires job-image=<digest reference>: %w", errs.ErrValidation)
 	}
 
-	return []string{"test-live-forgejo-consumer-snapshot", filepath.Join(dir, "demos", words[1]), image}, nil
+	return []string{"test-live-forgejo-snapshot", filepath.Join(dir, "demos", words[1]), image}, nil
 }

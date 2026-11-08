@@ -34,7 +34,7 @@ func TestCampaignPublishedSnapshotRoutesToNativeTrial(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			want := []string{"test-live-forgejo-consumer-snapshot", filepath.Join(dir, "demos/hello-maven-service"), snapshotJobImage}
+			want := []string{"test-live-forgejo-snapshot", filepath.Join(dir, "demos/hello-maven-service"), snapshotJobImage}
 			if len(plan.Cases) != 1 || !slices.Equal(plan.Cases[0].Args, want) {
 				t.Fatalf("wrong native snapshot route: %+v, want %v", plan, want)
 			}
@@ -150,7 +150,7 @@ func TestCampaignPublishedSnapshotBuilderDeclarations(t *testing.T) {
 				return
 			}
 
-			facts, err := run.caseSettings([]string{"test-live-forgejo-consumer-snapshot", "/consumer", snapshotJobImage})
+			facts, err := run.caseSettings([]string{"test-live-forgejo-snapshot", "/consumer", snapshotJobImage})
 			if err != nil || facts["image-builder"] != run.Settings["image-builder"] {
 				t.Fatalf("planner differs from native SelectedImageBuilder: %v %v", facts, err)
 			}
@@ -189,7 +189,7 @@ func TestCampaignPublishedSnapshotResolvesNativeBuilder(t *testing.T) {
 				"image-builder": "stale", "admin-application-tests": "true",
 			}}
 
-			facts, err := run.caseSettings([]string{"test-live-forgejo-consumer-snapshot", "/consumer", snapshotJobImage})
+			facts, err := run.caseSettings([]string{"test-live-forgejo-snapshot", "/consumer", snapshotJobImage})
 			if tc.want == "" {
 				if !errors.Is(err, errs.ErrValidation) {
 					t.Fatalf("invalid selector accepted: %v", err)
@@ -224,7 +224,7 @@ func TestCampaignPublishedSnapshotCheckedInProfile(t *testing.T) {
 	}
 
 	plan, err := PlanCampaignLane(dir, campaignForgejo, cases, campaignHead, run)
-	if err != nil || len(plan.Cases) != 1 || plan.Cases[0].Args[0] != "test-live-forgejo-consumer-snapshot" {
+	if err != nil || len(plan.Cases) != 1 || plan.Cases[0].Args[0] != "test-live-forgejo-snapshot" {
 		t.Fatalf("checked-in snapshot profile: %+v %v", plan, err)
 	}
 
@@ -251,7 +251,7 @@ func TestCampaignPublishedSnapshotRecipeOverridesTrialSelectors(t *testing.T) {
 	writeFile(t, filepath.Join(root, "scripts/ci/run-live-tests.sh"), snapshotRecipeCapture)
 
 	checkout := "/reviewed path/consumer;not-a-command"
-	command := exec.CommandContext(t.Context(), just, "--justfile", file, "test-live-forgejo-consumer-snapshot", checkout, snapshotJobImage)
+	command := exec.CommandContext(t.Context(), just, "--justfile", file, "test-live-forgejo-snapshot", checkout, snapshotJobImage)
 
 	command.Env = append(os.Environ(),
 		"FORGE_CI_LIVE_CONSUMER=/stale", "FORGE_CI_LIVE_CONSUMER_EVENT=release",
