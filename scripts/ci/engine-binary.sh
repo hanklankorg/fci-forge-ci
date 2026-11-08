@@ -7,6 +7,7 @@
 # recorded and published.
 #
 #   engine-binary.sh build <arch> <output>    build this tree's CLI to <output>
+#   engine-binary.sh build-checked <arch> <output> build, and fail if the record is stale
 #   engine-binary.sh verify <arch> <binary>  check bytes against this tree's record
 #   engine-binary.sh stage <arch> <artifact-dir> <output> verify and stage runtime input
 #   engine-binary.sh check                    fail if the recorded checksums are stale
@@ -40,7 +41,7 @@ architectures=(amd64 arm64)
 version='engine-layer'
 
 usage() {
-  printf 'usage: %s build <amd64|arm64> <output>\n       %s verify <amd64|arm64> <binary>\n       %s stage <amd64|arm64> <artifact-dir> <output>\n       %s check\n       %s refresh\n       %s publish <amd64|arm64> <binary>\n       %s inputs\n' "$0" "$0" "$0" "$0" "$0" "$0" "$0" >&2
+  printf 'usage: %s build <amd64|arm64> <output>\n       %s build-checked <amd64|arm64> <output>\n       %s verify <amd64|arm64> <binary>\n       %s stage <amd64|arm64> <artifact-dir> <output>\n       %s check\n       %s refresh\n       %s publish <amd64|arm64> <binary>\n       %s inputs\n' "$0" "$0" "$0" "$0" "$0" "$0" "$0" "$0" >&2
   exit 2
 }
 
@@ -106,6 +107,23 @@ build() {
     -buildvcs=false \
     -ldflags="-s -w -X main.version=${version}" \
     -o "$2" ./cmd/forge-ci
+}
+
+# build_checked ARCH OUTPUT builds to OUTPUT and compares the build with the
+# tree's record, naming a stale one with its cause and its remedy.
+build_checked() {
+  local arch=$1 built recorded
+  build "$arch" "$2"
+  built=$(sha256_of "$2")
+  recorded=$(recorded_sha256 "$arch")
+  if [[ "$built" == "$recorded" ]]; then
+    printf '✓ linux/%s checksum matches: %s\n' "$arch" "$built"
+    return 0
+  fi
+  printf '✗ linux/%s checksum is stale: recorded %s, built %s\n' "$arch" "$recorded" "$built"
+  printf '  The build inputs are %s; docs is embedded, so a docs-only\n  change moves the checksum too.\n' "${build_inputs[*]}"
+  printf '  Run just refresh-engine-binary and commit the updated files.\n'
+  return 1
 }
 
 sha256_of() {
@@ -215,6 +233,12 @@ build)
   require_pinned_toolchain
   build "$2" "$3"
   ;;
+build-checked)
+  [[ $# -eq 3 && -n "$3" ]] || usage
+  require_arch "$2"
+  require_pinned_toolchain
+  build_checked "$2" "$3"
+  ;;
 verify)
   [[ $# -eq 3 && -n "$3" ]] || usage
   require_arch "$2"
@@ -232,16 +256,7 @@ check)
   trap 'rm -rf -- "$staging"' EXIT
   failed=0
   for arch in "${architectures[@]}"; do
-    build "$arch" "$staging/forge-ci-$arch"
-    built=$(sha256_of "$staging/forge-ci-$arch")
-    recorded=$(recorded_sha256 "$arch")
-    if [[ "$built" == "$recorded" ]]; then
-      printf '✓ linux/%s checksum matches: %s\n' "$arch" "$built"
-    else
-      printf '✗ linux/%s checksum is stale: recorded %s, built %s\n' "$arch" "$recorded" "$built"
-      printf '  Run just refresh-engine-binary and commit the updated files.\n'
-      failed=1
-    fi
+    build_checked "$arch" "$staging/forge-ci-$arch" || failed=1
   done
   exit "$failed"
   ;;

@@ -273,6 +273,11 @@ func TestRecordedEngineChecksumIsABuildOfThisTree(t *testing.T) {
 		evidence.NotProvenf(t, "the local Go toolchain is not the release go.mod pins, so it cannot reproduce the layer binary")
 	}
 
+	inputs, err := script(t.Context(), root, "inputs")
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	for _, arch := range engineArchitectures() {
 		t.Run(arch, func(t *testing.T) {
 			t.Parallel()
@@ -280,8 +285,9 @@ func TestRecordedEngineChecksumIsABuildOfThisTree(t *testing.T) {
 			recorded := recordedChecksum(t, arch)
 			if built := fileSHA256(t, engineBuild(t, arch)); built != recorded {
 				t.Fatalf("%s does not record the build of this tree: recorded %s, built %s.\n"+
-					"A build input changed since it was recorded. Run `just refresh-engine-binary`, or write this line to the file, and commit it:\n%s  bin/forge-ci",
-					trackedChecksum(arch), recorded, built, built)
+					"A build input (%s) changed since it was recorded; docs is embedded, so a docs-only commit counts. "+
+					"Run `just refresh-engine-binary`, or write this line to the file, and commit it:\n%s  bin/forge-ci",
+					trackedChecksum(arch), recorded, built, strings.Join(strings.Fields(inputs), ", "), built)
 			}
 		})
 	}

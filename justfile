@@ -1201,13 +1201,7 @@ runtime-image-archive target directory:
     context=$(mktemp -d "${TMPDIR:-/tmp}/forge-ci-runtime-image.XXXXXXXX")
     trap 'rm -rf -- "$context"' EXIT
     mkdir -p -- "$context/scripts" "$context/cli-prebuilt"
-    bash scripts/ci/engine-binary.sh build "$arch" "$context/cli-prebuilt/forge-ci"
-    read -r recorded _ <".engine/bin/forge-ci-linux-$arch.sha256"
-    built=$(sha256sum -- "$context/cli-prebuilt/forge-ci")
-    if [[ "${built%% *}" != "$recorded" ]]; then
-        printf 'the engine built here is not the one this tree records; run just refresh-engine-binary and commit it\n' >&2
-        exit 1
-    fi
+    bash scripts/ci/engine-binary.sh build-checked "$arch" "$context/cli-prebuilt/forge-ci" >&2
     cp -R -- scripts/bootstrap "$context/scripts/bootstrap"
     cp -R -- templates "$context/templates"
     image="localhost/forge-ci-runtime-$target:candidate"
