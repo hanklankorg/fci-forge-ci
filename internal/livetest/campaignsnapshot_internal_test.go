@@ -100,6 +100,11 @@ func TestCampaignPublishedSnapshotSupportedRoadAndDiagnostics(t *testing.T) {
 
 			dir, cases := newCampaign(t, "CAMPAIGN_COMMIT="+campaignHead+"\n", "scenario TestFirst\n"+line+"\n")
 			writeFile(t, filepath.Join(dir, "demos", tc.project, "README.md"), "native fixture\n")
+			// The events a demo takes are read from its files: the Maven
+			// service's development route is its declaration and its pom.
+			if tc.project == "hello-maven-service" {
+				writeLifecycleDemo(t, dir, tc.project)
+			}
 
 			plan, err := PlanCampaignLane(dir, tc.provider, cases, campaignHead, CampaignRun{})
 			if !errors.Is(err, errs.ErrValidation) || len(plan.Cases) != 0 {

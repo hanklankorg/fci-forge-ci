@@ -14,19 +14,67 @@ import (
 	"github.com/diggsweden/forge-ci/internal/testutil/reporoot"
 )
 
-// lifecycleCampaignEnv is a campaign with the Java job image of a Forgejo
-// lifecycle and the archives of a GitLab one.
+// lifecycleCampaignEnv is a campaign with the job images of the Forgejo
+// lifecycle and the archives of the GitLab one.
 const lifecycleCampaignEnv = "CAMPAIGN_COMMIT=" + campaignHead + "\nJOB_IMAGE_JAVA=" + snapshotJobImage + "\n" +
-	"FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_JAVA=/c/java.tar\nFORGE_CI_LIVE_SIGNER_IMAGE_ARCHIVE=/c/signer.tar\nLINT_IMAGE_ARCHIVE_JAVA=/c/lint-java.tar\n"
+	"FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_JAVA=/c/java.tar\nFORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_RUST=/c/rust.tar\nFORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_NODE=/c/node.tar\n" +
+	"FORGE_CI_LIVE_SIGNER_IMAGE_ARCHIVE=/c/signer.tar\nLINT_IMAGE_ARCHIVE_JAVA=/c/lint-java.tar\nLINT_IMAGE_ARCHIVE_RUST=/c/lint-rust.tar\nLINT_IMAGE_ARCHIVE_JAVASCRIPT_TYPESCRIPT=/c/lint-js.tar\n"
 
-// newLifecycleCampaign is newCampaign with the Maven service demo, whose
-// GitLab gate lints.
+// lifecycleDemos are the demos a lifecycle's admission reads, as
+// writeLifecycleDemo lays them out: their shipped declarations, a
+// Containerfile where they have one, a root pom.xml for the Maven service,
+// and the GitLab release build of those that ship one. The Maven service and
+// the Cargo container have a development route; the npm service's declaration
+// is one, but here it ships no GitLab release build; the Go CLI declares no
+// container.
+var lifecycleDemos = map[string]struct {
+	declarations           []string
+	containerfile, pom, sh bool
+}{
+	"hello-maven-service":   {[]string{GitLabDefaultArtifactsConfig}, true, true, true},
+	"hello-cargo-container": {[]string{GitLabDefaultArtifactsConfig, GitLabDedicatedReleaseImagesConfig}, true, false, true},
+	"hello-npm-service":     {[]string{GitLabDefaultArtifactsConfig}, true, false, false},
+	"hello-go-cli":          {[]string{GitLabDefaultArtifactsConfig}, false, false, false},
+}
+
+// writeLifecycleDemo lays out one of lifecycleDemos under the campaign's
+// demos directory, with the linting gate every demo's is.
+func writeLifecycleDemo(t *testing.T, dir, demo string) {
+	t.Helper()
+
+	files, known := lifecycleDemos[demo]
+	if !known {
+		t.Fatalf("no lifecycle demo %s", demo)
+	}
+
+	root := filepath.Join(dir, "demos", demo)
+	writeFile(t, filepath.Join(root, filepath.FromSlash(GitLabGateFile)), lintingGate)
+
+	for _, declaration := range files.declarations {
+		writeFile(t, filepath.Join(root, filepath.FromSlash(declaration)), string(reporoot.ReadFile(t, "test/live/demos/"+demo+"/consumer/"+declaration)))
+	}
+
+	if files.containerfile {
+		writeFile(t, filepath.Join(root, "Containerfile"), "FROM example.invalid/base\n")
+	}
+
+	if files.pom {
+		writeFile(t, filepath.Join(root, "pom.xml"), "<project><artifactId>"+demo+"</artifactId><version>0.1.0</version></project>")
+	}
+
+	if files.sh {
+		writeFile(t, filepath.Join(root, filepath.FromSlash(GitLabConsumerBuildScript)), "#!/usr/bin/env bash\n")
+	}
+}
+
+// newLifecycleCampaign is newCampaign with every lifecycle demo laid out.
 func newLifecycleCampaign(t *testing.T, cases string) (string, string) {
 	t.Helper()
 
 	dir, casesPath := newCampaign(t, lifecycleCampaignEnv, cases)
-	writeFile(t, filepath.Join(dir, "demos/hello-maven-service/README.md"), "native fixture\n")
-	writeFile(t, filepath.Join(dir, "demos/hello-maven-service", filepath.FromSlash(GitLabGateFile)), lintingGate)
+	for demo := range lifecycleDemos {
+		writeLifecycleDemo(t, dir, demo)
+	}
 
 	return dir, casesPath
 }
@@ -73,19 +121,32 @@ func TestCampaignLifecycle_RunsTheMavenServiceDemoOnForgejo(t *testing.T) {
 }
 
 // On GitLab the lifecycle takes a release's archives and settings: the
-// recipe takes the archives apart, as for a release.
-func TestCampaignLifecycle_RunsTheMavenServiceDemoOnGitLab(t *testing.T) {
+// recipe takes the archives apart, as for a release. It runs every demo with
+// a service snapshot and a GitLab release: the Maven service, artifact-first
+// with its image, and the Cargo container, container-first.
+func TestCampaignLifecycle_RunsTheServiceDemosOnGitLab(t *testing.T) {
 	t.Parallel()
 
 	dir, plan := planCheckedInLifecycle(t, campaignGitLab, "test/live/campaigns/lifecycle-gitlab.cases")
 
-	want := []string{
+	want := [][]string{{
 		campaignConsumerRecipe, campaignGitLab, filepath.Join(dir, "demos/hello-maven-service"), TrialLifecycle,
 		"job-archive=/c/java.tar", "build-archive=/c/java.tar", "signer-archive=/c/signer.tar", "lint-archive=/c/lint-java.tar",
 		"version=0.2.0", "version-bump=maven", "job-user=65532:65532",
+	}, {
+		campaignConsumerRecipe, campaignGitLab, filepath.Join(dir, "demos/hello-cargo-container"), TrialLifecycle,
+		"job-archive=/c/rust.tar", "build-archive=/c/rust.tar", "signer-archive=/c/signer.tar", "lint-archive=/c/lint-rust.tar",
+		"version=0.2.0", "version-bump=cargo", "job-user=65532:65532",
+	}}
+
+	if len(plan.Cases) != len(want) {
+		t.Fatalf("lifecycle recipes %+v, want %v", plan.Cases, want)
 	}
-	if len(plan.Cases) != 1 || !slices.Equal(plan.Cases[0].Args, want) {
-		t.Fatalf("lifecycle recipe %+v, want %v", plan.Cases, want)
+
+	for index, recipe := range want {
+		if !slices.Equal(plan.Cases[index].Args, recipe) {
+			t.Fatalf("lifecycle recipe %d %+v, want %v", index, plan.Cases[index], recipe)
+		}
 	}
 }
 
@@ -97,13 +158,16 @@ func TestCampaignLifecycle_RefusesWhatItCannotRun(t *testing.T) {
 	for name, test := range map[string]struct {
 		provider, line, want string
 	}{
-		"demo without a development route": {campaignForgejo, "consumer hello-go-cli lifecycle CI_JOB_IMAGE=" + snapshotJobImage, "hello-maven-service demo only"},
+		"demo without a container":         {campaignForgejo, "consumer hello-go-cli lifecycle CI_JOB_IMAGE=" + snapshotJobImage, "no root Containerfile"},
+		"forgejo demo without a Maven app": {campaignForgejo, "consumer hello-npm-service lifecycle CI_JOB_IMAGE=" + snapshotJobImage, "no root pom.xml"},
+		"forgejo demo with extraction":     {campaignForgejo, "consumer hello-cargo-container lifecycle CI_JOB_IMAGE=" + snapshotJobImage, "not a service snapshot's declaration"},
 		"no job image":                     {campaignForgejo, "consumer hello-maven-service lifecycle RELEASE_PLATFORMS=linux/amd64", "CI_JOB_IMAGE=<digest reference>"},
 		"floating job image":               {campaignForgejo, "consumer hello-maven-service lifecycle CI_JOB_IMAGE=registry.invalid/java:latest", "CI_JOB_IMAGE=<digest reference>"},
 		"workflow":                         {campaignForgejo, "consumer hello-maven-service lifecycle CI_JOB_IMAGE=" + snapshotJobImage + " workflow=release.yml", "workflow="},
 		"interruption":                     {campaignForgejo, "consumer hello-maven-service lifecycle CI_JOB_IMAGE=" + snapshotJobImage + " interrupt-after=Build", "interrupt-after="},
 		"kaniko":                           {campaignForgejo, "consumer hello-maven-service lifecycle CI_JOB_IMAGE=" + snapshotJobImage + " CI_IMAGE_BUILDER=kaniko CI_IMAGE_BUILDER_JOB_IMAGE=" + snapshotJobImage, "Buildah for now"},
-		"gitlab demo without a route":      {campaignGitLab, "consumer hello-go-cli lifecycle" + gitlabArchives, "hello-maven-service demo only"},
+		"gitlab demo without a container":  {campaignGitLab, "consumer hello-go-cli lifecycle" + gitlabArchives, "no root Containerfile"},
+		"gitlab demo without a release":    {campaignGitLab, "consumer hello-npm-service lifecycle job-archive=@FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_NODE build-archive=@FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_NODE signer-archive=@FORGE_CI_LIVE_SIGNER_IMAGE_ARCHIVE lint-archive=@LINT_IMAGE_ARCHIVE_JAVASCRIPT_TYPESCRIPT version-bump=npm", "no .gitlab/build-release.sh"},
 		"gitlab without the lint archive":  {campaignGitLab, "consumer hello-maven-service lifecycle job-archive=/a.tar build-archive=/b.tar signer-archive=/s.tar", "nanolinter flavor's archive"},
 		"gitlab without the signer":        {campaignGitLab, "consumer hello-maven-service lifecycle job-archive=/a.tar build-archive=/b.tar lint-archive=/l.tar", "signer-archive="},
 		"gitlab second case":               {campaignGitLab, "consumer hello-maven-service lifecycle" + gitlabArchives + " scenario=TestGitLabRelease_ConsumerTrial", "no scenario="},
@@ -119,5 +183,25 @@ func TestCampaignLifecycle_RefusesWhatItCannotRun(t *testing.T) {
 				t.Fatalf("an unrunnable lifecycle: plan=%+v err=%v, want a validation error naming %q", plan, err, test.want)
 			}
 		})
+	}
+}
+
+// A demo's development route is read from its declaration, not its name: a
+// demo whose declaration the snapshot planner refuses is refused with the
+// planner's reason, on both providers.
+func TestCampaignLifecycle_RefusesADeclarationTheSnapshotCannotBuild(t *testing.T) {
+	t.Parallel()
+
+	dir, cases := newLifecycleCampaign(t, "consumer hello-go-service lifecycle CI_JOB_IMAGE="+snapshotJobImage+"\n")
+	root := filepath.Join(dir, "demos", "hello-go-service")
+	writeFile(t, filepath.Join(root, filepath.FromSlash(GitLabDefaultArtifactsConfig)), string(reporoot.ReadFile(t, "test/live/demos/hello-go-service/consumer/"+GitLabDefaultArtifactsConfig)))
+	writeFile(t, filepath.Join(root, "Containerfile"), "FROM example.invalid/base\n")
+	writeFile(t, filepath.Join(root, "pom.xml"), "<project/>")
+
+	for _, provider := range []string{campaignForgejo, campaignGitLab} {
+		_, err := PlanCampaignLane(dir, provider, cases, campaignHead, CampaignRun{})
+		if !errors.Is(err, errs.ErrValidation) || !strings.Contains(err.Error(), "not a service snapshot's declaration") || !strings.Contains(err.Error(), "extraction") {
+			t.Fatalf("%s: %v, want the declaration refused for its extraction", provider, err)
+		}
 	}
 }

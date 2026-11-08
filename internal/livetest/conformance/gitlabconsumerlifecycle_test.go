@@ -42,8 +42,10 @@ const gitlabLifecyclePolicyFile = "lifecycle.yml"
 const gitlabMainPushRule = `$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_REF_NAME == "main"`
 
 // A consumer lifecycle on GitLab: the linked flow TestForgejoLayer_ConsumerLifecycle
-// runs, in one GitLab project under one pinned policy. It is the Maven service
-// demo's, the one demo with a development route:
+// runs, in one GitLab project under one pinned policy. It is a demo's with a
+// development route on GitLab, a service snapshot of its one container, which
+// the snapshot-images component builds from the declaration the demo's
+// release builds its images from, whatever its ecosystem and build type:
 //
 //  1. a merge request from development into main, judged by the consumer's
 //     own merge-request gate, which the policy includes for merge-request
@@ -52,7 +54,9 @@ const gitlabMainPushRule = `$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_REF_NAME
 //     commit of the base and the change;
 //  3. the service development snapshot: the policy's snapshot-images
 //     component runs on the push the merge makes to main and snapshots
-//     development in a child pipeline, which publishes one amd64 image;
+//     development in a child pipeline, which builds the producers the
+//     declaration names in their toolchain images, builds the image with
+//     the selected builder and publishes one amd64 image;
 //  4. a signed release request at the merged main, judged as a release
 //     trial's: main advanced by one signed release commit, signed tag, a
 //     release with Cosign bundles that verify, signed packages and images;
@@ -102,14 +106,20 @@ func runGitLabConsumerLifecycle(t *testing.T, root string, private bool) {
 		t.Fatal(err)
 	}
 
-	// The development phase snapshots the consumer's one container; the
-	// release phase releases what the consumer declares, as a release does.
+	// The development phase snapshots the consumer's one container, from the
+	// declaration its release builds its images from; the release phase
+	// releases what the consumer declares, as a release does.
 	settings, profile := gitlabConsumerProfileOf(t, root, parsed)
 
+	snapshotSource, err := livetest.ServiceSnapshotSource(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	// The snapshot's image build and the release's image jobs run in the
-	// selected builder's job image; the consumer's Maven build, in the
-	// snapshot's producer job as in the release's build job, in the build
-	// image.
+	// selected builder's job image; the consumer's build, in the snapshot's
+	// producer job as in the release's build job, in the build image, the
+	// toolchain image of the consumer's ecosystem.
 	archives := gitlabReleaseArchiveInputs(t, true, true, profile.kaniko)
 	if !livetest.Requires(t, provider.ForgeGitLab, livetest.NeedsInRunner) {
 		livetest.NotCoveredf(t, "a lifecycle needs a GitLab runner")
@@ -139,7 +149,8 @@ func runGitLabConsumerLifecycle(t *testing.T, root string, private bool) {
 	}
 
 	layer := livetest.PushLayer(t, target, gitlabReleaseRepo(t, target, "lifecycle-engine", livetest.ReadLayerAnonymously))
-	consumer := opened.WithDraftLayer(t, layer).WithMavenServiceSnapshotDeclaration(t)
+	consumer := opened.WithDraftLayer(t, layer).WithServiceSnapshotDeclaration(t, snapshotSource)
+	families := livetest.ServiceSnapshotFamilies(livetest.Context(t), t, consumer)
 	images := pushGitLabReleaseImages(t, target, archives, layer)
 	publication := gitlabReleaseRepo(t, target, "lifecycle-publication", "")
 	policyRepo := gitlabReleaseRepo(t, target, "lifecycle-policy", "")
@@ -201,19 +212,26 @@ func runGitLabConsumerLifecycle(t *testing.T, root string, private bool) {
 
 	// The snapshot component takes the development phase: the consumer's
 	// declaration, the snapshot's image repository in the project's own
-	// registry, the Maven build in the build image, the image build with the
-	// selected builder on its runner. It runs on the push pipelines of main.
+	// registry, each producer's build in the build image, its ecosystem's
+	// toolchain image, the image build with the selected builder on its
+	// runner. It runs on the push pipelines of main.
+	snapshotInputs := map[string]any{
+		"branch": lifecycleBranch, "artifacts-config": livetest.ServiceSnapshotDeclarationFile,
+		"image-repository": image, "forge-ci-repository": layer.Repository,
+		"server-url": target.BaseURL(), "registry": registry,
+		"job-image": images.job, "build-image": builderJobImage,
+		"image-builder": imageBuilder, "builder-job-image": builderJobImage,
+		"runner-tags": []string{}, "build-runner-tags": builder.RunnerLabels,
+	}
+
+	for _, family := range families {
+		snapshotInputs["artifact-job-image-"+family] = images.build
+	}
+
 	snapshotInclude := map[string]any{
 		"component": gitlabComponent(target, layer, "snapshot-images"),
-		"inputs": layer.ComponentAdminInputs(t, "snapshot-images", map[string]any{
-			"branch": lifecycleBranch, "artifacts-config": livetest.MavenServiceDeclarationFile,
-			"image-repository": image, "forge-ci-repository": layer.Repository,
-			"server-url": target.BaseURL(), "registry": registry,
-			"job-image": images.job, "build-image": builderJobImage, "artifact-job-image-java": images.build,
-			"image-builder": imageBuilder, "builder-job-image": builderJobImage,
-			"runner-tags": []string{}, "build-runner-tags": builder.RunnerLabels,
-		}),
-		"rules": []any{map[string]string{"if": gitlabMainPushRule}},
+		"inputs":    layer.ComponentAdminInputs(t, "snapshot-images", snapshotInputs),
+		"rules":     []any{map[string]string{"if": gitlabMainPushRule}},
 	}
 
 	gateImages := livetest.GitLabGateImages{Job: images.job, Lint: images.lint, ExtraJobs: livetest.PushGitLabGateExtraJobImages(t, target, consumer, func(name string) string {
@@ -234,7 +252,7 @@ func runGitLabConsumerLifecycle(t *testing.T, root string, private bool) {
 	// Protect the empty project before its first write.
 	livetest.RestrictGitLabReleaseBranch(t, target, repo, deploy.ID)
 
-	t.Logf("consumer %s at %s (%s); layer %s at %s; job image %s, build image %s, image builder %s", root, consumer.Commit, consumer.ObjectFormat, layer.Repository, layer.Commit, images.job, images.build, imageBuilder)
+	t.Logf("consumer %s at %s (%s); layer %s at %s; job image %s, build image %s for producers %v of %s, image builder %s", root, consumer.Commit, consumer.ObjectFormat, layer.Repository, layer.Commit, images.job, images.build, families, snapshotSource, imageBuilder)
 
 	// Phase 1: the merge request.
 	base := consumer.PushGitLabRelease(t, repo, layer, gateImages)
@@ -356,7 +374,7 @@ func requireGitLabLifecyclePipeline(t *testing.T, ctx context.Context, client *g
 func requireGitLabPipelineIDs(t *testing.T, ctx context.Context, client *gitlabapi.Client, project string, want ...int64) {
 	t.Helper()
 
-	pipelines, _, err := client.Pipelines.ListProjectPipelines(project, &gitlabapi.ListProjectPipelinesOptions{ListOptions: gitlabapi.ListOptions{PerPage: 100}}, gitlabapi.WithContext(ctx))
+	pipelines, _, err := client.Pipelines.ListProjectPipelines(project, &gitlabapi.ListProjectPipelinesOptions{PerPage: 100}, gitlabapi.WithContext(ctx))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -367,6 +385,7 @@ func requireGitLabPipelineIDs(t *testing.T, ctx context.Context, client *gitlaba
 	}
 
 	slices.Sort(got)
+
 	want = slices.Sorted(slices.Values(want))
 
 	if !slices.Equal(got, want) {
@@ -398,14 +417,14 @@ func requireGitLabNoReleases(t *testing.T, ctx context.Context, client *gitlabap
 // frozen plan the parent's plan job holds and the receipts the child's
 // collect job holds, then judges them as the Forgejo service development's
 // are judged. The readiness and checked-JAR evidence are the Forgejo
-// recipe's own jobs; the component has none, so none is claimed here.
+// workflow's own jobs; the component has none, so none is claimed here.
 func requireGitLabServiceSnapshot(t *testing.T, ctx context.Context, client *gitlabapi.Client, target livetest.Target, repo string, consumer livetest.Consumer, parent, child int64, head, image string) (snapshotimage.Receipt, snapshotimage.Plan) {
 	t.Helper()
 
 	plan := gitlabJobArtifactFile(t, ctx, client, target, repo, parent, gitlabSnapshotPlanJob, "snapshot-plan.json")
 	receipts := gitlabJobArtifactFile(t, ctx, client, target, repo, child, gitlabSnapshotCollectJob, "container-images.json")
 
-	return requireServiceSnapshot(t, target, repo, consumer, lifecycleBranch, head, image, plan, receipts)
+	return requireServiceSnapshot(ctx, t, target, repo, consumer, lifecycleBranch, head, image, plan, receipts)
 }
 
 // gitlabJobArtifactFile reads one file of the artifacts of the named job of
@@ -415,7 +434,7 @@ func gitlabJobArtifactFile(t *testing.T, ctx context.Context, client *gitlabapi.
 
 	project := livetest.RepoSlug(target, repo)
 
-	jobs, response, err := client.Jobs.ListPipelineJobs(project, pipeline, &gitlabapi.ListJobsOptions{ListOptions: gitlabapi.ListOptions{PerPage: 100}}, gitlabapi.WithContext(ctx))
+	jobs, response, err := client.Jobs.ListPipelineJobs(project, pipeline, &gitlabapi.ListJobsOptions{PerPage: 100}, gitlabapi.WithContext(ctx))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -444,5 +463,5 @@ func gitlabJobArtifactFile(t *testing.T, ctx context.Context, client *gitlabapi.
 
 	address := fmt.Sprintf("%s/api/v4/projects/%s/jobs/%d/artifacts/%s", target.BaseURL(), url.PathEscape(project), id, path)
 
-	return livetest.Download(t, target, address, 1<<20)
+	return livetest.DownloadContext(ctx, t, target, address, 1<<20)
 }

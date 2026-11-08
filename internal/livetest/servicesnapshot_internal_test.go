@@ -4,103 +4,21 @@
 package livetest
 
 import (
-	"io/fs"
-	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/diggsweden/forge-ci/internal/domain/config"
 	"github.com/diggsweden/forge-ci/internal/domain/pipeline"
+	"github.com/diggsweden/forge-ci/internal/domain/projecttype"
 	"github.com/diggsweden/forge-ci/internal/domain/snapshotimage"
 	"github.com/diggsweden/forge-ci/internal/domain/version"
 	"github.com/diggsweden/forge-ci/internal/testutil/reporoot"
 )
 
-func TestMavenServiceDevelopmentPreservesDemoArtifactRoute(t *testing.T) {
-	root, git := stageTestRepo(t, "sha1")
-	recipe := filepath.Join(reporoot.Path(t), "test/live/demos/hello-maven-service/consumer")
-
-	err := fs.WalkDir(os.DirFS(recipe), ".", func(path string, entry fs.DirEntry, err error) error {
-		if err != nil || entry.IsDir() {
-			return err
-		}
-
-		body, err := os.ReadFile(filepath.Join(recipe, path))
-		if err != nil {
-			return err
-		}
-
-		info, err := entry.Info()
-		if err != nil {
-			return err
-		}
-
-		stageTestWrite(t, root, path, string(body), info.Mode().Perm())
-
-		return nil
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	stageTestCommit(t, git, root)
-
-	source, err := openConsumer(t.Context(), git, root, t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	fixture, err := mavenServiceDevelopmentFixture(t.Context(), source, MavenServiceDevelopmentConfig{
-		RecipeDirectory: recipe, JavaImage: "registry.invalid/java@sha256:" + strings.Repeat("a", 64),
-		Branch: "development", ReadinessURL: "http://127.0.0.1:8080/health",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	changed, err := git.run(t.Context(), fixture.stage, "diff-tree", "--no-commit-id", "--name-only", "-r", source.Commit, fixture.Commit)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	wantChanged := ".forge-ci/service-development.yml\n.forge-ci/service-fixture.sh\n.forgejo/workflows/development.yml"
-	if changed != wantChanged {
-		t.Fatalf("original demo bytes or modes changed: %s", changed)
-	}
-
-	if err = git.requireClean(t.Context(), root, "."); err != nil {
-		t.Fatal(err)
-	}
-
-	tag, err := version.ComposeSnapshotContainerTag("0.1.0", "development", fixture.Commit[:7])
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	plan := MavenServiceDevelopmentPlan(t, fixture, snapshotimage.Input{
-		SourceSHA: fixture.Commit, SourceBranch: "development", Tag: tag,
-		ImageRepository: "registry.invalid/owner/service", SourceDateEpoch: "1", Publish: true,
-	})
-	if len(plan.Artifacts) != 1 || plan.Artifacts[0].Name != "hello-maven-service" || len(plan.Builds) != 1 ||
-		len(plan.Builds[0].RequiredArtifacts) != 1 || plan.Builds[0].RequiredArtifacts[0].Name != "hello-maven-service" ||
-		plan.Builds[0].RequiredArtifacts[0].Destination != "target" || plan.Builds[0].Arch != "amd64" || plan.Images[0].Signing != "NONE" {
-		t.Fatalf("artifact-first route lost: %+v", plan)
-	}
-
-	workflow, err := githubWorkflow(t.Context(), fixture, ".forgejo/workflows/development.yml")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if !strings.Contains(workflow, "artifact-job-image-java: registry.invalid/java@sha256:") ||
-		strings.Contains(workflow, "context-artifact:") || !strings.Contains(workflow, "check:\n    needs: snapshot") {
-		t.Fatal("native automatic producer or separate checked-JAR job changed")
-	}
-}
-
-func TestMavenServiceSnapshotDeclarationPreservesBuildSettings(t *testing.T) {
+func TestServiceSnapshotDeclarationPreservesBuildSettings(t *testing.T) {
 	body := `artifacts:
   - name: app
     project-type: maven
@@ -121,9 +39,13 @@ containers:
     scan-severity: HIGH
 `
 
-	overlay, err := mavenServiceSnapshotDeclarationOverlay(body)
+	overlay, cfg, err := serviceSnapshotDeclarationOverlay(body)
 	if err != nil {
 		t.Fatal(err)
+	}
+
+	if families := serviceSnapshotFamilies(cfg); !slices.Equal(families, []string{snapshotimage.FamilyJava}) {
+		t.Fatalf("families %v, want the Maven application's java", families)
 	}
 
 	before := serviceTestConfigPlan(t, body)
@@ -141,13 +63,22 @@ containers:
 	}
 }
 
-func TestMavenServiceSnapshotDeclarationContainerOnlyHasNoProducer(t *testing.T) {
-	// Even a declared Maven artifact is not a producer unless the image depends
-	// on it. Container-first consumers must not acquire an eager extra build.
-	for _, artifacts := range []string{"", "artifacts: [{name: unused, project-type: maven, build-type: application}]\n"} {
-		overlay, err := mavenServiceSnapshotDeclarationOverlay(artifacts + "containers: [{name: service}]\n")
+func TestServiceSnapshotDeclarationContainerOnlyHasNoProducer(t *testing.T) {
+	// Even a declared artifact is not a producer unless the image depends on
+	// it, and a container-first artifact is built by the Containerfile.
+	// Container-first consumers must not acquire an eager extra build.
+	for _, declaration := range []string{
+		"containers: [{name: service}]\n",
+		"artifacts: [{name: unused, project-type: maven, build-type: application}]\ncontainers: [{name: service}]\n",
+		"artifacts: [{name: service, project-type: cargo, config: {build-mode: container-first}}]\ncontainers: [{name: service, from: [service]}]\n",
+	} {
+		overlay, cfg, err := serviceSnapshotDeclarationOverlay(declaration)
 		if err != nil {
 			t.Fatal(err)
+		}
+
+		if families := serviceSnapshotFamilies(cfg); len(families) != 0 {
+			t.Fatalf("container-first declaration has producer families %v", families)
 		}
 
 		tag, err := version.ComposeSnapshotContainerTag("1.0.0", "development", "aaaaaaa")
@@ -165,7 +96,30 @@ func TestMavenServiceSnapshotDeclarationContainerOnlyHasNoProducer(t *testing.T)
 	}
 }
 
-func TestMavenServiceSnapshotDeclarationRefusesUnsupportedInputs(t *testing.T) {
+// The snapshot builds a root producer of any family it has an image for; the
+// Maven service development workflow's Maven-only rule is the fixture's
+// (TestMavenServiceDevelopmentRefusesOtherProducers).
+func TestServiceSnapshotDeclarationAdmitsEveryProducerFamily(t *testing.T) {
+	for family, artifact := range map[string]string{
+		snapshotimage.FamilyJava: "{name: app, project-type: maven, build-type: application}",
+		snapshotimage.FamilyNode: "{name: app, project-type: npm}",
+		snapshotimage.FamilyGo:   "{name: app, project-type: go, config: {build-mode: artifact-first, main-package: ./cmd/app, binary-name: app}}",
+		snapshotimage.FamilyRust: "{name: app, project-type: cargo, config: {build-mode: artifact-first}}",
+	} {
+		t.Run(family, func(t *testing.T) {
+			_, cfg, err := serviceSnapshotDeclarationOverlay("artifacts: [" + artifact + "]\ncontainers: [{name: service, from: [app]}]\n")
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if families := serviceSnapshotFamilies(cfg); !slices.Equal(families, []string{family}) {
+				t.Fatalf("families %v, want %s", families, family)
+			}
+		})
+	}
+}
+
+func TestServiceSnapshotDeclarationRefusesUnsupportedInputs(t *testing.T) {
 	for name, body := range map[string]string{
 		"missing declaration":      "",
 		"no container":             "artifacts: [{name: app, project-type: maven}]",
@@ -180,14 +134,89 @@ func TestMavenServiceSnapshotDeclarationRefusesUnsupportedInputs(t *testing.T) {
 		"provenance":               "containers: [{name: service, enable-slsa: true}]",
 		"build secret":             "containers: [{name: service, build-secrets: [TOKEN]}]",
 		"extraction":               "containers: [{name: service, extract: {binary: {target: export, names: [app]}}}]",
-		"non Maven producer":       "artifacts: [{name: app, project-type: npm}]\ncontainers: [{name: service, from: [app]}]",
+		"two producers":            "artifacts: [{name: a, project-type: maven, build-type: application}, {name: b, project-type: npm}]\ncontainers: [{name: service, from: [a, b]}]",
+		"nested producer":          "artifacts: [{name: app, project-type: npm, working-directory: web}]\ncontainers: [{name: service, from: [app]}]",
 		"library producer":         "artifacts: [{name: app, project-type: maven, build-type: library}]\ncontainers: [{name: service, from: [app]}]",
+		"gradle library producer":  "artifacts: [{name: app, project-type: gradle, build-type: library}]\ncontainers: [{name: service, from: [app]}]",
 	} {
 		t.Run(name, func(t *testing.T) {
-			if overlay, err := mavenServiceSnapshotDeclarationOverlay(body); err == nil || overlay != "" {
+			if overlay, _, err := serviceSnapshotDeclarationOverlay(body); err == nil || overlay != "" {
 				t.Fatalf("unsupported declaration fell back to another route: %q, %v", overlay, err)
 			}
 		})
+	}
+}
+
+// The demos' own declarations decide which has a development route: the one
+// ServiceSnapshotSource names, as the GitLab lifecycle and the campaign
+// admission read it. A demo whose declaration the snapshot cannot build has
+// none, and the reason is the planner's, not a name's.
+func TestServiceSnapshotSourceOfTheDemos(t *testing.T) {
+	for demo, want := range map[string]struct {
+		source   string
+		families []string
+		refused  bool
+	}{
+		"hello-maven-service":   {source: GitLabDefaultArtifactsConfig, families: []string{snapshotimage.FamilyJava}},
+		"hello-npm-service":     {source: GitLabDefaultArtifactsConfig, families: []string{snapshotimage.FamilyNode}},
+		"hello-cargo-container": {source: GitLabDedicatedReleaseImagesConfig, families: []string{}},
+		// Two runtime images: a service snapshot is of one container.
+		"hello-cargo-workspace": {source: GitLabDedicatedReleaseImagesConfig, refused: true},
+		// Extraction, which the snapshot planner refuses.
+		"hello-go-service": {source: GitLabDefaultArtifactsConfig, refused: true},
+		// No container, so no snapshot.
+		"hello-go-cli":      {source: GitLabDefaultArtifactsConfig, refused: true},
+		"hello-maven":       {source: GitLabDefaultArtifactsConfig, refused: true},
+		"hello-npm-package": {source: GitLabDefaultArtifactsConfig, refused: true},
+	} {
+		t.Run(demo, func(t *testing.T) {
+			consumer := filepath.Join(reporoot.Path(t), "test/live/demos", demo, "consumer")
+
+			source, err := ServiceSnapshotSource(consumer)
+			if err != nil || source != want.source {
+				t.Fatalf("ServiceSnapshotSource() = %q, %v, want %q", source, err, want.source)
+			}
+
+			_, cfg, err := serviceSnapshotDeclarationOverlay(string(reporoot.ReadFile(t, "test/live/demos/"+demo+"/consumer/"+source)))
+			if want.refused {
+				if err == nil {
+					t.Fatalf("%s of %s is a service snapshot's declaration; the demo's development route is not refused", source, demo)
+				}
+
+				return
+			}
+
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if families := serviceSnapshotFamilies(cfg); !slices.Equal(families, want.families) {
+				t.Fatalf("families %v, want %v", families, want.families)
+			}
+		})
+	}
+}
+
+// ToolchainFamily is the one mapping of project types to the images the
+// snapshot's producers build in, on both forges.
+func TestToolchainFamilyNamesEveryProducerFamily(t *testing.T) {
+	families := map[string]bool{}
+
+	for _, projectType := range []projecttype.Type{projecttype.Go, projecttype.Maven, projecttype.Gradle, projecttype.NPM, projecttype.Cargo} {
+		family, err := snapshotimage.ToolchainFamily(projectType)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		families[family] = true
+	}
+
+	if len(families) != 4 {
+		t.Fatalf("families %v, want go, java, node and rust", families)
+	}
+
+	if _, err := snapshotimage.ToolchainFamily(projecttype.Python); err == nil {
+		t.Fatal("a project type without a snapshot producer has a family")
 	}
 }
 

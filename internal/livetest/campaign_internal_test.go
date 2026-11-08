@@ -24,10 +24,10 @@ func newCampaign(t *testing.T, env, cases string) (string, string) {
 	t.Helper()
 
 	dir := t.TempDir()
+	// Each stub demo ships a GitLab release build, as the demos with a GitLab
+	// release do.
 	for _, demo := range []string{"hello-go-cli", "hello-maven"} {
-		if err := os.MkdirAll(filepath.Join(dir, "demos", demo), 0o700); err != nil {
-			t.Fatal(err)
-		}
+		writeFile(t, filepath.Join(dir, "demos", demo, filepath.FromSlash(GitLabConsumerBuildScript)), "#!/usr/bin/env bash\n")
 	}
 
 	casesPath := filepath.Join(t.TempDir(), "lane.cases")
@@ -184,6 +184,7 @@ func TestPlanCampaignLane_RefusesWhatItCannotRead(t *testing.T) {
 		"lint for no lint gate":    {"gitlab", good, "consumer hello-go-cli pull-request job-archive=/a.tar lint-archive=/l.tar\n", "takes no lint-archive="},
 		"a lint archive twice":     {"gitlab", good, "consumer hello-maven release job-archive=/a lint-archive=/l lint-archive=/m\n", "lint-archive= is named twice"},
 		"a GitLab release short":   {"gitlab", good, "consumer hello-go-cli release job-archive=/a.tar\n", "build-archive="},
+		"a GitLab release unbuilt": {"gitlab", good, "consumer hello-gradle release job-archive=/a.tar build-archive=/b.tar signer-archive=/s.tar\n", "no .gitlab/build-release.sh"},
 		"a GitLab archive twice":   {"gitlab", good, "consumer hello-go-cli pull-request job-archive=/a.tar job-archive=/b.tar\n", "job-archive= is named twice"},
 		"a NUL byte":               {"forgejo", good, "scenario TestA\x00\n", "a NUL byte"},
 		"no case":                  {"forgejo", good, "# nothing\n\n", "names no case"},
@@ -198,6 +199,8 @@ func TestPlanCampaignLane_RefusesWhatItCannotRead(t *testing.T) {
 			}
 
 			writeFile(t, filepath.Join(dir, "demos", "hello-maven", filepath.FromSlash(GitLabGateFile)), lintingGate)
+			// A demo of the merge-request gate alone, as the example demos are.
+			writeFile(t, filepath.Join(dir, "demos", "hello-gradle", filepath.FromSlash(GitLabGateFile)), lintingGate)
 
 			_, err := PlanCampaignLane(dir, tc.provider, cases, campaignHead, CampaignRun{})
 			if !errors.Is(err, errs.ErrValidation) || !strings.Contains(err.Error(), tc.want) {

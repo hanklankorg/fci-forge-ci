@@ -519,6 +519,7 @@ func runGitLabReleaseScenario(t *testing.T, consumerRoot string, scenario gitlab
 		releaseImages: profile.releaseImages, artifactsConfig: profile.artifactsConfig(), releasePlatforms: releasePlatforms,
 		imageBuilder: imageBuilder, builderJobImage: builderJobImage, export: profile.export,
 	}
+
 	policyIncludes := []any{releasePolicy.include(t, target, layer)}
 	if recovery {
 		// Extend the exact captured parent, not a retained fork or consumer CI.

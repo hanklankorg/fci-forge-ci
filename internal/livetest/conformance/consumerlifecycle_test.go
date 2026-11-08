@@ -21,7 +21,9 @@ const lifecycleBranch = "development"
 
 // A consumer lifecycle: the linked flow one consumer goes through in one
 // repository, run on the lab against the layer of this checkout. It is the
-// Maven service demo's, the one demo with a development route:
+// Maven service demo's: its development route, the Maven service development
+// workflow over the service snapshot of its one container, is the one
+// Forgejo has (docs/live-campaigns.md, Lifecycle):
 //
 //  1. a pull request from development into main, judged by the consumer's
 //     own pull-request workflow;

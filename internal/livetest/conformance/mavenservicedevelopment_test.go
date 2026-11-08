@@ -8,6 +8,7 @@ package conformance_test
 import (
 	"archive/zip"
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
@@ -170,7 +171,7 @@ func requireMavenServiceDevelopment(t *testing.T, target livetest.Target, repo s
 	}
 
 	evidence := artifacts["service-evidence-"+head]
-	receipt, expected := requireServiceSnapshot(t, target, repo, consumer, config.Branch, head, image, artifacts["snapshot-images-plan"]["snapshot-plan.json"], evidence["container-images.json"])
+	receipt, expected := requireServiceSnapshot(livetest.Context(t), t, target, repo, consumer, config.Branch, head, image, artifacts["snapshot-images-plan"]["snapshot-plan.json"], evidence["container-images.json"])
 
 	if string(evidence["image-ref.txt"]) != receipt.Ref+"\n" || string(evidence["source-sha.txt"]) != head+"\n" || string(evidence["readiness-url.txt"]) != config.ReadinessURL+"\n" || len(evidence["readiness-body.txt"]) == 0 {
 		t.Fatalf("readiness evidence does not bind selected source and published image: %+v", receipt)
@@ -208,12 +209,12 @@ func requireMavenServiceDevelopment(t *testing.T, target livetest.Target, repo s
 	return receipt, count, len(expected.Artifacts)
 }
 
-// requireServiceSnapshot reads what a service snapshot of the Maven service
-// fixture left, from its frozen plan and its receipts: the plan the trial
+// requireServiceSnapshot reads what a service snapshot of a consumer left,
+// from its frozen plan and its receipts: the plan the trial
 // expects for the selected source head and branch, one amd64 image receipt
 // bound to them, the registry serving that digest under the receipt's tag
 // with no stable alias. It returns the receipt and the expected plan.
-func requireServiceSnapshot(t *testing.T, target livetest.Target, repo string, consumer livetest.Consumer, branch, head, image string, plan, receipts []byte) (snapshotimage.Receipt, snapshotimage.Plan) {
+func requireServiceSnapshot(ctx context.Context, t *testing.T, target livetest.Target, repo string, consumer livetest.Consumer, branch, head, image string, plan, receipts []byte) (snapshotimage.Receipt, snapshotimage.Plan) {
 	t.Helper()
 
 	var frozen snapshotimage.Plan
@@ -221,7 +222,7 @@ func requireServiceSnapshot(t *testing.T, target livetest.Target, repo string, c
 		t.Fatal(err)
 	}
 
-	expected := livetest.MavenServiceDevelopmentPlan(t, consumer, snapshotimage.Input{
+	expected := livetest.ServiceSnapshotPlan(ctx, t, consumer, snapshotimage.Input{
 		SourceSHA: head, SourceBranch: branch, Tag: frozen.Tag, ImageRepository: image,
 		SourceDateEpoch: frozen.SourceDateEpoch, Publish: true,
 	})
@@ -240,18 +241,18 @@ func requireServiceSnapshot(t *testing.T, target livetest.Target, repo string, c
 		t.Fatalf("the receipt does not bind the selected source and the published image: %+v", receipt)
 	}
 
-	imageConfig := livetest.ImageConfig(t, target, repo, receipt.Digest)
+	imageConfig := livetest.ImageConfig(t, target, repo, receipt.Digest) //nolint:contextcheck // registry helper derives a bounded context from the test owner.
 	if imageConfig.OS != "linux" || imageConfig.Architecture != "amd64" ||
 		imageConfig.Config.Labels["org.opencontainers.image.revision"] != head ||
 		imageConfig.Config.Labels["org.opencontainers.image.ref.name"] != branch {
 		t.Fatal("published platform image does not match the selected architecture, source and branch")
 	}
 
-	if digest, found := livetest.ImageDigest(t, target, repo, receipt.Tag); !found || digest != receipt.Digest {
+	if digest, found := livetest.ImageDigestContext(ctx, t, target, repo, receipt.Tag); !found || digest != receipt.Digest {
 		t.Fatalf("snapshot tag does not resolve to receipt digest: %s", digest)
 	}
 
-	for tag := range livetest.RegistrySnapshot(t, target, repo) {
+	for tag := range livetest.RegistrySnapshot(t, target, repo) { //nolint:contextcheck // registry helper derives a bounded context from the test owner.
 		if tag != receipt.Tag && tag != receipt.Tag+"-amd64" {
 			t.Errorf("unexpected registry alias %s", tag)
 		}
