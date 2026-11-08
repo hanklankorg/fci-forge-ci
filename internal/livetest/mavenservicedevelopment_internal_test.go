@@ -189,3 +189,49 @@ func requireAuthenticatedReadinessPull(t *testing.T, script string) {
 		t.Fatalf("readiness must pull with a job-local credential and drop it before the service starts:\n%s", script)
 	}
 }
+
+// A route whose pipeline the forge's policy owns takes the declaration alone:
+// no workflow, no fixture script, and the source otherwise as admitted.
+func TestMavenServiceSnapshotDeclarationStagesOnlyTheDeclaration(t *testing.T) {
+	root, git := stageTestRepo(t, "sha1")
+	for path, body := range map[string]string{
+		".forge-ci/artifacts.yml": "containers:\n  - name: service\n    container-file: Containerfile\n    context: .\n    platforms: linux/amd64,linux/arm64\n",
+		"pom.xml":                 "<project><artifactId>service</artifactId><version>1.0.0</version></project>",
+		"Containerfile":           "FROM example.invalid/java\nCOPY . /src\n",
+		"src/main/App.java":       "// original business code\n",
+	} {
+		stageTestWrite(t, root, path, body, 0644)
+	}
+
+	stageTestCommit(t, git, root)
+
+	source, err := openConsumer(t.Context(), git, root, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	staged := source.WithMavenServiceSnapshotDeclaration(t)
+
+	diff, err := git.run(t.Context(), staged.stage, "diff-tree", "--no-commit-id", "--name-only", "-r", source.Commit, staged.Commit)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if diff != MavenServiceDeclarationFile {
+		t.Fatalf("the declaration staged %q, want %s alone", diff, MavenServiceDeclarationFile)
+	}
+
+	declaration, err := githubWorkflow(t.Context(), staged, MavenServiceDeclarationFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := parseMavenServiceDeclaration(declaration)
+	if err != nil || len(cfg.Containers) != 1 || cfg.Containers[0].Platforms != "linux/amd64" || cfg.Containers[0].EnableSLSA == nil || *cfg.Containers[0].EnableSLSA {
+		t.Fatalf("declaration %+v, %v; want the one container on linux/amd64 without SLSA", cfg, err)
+	}
+
+	if err = git.requireClean(t.Context(), root, "."); err != nil {
+		t.Fatal(err)
+	}
+}

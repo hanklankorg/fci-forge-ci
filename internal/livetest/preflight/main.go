@@ -207,6 +207,10 @@ func preflightFact(mode string) (string, error) {
 		}
 
 		return livetest.GitLabConsumerReleaseScenario(settings.Scenario)
+	case "gitlab-lifecycle-settings":
+		_, err := livetest.ParseGitLabLifecycleSettings(os.Getenv("FORGE_CI_LIVE_CONSUMER_SETTINGS"))
+
+		return "lifecycle settings accepted", err
 	case "signing-inputs":
 		err := livetest.CheckReusedSigningInputs(os.Getenv("FORGE_CI_LIVE_SIGNING_KEY_DIR"))
 
@@ -227,7 +231,7 @@ func preflightFact(mode string) (string, error) {
 func usage() {
 	fmt.Fprintln(os.Stderr, "       preflight classify-run <exit-code> <retained-log>")
 	fmt.Fprintln(os.Stderr, "       preflight campaign-env-check <campaign.env>")
-	fmt.Fprintln(os.Stderr, "       preflight gitlab-consumer-scenario (validates FORGE_CI_LIVE_CONSUMER_SETTINGS)")
+	fmt.Fprintln(os.Stderr, "       preflight gitlab-consumer-scenario | gitlab-lifecycle-settings (validates FORGE_CI_LIVE_CONSUMER_SETTINGS)")
 	fmt.Fprintln(os.Stderr, "       preflight campaign-plan <dir> <forgejo|gitlab> <cases-file>")
 	fmt.Fprintln(os.Stderr, "       preflight campaign-runtime-targets <repository> <forgejo|gitlab>=<cases-file>... [flavor=<flavor>...]")
 	fmt.Fprintln(os.Stderr, "usage: preflight [signing-inputs | runner-arch | consumer-trial-layer | host-tools] (signing-inputs checks only FORGE_CI_LIVE_SIGNING_KEY_DIR; host-tools checks only this host; other modes read the forgeci lab contract)")

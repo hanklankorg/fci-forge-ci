@@ -329,3 +329,20 @@ func TestDevelopmentAdminPolicyPreservesRootPushAdmissionAndJobs(t *testing.T) {
 		}
 	}
 }
+
+func TestComponentAdminInputsAddOnlyWhatTheComponentDeclares(t *testing.T) {
+	t.Parallel()
+
+	layer := Layer{ServerURL: "https://gitlab.k3s.forgelab", Repository: "forgeci/engine", admin: testWorkflowAdmin(t)}
+	layer.Commit = layer.admin.commit
+
+	snapshot := layer.ComponentAdminInputs(t, "snapshot-images", map[string]any{"branch": "development"})
+	if !reflect.DeepEqual(snapshot, map[string]any{"branch": "development", "enforce-application-tests": false, "enforce-vulnerabilities": false}) {
+		t.Fatalf("snapshot-images inputs %v, want the two settings the component declares", snapshot)
+	}
+
+	release := layer.ComponentAdminInputs(t, "release", nil)
+	if !reflect.DeepEqual(release, map[string]any{"enforce-lint": false, "enforce-vulnerabilities": false, "enforce-application-tests": false, "enforce-reproducible-builds": true}) {
+		t.Fatalf("release inputs %v, want all four settings", release)
+	}
+}

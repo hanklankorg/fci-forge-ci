@@ -22,11 +22,9 @@ import (
 	gitlabapi "gitlab.com/gitlab-org/api/client-go"
 	"gopkg.in/yaml.v3"
 
-	"github.com/diggsweden/forge-ci/internal/domain/errs"
 	"github.com/diggsweden/forge-ci/internal/domain/imageledger"
 	"github.com/diggsweden/forge-ci/internal/domain/provider"
 	"github.com/diggsweden/forge-ci/internal/livetest"
-	"github.com/diggsweden/forge-ci/internal/retry"
 )
 
 func TestGitLabRelease_MinimalSignedArtifacts(t *testing.T) {
@@ -212,10 +210,18 @@ func gitlabConsumerSettings(t *testing.T, consumerRoot string) (livetest.GitLabR
 		t.Fatal("consumer settings require a consumer release trial")
 	}
 
+	return gitlabConsumerBuild(t, consumerRoot, settings)
+}
+
+// gitlabConsumerBuild binds the settings to the lab's runners and returns
+// them with the consumer's build command, its variables scoped to the build.
+func gitlabConsumerBuild(t *testing.T, consumerRoot string, settings livetest.GitLabReleaseSettings) (livetest.GitLabReleaseSettings, string) {
+	t.Helper()
+
 	// A consumer's release builds for the lab's runners, and only for them.
 	if consumerRoot != "" {
-		var arch string
-		if arch, err = livetest.LabRunnerArch(); err != nil {
+		arch, err := livetest.LabRunnerArch()
+		if err != nil {
 			t.Fatal(err)
 		}
 
@@ -374,7 +380,7 @@ func runGitLabReleaseScenario(t *testing.T, consumerRoot string, scenario gitlab
 	}
 
 	images := pushGitLabReleaseImages(t, target, archives, layer)
-	jobImage, buildImage, signerImage := images.job, images.build, images.signer
+	jobImage := images.job
 	publication := gitlabReleaseRepo(t, target, "release-publication", "")
 	policyRepo := gitlabReleaseRepo(t, target, "release-owned-policy", "")
 
@@ -476,34 +482,15 @@ func runGitLabReleaseScenario(t *testing.T, consumerRoot string, scenario gitlab
 		artifactsConfig = releaseImagesConfig
 	}
 
-	policyIncludes := []any{map[string]any{
-		"component": strings.TrimPrefix(target.BaseURL(), "https://") + "/" + layer.Repository + "/release@" + layer.Commit,
-		"inputs": livetest.AdminInputs(t, withGitChglog(map[string]any{
-			"forge-ci-repository": layer.Repository, "consumer-project": project,
-			"server-url": target.BaseURL(), "registry": registry,
-			"job-image": jobImage, "job-user": settings.JobUser, "build-image": buildImage, "signer-image": signerImage,
-			"publication-project":          livetest.RepoSlug(target, publication),
-			"publication-image-repository": registry + "/" + livetest.RepoSlug(target, publication),
-			"cosign-public-key-sha256":     keys.cosignPublicSHA256,
-			"release-git-url":              gitURL, "release-git-host-key-fingerprint": hostKey,
-			"request-allowed-signers": "livetest@localhost " + requestPublic,
-			"bot-name":                "Layer acceptance", "bot-email": releaseBotEmail,
-			"sign-distro-packages": consumer != nil,
-			"version-bump":         settings.VersionBump,
-			"base-images":          bases,
-			"checks":               checks,
-			"checks-runner-tags":   checksRunnerTags,
-			"build":                build,
-			"build-runner-tags":    buildRunnerTags,
-			"release-images":       releaseImages,
-			"artifacts-config":     artifactsConfig,
-			"release-platforms":    releasePlatforms,
-			"image-builder":        imageBuilder,
-			"builder-job-image":    builderJobImage,
-			"export-files":         len(exportCommand) != 0,
-			"export":               exportCommand,
-		})),
-	}}
+	releasePolicy := gitlabReleasePolicy{
+		project: project, publication: livetest.RepoSlug(target, publication), registry: registry,
+		images: images, keys: keys, gitURL: gitURL, hostKey: hostKey, requestPublic: requestPublic,
+		settings: settings, distro: consumer != nil, bases: bases,
+		checks: checks, checksRunnerTags: checksRunnerTags, build: build, buildRunnerTags: buildRunnerTags,
+		releaseImages: releaseImages, artifactsConfig: artifactsConfig, releasePlatforms: releasePlatforms,
+		imageBuilder: imageBuilder, builderJobImage: builderJobImage, export: exportCommand,
+	}
+	policyIncludes := []any{releasePolicy.include(t, target, layer)}
 	if recovery {
 		// Extend the exact captured parent, not a retained fork or consumer CI.
 		policyProject := livetest.RepoSlug(target, policyRepo)
@@ -547,7 +534,7 @@ func runGitLabReleaseScenario(t *testing.T, consumerRoot string, scenario gitlab
 
 	if bases {
 		policyIncludes = append(policyIncludes, map[string]any{
-			"component": strings.TrimPrefix(target.BaseURL(), "https://") + "/" + layer.Repository + "/check@" + layer.Commit,
+			"component": gitlabComponent(target, layer, "check"),
 			"inputs": livetest.AdminInputs(t, map[string]any{"forge-ci-repository": layer.Repository, "server-url": target.BaseURL(), "job-image": jobImage,
 				"job-name": "candidate-check", "commands": []string{"test -f next-release-request.txt"}}),
 		})
@@ -685,16 +672,7 @@ func requireGitLabPolicyMergeRequest(t *testing.T, client *gitlabapi.Client, pro
 	ctx, cancel := context.WithTimeout(livetest.Context(t), 30*time.Minute)
 	defer cancel()
 
-	if waitErr := retry.Run(ctx, nil, 30, 2*time.Second, func() error {
-		branch, _, readErr := client.Branches.GetBranch(project, trialBranch, gitlabapi.WithContext(ctx))
-		if readErr != nil || branch.Commit == nil || branch.Commit.ID != head {
-			return fmt.Errorf("branch %s is not at %s yet: %w", trialBranch, head, errs.ErrDependencyUnavailable)
-		}
-
-		return nil
-	}, retry.WithBackoff(retry.Constant)); waitErr != nil {
-		t.Fatal(waitErr)
-	}
+	waitGitLabBranch(t, ctx, client, project, trialBranch, head)
 
 	mr, err := livetest.CreateGitLabMergeRequest(ctx, client, project, &gitlabapi.CreateMergeRequestOptions{
 		SourceBranch: new(trialBranch), TargetBranch: new("main"), Title: new("test: consumer trial"),
@@ -815,6 +793,65 @@ func requireGitLabDemoScenario(t *testing.T, consumerRoot string, bases bool) {
 	}
 }
 
+// gitlabComponent is the include reference of one of the layer's components
+// at the layer's commit.
+func gitlabComponent(target livetest.Target, layer livetest.Layer, name string) string {
+	return strings.TrimPrefix(target.BaseURL(), "https://") + "/" + layer.Repository + "/" + name + "@" + layer.Commit
+}
+
+// gitlabReleasePolicy is what the harness writes into the release
+// component's include: the projects of the release, its keys and routes, the
+// caller's settings, and the jobs the consumer's release runs.
+type gitlabReleasePolicy struct {
+	project, publication, registry string
+	images                         gitlabReleaseImages
+	keys                           releaseKeys
+	gitURL, hostKey, requestPublic string
+	settings                       livetest.GitLabReleaseSettings
+	// distro signs distro packages, a consumer's release; bases releases the
+	// base fixture.
+	distro, bases                     bool
+	checks, build, export             []string
+	checksRunnerTags, buildRunnerTags []string
+	releaseImages                     bool
+	artifactsConfig, releasePlatforms string
+	imageBuilder, builderJobImage     string
+}
+
+// include is the release component's include with the policy's inputs.
+func (policy gitlabReleasePolicy) include(t *testing.T, target livetest.Target, layer livetest.Layer) map[string]any {
+	t.Helper()
+
+	return map[string]any{
+		"component": gitlabComponent(target, layer, "release"),
+		"inputs": livetest.AdminInputs(t, withGitChglog(map[string]any{
+			"forge-ci-repository": layer.Repository, "consumer-project": policy.project,
+			"server-url": target.BaseURL(), "registry": policy.registry,
+			"job-image": policy.images.job, "job-user": policy.settings.JobUser, "build-image": policy.images.build, "signer-image": policy.images.signer,
+			"publication-project":          policy.publication,
+			"publication-image-repository": policy.registry + "/" + policy.publication,
+			"cosign-public-key-sha256":     policy.keys.cosignPublicSHA256,
+			"release-git-url":              policy.gitURL, "release-git-host-key-fingerprint": policy.hostKey,
+			"request-allowed-signers": "livetest@localhost " + policy.requestPublic,
+			"bot-name":                "Layer acceptance", "bot-email": releaseBotEmail,
+			"sign-distro-packages": policy.distro,
+			"version-bump":         policy.settings.VersionBump,
+			"base-images":          policy.bases,
+			"checks":               policy.checks,
+			"checks-runner-tags":   policy.checksRunnerTags,
+			"build":                policy.build,
+			"build-runner-tags":    policy.buildRunnerTags,
+			"release-images":       policy.releaseImages,
+			"artifacts-config":     policy.artifactsConfig,
+			"release-platforms":    policy.releasePlatforms,
+			"image-builder":        policy.imageBuilder,
+			"builder-job-image":    policy.builderJobImage,
+			"export-files":         len(policy.export) != 0,
+			"export":               policy.export,
+		})),
+	}
+}
+
 // gitlabGateInclude admits the separately pinned administrator MR gate.
 func gitlabGateInclude(project, commit string) map[string]any {
 	return map[string]any{
@@ -879,6 +916,10 @@ func seedGitLabReleaseCanary(t *testing.T, ctx context.Context, client *gitlabap
 	return commit.ID
 }
 
+// gitlabProjectVariable is a protected project variable with the environment
+// scope that confines it to the jobs of that environment.
+type gitlabProjectVariable struct{ name, value, scope string }
+
 func configureGitLabReleaseVariables(t *testing.T, target livetest.Target, client *gitlabapi.Client, project string, keys releaseKeys, distro bool) {
 	t.Helper()
 
@@ -887,9 +928,7 @@ func configureGitLabReleaseVariables(t *testing.T, target livetest.Target, clien
 		storageRequest, storageLimit = "4Gi", "20Gi"
 	}
 
-	type projectVariable struct{ name, value, scope string }
-
-	variables := []projectVariable{
+	variables := []gitlabProjectVariable{
 		{"KUBERNETES_EPHEMERAL_STORAGE_REQUEST", storageRequest, "*"},
 		{"KUBERNETES_EPHEMERAL_STORAGE_LIMIT", storageLimit, "*"},
 		{"COSIGN_PUBLIC_KEY", keys.cosignPublic, "*"},
@@ -903,10 +942,19 @@ func configureGitLabReleaseVariables(t *testing.T, target livetest.Target, clien
 	if distro {
 		private, fingerprint := livetest.GPGKey(t, keys.dir, keys.passphrase)
 		variables = append(variables,
-			projectVariable{"RELEASE_GPG_PRIVATE_KEY", private, "release/registry/signing"},
-			projectVariable{"RELEASE_GPG_FINGERPRINT", fingerprint, "release/registry/signing"},
-			projectVariable{"RELEASE_GPG_PASSPHRASE", keys.passphrase, "release/registry/signing"})
+			gitlabProjectVariable{"RELEASE_GPG_PRIVATE_KEY", private, "release/registry/signing"},
+			gitlabProjectVariable{"RELEASE_GPG_FINGERPRINT", fingerprint, "release/registry/signing"},
+			gitlabProjectVariable{"RELEASE_GPG_PASSPHRASE", keys.passphrase, "release/registry/signing"})
 	}
+
+	createGitLabProtectedVariables(t, client, project, variables)
+}
+
+// createGitLabProtectedVariables creates the variables, protected, each in
+// its environment scope: a protected variable reaches only the jobs of
+// protected refs, and a scoped one only the jobs of its environment.
+func createGitLabProtectedVariables(t *testing.T, client *gitlabapi.Client, project string, variables []gitlabProjectVariable) {
+	t.Helper()
 
 	ctx, cancel := context.WithTimeout(livetest.Context(t), time.Minute)
 	defer cancel()
@@ -1212,20 +1260,21 @@ func requireGitLabReleaseChild(t *testing.T, ctx context.Context, client *gitlab
 	return child
 }
 
-// requireGitLabChildPipeline is the one child pipeline the release parent's
-// trigger job created. The pipeline's wait logged GitLab's account of a
-// parent that failed, so a missing child names where to read why.
+// requireGitLabChildPipeline is the one child pipeline the parent's trigger
+// job created: the release's, or a snapshot's. The pipeline's wait logged
+// GitLab's account of a parent that failed, so a missing child names where
+// to read why.
 func requireGitLabChildPipeline(t *testing.T, ctx context.Context, client *gitlabapi.Client, project string, run *gitlabapi.Pipeline) int64 {
 	t.Helper()
 
 	bridges, _, err := client.Jobs.ListPipelineBridges(project, run.ID, nil, gitlabapi.WithContext(ctx))
 	if err != nil {
-		t.Fatalf("read the release parent's trigger job: %v", err)
+		t.Fatalf("read the parent's trigger job: %v", err)
 	}
 
 	if len(bridges) != 1 || bridges[0].DownstreamPipeline == nil {
 		livetest.LogGitLabPipelineFailure(t, ctx, client, project, run)
-		t.Fatalf("release child pipeline was not created: the parent pipeline %d ended %s with %d trigger jobs; GitLab's account is logged above",
+		t.Fatalf("the child pipeline was not created: the parent pipeline %d ended %s with %d trigger jobs; GitLab's account is logged above",
 			run.ID, run.Status, len(bridges))
 	}
 

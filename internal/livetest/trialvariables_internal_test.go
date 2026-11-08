@@ -4,12 +4,15 @@
 package livetest
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/diggsweden/forge-ci/internal/domain/errs"
 )
 
 func TestTrialVariablesPreserveLiteralValuesAndRejectAmbiguity(t *testing.T) {
@@ -92,6 +95,23 @@ func TestParseGitLabReleaseSettings_SeparatesTheBumpFromVariables(t *testing.T) 
 	} {
 		if _, err := ParseGitLabReleaseSettings(input); err == nil {
 			t.Errorf("ParseGitLabReleaseSettings(%q) accepted it", input)
+		}
+	}
+}
+
+func TestParseGitLabLifecycleSettings_TakesAReleaseSettingsButASecondCase(t *testing.T) {
+	t.Parallel()
+
+	got, err := ParseGitLabLifecycleSettings("version-bump=maven\nversion=0.2.0\njob-user=65532:65532\nRELEASE_PLATFORMS=linux/amd64")
+	if err != nil || got.VersionBump != "maven" || got.Version != "0.2.0" || got.JobUser != "65532:65532" || got.Variables["RELEASE_PLATFORMS"] != "linux/amd64" {
+		t.Fatalf("ParseGitLabLifecycleSettings() = %+v, %v", got, err)
+	}
+
+	for _, input := range []string{
+		"scenario=TestGitLabRelease_ConsumerTrial", "version-bump=maven\nversion=0.2.0\nnext-version=0.3.0", "version-bump=gradle",
+	} {
+		if _, err := ParseGitLabLifecycleSettings(input); !errors.Is(err, errs.ErrValidation) {
+			t.Errorf("ParseGitLabLifecycleSettings(%q) = %v, want a validation error", input, err)
 		}
 	}
 }

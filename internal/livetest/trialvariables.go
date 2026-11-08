@@ -160,6 +160,23 @@ func (settings *GitLabReleaseSettings) setRecipeOption(key, value string) (bool,
 	return true, nil
 }
 
+// ParseGitLabLifecycleSettings reads a GitLab lifecycle's settings: a
+// release's, but scenario= and next-version=, which select another release
+// case or a second release. A lifecycle's phases are fixed and it requests
+// one release, of its merged main.
+func ParseGitLabLifecycleSettings(input string) (GitLabReleaseSettings, error) {
+	settings, err := ParseGitLabReleaseSettings(input)
+	if err != nil {
+		return GitLabReleaseSettings{}, err
+	}
+
+	if settings.Scenario != "" || settings.NextVersion != "" {
+		return GitLabReleaseSettings{}, fmt.Errorf("%s takes no %s= or next-version=; its phases are fixed and it requests one release: %w", TrialLifecycle, settingScenario, errs.ErrValidation)
+	}
+
+	return settings, nil
+}
+
 // GitLabConsumerReleaseScenario admits an exact registered case, not a caller's
 // regular expression. The archive/checkout recipe is shared by these cases.
 func GitLabConsumerReleaseScenario(name string) (string, error) {

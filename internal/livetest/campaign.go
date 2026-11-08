@@ -235,13 +235,17 @@ func campaignCaseArgs(dir, provider string, env map[string]string, words []strin
 		return nil, fmt.Errorf("a case is consumer or scenario: %w", errs.ErrValidation)
 	}
 
-	events := "pull-request or release"
+	events := []string{TrialPullRequest, TrialRelease}
+	if len(words) > 1 && campaignSupportsLifecycle(provider, words[1]) {
+		events = append(events, TrialLifecycle)
+	}
+
 	if len(words) > 1 && campaignSupportsPublishedSnapshot(provider, words[1]) {
-		events = "pull-request, release, " + campaignPublishedSnapshot + " or " + TrialLifecycle
+		events = append(events, campaignPublishedSnapshot)
 	}
 
 	if len(words) < 3 {
-		return nil, fmt.Errorf("want consumer <demo> <%s> [key=value ...]: %w", events, errs.ErrValidation)
+		return nil, fmt.Errorf("want consumer <demo> <%s> [key=value ...]: %w", campaignEventList(events), errs.ErrValidation)
 	}
 
 	if !campaignDemo.MatchString(words[1]) || !isDir(filepath.Join(dir, "demos", words[1])) {
@@ -253,7 +257,7 @@ func campaignCaseArgs(dir, provider string, env map[string]string, words []strin
 	}
 
 	if !slices.Contains([]string{TrialPullRequest, TrialRelease, TrialLifecycle}, words[2]) {
-		return nil, fmt.Errorf("a consumer event is %s: %w", events, errs.ErrValidation)
+		return nil, fmt.Errorf("a consumer event is %s: %w", campaignEventList(events), errs.ErrValidation)
 	}
 
 	archives, settings, err := campaignSettings(provider, env, words[3:])
@@ -268,12 +272,21 @@ func campaignCaseArgs(dir, provider string, env map[string]string, words []strin
 	return consumerRecipe(provider, words[2], filepath.Join(dir, "demos", words[1]), archives, settings)
 }
 
+// campaignEventList writes the events a demo takes, as "a, b or c".
+func campaignEventList(events []string) string {
+	last := len(events) - 1
+
+	return strings.Join(events[:last], ", ") + " or " + events[last]
+}
+
 // campaignAdmitConsumer refuses a consumer case the lane could not run: a
-// lifecycle outside its one demo and provider, or a GitLab consumer without
-// what its gate and release need.
+// lifecycle outside its one demo, or a GitLab consumer without what its
+// gate, release or lifecycle need.
 func campaignAdmitConsumer(checkout, provider, demo, event string, words, settings []string, env map[string]string) error {
 	if event == TrialLifecycle {
-		return campaignAdmitLifecycle(provider, demo)
+		if err := campaignAdmitLifecycle(provider, demo); err != nil {
+			return err
+		}
 	}
 
 	if provider == campaignGitLab {
@@ -295,11 +308,21 @@ func campaignScenarioRecipe(provider string, env map[string]string, words []stri
 	return []string{"test-live", "^" + words[1] + "$"}, nil
 }
 
+// campaignAdmitGitLabConsumer holds a GitLab case's settings to its event's
+// rules, as the trial will, and refuses a demo whose gate needs an image the
+// campaign has no archive of.
 func campaignAdmitGitLabConsumer(checkout, event string, words, settings []string, env map[string]string) error {
-	if event == TrialRelease {
-		if _, err := ParseGitLabReleaseSettings(strings.Join(settings, "\n")); err != nil {
-			return err
-		}
+	var err error
+
+	switch event {
+	case TrialRelease:
+		_, err = ParseGitLabReleaseSettings(strings.Join(settings, "\n"))
+	case TrialLifecycle:
+		_, err = ParseGitLabLifecycleSettings(strings.Join(settings, "\n"))
+	}
+
+	if err != nil {
+		return err
 	}
 
 	gate, err := readCampaignGate(filepath.Join(checkout, GitLabGateFile), words)
@@ -405,7 +428,7 @@ func consumerRecipe(provider, event, checkout string, archives map[string]string
 		return args, nil
 	default:
 		if images != 3 {
-			return nil, fmt.Errorf("a GitLab release takes job-archive=, build-archive= and signer-archive=: %w", errs.ErrValidation)
+			return nil, fmt.Errorf("a GitLab release or lifecycle takes job-archive=, build-archive= and signer-archive=: %w", errs.ErrValidation)
 		}
 
 		args := []string{

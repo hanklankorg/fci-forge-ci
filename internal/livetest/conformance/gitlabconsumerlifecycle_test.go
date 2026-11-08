@@ -1,0 +1,483 @@
+// SPDX-FileCopyrightText: 2026 Digg - Agency for Digital Government
+// SPDX-License-Identifier: EUPL-1.2 OR GPL-3.0-or-later
+
+//go:build live
+
+package conformance_test
+
+import (
+	"context"
+	"fmt"
+	"maps"
+	"net/url"
+	"os"
+	"path/filepath"
+	"slices"
+	"strings"
+	"testing"
+	"time"
+
+	gitlabapi "gitlab.com/gitlab-org/api/client-go"
+	"gopkg.in/yaml.v3"
+
+	"github.com/diggsweden/forge-ci/internal/domain/provider"
+	"github.com/diggsweden/forge-ci/internal/domain/snapshotimage"
+	"github.com/diggsweden/forge-ci/internal/livetest"
+)
+
+// The jobs of the policy's snapshot-images component that hold a snapshot's
+// frozen plan, in the parent pipeline, and its receipts, in the child.
+const (
+	gitlabSnapshotPlanJob    = "Snapshot: plan"
+	gitlabSnapshotCollectJob = "Snapshot: collect"
+)
+
+// gitlabLifecyclePolicyFile is the one policy file of a lifecycle's project,
+// whose includes serve its three pipelines.
+const gitlabLifecyclePolicyFile = "lifecycle.yml"
+
+// gitlabMainPushRule admits an include for the push pipelines of main alone:
+// the push a merge makes, not a tag's push, whose CI_COMMIT_BRANCH is unset,
+// and not a merge request's pipeline.
+const gitlabMainPushRule = `$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "main"`
+
+// A consumer lifecycle on GitLab: the linked flow TestForgejoLayer_ConsumerLifecycle
+// runs, in one GitLab project under one pinned policy. It is the Maven service
+// demo's, the one demo with a development route:
+//
+//  1. a merge request from development into main, judged by the consumer's
+//     own merge-request gate, which the policy includes for merge-request
+//     pipelines;
+//  2. its native merge through the API, told the head commit, with a merge
+//     commit of the base and the change;
+//  3. the service development snapshot: the policy's snapshot-images
+//     component runs on the push the merge makes to main and snapshots
+//     development in a child pipeline, which publishes one amd64 image;
+//  4. a signed release request at the merged main, judged as a release
+//     trial's: main advanced by one signed release commit, signed tag, a
+//     release with Cosign bundles that verify, signed packages and images;
+//  5. the project holds those three pipelines, two tags, one release and the
+//     bot's deploy key, and nothing else.
+//
+// Each phase ends the lifecycle when it fails, and says which phase it was.
+// The release requester's trust is the policy's request-allowed-signers input,
+// not a file of the consumer's, so nothing is staged for it. The credentials
+// are protected variables, which reach only the pipelines of protected refs,
+// main and the request tag, each scoped to the environment of the jobs that
+// use it: the merge request's pipeline gets none, the snapshot's publisher
+// the development registry credential alone, the release's jobs the
+// release's. The project's pipeline configuration is set after the base and
+// the change are pushed, as the Forgejo lifecycle turns Actions on then: the
+// merge's push is the first on main the policy sees.
+func TestGitLabLayer_ConsumerLifecycle(t *testing.T) {
+	livetest.RegisterLiveScenario(t)
+
+	root := os.Getenv(consumerCheckoutEnv)
+	if root == "" {
+		t.Skip("no consumer checkout is named; run `just test-live-consumer gitlab <checkout> lifecycle job-archive=<path> build-archive=<path> signer-archive=<path> lint-archive=<path>`")
+	}
+
+	if livetest.DemoName() != "" {
+		t.Fatal("a lifecycle runs in disposable scratch projects, not in a kept demo")
+	}
+
+	for _, visibility := range livetest.ConsumerVisibilities(t) {
+		t.Run(visibility.Name, func(t *testing.T) {
+			runGitLabConsumerLifecycle(t, root, visibility.Private)
+		})
+	}
+}
+
+func runGitLabConsumerLifecycle(t *testing.T, root string, private bool) {
+	t.Helper()
+
+	if event := os.Getenv(consumerEventEnv); event != livetest.TrialLifecycle {
+		t.Fatalf("the event is %s; a lifecycle starts with %s", event, livetest.TrialLifecycle)
+	}
+
+	parsed, err := livetest.ParseGitLabLifecycleSettings(os.Getenv(consumerSettingsEnv))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	settings, buildCommand := gitlabConsumerBuild(t, root, parsed)
+	kaniko := livetest.GitLabKaniko(t)
+
+	// The development phase snapshots the consumer's one container; the
+	// release phase releases what the consumer declares, as a release does.
+	releaseImages, releaseImagesConfig, err := livetest.GitLabReleaseImages(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if gitlabConsumerBuildRunsAContainerBuild(t, root) {
+		t.Fatalf("%s runs a container build, which the build job would run with Buildah whatever image-builder says; move it to %s", livetest.GitLabConsumerBuildScript, livetest.GitLabConsumerExportScript)
+	}
+
+	exportCommand, err := livetest.GitLabConsumerExportCommands(root, settings.Variables)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	requestTag, finalTag := releaseRequestTag, releaseFinalTag
+	if settings.Version != "" {
+		requestTag, finalTag = "release-request/v"+settings.Version, "v"+settings.Version
+	}
+
+	// The snapshot's image build and the release's image jobs run in the
+	// selected builder's job image; the consumer's Maven build, in the
+	// snapshot's producer job as in the release's build job, in the build
+	// image.
+	archives := gitlabReleaseArchiveInputs(t, true, true, kaniko)
+	if !livetest.Requires(t, provider.ForgeGitLab, livetest.NeedsInRunner) {
+		livetest.NotCoveredf(t, "a lifecycle needs a GitLab runner")
+	}
+
+	target := livetest.Accept(t, provider.ForgeGitLab)
+	builder := livetest.ChooseImageBuilder(t, target)
+
+	if platforms := settings.Variables["RELEASE_PLATFORMS"]; platforms != "linux/amd64" {
+		livetest.NotCoveredf(t, "the snapshot and the release build images for %s only on tagged arm64 runners, which the lab has none of", platforms)
+	}
+
+	opened := livetest.OpenConsumer(t, target, root)
+	if !opened.HasGitLabGate(t) {
+		t.Fatalf("the consumer has no %s, which a lifecycle's merge request is judged by", livetest.GitLabGateFile)
+	}
+
+	checksRunnerTags := []string{}
+
+	if opened.GitLabChecksNeedBuildah(t) {
+		label := livetest.PrivilegedRunnerLabel(t, target)
+		if label == "" {
+			livetest.NotCoveredf(t, "the consumer's checks run Buildah themselves and need runner.privileged_label")
+		}
+
+		checksRunnerTags = append(checksRunnerTags, label)
+	}
+
+	layer := livetest.PushLayer(t, target, gitlabReleaseRepo(t, target, "lifecycle-engine", livetest.ReadLayerAnonymously))
+	consumer := opened.WithDraftLayer(t, layer).WithMavenServiceSnapshotDeclaration(t)
+	images := pushGitLabReleaseImages(t, target, archives, layer)
+	publication := gitlabReleaseRepo(t, target, "lifecycle-publication", "")
+	policyRepo := gitlabReleaseRepo(t, target, "lifecycle-policy", "")
+	policyProject := livetest.RepoSlug(target, policyRepo)
+	repo := livetest.NewBareScratchRepo(t, target, livetest.ConsumerLifecycle, consumer.ObjectFormat, private)
+	project := livetest.RepoSlug(target, repo)
+
+	client, err := gitlabapi.NewClient(target.Token, gitlabapi.WithBaseURL(target.BaseURL()+"/api/v4/"),
+		gitlabapi.WithHTTPClient(livetest.HTTPClient(t, target, time.Minute)))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithTimeout(livetest.Context(t), 90*time.Minute)
+	defer cancel()
+
+	keys := newReleaseKeys(t)
+	livetest.RetainGitLabJobLogsAfter(t, target, repo, releaseEvidenceSecrets(keys))
+	requestKeyDir := t.TempDir()
+	_, requestPublic := livetest.SSHKey(t, requestKeyDir)
+
+	gitURL, hostKey, supported := livetest.SSHRoute(t, target, repo)
+	if !supported {
+		t.Fatal("the selected GitLab endpoint needs a pinned runner-side SSH route")
+	}
+
+	deploy, _, err := client.DeployKeys.AddDeployKey(project, &gitlabapi.AddDeployKeyOptions{
+		Title: new("fixture release signer"), Key: new(keys.sshPublic), CanPush: new(true),
+	}, gitlabapi.WithContext(ctx))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	protectGitLabReleaseTags(ctx, t, client, project, deploy.ID)
+	configureGitLabReleaseVariables(t, target, client, project, keys, true)
+	// The development registry credential, for the snapshot's publisher alone.
+	createGitLabProtectedVariables(t, client, project, []gitlabProjectVariable{
+		{"SNAPSHOT_REGISTRY_USER", target.CredentialUsername, "snapshot/registry"},
+		{"SNAPSHOT_REGISTRY_PASSWORD", target.Token, "snapshot/registry"},
+	})
+
+	registry, err := livetest.RegistryHost(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	image := registry + "/" + strings.ToLower(project)
+
+	imageBuilder, builderJobImage := livetest.ImageBuilderBuildah, images.buildah
+	if images.kaniko != "" {
+		imageBuilder, builderJobImage = livetest.ImageBuilderKaniko, images.kaniko
+	}
+
+	artifactsConfig := ""
+	if releaseImages {
+		artifactsConfig = releaseImagesConfig
+	}
+
+	releasePolicy := gitlabReleasePolicy{
+		project: project, publication: livetest.RepoSlug(target, publication), registry: registry,
+		images: images, keys: keys, gitURL: gitURL, hostKey: hostKey, requestPublic: requestPublic,
+		settings: settings, distro: true,
+		checks: []string{"bash .gitlab/check-release.sh"}, checksRunnerTags: checksRunnerTags,
+		build: []string{buildCommand}, buildRunnerTags: builder.RunnerLabels,
+		releaseImages: releaseImages, artifactsConfig: artifactsConfig, releasePlatforms: "linux/amd64",
+		imageBuilder: imageBuilder, builderJobImage: builderJobImage, export: exportCommand,
+	}
+
+	// The snapshot component takes the development phase: the consumer's
+	// declaration, the snapshot's image repository in the project's own
+	// registry, the Maven build in the build image, the image build with the
+	// selected builder on its runner. It runs on the push pipelines of main.
+	snapshotInclude := map[string]any{
+		"component": gitlabComponent(target, layer, "snapshot-images"),
+		"inputs": layer.ComponentAdminInputs(t, "snapshot-images", map[string]any{
+			"branch": lifecycleBranch, "artifacts-config": livetest.MavenServiceDeclarationFile,
+			"image-repository": image, "forge-ci-repository": layer.Repository,
+			"server-url": target.BaseURL(), "registry": registry,
+			"job-image": images.job, "build-image": builderJobImage, "artifact-job-image-java": images.build,
+			"image-builder": imageBuilder, "builder-job-image": builderJobImage,
+			"runner-tags": []string{}, "build-runner-tags": builder.RunnerLabels,
+		}),
+		"rules": []any{map[string]string{"if": gitlabMainPushRule}},
+	}
+
+	gateImages := livetest.GitLabGateImages{Job: images.job, Lint: images.lint, ExtraJobs: livetest.PushGitLabGateExtraJobImages(t, target, consumer, func(name string) string {
+		return gitlabReleaseRepo(t, target, "lifecycle-job-image-"+strings.ToLower(name), livetest.ReadJobImageAnonymously)
+	})}
+	gateCommit := gitlabPolicyCommit(t, ctx, client, policyProject, livetest.GitLabAdminGateFile, consumer.GitLabAdminPolicy(t, layer, gateImages), gitlabapi.FileCreate)
+
+	policyBody, err := yaml.Marshal(map[string]any{"include": []any{
+		gitlabGateInclude(policyProject, gateCommit.ID), snapshotInclude, releasePolicy.include(t, target, layer),
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	policy := gitlabPolicyCommit(t, ctx, client, policyProject, gitlabLifecyclePolicyFile, string(policyBody), gitlabapi.FileCreate)
+
+	livetest.RestrictGitLabJobToken(t, target, repo)
+	// Protect the empty project before its first write.
+	livetest.RestrictGitLabReleaseBranch(t, target, repo, deploy.ID)
+
+	t.Logf("consumer %s at %s (%s); layer %s at %s; job image %s, build image %s, image builder %s", root, consumer.Commit, consumer.ObjectFormat, layer.Repository, layer.Commit, images.job, images.build, imageBuilder)
+
+	// Phase 1: the merge request.
+	base := consumer.PushGitLabRelease(t, repo, layer, gateImages)
+	requireObjectFormats(t, consumer.ObjectFormat, base, layer.Commit)
+
+	head := consumer.PushChange(t, repo, lifecycleBranch, base)
+
+	// Nothing has run so far: the pushes arrived before the project had a
+	// pipeline configuration.
+	useGitLabAdminPolicy(ctx, t, client, project, gitlabLifecyclePolicyFile+"@"+policyProject+":"+policy.ID)
+	waitGitLabBranch(t, ctx, client, project, lifecycleBranch, head)
+
+	mr, err := livetest.CreateGitLabMergeRequest(ctx, client, project, &gitlabapi.CreateMergeRequestOptions{
+		SourceBranch: new(lifecycleBranch), TargetBranch: new(layerMain), Title: new("test: consumer lifecycle"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	review := waitGitLabMRPipeline(t, ctx, client, project, mr.IID, head, 0)
+	requireGitLabLifecyclePipeline(t, ctx, client, project, "1 merge request", review)
+	t.Log(strings.ReplaceAll(gitlabTrialTrace(t, ctx, client, project, review.ID, "Check: build and test", "Check: lint"), target.Token, "[REDACTED]"))
+	requireGitLabPipelineIDs(t, ctx, client, project, review.ID)
+	requireGitLabNoReleases(t, ctx, client, project)
+	t.Logf("lifecycle phase 1 merge request: !%d, %s@%s into %s@%s, pipeline %d", mr.IID, lifecycleBranch, head, layerMain, base, review.ID)
+
+	// Phase 2: the native merge.
+	merged, err := livetest.MergeGitLabMergeRequest(ctx, client, project, mr.IID, head)
+	if err != nil {
+		t.Fatalf("lifecycle phase 2 merge: %v", err)
+	}
+
+	request := merged.MergeCommitSHA
+	requireGitLabBranches(t, target, repo, map[string]string{layerMain: request, lifecycleBranch: head})
+	livetest.MirrorRepo(t, target, repo).RequireMergeOf(t, request, base, head)
+	t.Logf("lifecycle phase 2 merge: !%d merged natively, %s at %s with parents %s and %s", mr.IID, layerMain, request, base, head)
+
+	// Phase 3: the service development snapshot, on the push the merge made.
+	development := waitGitLabPushPipeline(t, ctx, client, project, layerMain, request)
+	snapshot := requireGitLabChildPipeline(t, ctx, client, project, development)
+
+	if development.Status != "success" {
+		logGitLabTrace(t, gitlabTrialTrace(t, ctx, client, project, development.ID, gitlabSnapshotPlanJob))
+		logGitLabTrace(t, gitlabTrialTrace(t, ctx, client, project, snapshot))
+		t.Fatalf("lifecycle phase 3 development: pipeline %d of %s@%s ended %q, want success", development.ID, layerMain, request, development.Status)
+	}
+
+	receipt, expected := requireGitLabServiceSnapshot(t, ctx, client, target, repo, consumer, development.ID, snapshot, head, image)
+	requireGitLabPipelineIDs(t, ctx, client, project, review.ID, development.ID)
+	requireGitLabNoReleases(t, ctx, client, project)
+	t.Logf("lifecycle phase 3 development: pipeline %d on %s@%s, child %d, snapshots %s@%s as %s; producers %d", development.ID, layerMain, request, snapshot, lifecycleBranch, head, receipt.Ref, len(expected.Artifacts))
+
+	// Phase 4: the signed release request at the merged main.
+	livetest.SignGitLabRequest(t, target, repo, request, requestTag, filepath.Join(requestKeyDir, "lab-ssh"))
+
+	run := waitGitLabTagPipeline(t, ctx, client, project, requestTag, request)
+	child := requireGitLabReleaseChild(t, ctx, client, project, run)
+	logGitLabReleaseInventory(t, ctx, client, project, child)
+
+	released := requireReleaseGit(t, target, repo, keys, request, requestTag, finalTag)
+	verified := requireGitLabReleaseBundles(t, client, target, repo, child, run.SHA, keys, finalTag, releaseImages)
+	requireGitLabReleaseRunnerRouting(t, ctx, client, project, child,
+		gitLabReleaseRunnerRoles(builder.RunnerLabels, checksRunnerTags, imageBuilder, releaseImages, len(exportCommand) != 0))
+	requireGitLabPackageSignatures(t, target, repo, keys, finalTag)
+	requireGitLabPublishedImages(t, client, target, repo, publication, child, keys)
+	t.Logf("lifecycle phase 4 release: %s requested at %s, release commit %s, pipeline %d, child %d, %d verified bundles", finalTag, request, released, run.ID, child, verified)
+
+	// Phase 5: the project holds the lifecycle and nothing else.
+	requireGitLabBranches(t, target, repo, map[string]string{layerMain: released, lifecycleBranch: head})
+	requireGitLabPipelineIDs(t, ctx, client, project, review.ID, development.ID, run.ID)
+
+	tags, _, err := client.Tags.ListTags(project, nil, gitlabapi.WithContext(ctx))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(tags) != 2 {
+		t.Errorf("the project has %d tags, want the request and the release", len(tags))
+	}
+
+	releases, _, err := client.Releases.ListReleases(project, nil, gitlabapi.WithContext(ctx))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(releases) != 1 {
+		t.Errorf("the project has %d releases, want one", len(releases))
+	}
+
+	deployKeys, _, err := client.DeployKeys.ListProjectDeployKeys(project, nil, gitlabapi.WithContext(ctx))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(deployKeys) != 1 {
+		t.Errorf("the project has %d deploy keys, want only the bot's", len(deployKeys))
+	}
+
+	t.Logf("lifecycle complete: base %s, change %s, merge %s, release %s; pipelines %d, %d, %d", base, head, request, released, review.ID, development.ID, run.ID)
+}
+
+// requireGitLabLifecyclePipeline ends the lifecycle at the phase whose
+// pipeline did not succeed, with the failed jobs' traces.
+func requireGitLabLifecyclePipeline(t *testing.T, ctx context.Context, client *gitlabapi.Client, project, phase string, pipeline *gitlabapi.Pipeline) {
+	t.Helper()
+
+	if pipeline.Status != "success" {
+		logGitLabTrace(t, gitlabTrialTrace(t, ctx, client, project, pipeline.ID))
+		t.Fatalf("lifecycle phase %s: pipeline %d ended %q, want success", phase, pipeline.ID, pipeline.Status)
+	}
+}
+
+// requireGitLabPipelineIDs holds the project to exactly the pipelines the
+// lifecycle started: a phase starts no pipeline but its own. Child pipelines
+// are the trigger jobs' and are not listed among the project's.
+func requireGitLabPipelineIDs(t *testing.T, ctx context.Context, client *gitlabapi.Client, project string, want ...int64) {
+	t.Helper()
+
+	pipelines, _, err := client.Pipelines.ListProjectPipelines(project, &gitlabapi.ListProjectPipelinesOptions{ListOptions: gitlabapi.ListOptions{PerPage: 100}}, gitlabapi.WithContext(ctx))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got := make([]int64, 0, len(pipelines))
+	for _, pipeline := range pipelines {
+		got = append(got, pipeline.ID)
+	}
+
+	slices.Sort(got)
+	slices.Sort(want)
+
+	if !slices.Equal(got, want) {
+		t.Fatalf("the project has pipelines %v, want exactly %v", got, want)
+	}
+}
+
+// requireGitLabNoReleases holds the project to no tag and no release before
+// the release phase.
+func requireGitLabNoReleases(t *testing.T, ctx context.Context, client *gitlabapi.Client, project string) {
+	t.Helper()
+
+	tags, _, err := client.Tags.ListTags(project, nil, gitlabapi.WithContext(ctx))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	releases, _, err := client.Releases.ListReleases(project, nil, gitlabapi.WithContext(ctx))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(tags) != 0 || len(releases) != 0 {
+		t.Fatalf("the project has %d tags and %d releases before the release phase", len(tags), len(releases))
+	}
+}
+
+// requireGitLabBranches asks the forge where each branch is.
+func requireGitLabBranches(t *testing.T, target livetest.Target, repo string, want map[string]string) {
+	t.Helper()
+
+	for _, branch := range slices.Sorted(maps.Keys(want)) {
+		if got := livetest.BranchCommitSHA(t, target, repo, branch); got != want[branch] {
+			t.Fatalf("branch %s is at %s, want %s", branch, got, want[branch])
+		}
+	}
+}
+
+// requireGitLabServiceSnapshot reads what the snapshot component left: the
+// frozen plan the parent's plan job holds and the receipts the child's
+// collect job holds, then judges them as the Forgejo service development's
+// are judged. The readiness and checked-JAR evidence are the Forgejo
+// recipe's own jobs; the component has none, so none is claimed here.
+func requireGitLabServiceSnapshot(t *testing.T, ctx context.Context, client *gitlabapi.Client, target livetest.Target, repo string, consumer livetest.Consumer, parent, child int64, head, image string) (snapshotimage.Receipt, snapshotimage.Plan) {
+	t.Helper()
+
+	plan := gitlabJobArtifactFile(t, ctx, client, target, repo, parent, gitlabSnapshotPlanJob, "snapshot-plan.json")
+	receipts := gitlabJobArtifactFile(t, ctx, client, target, repo, child, gitlabSnapshotCollectJob, "container-images.json")
+
+	return requireServiceSnapshot(t, target, repo, consumer, lifecycleBranch, head, image, plan, receipts)
+}
+
+// gitlabJobArtifactFile reads one file of the artifacts of the named job of
+// a pipeline, which must have succeeded once.
+func gitlabJobArtifactFile(t *testing.T, ctx context.Context, client *gitlabapi.Client, target livetest.Target, repo string, pipeline int64, job, path string) []byte {
+	t.Helper()
+
+	project := livetest.RepoSlug(target, repo)
+
+	jobs, response, err := client.Jobs.ListPipelineJobs(project, pipeline, &gitlabapi.ListJobsOptions{ListOptions: gitlabapi.ListOptions{PerPage: 100}}, gitlabapi.WithContext(ctx))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if response == nil || response.NextPage != 0 {
+		t.Fatalf("reading %s of pipeline %d requires a complete job listing", job, pipeline)
+	}
+
+	var id int64
+
+	for _, candidate := range jobs {
+		if candidate.Name != job || candidate.Status != "success" {
+			continue
+		}
+
+		if id != 0 {
+			t.Fatalf("pipeline %d ran %s twice", pipeline, job)
+		}
+
+		id = candidate.ID
+	}
+
+	if id == 0 {
+		t.Fatalf("pipeline %d has no successful %s job", pipeline, job)
+	}
+
+	address := fmt.Sprintf("%s/api/v4/projects/%s/jobs/%d/artifacts/%s", target.BaseURL(), url.PathEscape(project), id, path)
+
+	return livetest.Download(t, target, address, 1<<20)
+}

@@ -951,7 +951,14 @@ test-live-image kind forge_lab:
 # (the non-root check image), build-archive= (the release builder) and
 # signer-archive=, plus lint-archive= when the gate lints, KEY=value build
 # variables and scenario=<exact consumer release test name>; see
-# docs/live-campaigns.md.
+# docs/live-campaigns.md. lifecycle is the linked flow in one project under
+# one policy, for the hello-maven-service demo alone: a merge request on
+# branch development, its native merge, the snapshot-images component on the
+# merged main, and a signed release request from it. It takes the release's
+# archives and settings but scenario= and next-version=; the build image is
+# also the Java image the snapshot builds the service with.
+#
+#   just test-live-consumer gitlab /absolute/hello-maven-service/consumer lifecycle job-archive=<path> build-archive=<path> signer-archive=<path> lint-archive=<path> version=0.2.0 version-bump=maven job-user=65532:65532
 #
 # github, events pull-request, dev-release and release, on hosted GitHub. Runs
 # inside Forge Lab's hosted session (`just github run --org ... --prefix ...
@@ -968,7 +975,7 @@ test-live-image kind forge_lab:
 # docs/testing.md, Trying a consumer on GitHub, has the prerequisites.
 [arg('repo', help='Absolute path to a clean consumer checkout, for example /absolute/myapp')]
 [arg('forge', help='forgejo, gitlab or github')]
-[arg('event', help='pull-request or release; forgejo also lifecycle, github also dev-release')]
+[arg('event', help='pull-request or release; forgejo and gitlab also lifecycle, github also dev-release')]
 [arg('settings', help='key=value settings; gitlab: job-archive=, build-archive=, signer-archive=, lint-archive=; github: org=<id>; see docs/testing.md')]
 [doc('Live; run a consumer against this engine')]
 [group('live')]
@@ -1016,12 +1023,17 @@ test-live-consumer forge repo event *settings:
         unset FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE
         exec bash scripts/ci/run-live-tests.sh focused '^TestGitLabLayer_ConsumerTrial$'
         ;;
-    gitlab:release)
+    gitlab:release | gitlab:lifecycle)
         for name in job build signer; do
             variable="FORGE_CI_LIVE_${name^^}_IMAGE_ARCHIVE"
-            [[ -n "${!variable:-}" ]] || { printf 'a GitLab release needs %s-archive=<path>\n' "$name" >&2; exit 2; }
+            [[ -n "${!variable:-}" ]] || { printf 'a GitLab %s needs %s-archive=<path>\n' "$event" "$name" >&2; exit 2; }
         done
-        scenario=$(go run ./internal/livetest/preflight gitlab-consumer-scenario)
+        if [[ $event == release ]]; then
+            scenario=$(go run ./internal/livetest/preflight gitlab-consumer-scenario)
+        else
+            go run ./internal/livetest/preflight gitlab-lifecycle-settings
+            scenario=TestGitLabLayer_ConsumerLifecycle
+        fi
         exec bash scripts/ci/run-live-tests.sh focused "^${scenario}$"
         ;;
     github:*)
@@ -1033,7 +1045,7 @@ test-live-consumer forge repo event *settings:
             -run='^TestGitHubLayer_ConsumerTrial$' ./internal/livetest/githubconsumer/
         ;;
     gitlab:*)
-        printf 'a GitLab trial event is pull-request or release, got %q\n' "$event" >&2
+        printf 'a GitLab trial event is pull-request, release or lifecycle, got %q\n' "$event" >&2
         exit 2
         ;;
     *)

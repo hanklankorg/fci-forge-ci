@@ -41,6 +41,12 @@ type MavenServiceDevelopmentConfig struct {
 	RecipeDirectory, JavaImage, Branch, ReadinessURL, Fixture string
 }
 
+// MavenServiceDeclarationFile is the consumer path of the service snapshot's
+// declaration: the consumer's own .forge-ci/artifacts.yml, overlaid for the
+// trial's native platform and unsigned policy. A development route names it
+// as its artifacts config.
+const MavenServiceDeclarationFile = ".forge-ci/service-development.yml"
+
 //go:embed testdata/maven-service-development.yml.tmpl
 var mavenServiceDevelopmentRecipe string
 
@@ -62,6 +68,86 @@ func NewMavenServiceDevelopmentFixture(tb TB, source Consumer, config MavenServi
 	return fixture
 }
 
+// WithMavenServiceSnapshotDeclaration returns the consumer with the service
+// snapshot's declaration in its tree, MavenServiceDeclarationFile, and nothing
+// else of the Forgejo development fixture: a route whose pipeline the forge's
+// policy owns, as GitLab's snapshot-images component, reads the declaration
+// from the consumer and needs no workflow of the consumer's.
+func (consumer Consumer) WithMavenServiceSnapshotDeclaration(tb TB) Consumer {
+	tb.Helper()
+
+	ctx, cancel := context.WithTimeout(Context(tb), timeoutLayerPush)
+	defer cancel()
+
+	declared, err := mavenServiceSnapshotDeclaration(ctx, consumer)
+	if err == nil {
+		declared, err = declared.stageMavenServiceFiles(ctx, map[string]string{MavenServiceDeclarationFile: declared.declaration})
+	}
+
+	if err != nil {
+		tb.Fatalf("Maven service snapshot declaration: %v", err)
+	}
+
+	return declared.Consumer
+}
+
+// mavenServiceSnapshot is a consumer admitted as a Maven service whose
+// snapshot the trial takes: its root application artifact and its
+// declaration, overlaid for the trial.
+type mavenServiceSnapshot struct {
+	Consumer
+	artifact, declaration string
+}
+
+// mavenServiceSnapshotDeclaration admits the consumer as a Maven service: one
+// root Maven application, a root Containerfile, and a declaration of one
+// container the trial can build natively.
+func mavenServiceSnapshotDeclaration(ctx context.Context, source Consumer) (mavenServiceSnapshot, error) {
+	artifact, err := mavenLibraryArtifact(ctx, source)
+	if err != nil {
+		return mavenServiceSnapshot{}, err
+	}
+
+	if _, err = githubWorkflow(ctx, source, "Containerfile"); err != nil {
+		return mavenServiceSnapshot{}, err
+	}
+
+	declared, err := githubWorkflow(ctx, source, ".forge-ci/artifacts.yml")
+	if err != nil {
+		return mavenServiceSnapshot{}, err
+	}
+
+	declaration, err := mavenServiceSnapshotDeclarationOverlay(declared)
+	if err != nil {
+		return mavenServiceSnapshot{}, err
+	}
+
+	return mavenServiceSnapshot{Consumer: source, artifact: artifact, declaration: declaration}, nil
+}
+
+// stageMavenServiceFiles commits the files onto the admitted tree, in the
+// consumer's private index alone.
+func (service mavenServiceSnapshot) stageMavenServiceFiles(ctx context.Context, files map[string]string) (mavenServiceSnapshot, error) {
+	if _, err := service.git.run(ctx, service.stage, "read-tree", service.Commit); err != nil {
+		return service, err
+	}
+
+	for path, text := range files {
+		if err := service.stageFile(ctx, "100644", path, text); err != nil {
+			return service, err
+		}
+	}
+
+	commit, err := service.commit(ctx, consumerBaseMessage)
+	if err != nil {
+		return service, err
+	}
+
+	service.Commit = commit
+
+	return service, nil
+}
+
 func mavenServiceDevelopmentFixture(ctx context.Context, source Consumer, config MavenServiceDevelopmentConfig) (Consumer, error) {
 	if err := config.validateInfrastructure(); err != nil {
 		return source, err
@@ -71,21 +157,7 @@ func mavenServiceDevelopmentFixture(ctx context.Context, source Consumer, config
 		return source, errServiceSourceBranch
 	}
 
-	artifact, err := mavenLibraryArtifact(ctx, source)
-	if err != nil {
-		return source, err
-	}
-
-	if _, err = githubWorkflow(ctx, source, "Containerfile"); err != nil {
-		return source, err
-	}
-
-	declared, err := githubWorkflow(ctx, source, ".forge-ci/artifacts.yml")
-	if err != nil {
-		return source, err
-	}
-
-	declaration, err := mavenServiceSnapshotDeclaration(declared)
+	service, err := mavenServiceSnapshotDeclaration(ctx, source)
 	if err != nil {
 		return source, err
 	}
@@ -109,30 +181,21 @@ func mavenServiceDevelopmentFixture(ctx context.Context, source Consumer, config
 
 	workflow := strings.NewReplacer("@ACTIONS@", pin.Actions, "@WORKFLOWS@", pin.Workflows,
 		"@PIN@", pin.Commit, "@IMAGE@", config.JavaImage, "@BRANCH@", quote(config.Branch),
-		"@URL@", quote(config.ReadinessURL), "@ARTIFACT@", artifact).Replace(mavenServiceDevelopmentRecipe)
-	if _, err = source.git.run(ctx, source.stage, "read-tree", source.Commit); err != nil {
-		return source, err
-	}
+		"@URL@", quote(config.ReadinessURL), "@ARTIFACT@", service.artifact).Replace(mavenServiceDevelopmentRecipe)
 
-	for path, text := range map[string]string{
-		forgejoDevelopmentWorkflow:          workflow,
-		".forge-ci/service-development.yml": declaration,
-		".forge-ci/service-fixture.sh":      fixture,
-	} {
-		if err = source.stageFile(ctx, "100644", path, text); err != nil {
-			return source, err
-		}
-	}
+	staged, err := service.stageMavenServiceFiles(ctx, map[string]string{
+		forgejoDevelopmentWorkflow:     workflow,
+		MavenServiceDeclarationFile:    service.declaration,
+		".forge-ci/service-fixture.sh": fixture,
+	})
 
-	source.Commit, err = source.commit(ctx, consumerBaseMessage)
-
-	return source, err
+	return staged.Consumer, err
 }
 
-// mavenServiceSnapshotDeclaration preserves the declared build graph and raw
-// ecosystem settings. Only the trial's native platform and unsigned policy are
-// overlaid; release signing settings remain in the original declaration.
-func mavenServiceSnapshotDeclaration(body string) (string, error) {
+// mavenServiceSnapshotDeclarationOverlay preserves the declared build graph and
+// raw ecosystem settings. Only the trial's native platform and unsigned policy
+// are overlaid; release signing settings remain in the original declaration.
+func mavenServiceSnapshotDeclarationOverlay(body string) (string, error) {
 	cfg, err := parseMavenServiceDeclaration(body)
 	if err != nil {
 		return "", err
@@ -229,7 +292,7 @@ func validateMavenServiceDependencies(typed pipeline.ConfigPlan, from []string) 
 func MavenServiceDevelopmentPlan(tb TB, source Consumer, in snapshotimage.Input) snapshotimage.Plan {
 	tb.Helper()
 
-	body, err := githubWorkflow(Context(tb), source, ".forge-ci/service-development.yml")
+	body, err := githubWorkflow(Context(tb), source, MavenServiceDeclarationFile)
 	if err != nil {
 		tb.Fatalf("service declaration: %v", err)
 	}

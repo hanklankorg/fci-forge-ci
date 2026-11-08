@@ -121,7 +121,7 @@ containers:
     scan-severity: HIGH
 `
 
-	overlay, err := mavenServiceSnapshotDeclaration(body)
+	overlay, err := mavenServiceSnapshotDeclarationOverlay(body)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -145,7 +145,7 @@ func TestMavenServiceSnapshotDeclarationContainerOnlyHasNoProducer(t *testing.T)
 	// Even a declared Maven artifact is not a producer unless the image depends
 	// on it. Container-first consumers must not acquire an eager extra build.
 	for _, artifacts := range []string{"", "artifacts: [{name: unused, project-type: maven, build-type: application}]\n"} {
-		overlay, err := mavenServiceSnapshotDeclaration(artifacts + "containers: [{name: service}]\n")
+		overlay, err := mavenServiceSnapshotDeclarationOverlay(artifacts + "containers: [{name: service}]\n")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -184,7 +184,7 @@ func TestMavenServiceSnapshotDeclarationRefusesUnsupportedInputs(t *testing.T) {
 		"library producer":         "artifacts: [{name: app, project-type: maven, build-type: library}]\ncontainers: [{name: service, from: [app]}]",
 	} {
 		t.Run(name, func(t *testing.T) {
-			if overlay, err := mavenServiceSnapshotDeclaration(body); err == nil || overlay != "" {
+			if overlay, err := mavenServiceSnapshotDeclarationOverlay(body); err == nil || overlay != "" {
 				t.Fatalf("unsupported declaration fell back to another route: %q, %v", overlay, err)
 			}
 		})

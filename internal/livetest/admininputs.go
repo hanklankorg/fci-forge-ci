@@ -73,6 +73,43 @@ func AdminInputs(tb TB, inputs map[string]any) map[string]any {
 	return inputs
 }
 
+// ComponentAdminInputs is AdminInputs for an include of one of the layer's
+// GitLab components: it adds only the administrator settings the component
+// declares, read from templates/<component>.yml at the layer's commit, since
+// GitLab refuses an input a component does not declare.
+func (layer Layer) ComponentAdminInputs(tb TB, component string, inputs map[string]any) map[string]any {
+	tb.Helper()
+
+	if layer.admin == nil || layer.admin.commit != layer.Commit {
+		tb.Fatalf("livetest: administrator inputs of %s require the layer's captured policy", component)
+	}
+
+	declared, err := layer.admin.declaredInputs(filepath.Join("templates", component+".yml"))
+	if err != nil {
+		tb.Fatalf("livetest: %v", err)
+	}
+
+	inputs = maps.Clone(inputs)
+	if inputs == nil {
+		inputs = map[string]any{}
+	}
+
+	for _, check := range enforcement.Checks {
+		key := enforcement.Setting(check)
+		if gitlabMappingValue(declared, key) == nil {
+			continue
+		}
+
+		if _, exists := inputs[key]; exists {
+			tb.Fatalf("livetest: administrator input %s was already supplied", key)
+		}
+
+		inputs[key] = layer.admin.values[key]
+	}
+
+	return inputs
+}
+
 type workflowAdmin struct {
 	commit string
 	read   func(string) ([]byte, error)

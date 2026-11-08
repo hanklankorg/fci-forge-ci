@@ -364,6 +364,7 @@ setup, evidence and cleanup.
 | Forgejo PR, release or lifecycle | `just test-live-consumer forgejo <checkout> <pull-request\|release\|lifecycle> [setting ...]` | Local `forgeci` contract and runner; consumer job image; signer image for releases; lifecycle: the Maven service demo and the container/readiness runner (docs/live-campaigns.md, Lifecycle) |
 | GitLab MR | `just test-live-consumer gitlab <checkout> pull-request job-archive=<image-archive>` | Local `forgeci` contract and runner; prepared MR job image archive |
 | GitLab release | `just test-live-consumer gitlab <checkout> release job-archive=<archive> build-archive=<archive> signer-archive=<archive> [setting ...]` | Local contract, prepared image archives and guarded full-release runner profile |
+| GitLab lifecycle | `just test-live-consumer gitlab <checkout> lifecycle job-archive=<archive> build-archive=<archive> signer-archive=<archive> lint-archive=<archive> [setting ...]` | As the release; the `hello-maven-service` demo alone (docs/live-campaigns.md, Lifecycle) |
 | GitHub PR, development build or release | `just test-live-consumer github <checkout> <pull-request\|dev-release\|release> org=<org-id> [setting ...]` | Forge Lab's hosted `github run` session, consumer workflow fixtures and public engine images |
 
 See [Forgejo trials](#trying-a-consumer), [GitLab acceptance](#gitlab-live-acceptance)

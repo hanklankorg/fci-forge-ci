@@ -82,10 +82,10 @@ func TestCampaignPublishedSnapshotSupportedRoadAndDiagnostics(t *testing.T) {
 		advertise                bool
 		diagnostic               string
 	}{
-		{campaignForgejo, "hello-maven-service", "unknown", true, "a consumer event is pull-request, release, published-unsigned-snapshot or lifecycle"},
-		{campaignForgejo, "hello-maven-service", "", true, "want consumer <demo> <pull-request, release, published-unsigned-snapshot or lifecycle> [key=value ...]"},
+		{campaignForgejo, "hello-maven-service", "unknown", true, "a consumer event is pull-request, release, lifecycle or published-unsigned-snapshot"},
+		{campaignForgejo, "hello-maven-service", "", true, "want consumer <demo> <pull-request, release, lifecycle or published-unsigned-snapshot> [key=value ...]"},
 		{campaignForgejo, "hello-go-cli", "unknown", false, "a consumer event is pull-request or release"},
-		{campaignGitLab, "hello-maven-service", "unknown", false, "a consumer event is pull-request or release"},
+		{campaignGitLab, "hello-maven-service", "unknown", false, "a consumer event is pull-request, release or lifecycle"},
 		{campaignForgejo, "hello-go-cli", campaignPublishedSnapshot, false, "published unsigned snapshot supports only the Forgejo hello-maven-service native trial"},
 		{campaignGitLab, "hello-maven-service", campaignPublishedSnapshot, false, "published unsigned snapshot supports only the Forgejo hello-maven-service native trial"},
 		{"github", "hello-maven-service", campaignPublishedSnapshot, false, `the provider is forgejo or gitlab, got "github"`},

@@ -104,18 +104,7 @@ func runGitLabConsumerTrial(t *testing.T, root string, private bool) {
 
 	livetest.RetainGitLabJobLogsAfter(t, target, repo, map[string]string{variable: canary})
 
-	// GitLab takes a pushed branch in after git has returned, and refuses a
-	// merge request opened before then: "source_branch does not exist".
-	if waitErr := retry.Run(ctx, nil, 30, 2*time.Second, func() error {
-		branch, _, readErr := client.Branches.GetBranch(project, trialBranch, gitlabapi.WithContext(ctx))
-		if readErr != nil || branch.Commit == nil || branch.Commit.ID != head {
-			return fmt.Errorf("branch %s is not at %s yet: %w", trialBranch, head, errs.ErrDependencyUnavailable)
-		}
-
-		return nil
-	}, retry.WithBackoff(retry.Constant)); waitErr != nil {
-		t.Fatal(waitErr)
-	}
+	waitGitLabBranch(t, ctx, client, project, trialBranch, head)
 
 	mr, err := livetest.CreateGitLabMergeRequest(ctx, client, project, &gitlabapi.CreateMergeRequestOptions{
 		SourceBranch: new(trialBranch), TargetBranch: new("main"), Title: new("test: GitLab consumer trial"),
@@ -214,6 +203,24 @@ func installGitLabDevelopmentPolicy(t *testing.T, client *gitlabapi.Client, targ
 	gitlabPolicyCommit(t, ctx, client, policyProject, livetest.GitLabAdminGateFile, gate, gitlabapi.FileCreate)
 	policy := gitlabPolicyCommit(t, ctx, client, policyProject, livetest.GitLabAdminPipelineFile, pipeline, gitlabapi.FileCreate)
 	useGitLabAdminPolicy(ctx, t, client, project, livetest.GitLabAdminPipelineFile+"@"+policyProject+":"+policy.ID)
+}
+
+// waitGitLabBranch waits for GitLab to take a pushed branch in: it does so
+// after git has returned, and refuses a merge request opened before then,
+// "source_branch does not exist".
+func waitGitLabBranch(t *testing.T, ctx context.Context, client *gitlabapi.Client, project, branch, sha string) {
+	t.Helper()
+
+	if err := retry.Run(ctx, nil, 30, 2*time.Second, func() error {
+		current, _, readErr := client.Branches.GetBranch(project, branch, gitlabapi.WithContext(ctx))
+		if readErr != nil || current.Commit == nil || current.Commit.ID != sha {
+			return fmt.Errorf("branch %s is not at %s yet: %w", branch, sha, errs.ErrDependencyUnavailable)
+		}
+
+		return nil
+	}, retry.WithBackoff(retry.Constant)); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func waitGitLabMRPipeline(t *testing.T, ctx context.Context, client *gitlabapi.Client, project string, mr int64, sha string, id int64) *gitlabapi.Pipeline {
