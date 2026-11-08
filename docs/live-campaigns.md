@@ -290,10 +290,11 @@ registry credential alone, set before the flow; the release's jobs the
 release's, set at the release phase and not before, as on Forgejo. The bot's
 deploy key alone exists from the start, because `main` is protected to it
 before its first write. The project's pipeline configuration is set after the
-base and the change are pushed, and GitLab resolves it, the policy and its
-includes, as it does for every GitLab trial's policy, before any pipeline is
-waited for, so a refused include or component input is GitLab's own message;
-the merge's push is then the first pipeline on `main`. The include rules'
+base and the change are pushed, so the merge's push is the first pipeline on
+`main`. GitLab resolves a policy only as it creates a pipeline, never ahead of
+one: its project lint reads the project's own repository, not a policy in
+another project, so a refused include or component input is read from the
+pipeline's `yaml_errors`, as for every GitLab trial. The include rules'
 variables are the documented ones, `CI_PIPELINE_SOURCE` and
 `CI_COMMIT_REF_NAME`. The GitLab `snapshot-images` component has no standalone
 trial: the lifecycle's development phase is its first conformance exercise,

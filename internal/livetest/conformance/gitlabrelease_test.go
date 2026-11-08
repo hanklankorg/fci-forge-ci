@@ -323,11 +323,15 @@ func protectGitLabReleaseTags(ctx context.Context, t *testing.T, client *gitlaba
 }
 
 // useGitLabAdminPolicy points the consumer's pipeline at the pinned policy
-// file, takes pipeline variables and job-token pushes away from everyone,
-// and has GitLab resolve the configuration, the policy and its includes,
-// before any pipeline is asked for: a YAML, include or component input
-// GitLab refuses is then its own message here, not a pipeline that never
-// appears. The resolution is static, so it takes no commit of the project's.
+// file and takes pipeline variables and job-token pushes away from everyone.
+//
+// The policy is not resolved here. GitLab's project lint, GET
+// /projects/:id/ci/lint, reads the configuration from the project's own
+// repository at ci_config_path, so a policy in another project,
+// file@project:ref, is to it a file the project does not have: it answers
+// 404 for an empty project and "Please provide content of .gitlab-ci.yml"
+// for one with commits. A policy GitLab refuses is read from the pipeline it
+// records instead, whose yaml_errors GitLabPipelineAccount reports.
 func useGitLabAdminPolicy(ctx context.Context, t *testing.T, client *gitlabapi.Client, project, configPath string) {
 	t.Helper()
 
@@ -338,21 +342,6 @@ func useGitLabAdminPolicy(ctx context.Context, t *testing.T, client *gitlabapi.C
 	}, gitlabapi.WithContext(ctx)); err != nil {
 		t.Fatal(err)
 	}
-
-	result, _, err := client.Validate.ProjectLint(project, &gitlabapi.ProjectLintOptions{IncludeJobs: new(true)}, gitlabapi.WithContext(ctx))
-	if err != nil {
-		t.Fatalf("resolve the pipeline configuration %s: %v", configPath, err)
-	}
-
-	for _, warning := range result.Warnings {
-		t.Logf("pipeline configuration %s: warning: %s", configPath, warning)
-	}
-
-	if !result.Valid {
-		t.Fatalf("GitLab refuses the pipeline configuration %s: %s", configPath, strings.Join(result.Errors, "; "))
-	}
-
-	t.Logf("GitLab resolved the pipeline configuration %s with %d includes", configPath, len(result.Includes))
 }
 
 func runGitLabReleaseScenario(t *testing.T, consumerRoot string, scenario gitlabReleaseCase, private bool) {
