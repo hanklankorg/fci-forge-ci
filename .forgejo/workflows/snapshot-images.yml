@@ -228,7 +228,9 @@ jobs:
     needs: [coordinates, plan]
     if: ${{ needs.plan.outputs.enabled == 'true' && inputs['context-artifact'] == '' }}
     runs-on: ${{ fromJSON(inputs['runner-label']) }}
-    container: ${{ (matrix.artifact.project_type == 'go' && needs.coordinates.outputs.artifact_job_image_go) || ((matrix.artifact.project_type == 'maven' || matrix.artifact.project_type == 'gradle') && needs.coordinates.outputs.artifact_job_image_java) || (matrix.artifact.project_type == 'npm' && needs.coordinates.outputs.artifact_job_image_node) || (matrix.artifact.project_type == 'cargo' && needs.coordinates.outputs.artifact_job_image_rust) || '' }}
+    # Select a validated coordinate by key, never a logical expression's value.
+    # format preserves an empty container (the runner default) for the no-op row.
+    container: ${{ format('{0}', needs.coordinates.outputs[fromJSON('{"go":"artifact_job_image_go","maven":"artifact_job_image_java","gradle":"artifact_job_image_java","npm":"artifact_job_image_node","cargo":"artifact_job_image_rust"}')[matrix.artifact.project_type]]) }}
     env:
       FORGE_CI_REPOSITORY_URL: ${{ needs.coordinates.outputs.helpers_repository }}
     strategy:
