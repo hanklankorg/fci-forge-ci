@@ -37,9 +37,10 @@ const (
 const gitlabLifecyclePolicyFile = "lifecycle.yml"
 
 // gitlabMainPushRule admits an include for the push pipelines of main alone:
-// the push a merge makes, not a tag's push, whose CI_COMMIT_BRANCH is unset,
-// and not a merge request's pipeline.
-const gitlabMainPushRule = `$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "main"`
+// the push a merge makes, not a tag's push, whose ref name is the tag's, and
+// not a merge request's pipeline. Both variables are among those GitLab
+// documents for include rules.
+const gitlabMainPushRule = `$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_REF_NAME == "main"`
 
 // A consumer lifecycle on GitLab: the linked flow TestForgejoLayer_ConsumerLifecycle
 // runs, in one GitLab project under one pinned policy. It is the Maven service
@@ -66,9 +67,11 @@ const gitlabMainPushRule = `$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH =
 // main and the request tag, each scoped to the environment of the jobs that
 // use it: the merge request's pipeline gets none, the snapshot's publisher
 // the development registry credential alone, the release's jobs the
-// release's. The project's pipeline configuration is set after the base and
-// the change are pushed, as the Forgejo lifecycle turns Actions on then: the
-// merge's push is the first on main the policy sees.
+// release's, given at the release phase and not before. The bot's deploy
+// key alone exists from the start, because main is protected to it before
+// its first write. The project's pipeline configuration is set after the
+// base and the change are pushed, as the Forgejo lifecycle turns Actions on
+// then: the merge's push is the first on main the policy sees.
 func TestGitLabLayer_ConsumerLifecycle(t *testing.T) {
 	livetest.RegisterLiveScenario(t)
 
@@ -192,7 +195,6 @@ func runGitLabConsumerLifecycle(t *testing.T, root string, private bool) {
 	}
 
 	protectGitLabReleaseTags(ctx, t, client, project, deploy.ID)
-	configureGitLabReleaseVariables(t, target, client, project, keys, true)
 	// The development registry credential, for the snapshot's publisher alone.
 	createGitLabProtectedVariables(t, client, project, []gitlabProjectVariable{
 		{"SNAPSHOT_REGISTRY_USER", target.CredentialUsername, "snapshot/registry"},
@@ -314,7 +316,9 @@ func runGitLabConsumerLifecycle(t *testing.T, root string, private bool) {
 	requireGitLabNoReleases(t, ctx, client, project)
 	t.Logf("lifecycle phase 3 development: pipeline %d on %s@%s, child %d, snapshots %s@%s as %s; producers %d", development.ID, layerMain, request, snapshot, lifecycleBranch, head, receipt.Ref, len(expected.Artifacts))
 
-	// Phase 4: the signed release request at the merged main.
+	// Phase 4: the signed release request at the merged main. The release's
+	// authority is given now and not before.
+	configureGitLabReleaseVariables(t, target, client, project, keys, true)
 	livetest.SignGitLabRequest(t, target, repo, request, requestTag, filepath.Join(requestKeyDir, "lab-ssh"))
 
 	run := waitGitLabTagPipeline(t, ctx, client, project, requestTag, request)

@@ -284,11 +284,20 @@ digest and tag with no alias. The component has no readiness or checked-JAR
 job, so none is claimed. The release is judged as the GitLab release trial's,
 packages and images included. The event takes the release's archives and
 settings but `scenario=` and `next-version=`. The credentials are protected
-variables scoped to their jobs' environments, set before the flow: the merge
-request's pipeline, on an unprotected branch, gets none; the snapshot's
-publisher the development registry credential alone; the release's jobs the
-release's. The project's pipeline configuration is set after the base and the
-change are pushed, so the merge's push is the first pipeline on `main`.
+variables scoped to their jobs' environments: the merge request's pipeline, on
+an unprotected branch, gets none; the snapshot's publisher the development
+registry credential alone, set before the flow; the release's jobs the
+release's, set at the release phase and not before, as on Forgejo. The bot's
+deploy key alone exists from the start, because `main` is protected to it
+before its first write. The project's pipeline configuration is set after the
+base and the change are pushed, and GitLab resolves it, the policy and its
+includes, as it does for every GitLab trial's policy, before any pipeline is
+waited for, so a refused include or component input is GitLab's own message;
+the merge's push is then the first pipeline on `main`. The include rules'
+variables are the documented ones, `CI_PIPELINE_SOURCE` and
+`CI_COMMIT_REF_NAME`. The GitLab `snapshot-images` component has no standalone
+trial: the lifecycle's development phase is its first conformance exercise,
+so a failure there may be the component's rather than the flow's.
 
 The event is admitted for the `hello-maven-service` demo alone, the one demo
 with a development route; a demo without one is refused rather than run as a

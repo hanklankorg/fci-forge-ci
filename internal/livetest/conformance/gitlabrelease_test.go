@@ -269,7 +269,11 @@ func protectGitLabReleaseTags(ctx context.Context, t *testing.T, client *gitlaba
 }
 
 // useGitLabAdminPolicy points the consumer's pipeline at the pinned policy
-// file and takes pipeline variables and job-token pushes away from everyone.
+// file, takes pipeline variables and job-token pushes away from everyone,
+// and has GitLab resolve the configuration, the policy and its includes,
+// before any pipeline is asked for: a YAML, include or component input
+// GitLab refuses is then its own message here, not a pipeline that never
+// appears. The resolution is static, so it takes no commit of the project's.
 func useGitLabAdminPolicy(ctx context.Context, t *testing.T, client *gitlabapi.Client, project, configPath string) {
 	t.Helper()
 
@@ -280,6 +284,21 @@ func useGitLabAdminPolicy(ctx context.Context, t *testing.T, client *gitlabapi.C
 	}, gitlabapi.WithContext(ctx)); err != nil {
 		t.Fatal(err)
 	}
+
+	result, _, err := client.Validate.ProjectLint(project, &gitlabapi.ProjectLintOptions{IncludeJobs: new(true)}, gitlabapi.WithContext(ctx))
+	if err != nil {
+		t.Fatalf("resolve the pipeline configuration %s: %v", configPath, err)
+	}
+
+	for _, warning := range result.Warnings {
+		t.Logf("pipeline configuration %s: warning: %s", configPath, warning)
+	}
+
+	if !result.Valid {
+		t.Fatalf("GitLab refuses the pipeline configuration %s: %s", configPath, strings.Join(result.Errors, "; "))
+	}
+
+	t.Logf("GitLab resolved the pipeline configuration %s with %d includes", configPath, len(result.Includes))
 }
 
 func runGitLabReleaseScenario(t *testing.T, consumerRoot string, scenario gitlabReleaseCase, private bool) {
