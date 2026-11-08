@@ -1,0 +1,79 @@
+# SPDX-FileCopyrightText: 2026 Digg - Agency for Digital Government
+# SPDX-License-Identifier: CC0-1.0
+name: Development
+on:
+  push:
+    branches: [development]
+permissions:
+  contents: read
+jobs:
+  development:
+    name: "Check: development container"
+    runs-on: ${{ vars.CI_RUNNER_LABEL }}
+    timeout-minutes: 30
+    env:
+      BUILDAH_ISOLATION: chroot
+    steps:
+      - name: Set up forge-ci
+        uses: https://codefloe.com/itiquette/forge-ci/.forgejo/actions/setup-forge-ci@ea604df3f4746d9effe2ddd9d9574de0b0c2ae8c
+      - name: Checkout development commit
+        env:
+          CHECKOUT_REF: ${{ forgejo.sha }}
+        run: |
+          set -euo pipefail
+          forge-ci platform checkout --depth 1
+          test "$(git rev-parse HEAD)" = "$CHECKOUT_REF"
+      - name: Set up toolchain
+        uses: https://codefloe.com/itiquette/forge-ci/.forgejo/actions/setup-toolchain@ea604df3f4746d9effe2ddd9d9574de0b0c2ae8c
+        with:
+          cache-key-suffix: development-container
+          install-dev-tools: 'false'
+          cache: 'false'
+          mise-locked: 'true'
+          tools: rust aqua:aquasecurity/trivy
+      - name: Test
+        run: cargo test --locked
+      - name: Set up Buildah
+        uses: https://codefloe.com/itiquette/forge-ci/.forgejo/actions/setup-buildah@ea604df3f4746d9effe2ddd9d9574de0b0c2ae8c
+      - name: Log in with scoped package credential
+        id: registry-login
+        uses: https://codefloe.com/itiquette/forge-ci/.forgejo/actions/registry-login@ea604df3f4746d9effe2ddd9d9574de0b0c2ae8c
+        with:
+          username: ${{ vars.DEVELOPMENT_REGISTRY_USERNAME }}
+          token: ${{ secrets.DEVELOPMENT_REGISTRY_TOKEN }}
+      - name: Build, scan, then publish development image
+        id: image
+        uses: https://codefloe.com/itiquette/forge-ci/.forgejo/actions/build-release-image@ea604df3f4746d9effe2ddd9d9574de0b0c2ae8c
+        with:
+          role: runtime
+          tag: dev-${{ forgejo.sha }}
+          # Explicit ledger scope is required for non-semver OCI tags; no Git tag is created.
+          release-tag: dev-${{ forgejo.sha }}
+          revision: ${{ forgejo.sha }}
+          containerfile: Containerfile
+          builds: '[{"platform":"linux/amd64"}]'
+          scan-output: dist/trivy-results-runtime-{arch}.json
+          title: hello-cargo-container
+          auth-file: ${{ steps.registry-login.outputs.auth-file }}
+      - name: Export bounded native acceptance artifact
+        env:
+          FORGE_CI_PROVIDER: forgejo
+          DEVELOPMENT_SHA: ${{ forgejo.sha }}
+          IMAGE: ${{ steps.image.outputs.image }}
+          DIGEST: ${{ steps.image.outputs.digest }}
+        run: |
+          set -euo pipefail
+          [[ "$DEVELOPMENT_SHA" =~ ^([0-9a-f]{40}|[0-9a-f]{64})$ ]]
+          [[ "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+          test -n "$IMAGE"
+          mkdir development-artifacts
+          printf '%s\n' "$DEVELOPMENT_SHA" > development-artifacts/commit.txt
+          printf '%s\n' "$DIGEST" > development-artifacts/image-digest.txt
+          printf '%s@%s\n' "$IMAGE" "$DIGEST" > development-artifacts/image-ref.txt
+          printf '%s:dev-%s\n' "$IMAGE" "$DEVELOPMENT_SHA" > development-artifacts/image-tag.txt
+          test "$(wc -c < development-artifacts/commit.txt)" -le 65
+          test "$(wc -c < development-artifacts/image-digest.txt)" -eq 72
+          test "$(wc -c < development-artifacts/image-ref.txt)" -le 1024
+          test "$(wc -c < development-artifacts/image-tag.txt)" -le 1024
+          forge-ci artifact upload --name "fc-cargo-dev-${DEVELOPMENT_SHA}" \
+            --dir development-artifacts --retention-days 1 --if-no-files error

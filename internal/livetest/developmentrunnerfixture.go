@@ -6,6 +6,7 @@ package livetest
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -22,11 +23,24 @@ func NewPackageDevelopmentFixture(tb TB, source Consumer) Consumer {
 }
 
 // NewCargoDevelopmentFixture binds the sole Cargo build/publish job to the
-// container runner in the private consumer index, without changing its checks.
+// container runner and migrates the exact historical publication step to the
+// current native CLI in the private index. The admitted checkout stays unchanged.
 func NewCargoDevelopmentFixture(tb TB, source Consumer) Consumer {
 	tb.Helper()
 
-	return newDevelopmentRunnerFixture(tb, source, "Check: development container", "CI_RUNNER_LABEL_CONTAINER")
+	runner := newDevelopmentRunnerFixture(tb, source, "Check: development container", "CI_RUNNER_LABEL_CONTAINER")
+
+	ctx, cancel := context.WithTimeout(Context(tb), timeoutLayerPush)
+	defer cancel()
+
+	fixture, err := cargoDevelopmentFixture(ctx, runner, os.Getenv)
+	if err != nil {
+		tb.Fatalf("Cargo development publication fixture: %v", err)
+	}
+
+	tb.Logf("Cargo development publication fixture: admitted=%s runner-staged=%s generated=%s", source.Commit, runner.Commit, fixture.Commit)
+
+	return fixture
 }
 
 func newDevelopmentRunnerFixture(tb TB, source Consumer, jobName, runnerVariable string) Consumer {
@@ -57,6 +71,12 @@ func developmentRunnerFixture(ctx context.Context, source Consumer, jobName, run
 	if err != nil || rendered == body {
 		return source, err
 	}
+
+	return stageDevelopmentWorkflow(ctx, source, rendered)
+}
+
+func stageDevelopmentWorkflow(ctx context.Context, source Consumer, rendered string) (Consumer, error) {
+	const path = ".forgejo/workflows/development.yml"
 
 	mode, err := source.git.run(ctx, source.stage, "ls-tree", "--format=%(objectmode)", source.Commit, "--", path)
 	if err != nil {
