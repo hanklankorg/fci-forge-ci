@@ -6,6 +6,10 @@ used.
 
 > Current testing policy for the Go codebase.
 
+For the dated, evidence-scoped acceptance snapshot, see
+[Testing parity and proof](testing-parity.md). Test layers below describe what
+can run; they do not establish that a feature has passed on a real forge.
+
 ## Layers
 
 Tests sit in one of the buckets below. Each has a different shape, build
