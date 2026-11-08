@@ -95,6 +95,12 @@ Why a flow is missing:
 The npm package releases on Forgejo and GitLab ship the tarball as a signed
 release file; neither publishes it to a package registry.
 
+A demo's **development route**, the `lifecycle` event's development phase,
+is a service snapshot of its one container, read from its declaration:
+`hello-maven-service` on Forgejo and GitLab, `hello-cargo-container` on
+GitLab. docs/live-campaigns.md, Lifecycle, lists why each other demo has
+none.
+
 Record live results separately by commit, provider, visibility and flow. Local
 package, binary and Android build tests do not establish registry permissions,
 release signing or promotion. Web archive coverage and development-release

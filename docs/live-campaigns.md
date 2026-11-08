@@ -228,15 +228,17 @@ Forge CI owns these CI consumer scenarios. Forge Lab owns its CLI/infrastructure
 tests and provides the existing contract/SDK guards; its destructive live TestMain
 is not a validation entry point for this profile. No scenario is duplicated there.
 
-### Lifecycle (Maven service only)
+### Lifecycle
 
 `test/live/campaigns/lifecycle-forgejo.cases` and
 `test/live/campaigns/lifecycle-gitlab.cases` run the linked flow of one
-consumer in one scratch repository, the `lifecycle` event:
+consumer in one scratch repository, the `lifecycle` event, for each demo with
+a development route on the provider:
 
 ```text
 consumer hello-maven-service lifecycle CI_JOB_IMAGE=@JOB_IMAGE_JAVA CI_IMAGE_BUILDER=buildah RELEASE_PLATFORMS=linux/amd64
 consumer hello-maven-service lifecycle job-archive=@FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_JAVA build-archive=@FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_JAVA signer-archive=@FORGE_CI_LIVE_SIGNER_IMAGE_ARCHIVE lint-archive=@LINT_IMAGE_ARCHIVE_JAVA version=0.2.0 version-bump=maven job-user=65532:65532
+consumer hello-cargo-container lifecycle job-archive=@FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_RUST build-archive=@FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_RUST signer-archive=@FORGE_CI_LIVE_SIGNER_IMAGE_ARCHIVE lint-archive=@LINT_IMAGE_ARCHIVE_RUST version=0.2.0 version-bump=cargo job-user=65532:65532
 ```
 
 The same reader, `key=value` words and `@NAME` expansion as the other consumer
@@ -279,11 +281,13 @@ pipelines: the demo's gate for merge-request pipelines, the `snapshot-images`
 component for the push pipelines of `main`, the `release` component for the
 request tag. The merge request is merged through the API, told the head
 commit; the push that merge makes to `main` is the development phase, a
-snapshot of `development` whose child pipeline builds the JAR in the build
-image, builds the image with the selected builder and publishes it to the
-project's registry; the acceptance is the frozen plan, one amd64 receipt,
-digest and tag with no alias. The component has no readiness or checked-JAR
-job, so none is claimed. The release is judged as the GitLab release trial's,
+snapshot of `development` whose child pipeline builds the producer the
+declaration names in the build image, the ecosystem's toolchain image (none
+for a container-first service, whose Containerfile builds it), builds the
+image with the selected builder and publishes it to the project's registry;
+the acceptance is the frozen plan, one amd64 receipt, digest and tag with no
+alias. The component has no readiness or checked-JAR job, so none is
+claimed. The release is judged as the GitLab release trial's,
 packages and images included. The event takes the release's archives and
 settings but `scenario=` and `next-version=`. The credentials are protected
 variables scoped to their jobs' environments: the merge request's pipeline, on
@@ -302,13 +306,46 @@ variables are the documented ones, `CI_PIPELINE_SOURCE` and
 trial: the lifecycle's development phase is its first conformance exercise,
 so a failure there may be the component's rather than the flow's.
 
-The event is admitted for the `hello-maven-service` demo alone, the one demo
-with a development route; a demo without one is refused rather than run as a
-shorter flow, and hosted GitHub refuses the event. amd64 runners only for now.
-Standalone `test-live-consumer <forgejo|gitlab> <checkout> lifecycle …` runs
-the same test outside a campaign. The standalone pull-request, release and
-snapshot trials remain the single-phase entrypoints; the lifecycle calls their
-extracted checks.
+**Development routes.** The event is admitted for a demo with a development
+route on the provider, read from the demo's own files, not its name; a demo
+without one is refused rather than run as a shorter flow, and hosted GitHub
+refuses the event. The route is a *service snapshot*: the snapshot-images
+policy, the reusable workflow on Forgejo and the component on GitLab, over
+the demo's declaration of one container built from the root Containerfile and
+context on native amd64, plain (no image name, tag suffix, build secrets,
+extraction or provenance), from at most one root producer of a family the
+snapshot builds (go, java, node, rust; an application where the family has
+libraries). The harness overlays that declaration for the trial, native
+linux/amd64 and unsigned, into `.forge-ci/service-development.yml`
+(`livetest.ServiceSnapshotDeclarationFile`). On GitLab the declaration is the
+one the demo's release builds its images from, `.forge-ci/release-images.yml`
+when the demo has one (its `artifacts.yml` then serves another forge's flow
+in a shape the snapshot refuses too), else `.forge-ci/artifacts.yml`
+(`livetest.ServiceSnapshotSource`), and the demo must ship the GitLab release
+build, `.gitlab/build-release.sh`. On Forgejo the one route is the Maven
+service development workflow, so the demo is also a root Maven application
+whose producers are Maven. The campaign refuses a case before anything is
+created (`campaignAdmitLifecycle`), with the planner's reason:
+
+| Demo | Forgejo | GitLab | Why not |
+|---|---|---|---|
+| hello-maven-service | lifecycle | lifecycle | — artifact-first Maven application and its runtime image |
+| hello-cargo-container | — | lifecycle | Forgejo: not a Maven application. GitLab: container-first from `release-images.yml` |
+| hello-npm-service | — | — | `artifacts.yml` is a service snapshot's (one npm producer), but the demo's Containerfile copies the unpacked package's `dist/` as the releases lay it out, while a snapshot lays the packed tarball at `.forge-ci/snapshot-inputs/<name>` (docs/workflows.md); one Containerfile cannot serve both until the two conventions agree. Forgejo also has no npm service route: the npm application fixture is a CLI package's (`bin`) with the rest-service case's oracle |
+| hello-cargo-workspace | — | — | two runtime images; a service snapshot is of one container |
+| hello-go-service | — | — | extraction, which the snapshot planner refuses; no GitLab release build either |
+| hello-go-cli, hello-maven, hello-npm-package | — | — | no container, so no snapshot; hello-maven's library development route publishes a SNAPSHOT package, another shape |
+| hello-gradle, hello-monorepo, hello-android, hello-ios | — | — | no Forgejo flow or no container; the example demos ship no GitLab release build |
+
+amd64 runners only for now. Standalone
+`test-live-consumer <forgejo|gitlab> <checkout> lifecycle …` runs the same
+test outside a campaign; the GitLab lifecycle reads the checkout's snapshot
+source itself. The standalone pull-request, release and snapshot trials
+remain the single-phase entrypoints; the lifecycle calls their extracted
+checks. A GPG-signed lifecycle has no demo yet: `hello-go-cli` has the GPG
+declaration (`artifacts-gpg.yml`) but no development route, and the Forgejo
+demos' release workflows take the default declaration, so selecting another
+would be a workflow of the demo's, not a setting.
 
 ### Explicit-input GitLab regressions
 

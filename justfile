@@ -954,13 +954,16 @@ test-live-image kind forge_lab:
 # signer-archive=, plus lint-archive= when the gate lints, KEY=value build
 # variables and scenario=<exact consumer release test name>; see
 # docs/live-campaigns.md. lifecycle is the linked flow in one project under
-# one policy, for the hello-maven-service demo alone: a merge request on
+# one policy, for a demo with a development route on GitLab, a service
+# snapshot of its one container from the declaration its release builds its
+# images from (hello-maven-service, hello-cargo-container): a merge request on
 # branch development, its native merge, the snapshot-images component on the
 # merged main, and a signed release request from it. It takes the release's
 # archives and settings but scenario= and next-version=; the build image is
-# also the Java image the snapshot builds the service with.
+# also the image the snapshot builds the service's producer with.
 #
 #   just test-live-consumer gitlab /absolute/hello-maven-service/consumer lifecycle job-archive=<path> build-archive=<path> signer-archive=<path> lint-archive=<path> version=0.2.0 version-bump=maven job-user=65532:65532
+#   just test-live-consumer gitlab /absolute/hello-cargo-container/consumer lifecycle job-archive=<path> build-archive=<path> signer-archive=<path> lint-archive=<path> version=0.2.0 version-bump=cargo job-user=65532:65532
 #
 # github, events pull-request, dev-release and release, on hosted GitHub. Runs
 # inside Forge Lab's hosted session (`just github run --org ... --prefix ...

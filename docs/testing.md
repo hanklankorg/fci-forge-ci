@@ -364,7 +364,7 @@ setup, evidence and cleanup.
 | Forgejo PR, release or lifecycle | `just test-live-consumer forgejo <checkout> <pull-request\|release\|lifecycle> [setting ...]` | Local `forgeci` contract and runner; consumer job image; signer image for releases; lifecycle: the Maven service demo and the container/readiness runner (docs/live-campaigns.md, Lifecycle) |
 | GitLab MR | `just test-live-consumer gitlab <checkout> pull-request job-archive=<image-archive>` | Local `forgeci` contract and runner; prepared MR job image archive |
 | GitLab release | `just test-live-consumer gitlab <checkout> release job-archive=<archive> build-archive=<archive> signer-archive=<archive> [setting ...]` | Local contract, prepared image archives and guarded full-release runner profile |
-| GitLab lifecycle | `just test-live-consumer gitlab <checkout> lifecycle job-archive=<archive> build-archive=<archive> signer-archive=<archive> lint-archive=<archive> [setting ...]` | As the release; the `hello-maven-service` demo alone (docs/live-campaigns.md, Lifecycle) |
+| GitLab lifecycle | `just test-live-consumer gitlab <checkout> lifecycle job-archive=<archive> build-archive=<archive> signer-archive=<archive> lint-archive=<archive> [setting ...]` | As the release; a demo with a service snapshot and a GitLab release, `hello-maven-service` or `hello-cargo-container` (docs/live-campaigns.md, Lifecycle) |
 | GitHub PR, development build or release | `just test-live-consumer github <checkout> <pull-request\|dev-release\|release> org=<org-id> [setting ...]` | Forge Lab's hosted `github run` session, consumer workflow fixtures and public engine images |
 
 See [Forgejo trials](#trying-a-consumer), [GitLab acceptance](#gitlab-live-acceptance)
@@ -1859,6 +1859,13 @@ just test-live-consumer gitlab /absolute/hello-maven-service/consumer lifecycle 
   job-archive=/absolute/java-image.tar build-archive=/absolute/java-image.tar \
   signer-archive=/absolute/signer-image.tar lint-archive=/absolute/lint-java.tar \
   version=0.2.0 version-bump=maven job-user=65532:65532
+
+# Cargo container demo: the same lifecycle, container-first; the snapshot
+# builds the runtime image of .forge-ci/release-images.yml, as the release does.
+just test-live-consumer gitlab /absolute/hello-cargo-container/consumer lifecycle \
+  job-archive=/absolute/rust-image.tar build-archive=/absolute/rust-image.tar \
+  signer-archive=/absolute/signer-image.tar lint-archive=/absolute/lint-rust.tar \
+  version=0.2.0 version-bump=cargo job-user=65532:65532
 ```
 
 The image archives are settings, as for `just demo gitlab`: `job-archive=`
