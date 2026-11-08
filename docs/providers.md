@@ -115,7 +115,7 @@ of the commit it pins, one of three ways:
   delivery through `consume-canonical-cli` before it checks anything out
   ([canonical delivery](../scripts/ci/canonical-cli-delivery.md)). A direct
   caller of such a leaf carries a `canonical-cli` job of its own, as the
-  [publish-container example](publishing.md#github-container-registry) shows.
+  [publish-container example](publishing.md#github-container-registry-ghcrio) shows.
 - **macOS jobs** (`lint-swift.yml`, `build-xcode-ios.yml`,
   `publish-apple-appstore.yml`) check the engine out at the full commit and
   build it there with `.github/actions/build-darwin-cli`, because canonical
