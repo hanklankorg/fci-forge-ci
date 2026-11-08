@@ -23,10 +23,6 @@ import (
 	"github.com/diggsweden/forge-ci/internal/testutil/evidence"
 )
 
-// testForgeCIRepository is the repository the installer cases trust; the
-// installer has no default.
-const testForgeCIRepository = "diggsweden/forge-ci"
-
 func runSourcedScript(t *testing.T, script, body string, env map[string]string) (string, string, error) {
 	t.Helper()
 	root := t.TempDir()

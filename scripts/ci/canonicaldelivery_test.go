@@ -95,6 +95,7 @@ func newCanonicalFixture(t *testing.T) *canonicalFixture {
 	for _, arch := range []string{"amd64", "arm64"} {
 		canonicalWrite(t, filepath.Join(fixture.engine, ".engine/bin/forge-ci-linux-"+arch+".sha256"), fmt.Sprintf("%x  bin/forge-ci\n", sha256.Sum256([]byte(fixture.cli))), 0o600)
 	}
+
 	canonicalWrite(t, filepath.Join(fixture.engine, "go.mod"), "module example.invalid/inert\n\ngo 1.26.4\n", 0o600)
 	canonicalWrite(t, filepath.Join(fixture.engine, "go.sum"), "", 0o600)
 	canonicalGit(t, fixture.engine, "init", "-q")

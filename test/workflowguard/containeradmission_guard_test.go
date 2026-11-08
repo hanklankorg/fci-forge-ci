@@ -194,6 +194,8 @@ func containerImage(node *yaml.Node) string {
 		if image := mappingChild(node, "image"); image != nil {
 			return image.Value
 		}
+	default:
+		// Another node names no image.
 	}
 
 	return ""
@@ -210,6 +212,8 @@ func needsList(node *yaml.Node) []string {
 		}
 
 		return needs
+	default:
+		// Another node names no job.
 	}
 
 	return nil

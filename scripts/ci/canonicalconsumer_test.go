@@ -173,6 +173,7 @@ func TestCanonicalConsumerRealHelpers(t *testing.T) {
 					}
 
 					receiveErr := run(helper, "receive")
+
 					if scenario == "unknown-profile" {
 						var exit *exec.ExitError
 						if !errors.As(receiveErr, &exit) || exit.ExitCode() != 69 {
