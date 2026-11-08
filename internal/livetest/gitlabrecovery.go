@@ -138,7 +138,7 @@ func GitLabRecoveryParent(parent []byte, engineSHA, policyProject, extensionRef 
 // reads the fixture variable. A retry receives its new project-variable value;
 // the original running shell deliberately cannot notice that change.
 func GitLabRecoveryExtension(image string) ([]byte, error) {
-	return yaml.Marshal(map[string]any{
+	extension, err := encodeYAML(map[string]any{
 		GitLabRecoveryCheckpoint: map[string]any{
 			"stage": "sign", "image": map[string]any{fieldName: image, "entrypoint": []string{""}},
 			"variables": map[string]string{"GIT_STRATEGY": "empty", "GIT_SUBMODULE_STRATEGY": "none"},
@@ -162,6 +162,8 @@ esac`},
 			},
 		},
 	})
+
+	return []byte(extension), err
 }
 
 // GitLabRecoveryCandidate admits exactly the single-image recovery case. Both
