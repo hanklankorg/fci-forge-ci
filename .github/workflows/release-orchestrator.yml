@@ -99,7 +99,7 @@ on:
         type: string
       # Changelog creator configuration
       changelog-creator:
-        description: "Changelog creator type (e.g., git-cliff). Leave empty to skip"
+        description: "Changelog renderer: git-cliff, or empty to skip the changelog and version bump"
         required: false
         default: "git-cliff"
         type: string

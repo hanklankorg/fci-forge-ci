@@ -5,6 +5,7 @@ package pipeline
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/diggsweden/forge-ci/internal/domain/errs"
@@ -166,7 +167,6 @@ func TestResolveReleasePolicy_VersionBumpRequiresGitCliffAndNotSkipped(t *testin
 		{"git-cliff", false, true},
 		{"git-cliff", true, false},
 		{"", false, false},
-		{"changie", false, false},
 	}
 	for _, cfg := range cases {
 		in := baseInputs()
@@ -276,5 +276,20 @@ func TestResolveReleasePolicy_RejectsUnknownPolicy(t *testing.T) {
 
 	if _, err := resolveReleasePolicy(in); !errors.Is(err, errs.ErrUsage) {
 		t.Fatalf("unknown policy accepted: %v", err)
+	}
+}
+
+// GitHub renders git-cliff only: another renderer's name is refused, not
+// planned as a release without a version bump or changelog.
+func TestResolveReleasePolicy_RefusesAChangelogCreatorOtherThanGitCliff(t *testing.T) {
+	t.Parallel()
+
+	for _, creator := range []string{"git-chglog", "changie", " git-cliff"} {
+		in := baseInputs()
+		in.ChangelogCreator = creator
+
+		if _, err := resolveReleasePolicy(in); !errors.Is(err, errs.ErrUsage) || !strings.Contains(err.Error(), "git-cliff only") {
+			t.Errorf("changelog-creator %q: got %v, want a usage error naming git-cliff only", creator, err)
+		}
 	}
 }

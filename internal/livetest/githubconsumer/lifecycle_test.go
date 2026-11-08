@@ -132,7 +132,7 @@ func runLifecycle(t *testing.T, trial *livetest.GitHubTrial, engine livetest.Git
 	trial.PushReleaseRequest(repo, tree, key, request, settings.Version)
 	release := judge(t, trial, repo, settings.Workflow, "push", merge)
 
-	assets := trial.CheckRelease(repo, tree, final, signing.trust, key)
+	assets := trial.CheckRelease(repo, tree, settings.Workflow, final, signing.trust, key)
 	if visibility.Private {
 		trial.CheckPrivateReleaseAssets(repo, assets)
 	}

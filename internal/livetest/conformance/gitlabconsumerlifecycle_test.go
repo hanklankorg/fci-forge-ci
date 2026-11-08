@@ -208,7 +208,7 @@ func runGitLabConsumerLifecycle(t *testing.T, root string, private bool) {
 		checks: []string{"bash .gitlab/check-release.sh"}, checksRunnerTags: []string{},
 		build: []string{profile.build}, buildRunnerTags: builder.RunnerLabels,
 		releaseImages: profile.releaseImages, artifactsConfig: profile.artifactsConfig(), releasePlatforms: "linux/amd64",
-		imageBuilder: imageBuilder, builderJobImage: builderJobImage, export: profile.export,
+		imageBuilder: imageBuilder, builderJobImage: builderJobImage, export: profile.export, changelog: profile.changelog,
 	}
 
 	// The snapshot component takes the development phase: the consumer's

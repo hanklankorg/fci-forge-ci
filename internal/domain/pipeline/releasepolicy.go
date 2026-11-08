@@ -4,15 +4,21 @@
 package pipeline
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/diggsweden/forge-ci/internal/domain/config"
+	"github.com/diggsweden/forge-ci/internal/domain/errs"
 	"github.com/diggsweden/forge-ci/internal/domain/version"
 )
 
 // SBOMsNone is the sboms input spelling for "no SBOM layers": what an empty
 // effective intersection resolves to, and the snapshot default.
 const SBOMsNone = "none"
+
+// changelogCreatorGitCliff is the one changelog renderer the GitHub release
+// runs.
+const changelogCreatorGitCliff = "git-cliff"
 
 // releasePolicyInputs is the typed envelope of everything the policy
 // resolver reads from. Unexported: it is an internal helper input shape
@@ -24,7 +30,7 @@ type releasePolicyInputs struct {
 	ReleaseDraft                    bool
 	ReleaseSBOMs                    string // "all" | "none" | "build,…"
 	ReleaseSignArtifacts            bool
-	ChangelogCreator                string // "git-cliff" | "" | …
+	ChangelogCreator                string // "git-cliff" | "" (no changelog)
 	ChangelogSkipVersionBump        bool
 	RefName                         string // CI_REF_NAME (tag name)
 	PipelineSBOMs                   string // union from parse-artifacts-config
@@ -40,6 +46,12 @@ type releasePolicyInputs struct {
 func resolveReleasePolicy(in releasePolicyInputs) (ReleasePolicy, error) {
 	if err := version.ValidateReleasePolicy(in.ReleasePolicy); err != nil {
 		return ReleasePolicy{}, err
+	}
+
+	// The GitHub release renders with git-cliff and nothing else. Any other
+	// name would plan no version bump and no changelog without a word.
+	if in.ChangelogCreator != "" && in.ChangelogCreator != changelogCreatorGitCliff {
+		return ReleasePolicy{}, fmt.Errorf("changelog-creator must be git-cliff or empty (got %q): the GitHub release renders its changelog with git-cliff only: %w", in.ChangelogCreator, errs.ErrUsage)
 	}
 
 	var parsed version.Semver
@@ -58,7 +70,7 @@ func resolveReleasePolicy(in releasePolicyInputs) (ReleasePolicy, error) {
 		SignArtifacts:            in.ReleaseSignArtifacts,
 		CreateRelease:            in.ReleasePublisher == "github-cli",
 		RequireAllowlistedSigner: in.AnyRequireAuthorization || in.ReleaseRequireAllowlistedSigner,
-		RunVersionBump:           !in.ChangelogSkipVersionBump && in.ChangelogCreator == "git-cliff",
+		RunVersionBump:           !in.ChangelogSkipVersionBump && in.ChangelogCreator == changelogCreatorGitCliff,
 		MakeLatest:               parsed.Prerelease == "",
 		Prerelease:               parsed.Prerelease != "",
 		CreateDraftRelease:       in.ReleaseDraft,

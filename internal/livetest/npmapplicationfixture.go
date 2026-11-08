@@ -268,6 +268,9 @@ func npmDevelopmentWorkflow(ctx context.Context, source Consumer, config NPMAppl
 	return strings.NewReplacer("@ACTIONS@", pin.Actions, "@WORKFLOWS@", pin.Workflows, "@PIN@", pin.Commit, "@IMAGE@", config.NodeImage, "@BRANCH@", "'"+strings.ReplaceAll(config.Branch, "'", "''")+"'").Replace(npmApplicationDevelopment), nil
 }
 
+// npmVersionBumpImage is the recipe's version-bump image input.
+var npmVersionBumpImage = regexp.MustCompile(`(?m)^      version-bump-image: .*$`)
+
 // npmStableReleaseWorkflow rewrites the native release recipe so it publishes
 // the application package independently of container publication, reusing
 // native preparation, artifact handoff and signing.
@@ -284,7 +287,13 @@ func npmStableReleaseWorkflow(workflow string, pin ConsumerPin, image string) (s
 	workflow = workflow[:start] + workflow[end:]
 	workflow = workflow[:buildStart] + npmApplicationBuildSteps + workflow[buildEnd:]
 	workflow = strings.NewReplacer("@IMAGE@", image, "publish-container-images: 'true'", "publish-container-images: 'false'", "needs: [build, release-images]", "needs: [build]", "prepare, build, release-images, handoff", "prepare, build, handoff", "          IMAGES_RESULT: ${{ needs.release-images.result }}\n", "", `--job "Images=${IMAGES_RESULT}" `, "", "          forge-ci artifact download --name release-images --dir dist\n", "", "      release-images-path: dist/release-images.json\n", "").Replace(workflow)
-	workflow = strings.Replace(workflow, "      # The default request already matches package.json; select version-bump", "      version-bump: npm\n      version-bump-image: "+image+"\n      # The default request already matches package.json; select version-bump", 1)
+	// The recipe's release bumps package.json; the bump runs in the trial's
+	// Node image, as the build does.
+	if !npmVersionBumpImage.MatchString(workflow) {
+		return "", errNPMRecipeStructure
+	}
+
+	workflow = npmVersionBumpImage.ReplaceAllLiteralString(workflow, "      version-bump-image: "+image)
 	workflow = strings.Replace(workflow, "    env:\n      ARTIFACT_NAME:", "    container:\n      image: "+image+"\n    env:\n      ARTIFACT_NAME:", 1)
 	workflow += strings.NewReplacer("@ACTIONS@", pin.Actions, "@PIN@", pin.Commit, "@IMAGE@", image).Replace(npmApplicationStableConsumers)
 
@@ -318,7 +327,7 @@ func npmFixtureFiles(recipeDirectory, workflow string, oracle []byte, developmen
 
 // readNPMChangelogInputs copies the recipe's changelog inputs into files.
 func readNPMChangelogInputs(recipeDirectory string, files map[string]string) error {
-	for _, path := range []string{".chglog/config-keepachangelog.yml", ".chglog/config-minimal.yml", ".chglog/CHANGELOG-keepachangelog.tpl", ".chglog/CHANGELOG-minimal.tpl"} {
+	for _, path := range []string{chglogKeepAChangelogConfig, chglogMinimalConfig, ".chglog/CHANGELOG-keepachangelog.tpl", ".chglog/CHANGELOG-minimal.tpl"} {
 		text, err := os.ReadFile(filepath.Join(recipeDirectory, path)) //nolint:gosec // operator-supplied recipe directory joined with a fixed changelog file name.
 		if err != nil {
 			return err

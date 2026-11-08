@@ -621,7 +621,7 @@ External use cases:
 #### Caller responsibilities
 
 - **`artifacts.yml`** with at least one artifact of `project-type: meta`. No `config:` block (none would apply).
-- **Changelog tooling** if used (git-cliff or another `changelog-creator`).
+- **Changelog tooling** if used: `changelog-creator: git-cliff` and its configuration; empty skips the changelog and the version bump.
 - **A meaningful release notes flow**: the value of a meta release is the human-readable changelog + the signed tag.
 
 ---
