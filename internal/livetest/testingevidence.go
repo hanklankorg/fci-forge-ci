@@ -4,6 +4,7 @@
 package livetest
 
 import (
+	"cmp"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -15,6 +16,8 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/diggsweden/forge-ci/internal/domain/enforcement"
 )
 
 // SeedTestingEvidence drafts TestingMatricesEvidence lines from the runs
@@ -23,8 +26,10 @@ import (
 // <trial>/controller.sh with its controller.exit and finished-at each. For
 // every demo consumer it keeps the latest run of each flow on each provider:
 // passed as ✅, failed as ❌, anything else as ⏳, with the run's date as the
-// note. It reads the recorded facts and makes no judgement: the overlay is
-// hand-kept, so the operator reviews the draft before committing it.
+// note; a lifecycle run is kept for each set of the axis values its verdict
+// header records, which lead the note (evidenceAxes). It reads the recorded
+// facts and makes no judgement: the overlay is hand-kept, so the operator
+// reviews the draft before committing it.
 func SeedTestingEvidence(liveRuns, hostedRuns string) (string, error) {
 	latest := map[string]seededRun{}
 
@@ -41,7 +46,9 @@ func SeedTestingEvidence(liveRuns, hostedRuns string) (string, error) {
 	lines := make([]string, 0, len(latest))
 
 	for key, run := range latest {
-		lines = append(lines, key+" "+evidenceMark(run.verdict)+" "+run.date())
+		// The axis values follow the flow in the key and the mark in the line.
+		words := strings.Fields(key)
+		lines = append(lines, strings.Join(slices.Concat(words[:3], []string{evidenceMark(run.verdict)}, words[3:], []string{run.date()}), " "))
 	}
 
 	slices.Sort(lines)
@@ -97,6 +104,10 @@ func seedLiveRuns(liveRuns string, latest map[string]seededRun) error {
 		key := evidenceKey(verdict.Run)
 		if key == "" {
 			continue
+		}
+
+		if strings.HasSuffix(key, " "+TrialLifecycle) {
+			key = strings.TrimSpace(key + " " + evidenceAxes(verdict.Run))
 		}
 
 		run, err := newSeededRun(verdict.Run.StartedAt, verdict.Verdict, file)
@@ -252,6 +263,46 @@ func evidenceKey(run LiveRunHeader) string {
 	}
 
 	return run.Provider + " " + demo + " " + flow
+}
+
+// evidenceAxes are the axis values a run's verdict header records, as the
+// overlay qualifies a mark with them: the visibility (both where none was
+// selected), the image builder, the Forgejo case's own CI_IMAGE_BUILDER or
+// the lane's selector, and each administrator input. An axis the header does
+// not record is left out, so the matrices claim no value for it.
+func evidenceAxes(run LiveRunHeader) string {
+	input := func(env string) string { return run.Inputs[strings.ToLower(env)] }
+
+	axes := []string{settingVisibility + "=" + cmp.Or(input(consumerVisibilityEnv), visibilityBoth)}
+
+	variables := map[string]string{}
+
+	for line := range strings.SplitSeq(input("FORGE_CI_LIVE_CONSUMER_SETTINGS"), "\n") {
+		if key, value, isVariable := strings.Cut(line, "="); isVariable {
+			variables[key] = value
+		}
+	}
+
+	builder, err := "", error(nil)
+
+	switch run.Provider {
+	case campaignForgejo:
+		builder, err = ForgejoConsumerImageBuilder(variables, input(ForgejoImageBuilderEnv))
+	case campaignGitLab:
+		builder, _ = imageBuilderValue(input(GitLabImageBuilderEnv))
+	}
+
+	if err == nil && builder != "" {
+		axes = append(axes, settingImageBuilder+"="+builder)
+	}
+
+	for _, check := range enforcement.Checks {
+		if value := input(adminInputEnvironment(check)); value != "" {
+			axes = append(axes, campaignAdminSetting(check)+"="+value)
+		}
+	}
+
+	return strings.Join(axes, " ")
 }
 
 func evidenceMark(verdict string) string {
