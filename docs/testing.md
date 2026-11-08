@@ -1595,11 +1595,15 @@ proves that a deployed service works.
 
 ##### Java service development
 
-Setting `FORGE_CI_LIVE_MAVEN_APPLICATION_IMAGE` selects the Java-service case
-of `TestForgejoLayer_ConsumerDevelopment`: an unsigned snapshot trial of a
-declared Maven service, public or private, on the existing private-index
-staging, scratch-resource cleanup and shared snapshot workflow. It does not
-exercise stable release or PR linting.
+Setting `FORGE_CI_LIVE_MAVEN_APPLICATION_IMAGE` selects the service case of
+`TestForgejoLayer_ConsumerDevelopment`: an unsigned snapshot trial of a
+declared service, public or private, on the existing private-index staging,
+scratch-resource cleanup and shared snapshot workflow, through the harness's
+service development workflow
+(`internal/livetest/testdata/service-development.yml.tmpl`, the lifecycle's
+development phase). The variable names the image the snapshot builds the
+declaration's producers in, whatever their family. It does not exercise
+stable release or PR linting.
 
 | Environment variable | Value |
 | --- | --- |
@@ -1650,22 +1654,20 @@ declaration, compilation belongs in the original Containerfile and no unused
 artifact producer is scheduled. Missing or invalid declarations never imply a
 fallback between these routes.
 
-A separate Maven `app` job after snapshot publication keeps its normal checks and
-tests and copies the actual `target/<artifactId>-*.jar` outputs. This separate
-checked build is intentional: **the checked JAR is not asserted to be the JAR
-inside the image**. Acceptance derives the expected producer/dependency graph
-from the validated private declaration rather than assuming zero producers.
+The snapshot's own producer build is the build; nothing is built a second
+time. Acceptance derives the expected producer/dependency graph from the
+validated private declaration rather than assuming zero producers.
 
-The runtime fixture script runs inside the Java job and writes
-`trial-runtime/runtime.env` plus optional files. They are transferred in the
-same run, mounted read-only at `/trial` and passed to the service with
-`--env-file`; only disposable, nonsecret trial material belongs there. The
-runtime is pulled and started by immutable digest. Readiness makes at most 60
-HTTP requests, each bounded to two seconds with two-second retries, and
-cleanup uses the exact created container ID.
+The runtime fixture script runs in the readiness job at the selected source
+and writes `trial-runtime/runtime.env` plus optional files, mounted read-only
+at `/trial` and passed to the service with `--env-file`; only disposable,
+nonsecret trial material belongs there. The runtime is pulled and started by
+immutable digest. Readiness makes at most 60 HTTP requests, each bounded to
+two seconds with two-second retries, and cleanup uses the exact created
+container ID.
 
 The acceptance binds the frozen branch and SHA, the registry digest, the OCI
-revision and branch labels, the checked JARs and the HTTP readiness evidence.
+revision and branch labels and the HTTP readiness evidence.
 It rejects unexpected registry aliases, Git tags or releases, and movement of
 either scratch branch. Successful job traces are retained by the existing log
 protocol. The offline guard for source preservation is:

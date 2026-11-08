@@ -6,14 +6,11 @@
 package conformance_test
 
 import (
-	"archive/zip"
-	"bytes"
 	"context"
-	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
-	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -23,7 +20,10 @@ import (
 	"github.com/diggsweden/forge-ci/internal/livetest"
 )
 
-func runForgejoMavenServiceDevelopment(t *testing.T) {
+// runForgejoServiceDevelopment is the standalone service development trial:
+// the lifecycle's development phase alone, dispatched on a consumer's policy
+// main over a scratch source branch.
+func runForgejoServiceDevelopment(t *testing.T) {
 	t.Helper()
 
 	root := os.Getenv(consumerCheckoutEnv)
@@ -37,12 +37,12 @@ func runForgejoMavenServiceDevelopment(t *testing.T) {
 
 	for _, visibility := range livetest.ConsumerVisibilities(t) {
 		t.Run(visibility.Name, func(t *testing.T) {
-			runForgejoMavenServiceCase(t, root, visibility.Private)
+			runForgejoServiceCase(t, root, visibility.Private)
 		})
 	}
 }
 
-func runForgejoMavenServiceCase(t *testing.T, root string, private bool) {
+func runForgejoServiceCase(t *testing.T, root string, private bool) {
 	t.Helper()
 
 	if !livetest.Requires(t, provider.ForgeForgejo, livetest.NeedsInRunner, livetest.NeedsPackages) {
@@ -64,19 +64,19 @@ func runForgejoMavenServiceCase(t *testing.T, root string, private bool) {
 
 	t.Logf("development image builder: %s; container/readiness runner: %q", builder.Builder, buildLabel)
 
-	recipe, err := filepath.Abs("../../../test/live/demos/hello-maven-service/consumer")
+	declaration, err := livetest.ServiceSnapshotSource(root)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	config := livetest.MavenServiceDevelopmentConfig{
-		RecipeDirectory: recipe, JavaImage: os.Getenv("FORGE_CI_LIVE_MAVEN_APPLICATION_IMAGE"),
+	config := livetest.ServiceDevelopmentConfig{
+		RecipeDirectory: root, Declaration: declaration, JobImage: os.Getenv("FORGE_CI_LIVE_MAVEN_APPLICATION_IMAGE"),
 		Branch: os.Getenv("FORGE_CI_LIVE_SERVICE_BRANCH"), ReadinessURL: os.Getenv("FORGE_CI_LIVE_SERVICE_READINESS_URL"),
 		Fixture: os.Getenv("FORGE_CI_LIVE_SERVICE_FIXTURE"),
 	}
 	source := livetest.OpenConsumer(t, target, root)
 	admitted := source.Commit
-	consumer := livetest.NewMavenServiceDevelopmentFixture(t, source, config)
+	consumer := livetest.NewServiceDevelopmentFixture(t, source, config)
 	layer, repo := newConsumerRepos(t, target, consumer, "consumer-development", private)
 	jobImage := consumerBuilderJobImage(t, target, builder, layer)
 
@@ -101,6 +101,8 @@ func runForgejoMavenServiceCase(t *testing.T, root string, private bool) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
+	maps.Copy(variables, livetest.ServiceSnapshotJobImageVariables(livetest.Context(t), t, consumer, config.JobImage))
 
 	main := consumer.Push(t, repo, plan)
 	head := consumer.PushChange(t, repo, config.Branch, main)
@@ -127,32 +129,32 @@ func runForgejoMavenServiceCase(t *testing.T, root string, private bool) {
 
 	requireRunIDs(t, target, repo, run.ID)
 
-	receipt, jars, producers := requireMavenServiceDevelopment(t, target, repo, run, consumer, config, head, image)
+	receipt, producers := requireServiceDevelopment(t, target, repo, run, consumer, config, head, image)
 
-	t.Logf("admitted=%s policy=%s selected=%s branch=%s engine=%s image=%s readiness=%s; checked JARs=%d producers=%d; declared build route preserved, no checked-JAR/image byte-equality claim", admitted, main, head, config.Branch, layer.Commit, receipt.Ref, config.ReadinessURL, jars, producers)
+	t.Logf("admitted=%s policy=%s selected=%s branch=%s engine=%s image=%s readiness=%s; producers=%d; declared build route preserved, no image byte-equality claim", admitted, main, head, config.Branch, layer.Commit, receipt.Ref, config.ReadinessURL, producers)
 }
 
 // developmentWorkflow is the workflow file a consumer's development run is
 // dispatched from.
 const developmentWorkflow = "development.yml"
 
-// requireMavenServiceDevelopment reads what a dispatched service development
-// run of the Maven service fixture left: the frozen snapshot plan bound to the
-// selected source head and branch, one amd64 image receipt with its readiness
-// evidence, the registry's digest and tag with no stable alias, and the
-// checked JARs. It returns the image receipt, the count of checked JARs and
-// of the declared producers.
-func requireMavenServiceDevelopment(t *testing.T, target livetest.Target, repo string, run livetest.WorkflowRun, consumer livetest.Consumer, config livetest.MavenServiceDevelopmentConfig, head, image string) (snapshotimage.Receipt, int, int) {
+// requireServiceDevelopment reads what a dispatched service development run
+// left: the frozen snapshot plan bound to the selected source head and
+// branch, one amd64 image receipt, the registry's digest and tag with no
+// stable alias, and the readiness evidence binding the published digest to
+// that source. It returns the image receipt and the count of the producers
+// the plan built, none for a container-first service.
+func requireServiceDevelopment(t *testing.T, target livetest.Target, repo string, run livetest.WorkflowRun, consumer livetest.Consumer, config livetest.ServiceDevelopmentConfig, head, image string) (snapshotimage.Receipt, int) {
 	t.Helper()
 
 	if run.Status != jobSuccess || (run.Event != "" && run.Event != "workflow_dispatch") || run.TriggerEvent != "workflow_dispatch" || run.WorkflowID != developmentWorkflow {
-		t.Fatalf("service development run %d: %s; original Containerfile/POM failures are CI integration failures, not permission to alter source", run.ID, run.Status)
+		t.Fatalf("service development run %d: %s; a failure of the consumer's own Containerfile or build is a CI integration failure, not permission to alter source", run.ID, run.Status)
 	}
 
 	artifacts := map[string]map[string][]byte{}
 
 	for _, artifact := range livetest.RunArtifacts(t, target, repo, run.ID) {
-		if artifact.Name != "service-jars-"+head && artifact.Name != "service-evidence-"+head && artifact.Name != "snapshot-images-plan" {
+		if artifact.Name != "service-evidence-"+head && artifact.Name != "snapshot-images-plan" {
 			continue
 		}
 
@@ -177,36 +179,7 @@ func requireMavenServiceDevelopment(t *testing.T, target livetest.Target, repo s
 		t.Fatalf("readiness evidence does not bind selected source and published image: %+v", receipt)
 	}
 
-	jars := artifacts["service-jars-"+head]
-	if string(jars["source-sha.txt"]) != head+"\n" {
-		t.Fatal("checked JAR source differs from selected branch")
-	}
-
-	count := 0
-
-	for name, body := range jars {
-		if !strings.HasSuffix(name, ".jar") {
-			continue
-		}
-
-		jar, err := zip.NewReader(bytes.NewReader(body), int64(len(body)))
-		if err != nil || len(jar.File) == 0 {
-			t.Fatalf("not an actual nonempty JAR: %s", name)
-		}
-
-		entry := fmt.Sprintf("%x  checked-jars/%s\n", sha256.Sum256(body), name)
-		if !strings.Contains(string(jars["SHA256SUMS"]), entry) {
-			t.Fatalf("checked JAR checksum differs: %s", name)
-		}
-
-		count++
-	}
-
-	if count == 0 {
-		t.Fatal("no actual checked source JAR")
-	}
-
-	return receipt, count, len(expected.Artifacts)
+	return receipt, len(expected.Artifacts)
 }
 
 // requireServiceSnapshot reads what a service snapshot of a consumer left,

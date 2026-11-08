@@ -1796,8 +1796,11 @@ For published product image snapshots, use the existing `snapshot-images.yml` ra
 than the runtime publisher. The thin caller in
 `examples/go-service/forgejo/snapshot.yml` demonstrates a protected-main,
 container-only snapshot with an explicit registry credential and no release
-signing authority. PR and release callers keep their existing actions and
-prepare/build/sign separation; product preparation stays in the unsigned job.
+signing authority; `examples/maven-app/forgejo/snapshot.yml` the artifact-first
+shape, the jar built first in the digest-pinned Java toolchain image the
+caller names with `artifact-job-image-java`. PR and release callers keep
+their existing actions and prepare/build/sign separation; product preparation
+stays in the unsigned job.
 
 For an **ephemeral CLI build**, use
 `examples/go-cli/forgejo/snapshot.yml`: its existing `build-go` action runs tests

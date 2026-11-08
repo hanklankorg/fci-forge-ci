@@ -1,6 +1,15 @@
 # SPDX-FileCopyrightText: 2026 Digg - Agency for Digital Government
 # SPDX-License-Identifier: CC0-1.0
-name: Maven service development
+#
+# The harness's consumer-side development workflow of a service snapshot, for
+# a consumer of any snapshot family: the snapshot-images workflow plans the
+# staged declaration, builds the producers it names in the family's image,
+# which the repository's SNAPSHOT_ARTIFACT_JOB_IMAGE_<FAMILY> variable names
+# (none for a container-first service), builds the image and publishes it;
+# readiness then runs the published digest with Podman on the container
+# runner. The snapshot's own producer build is the build; nothing is built
+# twice.
+name: Service development
 on:
   workflow_dispatch:
 permissions:
@@ -11,7 +20,6 @@ jobs:
     with:
       branch: @BRANCH@
       artifacts-config: .forge-ci/service-development.yml
-      artifact-job-image-java: @IMAGE@
       forge-ci-repository: ${{ vars.FORGE_CI_REPOSITORY }}
       forge-ci-sha: @PIN@
       runner-label: ${{ vars.CI_RUNNER_LABEL_CONTAINER }}
@@ -19,42 +27,26 @@ jobs:
       registry-user: ${{ vars.DEVELOPMENT_REGISTRY_USERNAME }}
     secrets:
       SNAPSHOT_REGISTRY_PASSWORD: ${{ secrets.DEVELOPMENT_REGISTRY_TOKEN }}
-  check:
+  readiness:
     needs: snapshot
-    runs-on: ${{ fromJSON(vars.CI_RUNNER_LABEL) }}
-    container:
-      image: @IMAGE@
+    runs-on: ${{ fromJSON(vars.CI_RUNNER_LABEL_CONTAINER) }}
     steps:
       - uses: @ACTIONS@setup-forge-ci@@PIN@
       - uses: @ACTIONS@checkout-consumer@@PIN@
         with:
           ref: ${{ needs.snapshot.outputs.source-sha }}
-      - uses: @ACTIONS@build-maven@@PIN@
-        with:
-          commit: ${{ needs.snapshot.outputs.source-sha }}
-          build-type: app
-      - name: Retain checked source JAR and nonsecret runtime fixture
+      - name: Prepare isolated runtime tools
+        run: forge-ci container setup-buildah --extra-packages "podman jq nftables" --print-store=false --summary=false
+      - name: Produce the nonsecret runtime fixture at the selected source
         env:
           SOURCE_SHA: ${{ needs.snapshot.outputs.source-sha }}
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
-          mkdir -p checked-jars trial-runtime
-          cp target/@ARTIFACT@-*.jar checked-jars/
-          printf '%s\n' "$SOURCE_SHA" > checked-jars/source-sha.txt
-          sha256sum checked-jars/*.jar > checked-jars/SHA256SUMS
+          mkdir -p trial-runtime
           touch trial-runtime/runtime.env
           bash .forge-ci/service-fixture.sh
           chmod -R a+rX trial-runtime
-          forge-ci artifact upload --name "service-jars-$SOURCE_SHA" --dir checked-jars --if-no-files error
-          forge-ci artifact upload --name service-runtime --dir trial-runtime --if-no-files error --retention-days 1
-  readiness:
-    needs: [snapshot, check]
-    runs-on: ${{ fromJSON(vars.CI_RUNNER_LABEL_CONTAINER) }}
-    steps:
-      - uses: @ACTIONS@setup-forge-ci@@PIN@
-      - name: Prepare isolated runtime tools
-        run: forge-ci container setup-buildah --extra-packages "podman jq nftables" --print-store=false --summary=false
       - name: Pull and start the immutable published digest
         env:
           SOURCE_SHA: ${{ needs.snapshot.outputs.source-sha }}
@@ -66,7 +58,6 @@ jobs:
           set -euo pipefail
           command -v podman
           command -v curl
-          forge-ci artifact download --name service-runtime --dir trial-runtime
           mkdir -p service-evidence
           printf '%s\n' "$IMAGES_JSON" > service-evidence/container-images.json
           ref=$(jq -er 'if length == 1 then .[0].ref else error("one image required") end' service-evidence/container-images.json)

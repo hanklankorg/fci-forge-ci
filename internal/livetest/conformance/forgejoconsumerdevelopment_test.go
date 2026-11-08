@@ -25,7 +25,7 @@ func TestForgejoLayer_ConsumerDevelopment(t *testing.T) {
 	livetest.RegisterLiveScenario(t)
 
 	if os.Getenv("FORGE_CI_LIVE_MAVEN_APPLICATION_IMAGE") != "" {
-		runForgejoMavenServiceDevelopment(t)
+		runForgejoServiceDevelopment(t)
 
 		return
 	}

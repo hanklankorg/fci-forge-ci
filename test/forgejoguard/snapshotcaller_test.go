@@ -40,25 +40,38 @@ func TestCLISnapshotBuildsWithoutPublicationOrSecrets(t *testing.T) {
 	}, actions)
 }
 
+// The consumer-side snapshot callers: the Go service's, container-only, and
+// the Maven application's, artifact-first, whose producer builds in the
+// digest-pinned Java toolchain image the caller names.
 func TestSnapshotCallerDelegatesWithoutReleaseAuthority(t *testing.T) {
 	t.Parallel()
 
-	workflow := loadWorkflow(t, "examples/go-service/forgejo/snapshot.yml")
-	require.Len(t, workflow.jobs, 1)
-	caller := workflow.jobs["snapshot"]
-	require.Equal(t, "OWNER/forge-ci/.forgejo/workflows/snapshot-images.yml@PIN_FORGE_CI_SHA", scalarString(mappingValue(caller.node, "uses")))
-	require.Nil(t, mappingValue(caller.node, "runs-on"), "same-instance workflow expansion chooses the native runners")
-	require.Empty(t, caller.steps(), "the caller must not copy snapshot operations")
-	require.Equal(t, "forgejo.ref == 'refs/heads/main'", scalarString(mappingValue(caller.node, "if")))
-	inputs := mappingValue(caller.node, "with")
-	require.Equal(t, "PIN_FORGE_CI_SHA", scalarString(mappingValue(inputs, "forge-ci-sha")))
-	require.Equal(t, "main", scalarString(mappingValue(inputs, "branch")))
-	secrets := mappingEntries(mappingValue(caller.node, "secrets"))
-	require.Len(t, secrets, 1)
-	require.Equal(t, "SNAPSHOT_REGISTRY_PASSWORD", scalarString(secrets[0].Key))
-	require.Equal(t, "${{ secrets.SNAPSHOT_REGISTRY_PASSWORD }}", scalarString(secrets[0].Value))
+	for path, producerImage := range map[string]string{
+		"examples/go-service/forgejo/snapshot.yml": "artifact-job-image-go",
+		"examples/maven-app/forgejo/snapshot.yml":  "artifact-job-image-java",
+	} {
+		t.Run(path, func(t *testing.T) {
+			t.Parallel()
 
-	for _, forbidden := range []string{"RELEASE_COSIGN", "RELEASE_GPG", "RELEASE_SSH", "RELEASE_TOKEN", "signer-image"} {
-		require.NotContains(t, caller.node.String(), forbidden)
+			workflow := loadWorkflow(t, path)
+			require.Len(t, workflow.jobs, 1)
+			caller := workflow.jobs["snapshot"]
+			require.Equal(t, "OWNER/forge-ci/.forgejo/workflows/snapshot-images.yml@PIN_FORGE_CI_SHA", scalarString(mappingValue(caller.node, "uses")))
+			require.Nil(t, mappingValue(caller.node, "runs-on"), "same-instance workflow expansion chooses the native runners")
+			require.Empty(t, caller.steps(), "the caller must not copy snapshot operations")
+			require.Equal(t, "forgejo.ref == 'refs/heads/main'", scalarString(mappingValue(caller.node, "if")))
+			inputs := mappingValue(caller.node, "with")
+			require.Equal(t, "PIN_FORGE_CI_SHA", scalarString(mappingValue(inputs, "forge-ci-sha")))
+			require.Equal(t, "main", scalarString(mappingValue(inputs, "branch")))
+			require.Contains(t, scalarString(mappingValue(inputs, producerImage)), "@sha256:", "the producer toolchain image is pinned by digest")
+			secrets := mappingEntries(mappingValue(caller.node, "secrets"))
+			require.Len(t, secrets, 1)
+			require.Equal(t, "SNAPSHOT_REGISTRY_PASSWORD", scalarString(secrets[0].Key))
+			require.Equal(t, "${{ secrets.SNAPSHOT_REGISTRY_PASSWORD }}", scalarString(secrets[0].Value))
+
+			for _, forbidden := range []string{"RELEASE_COSIGN", "RELEASE_GPG", "RELEASE_SSH", "RELEASE_TOKEN", "signer-image"} {
+				require.NotContains(t, caller.node.String(), forbidden)
+			}
+		})
 	}
 }
