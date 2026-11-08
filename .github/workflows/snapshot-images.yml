@@ -49,19 +49,19 @@ on:
         default: false
         type: boolean
       runtime-image-go:
-        description: "Go producer runtime image (forge-ci runtime family, forge-ci baked in); empty uses the resolved bootstrap family"
+        description: "Go producer runtime image (forge-ci runtime family, forge-ci baked in), pinned by digest; required when the plan builds that family"
         default: ""
         type: string
       runtime-image-java:
-        description: "Maven/Gradle producer runtime image (forge-ci runtime family, forge-ci baked in); empty uses the resolved bootstrap family"
+        description: "Maven/Gradle producer runtime image (forge-ci runtime family, forge-ci baked in), pinned by digest; required when the plan builds that family"
         default: ""
         type: string
       runtime-image-node:
-        description: "NPM producer runtime image (forge-ci runtime family, forge-ci baked in); empty uses the resolved bootstrap family"
+        description: "NPM producer runtime image (forge-ci runtime family, forge-ci baked in), pinned by digest; required when the plan builds that family"
         default: ""
         type: string
       runtime-image-rust:
-        description: "Cargo producer runtime image (forge-ci runtime family, forge-ci baked in); empty uses the resolved bootstrap family"
+        description: "Cargo producer runtime image (forge-ci runtime family, forge-ci baked in), pinned by digest; required when the plan builds that family"
         default: ""
         type: string
       image-repository:
@@ -118,6 +118,13 @@ jobs:
     uses: ./.github/workflows/resolve-forge-ci-bootstrap.yml
     with:
       forge-ci-binary-ref: ${{ inputs['forge-ci-binary-ref'] }}
+      images: |
+        runtime-image=${{ inputs['runtime-image'] }}
+        runtime-image-full=${{ inputs['runtime-image-full'] }}
+        runtime-image-go?=${{ inputs['runtime-image-go'] }}
+        runtime-image-rust?=${{ inputs['runtime-image-rust'] }}
+        runtime-image-node?=${{ inputs['runtime-image-node'] }}
+        runtime-image-java?=${{ inputs['runtime-image-java'] }}
   plan:
     needs: [resolve-bootstrap]
     runs-on: ubuntu-26.04
@@ -193,6 +200,33 @@ jobs:
             --branch "$SOURCE_BRANCH" --source-sha "$SOURCE_SHA" \
             --image-repository "$IMAGE_REPOSITORY" --publish="$PUBLISH_CONTAINERS" \
             --output "${RUNNER_TEMP}/snapshot-inputs/snapshot-plan.json"
+      - name: Require the toolchain image of every planned artifact
+        # The resolver admitted each family image that was passed as a digest;
+        # a family the plan builds must also have been passed, or its build
+        # job would get no image at all.
+        shell: bash
+        env:
+          ARTIFACTS: ${{ steps.plan.outputs.artifacts }}
+          IMAGE_GO: ${{ inputs['runtime-image-go'] }}
+          IMAGE_RUST: ${{ inputs['runtime-image-rust'] }}
+          IMAGE_NODE: ${{ inputs['runtime-image-node'] }}
+          IMAGE_JAVA: ${{ inputs['runtime-image-java'] }}
+        run: |
+          set -euo pipefail
+          missing=0
+          while IFS= read -r type; do
+            case "$type" in
+              go) input=runtime-image-go image=$IMAGE_GO ;;
+              cargo) input=runtime-image-rust image=$IMAGE_RUST ;;
+              npm) input=runtime-image-node image=$IMAGE_NODE ;;
+              *) input=runtime-image-java image=$IMAGE_JAVA ;;
+            esac
+            if [[ -z "$image" ]]; then
+              printf 'ERROR: the plan builds a %s artifact; pass %s as its digest-pinned runtime image\n' "$type" "$input" >&2
+              missing=1
+            fi
+          done < <(jq -r '.[].project_type' <<<"$ARTIFACTS" | sort -u)
+          exit "$missing"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ${{ inputs['artifact-name'] }}-inputs
@@ -210,10 +244,10 @@ jobs:
     timeout-minutes: 45
     container:
       image: >-
-        ${{ matrix.artifact.project_type == 'go' && (inputs['runtime-image-go'] || needs.resolve-bootstrap.outputs['runtime-image-go']) ||
-            matrix.artifact.project_type == 'cargo' && (inputs['runtime-image-rust'] || needs.resolve-bootstrap.outputs['runtime-image-rust']) ||
-            matrix.artifact.project_type == 'npm' && (inputs['runtime-image-node'] || needs.resolve-bootstrap.outputs['runtime-image-node']) ||
-            (inputs['runtime-image-java'] || needs.resolve-bootstrap.outputs['runtime-image-java']) }}
+        ${{ matrix.artifact.project_type == 'go' && inputs['runtime-image-go'] ||
+            matrix.artifact.project_type == 'cargo' && inputs['runtime-image-rust'] ||
+            matrix.artifact.project_type == 'npm' && inputs['runtime-image-node'] ||
+            inputs['runtime-image-java'] }}
     defaults:
       run:
         shell: bash

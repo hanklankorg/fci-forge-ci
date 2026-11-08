@@ -146,32 +146,31 @@ on:
         required: true
         type: string
       runtime-image-full:
-        description: "forge-ci full runtime image for SBOM-capable snapshot publish jobs. Empty uses the resolved forge-ci version."
-        required: false
-        default: ""
+        description: "Administrator-pinned forge-ci full runtime image@sha256 digest: the snapshot publish stage and image publication run in it on every snapshot."
+        required: true
         type: string
       runtime-image-java:
-        description: "forge-ci Java runtime image for Maven/Gradle jobs. Empty uses the resolved forge-ci version."
+        description: "forge-ci Java runtime image for Maven/Gradle jobs. Pinned by digest (image@sha256:<64 hex>); required when the plan runs a job in it, which refuses an empty or unpinned value before its container starts."
         required: false
         default: ""
         type: string
       runtime-image-node:
-        description: "forge-ci Node runtime image for NPM jobs. Empty uses the resolved forge-ci version."
+        description: "forge-ci Node runtime image for NPM jobs. Pinned by digest (image@sha256:<64 hex>); required when the plan runs a job in it, which refuses an empty or unpinned value before its container starts."
         required: false
         default: ""
         type: string
       runtime-image-rust:
-        description: "forge-ci Rust runtime image for Cargo build + SBOM jobs (build-cargo.yml for artefact-first, sbom-cargo.yml for container-first). Empty uses the resolved forge-ci version."
+        description: "forge-ci Rust runtime image for Cargo build + SBOM jobs (build-cargo.yml for artefact-first, sbom-cargo.yml for container-first). Pinned by digest (image@sha256:<64 hex>); required when the plan runs a job in it, which refuses an empty or unpinned value before its container starts."
         required: false
         default: ""
         type: string
       runtime-image-go:
-        description: "forge-ci Go runtime image for Go build/SBOM jobs. Empty uses the resolved forge-ci version."
+        description: "forge-ci Go runtime image for Go build/SBOM jobs. Pinned by digest (image@sha256:<64 hex>); required when the plan runs a job in it, which refuses an empty or unpinned value before its container starts."
         required: false
         default: ""
         type: string
       runtime-image-android:
-        description: "forge-ci Android runtime image for Gradle Android jobs. Empty uses the resolved forge-ci version."
+        description: "forge-ci Android runtime image for Gradle Android jobs. Pinned by digest (image@sha256:<64 hex>); required when the plan runs a job in it, which refuses an empty or unpinned value before its container starts."
         required: false
         default: ""
         type: string
@@ -245,6 +244,8 @@ jobs:
     uses: ./.github/workflows/resolve-forge-ci-bootstrap.yml
     with:
       forge-ci-binary-ref: ${{ inputs['forge-ci-binary-ref'] }}
+      images: |
+        runtime-image=${{ inputs['runtime-image'] }}
   canonical-cli:
     needs: [resolve-bootstrap]
     permissions:
@@ -354,7 +355,7 @@ jobs:
           NODE_VERSION: ${{ inputs['node-version'] }}
           RUST_TOOLCHAIN: ${{ inputs['rust-toolchain'] }}
           REGISTRY: ${{ inputs.registry }}
-          FORGE_CI_BINARY_REF: ${{ needs.resolve-bootstrap.outputs.forge-ci-binary-ref }}
+          FORGE_CI_BINARY_REF: ${{ inputs['forge-ci-binary-ref'] }}
           NPM_REGISTRY: ${{ inputs['npm-registry'] }}
           PACKAGE_SCOPE: ${{ inputs['package-scope'] }}
           SBOMS: ${{ inputs.sboms }}
@@ -387,13 +388,13 @@ jobs:
       enforce-application-tests: ${{ inputs['enforce-application-tests'] }}
       snapshot-release-plan-json: ${{ needs.setup-snapshot.outputs.snapshot-release-plan-json }}
       snapshot-build-stage-plan-json: ${{ needs.setup-snapshot.outputs.snapshot-build-stage-plan-json }}
-      forge-ci-binary-ref: ${{ needs.resolve-bootstrap.outputs.forge-ci-binary-ref }}
+      forge-ci-binary-ref: ${{ inputs['forge-ci-binary-ref'] }}
       runtime-image: ${{ inputs['runtime-image'] }}
-      runtime-image-java: ${{ inputs['runtime-image-java'] || needs.resolve-bootstrap.outputs['runtime-image-java'] }}
-      runtime-image-node: ${{ inputs['runtime-image-node'] || needs.resolve-bootstrap.outputs['runtime-image-node'] }}
-      runtime-image-go: ${{ inputs['runtime-image-go'] || needs.resolve-bootstrap.outputs['runtime-image-go'] }}
-      runtime-image-android: ${{ inputs['runtime-image-android'] || needs.resolve-bootstrap.outputs['runtime-image-android'] }}
-      runtime-image-rust: ${{ inputs['runtime-image-rust'] || needs.resolve-bootstrap.outputs['runtime-image-rust'] }}
+      runtime-image-java: ${{ inputs['runtime-image-java'] }}
+      runtime-image-node: ${{ inputs['runtime-image-node'] }}
+      runtime-image-go: ${{ inputs['runtime-image-go'] }}
+      runtime-image-android: ${{ inputs['runtime-image-android'] }}
+      runtime-image-rust: ${{ inputs['runtime-image-rust'] }}
       sboms: ${{ inputs.sboms }}
 
   # ===== Stage 2: Publish =====
@@ -417,12 +418,12 @@ jobs:
     uses: ./.github/workflows/release-snapshot-publish-stage.yml
     with:
       snapshot-release-plan-json: ${{ needs.setup-snapshot.outputs.snapshot-release-plan-json }}
-      forge-ci-binary-ref: ${{ needs.resolve-bootstrap.outputs.forge-ci-binary-ref }}
-      runtime-image: ${{ inputs['runtime-image-full'] || needs.resolve-bootstrap.outputs['runtime-image-full'] }}
-      runtime-image-java: ${{ inputs['runtime-image-java'] || needs.resolve-bootstrap.outputs['runtime-image-java'] }}
-      runtime-image-node: ${{ inputs['runtime-image-node'] || needs.resolve-bootstrap.outputs['runtime-image-node'] }}
-      runtime-image-rust: ${{ inputs['runtime-image-rust'] || needs.resolve-bootstrap.outputs['runtime-image-rust'] }}
-      runtime-image-go: ${{ inputs['runtime-image-go'] || needs.resolve-bootstrap.outputs['runtime-image-go'] }}
+      forge-ci-binary-ref: ${{ inputs['forge-ci-binary-ref'] }}
+      runtime-image: ${{ inputs['runtime-image-full'] }}
+      runtime-image-java: ${{ inputs['runtime-image-java'] }}
+      runtime-image-node: ${{ inputs['runtime-image-node'] }}
+      runtime-image-rust: ${{ inputs['runtime-image-rust'] }}
+      runtime-image-go: ${{ inputs['runtime-image-go'] }}
       snapshot-publish-stage-plan-json: ${{ needs.setup-snapshot.outputs.snapshot-publish-stage-plan-json }}
       artifact-transfer-plan-json: ${{ needs.setup-snapshot.outputs.artifact-transfer-plan-json }}
       build-result-json: ${{ needs.execute-snapshot-build-stage.outputs.result-json }}
@@ -447,9 +448,9 @@ jobs:
       image-repository: ${{ inputs['container-image-repository'] }}
       registry: ${{ inputs.registry }}
       registry-user: ${{ inputs['container-registry-user'] }}
-      forge-ci-binary-ref: ${{ needs.resolve-bootstrap.outputs.forge-ci-binary-ref }}
+      forge-ci-binary-ref: ${{ inputs['forge-ci-binary-ref'] }}
       runtime-image: ${{ inputs['runtime-image'] }}
-      runtime-image-full: ${{ inputs['runtime-image-full'] || needs.resolve-bootstrap.outputs['runtime-image-full'] }}
+      runtime-image-full: ${{ inputs['runtime-image-full'] }}
       canonical-artifact-id: ${{ needs.canonical-cli.outputs.artifact-id }}
       canonical-artifact-name: ${{ needs.canonical-cli.outputs.artifact-name }}
       canonical-producer-run-id: ${{ needs.canonical-cli.outputs.producer-run-id }}
@@ -458,10 +459,10 @@ jobs:
       canonical-producer-engine-commit: ${{ needs.canonical-cli.outputs.engine-commit }}
       canonical-producer-result: ${{ needs.canonical-cli.result }}
       use-build-artifacts: true
-      runtime-image-go: ${{ inputs['runtime-image-go'] || needs.resolve-bootstrap.outputs['runtime-image-go'] }}
-      runtime-image-java: ${{ inputs['runtime-image-java'] || needs.resolve-bootstrap.outputs['runtime-image-java'] }}
-      runtime-image-node: ${{ inputs['runtime-image-node'] || needs.resolve-bootstrap.outputs['runtime-image-node'] }}
-      runtime-image-rust: ${{ inputs['runtime-image-rust'] || needs.resolve-bootstrap.outputs['runtime-image-rust'] }}
+      runtime-image-go: ${{ inputs['runtime-image-go'] }}
+      runtime-image-java: ${{ inputs['runtime-image-java'] }}
+      runtime-image-node: ${{ inputs['runtime-image-node'] }}
+      runtime-image-rust: ${{ inputs['runtime-image-rust'] }}
     secrets:
       registry-password: ${{ secrets['container-registry-password'] }}
 

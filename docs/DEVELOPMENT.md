@@ -48,12 +48,8 @@ image) and `.github/actions/build-darwin-cli` for macOS jobs, run from the
 engine checkout at that commit. Self Release passes the commit named by its
 release-request tag, so advancing the branch cannot change its CLI. Release
 tags and branches are not accepted there; to run a branch, pass its commit.
-An omitted binary ref resolves the current published stable release to its
-concrete tag once. GitHub orchestrators, and the reusable workflows a caller
-can also use on its own, use that tag for default runtime images as well,
-under the namespace of the repository serving them; explicit image overrides
-take precedence. Self Release's explicit
-request commit never takes this default-discovery path.
+Every runtime image is passed by digest as well; no workflow picks an image
+or a revision for its caller.
 See
 [CLI binary channels](runtime-images.md#cli-binary-channels).
 

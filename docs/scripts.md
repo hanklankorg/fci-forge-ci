@@ -123,10 +123,9 @@ listed here.
 
 1. **One Go command surface for core operations.** Workflows call
    `forge-ci <group> <subcmd>` for those operations. The binary is baked into the
-   runtime container. On plain runners, tagged releases install a
-   cosign- and SHA-256-verified release archive; branch/SHA refs, local refs,
-   and explicit `FORGE_CI_USE_GO_INSTALL=1` overrides select source installation,
-   using the [source checkout requirements](DEVELOPMENT.md#source-checkout).
+   runtime container. GitHub plain-runner jobs receive the canonical CLI their
+   run builds from the engine commit, and the macOS jobs build it from a
+   checkout of that commit.
 2. **Typed values and errors.** The domain/app/adapter split keeps business
    rules and external operations behind one CLI binding per use case.
 3. **Cross-provider shape.** The use cases are written behind provider-specific

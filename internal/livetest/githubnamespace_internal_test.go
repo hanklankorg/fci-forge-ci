@@ -13,7 +13,7 @@ import (
 func TestGitHubRuntimeNamespaceRendering(t *testing.T) {
 	t.Parallel()
 
-	engine := GitHubEngine{Owner: "Example-Org", Repository: "scratch-engine", Commit: strings.Repeat("a", 40)}
+	engine := GitHubEngine{Owner: "Example-Org", Repository: "scratch-engine", Commit: strings.Repeat("a", 40), Digests: publishedDigests()}
 	require.Equal(t, "ghcr.io/example-org", engine.Registry())
 	engine.Namespace = "ghcr.io/example-org/scratch-engine"
 
@@ -23,10 +23,10 @@ func TestGitHubRuntimeNamespaceRendering(t *testing.T) {
 			image = "forge-ci-runtime"
 		}
 
-		text := "uses: diggsweden/forge-ci/.github/workflows/test.yml@main\n  runtime-image: ghcr.io/diggsweden/" + image + ":v0.90.0\n"
+		text := "jobs:\n  test:\n    uses: diggsweden/forge-ci/.github/workflows/test.yml@main\n    with:\n      runtime-image: ghcr.io/diggsweden/" + image + ":v0.90.0\n"
 		rendered, _, err := RenderGitHubConsumer("test.yml", text, engine, nil)
 		require.NoError(t, err)
-		require.Contains(t, rendered, engine.Namespace+"/"+image+":"+engine.ImageTag())
+		require.Contains(t, rendered, engine.Namespace+"/"+image+"@"+engine.Digests[image])
 		require.Contains(t, rendered, engine.Owner+"/"+engine.Repository+"/.github/workflows/test.yml@"+engine.Commit)
 	}
 

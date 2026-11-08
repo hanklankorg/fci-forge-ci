@@ -83,8 +83,10 @@ mirroring, or stricter reproducibility.
 ```yaml
 jobs:
   build:
-    uses: diggsweden/forge-ci/.github/workflows/build-gradle-android.yml@v0.90.0
+    uses: diggsweden/forge-ci/.github/workflows/build-gradle-android.yml@84180b5ac07af63d33917bec306e7f838aa8e366 # v0.90.0
     with:
+      forge-ci-binary-ref: 84180b5ac07af63d33917bec306e7f838aa8e366 # v0.90.0
+      runtime-image: ghcr.io/diggsweden/forge-ci-runtime-android-35@sha256:0000000000000000000000000000000000000000000000000000000000000000 # FIXME v0.90.0 digest
       build-module: "app"
       product-flavor: "demo"
 ```
@@ -94,13 +96,15 @@ jobs:
 ```yaml
 jobs:
   build:
-    uses: diggsweden/forge-ci/.github/workflows/build-gradle-android.yml@v0.90.0
+    uses: diggsweden/forge-ci/.github/workflows/build-gradle-android.yml@84180b5ac07af63d33917bec306e7f838aa8e366 # v0.90.0
     secrets:  # Required for signing
       ANDROID_KEYSTORE: ${{ secrets.ANDROID_KEYSTORE }}
       ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
       ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
       ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
     with:
+      forge-ci-binary-ref: 84180b5ac07af63d33917bec306e7f838aa8e366 # v0.90.0
+      runtime-image: ghcr.io/diggsweden/forge-ci-runtime-android-35@sha256:0000000000000000000000000000000000000000000000000000000000000000 # FIXME v0.90.0 digest
       build-module: "app"
       product-flavor: "prod"
       enable-signing: true
@@ -121,13 +125,15 @@ as `ANDROID_KEYSTORE`.
 ```yaml
 jobs:
   build:
-    uses: diggsweden/forge-ci/.github/workflows/build-gradle-android.yml@v0.90.0
+    uses: diggsweden/forge-ci/.github/workflows/build-gradle-android.yml@84180b5ac07af63d33917bec306e7f838aa8e366 # v0.90.0
     secrets:  # Required for signing
       ANDROID_KEYSTORE: ${{ secrets.ANDROID_KEYSTORE }}
       ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
       ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
       ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
     with:
+      forge-ci-binary-ref: 84180b5ac07af63d33917bec306e7f838aa8e366 # v0.90.0
+      runtime-image: ghcr.io/diggsweden/forge-ci-runtime-android-35@sha256:0000000000000000000000000000000000000000000000000000000000000000 # FIXME v0.90.0 digest
       build-module: "app"
       build-types: "release"  # Only release builds
       include-aab: true
@@ -139,8 +145,10 @@ jobs:
 ```yaml
 jobs:
   build:
-    uses: diggsweden/forge-ci/.github/workflows/build-gradle-android.yml@v0.90.0
+    uses: diggsweden/forge-ci/.github/workflows/build-gradle-android.yml@84180b5ac07af63d33917bec306e7f838aa8e366 # v0.90.0
     with:
+      forge-ci-binary-ref: 84180b5ac07af63d33917bec306e7f838aa8e366 # v0.90.0
+      runtime-image: ghcr.io/diggsweden/forge-ci-runtime-android-35@sha256:0000000000000000000000000000000000000000000000000000000000000000 # FIXME v0.90.0 digest
       build-module: "app"
       artifact-name-prefix: "production_store"  # Custom prefix
       include-date-stamp: true  # Include date in name
@@ -153,20 +161,24 @@ Build multiple flavors in parallel:
 ```yaml
 jobs:
   build-demo:
-    uses: diggsweden/forge-ci/.github/workflows/build-gradle-android.yml@v0.90.0
+    uses: diggsweden/forge-ci/.github/workflows/build-gradle-android.yml@84180b5ac07af63d33917bec306e7f838aa8e366 # v0.90.0
     with:
+      forge-ci-binary-ref: 84180b5ac07af63d33917bec306e7f838aa8e366 # v0.90.0
+      runtime-image: ghcr.io/diggsweden/forge-ci-runtime-android-35@sha256:0000000000000000000000000000000000000000000000000000000000000000 # FIXME v0.90.0 digest
       build-module: "app"
       product-flavor: "demo"
       artifact-name-prefix: "demo_store"
 
   build-prod:
-    uses: diggsweden/forge-ci/.github/workflows/build-gradle-android.yml@v0.90.0
+    uses: diggsweden/forge-ci/.github/workflows/build-gradle-android.yml@84180b5ac07af63d33917bec306e7f838aa8e366 # v0.90.0
     secrets:  # Required for signing
       ANDROID_KEYSTORE: ${{ secrets.ANDROID_KEYSTORE }}
       ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
       ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
       ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
     with:
+      forge-ci-binary-ref: 84180b5ac07af63d33917bec306e7f838aa8e366 # v0.90.0
+      runtime-image: ghcr.io/diggsweden/forge-ci-runtime-android-35@sha256:0000000000000000000000000000000000000000000000000000000000000000 # FIXME v0.90.0 digest
       build-module: "app"
       product-flavor: "prod"
       artifact-name-prefix: "production_store"
@@ -246,13 +258,15 @@ on:
 
 jobs:
   build:
-    uses: diggsweden/forge-ci/.github/workflows/build-gradle-android.yml@v0.90.0
+    uses: diggsweden/forge-ci/.github/workflows/build-gradle-android.yml@84180b5ac07af63d33917bec306e7f838aa8e366 # v0.90.0
     secrets:  # Required for signing
       ANDROID_KEYSTORE: ${{ secrets.ANDROID_KEYSTORE }}
       ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
       ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
       ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
     with:
+      forge-ci-binary-ref: 84180b5ac07af63d33917bec306e7f838aa8e366 # v0.90.0
+      runtime-image: ghcr.io/diggsweden/forge-ci-runtime-android-35@sha256:0000000000000000000000000000000000000000000000000000000000000000 # FIXME v0.90.0 digest
       build-module: app
       product-flavor: demo
       build-types: release
@@ -261,10 +275,12 @@ jobs:
 
   upload-play-store:
     needs: build
-    uses: diggsweden/forge-ci/.github/workflows/publish-google-play.yml@v0.90.0
+    uses: diggsweden/forge-ci/.github/workflows/publish-google-play.yml@84180b5ac07af63d33917bec306e7f838aa8e366 # v0.90.0
     secrets:
       GOOGLE_PLAY_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON }}
     with:
+      forge-ci-binary-ref: 84180b5ac07af63d33917bec306e7f838aa8e366 # v0.90.0
+      runtime-image: ghcr.io/diggsweden/forge-ci-runtime-base@sha256:0000000000000000000000000000000000000000000000000000000000000000 # FIXME v0.90.0 digest
       branch: ${{ github.ref }}
       aab-artifact-name: ${{ needs.build.outputs.aab-name }}
       package-name: com.example.myapp

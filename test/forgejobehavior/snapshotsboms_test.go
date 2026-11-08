@@ -154,11 +154,11 @@ func TestPackagePublisherRunsInTheToolchainImageOfItsPackageType(t *testing.T) {
 		t.Fatal("package publisher must wait for the frozen bootstrap revision")
 	}
 
-	if _, forwarded := publisher.With["forge-ci-binary-ref"]; forwarded {
-		t.Fatal("package publisher takes its engine from the runtime image, not an engine ref")
+	if publisher.With["forge-ci-binary-ref"] != "${{ inputs['forge-ci-binary-ref'] }}" {
+		t.Fatal("package publisher admits its runtime image itself, so it takes the caller's engine commit")
 	}
 
-	want := "${{ matrix.artifact.project_type == 'npm' && (inputs['runtime-image-node'] || needs.resolve-bootstrap.outputs['runtime-image-node']) || (inputs['runtime-image-java'] || needs.resolve-bootstrap.outputs['runtime-image-java']) }}"
+	want := "${{ matrix.artifact.project_type == 'npm' && inputs['runtime-image-node'] || matrix.artifact.project_type != 'npm' && inputs['runtime-image-java'] || '' }}"
 	if got := publisher.With["runtime-image"]; got != want {
 		t.Fatalf("package publisher image is not selected by package type: %v", got)
 	}

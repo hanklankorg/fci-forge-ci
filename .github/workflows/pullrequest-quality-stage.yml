@@ -63,6 +63,8 @@ jobs:
     uses: ./.github/workflows/resolve-forge-ci-bootstrap.yml
     with:
       forge-ci-binary-ref: ${{ inputs['forge-ci-binary-ref'] }}
+      images: |
+        runtime-image=${{ inputs['runtime-image'] }}
   nanolinter:
     needs: [resolve-bootstrap]
     name: "Check: lint"
@@ -79,7 +81,7 @@ jobs:
       # flavour matching the project type.
       nanolinter-image: ${{ fromJson(inputs['pr-plan-json']).policy.nanolinter_image }}
       required-lints: ${{ inputs['required-lints'] }}
-      forge-ci-binary-ref: ${{ needs.resolve-bootstrap.outputs.forge-ci-binary-ref }}
+      forge-ci-binary-ref: ${{ inputs['forge-ci-binary-ref'] }}
       runtime-image: ${{ inputs['runtime-image'] }}
       canonical-artifact-id: ${{ inputs['canonical-artifact-id'] }}
       canonical-artifact-name: ${{ inputs['canonical-artifact-name'] }}
@@ -99,7 +101,7 @@ jobs:
     uses: ./.github/workflows/lint-megalinter.yml
     with:
       megalinter-image: ${{ inputs['megalinter-image'] }}
-      forge-ci-binary-ref: ${{ needs.resolve-bootstrap.outputs.forge-ci-binary-ref }}
+      forge-ci-binary-ref: ${{ inputs['forge-ci-binary-ref'] }}
       runtime-image: ${{ inputs['runtime-image'] }}
       canonical-artifact-id: ${{ inputs['canonical-artifact-id'] }}
       canonical-artifact-name: ${{ inputs['canonical-artifact-name'] }}
@@ -117,7 +119,7 @@ jobs:
     uses: ./.github/workflows/lint-swift.yml
     with:
       enforce-lint: ${{ inputs['enforce-lint'] }}
-      forge-ci-binary-ref: ${{ needs.resolve-bootstrap.outputs.forge-ci-binary-ref }}
+      forge-ci-binary-ref: ${{ inputs['forge-ci-binary-ref'] }}
       enable-swiftformat: ${{ fromJson(inputs['pr-plan-json']).policy.swift_format }}
       enable-swiftlint: ${{ fromJson(inputs['pr-plan-json']).policy.swift_lint }}
       runtime-image: ${{ inputs['runtime-image'] }}

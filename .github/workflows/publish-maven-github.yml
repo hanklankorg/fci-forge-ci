@@ -79,14 +79,29 @@ on:
         required: true
         type: string
       runtime-image:
-        description: "forge-ci runtime image the publication runs in: the Java image (JDK, Maven and Gradle baked in) for maven, gradle and gradle-android, the Node image for npm. The caller selects it by package type; a job container starts before any step, so the caller admits the image, by digest for a strict posture."
+        description: "forge-ci runtime image the publication runs in: the Java image (JDK, Maven and Gradle baked in) for maven, gradle and gradle-android, the Node image for npm. The caller selects it by package type, pinned by digest; the resolver refuses anything else before the job container starts."
+        required: true
+        type: string
+      forge-ci-binary-ref:
+        description: "Full engine commit (40 hex) the workflow ref names; a tag or branch is refused"
         required: true
         type: string
 permissions:
   contents: read
 jobs:
+  # Admits the engine commit and the runtime image by digest before the job
+  # container starts.
+  resolve-bootstrap:
+    permissions:
+      contents: read
+    uses: ./.github/workflows/resolve-forge-ci-bootstrap.yml
+    with:
+      forge-ci-binary-ref: ${{ inputs['forge-ci-binary-ref'] }}
+      images: |
+        runtime-image=${{ inputs['runtime-image'] }}
   publish-maven-github:
     name: Publish to GitHub Packages (${{ inputs['package-type'] }})
+    needs: [resolve-bootstrap]
     runs-on: ubuntu-26.04
     timeout-minutes: 30
     container:

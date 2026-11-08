@@ -108,7 +108,11 @@ on:
         default: false
         type: boolean
       runtime-image:
-        description: "Administrator-pinned forge-ci base runtime image@sha256 digest the promotion runs in (forge-ci and cosign baked in). The orchestrator passes the digest its canonical delivery admitted."
+        description: "Administrator-pinned forge-ci base runtime image@sha256 digest the promotion runs in (forge-ci and cosign baked in). The resolver refuses anything else before the job container starts."
+        required: true
+        type: string
+      forge-ci-binary-ref:
+        description: "Full engine commit (40 hex) the workflow ref names; a tag or branch is refused"
         required: true
         type: string
     secrets:
@@ -127,8 +131,19 @@ concurrency:
 permissions:
   contents: read # Base least-privilege; the job adds what it needs.
 jobs:
+  # Admits the engine commit and the runtime image by digest before the job
+  # container starts.
+  resolve-bootstrap:
+    permissions:
+      contents: read
+    uses: ./.github/workflows/resolve-forge-ci-bootstrap.yml
+    with:
+      forge-ci-binary-ref: ${{ inputs['forge-ci-binary-ref'] }}
+      images: |
+        runtime-image=${{ inputs['runtime-image'] }}
   promote:
     name: "Publish: images to ${{ inputs.stage }}"
+    needs: [resolve-bootstrap]
     runs-on: ubuntu-26.04
     timeout-minutes: 15
     container:

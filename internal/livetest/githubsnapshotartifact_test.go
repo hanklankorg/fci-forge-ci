@@ -69,15 +69,18 @@ func TestGitHubSnapshotArtifactFirst(t *testing.T) {
 	// host build legs. A copy of the tree without images cannot serve them.
 	engine := trial.ReuseEngine(reporoot.Path(t))
 	engineRepo, engineSHA := engine.Repository, engine.Commit
-	baseImage := engine.renderRuntimeImage("ghcr.io/diggsweden/forge-ci-runtime-base:x")
-	fullImage := engine.renderRuntimeImage("ghcr.io/diggsweden/forge-ci-runtime:x")
-	goImage := engine.renderRuntimeImage("ghcr.io/diggsweden/forge-ci-runtime-go-1.27:x")
+	images := map[string]string{}
 
-	for _, image := range []string{baseImage, goImage} {
-		if !pinnedImage.MatchString(image) {
-			t.Fatalf("canonical admission takes images by digest only; the engine resolved %q", image)
+	for _, name := range []string{"forge-ci-runtime-base", "forge-ci-runtime", "forge-ci-runtime-go-1.27"} {
+		image, ok := engine.RuntimeImage(name)
+		if !ok || !pinnedImage.MatchString(image) {
+			t.Fatalf("every workflow admits images by digest only; the engine published no digest for %s", name)
 		}
+
+		images[name] = image
 	}
+
+	baseImage, fullImage, goImage := images["forge-ci-runtime-base"], images["forge-ci-runtime"], images["forge-ci-runtime-go-1.27"]
 
 	t.Logf("snapshot engine under test: %s/%s commit=%s", trial.org, engineRepo, engineSHA)
 

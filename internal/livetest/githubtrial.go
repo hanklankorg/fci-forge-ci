@@ -182,9 +182,9 @@ func (trial *GitHubTrial) EnsureEngine(root, platforms string) GitHubEngine {
 }
 
 // resolveEngineDigests asks the organization's packages what each runtime
-// image serves for the commit's tag, so release fixtures render the digests
-// the release route admits. The two images the route admits must exist; a
-// missing lane image renders by tag and fails where it is pulled, as before.
+// image serves for the commit's tag, so fixtures render the digests every
+// workflow admits. The base and Go builder images must exist; a fixture that
+// names another image the engine did not publish is refused when it renders.
 func (trial *GitHubTrial) resolveEngineDigests(engine GitHubEngine) map[string]string {
 	trial.tb.Helper()
 
@@ -208,7 +208,7 @@ func (trial *GitHubTrial) resolveEngineDigests(engine GitHubEngine) map[string]s
 
 	for _, image := range []string{"forge-ci-runtime-base", "forge-ci-runtime-go-1.27"} {
 		if digests[image] == "" {
-			trial.tb.Fatalf("livetest: %s/%s:%s has no published digest; the release route admits only digest-pinned images", engine.Registry(), image, engine.ImageTag())
+			trial.tb.Fatalf("livetest: %s/%s:%s has no published digest; every workflow admits only digest-pinned images", engine.Registry(), image, engine.ImageTag())
 		}
 	}
 

@@ -581,7 +581,7 @@ jobs:
     permissions:
       contents: read
       actions: read
-    uses: diggsweden/forge-ci/.github/workflows/canonical-cli-bootstrap.yml@v0.90.0
+    uses: diggsweden/forge-ci/.github/workflows/canonical-cli-bootstrap.yml@84180b5ac07af63d33917bec306e7f838aa8e366 # v0.90.0
     with:
       engine-repository: diggsweden/forge-ci
       engine-commit: <full-engine-commit> # the commit the pinned forge-ci tag points at
@@ -589,7 +589,7 @@ jobs:
       receive-runtime-image: ghcr.io/diggsweden/forge-ci-runtime-base@sha256:<digest>
   publish-container:
     needs: [build-maven, canonical-cli]
-    uses: diggsweden/forge-ci/.github/workflows/publish-container.yml@v0.90.0
+    uses: diggsweden/forge-ci/.github/workflows/publish-container.yml@84180b5ac07af63d33917bec306e7f838aa8e366 # v0.90.0
     permissions:
       contents: read
       packages: write
@@ -642,13 +642,16 @@ secret:
 jobs:
   publish-container:
     needs: [build-maven, canonical-cli]
-    uses: diggsweden/forge-ci/.github/workflows/publish-container.yml@v0.90.0
+    uses: diggsweden/forge-ci/.github/workflows/publish-container.yml@84180b5ac07af63d33917bec306e7f838aa8e366 # v0.90.0
     permissions:
       contents: read
       packages: write
       id-token: write
       actions: read
     with:
+      forge-ci-binary-ref: 84180b5ac07af63d33917bec306e7f838aa8e366 # v0.90.0
+      runtime-image: ghcr.io/diggsweden/forge-ci-runtime-base@sha256:0000000000000000000000000000000000000000000000000000000000000000 # FIXME v0.90.0 digest
+      runtime-image-full: ghcr.io/diggsweden/forge-ci-runtime@sha256:0000000000000000000000000000000000000000000000000000000000000000 # FIXME v0.90.0 digest
       branch: main
       # forge-ci-binary-ref, runtime-image, runtime-image-full and the
       # canonical-* inputs exactly as in the GHCR example above.
@@ -681,13 +684,16 @@ namespace and repository name, producing `registry.example.com/source-org/my-app
 jobs:
   publish-container:
     needs: [build-maven, canonical-cli]
-    uses: diggsweden/forge-ci/.github/workflows/publish-container.yml@v0.90.0
+    uses: diggsweden/forge-ci/.github/workflows/publish-container.yml@84180b5ac07af63d33917bec306e7f838aa8e366 # v0.90.0
     permissions:
       contents: read
       packages: write
       id-token: write
       actions: read
     with:
+      forge-ci-binary-ref: 84180b5ac07af63d33917bec306e7f838aa8e366 # v0.90.0
+      runtime-image: ghcr.io/diggsweden/forge-ci-runtime-base@sha256:0000000000000000000000000000000000000000000000000000000000000000 # FIXME v0.90.0 digest
+      runtime-image-full: ghcr.io/diggsweden/forge-ci-runtime@sha256:0000000000000000000000000000000000000000000000000000000000000000 # FIXME v0.90.0 digest
       branch: main
       # forge-ci-binary-ref, runtime-image, runtime-image-full and the
       # canonical-* inputs exactly as in the GHCR example above.

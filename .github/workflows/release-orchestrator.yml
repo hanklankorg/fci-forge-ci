@@ -164,7 +164,7 @@ on:
         required: true
         type: string
       runtime-image-full:
-        description: "forge-ci full runtime image for SBOM/security-capable release jobs. Empty uses the resolved forge-ci version."
+        description: "forge-ci full runtime image for SBOM/security-capable release jobs. Pinned by digest (image@sha256:<64 hex>); required when the plan runs a job in it, which refuses an empty or unpinned value before its container starts."
         required: false
         default: ""
         type: string
@@ -173,27 +173,27 @@ on:
         required: true
         type: string
       runtime-image-java:
-        description: "forge-ci Java runtime image for Maven/Gradle jobs. Empty uses the resolved forge-ci version."
+        description: "forge-ci Java runtime image for Maven/Gradle jobs. Pinned by digest (image@sha256:<64 hex>); required when the plan runs a job in it, which refuses an empty or unpinned value before its container starts."
         required: false
         default: ""
         type: string
       runtime-image-node:
-        description: "forge-ci Node runtime image for NPM jobs. Empty uses the resolved forge-ci version."
+        description: "forge-ci Node runtime image for NPM jobs. Pinned by digest (image@sha256:<64 hex>); required when the plan runs a job in it, which refuses an empty or unpinned value before its container starts."
         required: false
         default: ""
         type: string
       runtime-image-rust:
-        description: "forge-ci Rust runtime image for Cargo build + SBOM jobs (build-cargo.yml for artefact-first, sbom-cargo.yml for container-first). Empty uses the resolved forge-ci version."
+        description: "forge-ci Rust runtime image for Cargo build + SBOM jobs (build-cargo.yml for artefact-first, sbom-cargo.yml for container-first). Pinned by digest (image@sha256:<64 hex>); required when the plan runs a job in it, which refuses an empty or unpinned value before its container starts."
         required: false
         default: ""
         type: string
       runtime-image-go:
-        description: "forge-ci Go runtime image for Go build/SBOM jobs. Empty uses the resolved forge-ci version."
+        description: "forge-ci Go runtime image for Go build/SBOM jobs. Pinned by digest (image@sha256:<64 hex>); required when the plan runs a job in it, which refuses an empty or unpinned value before its container starts."
         required: false
         default: ""
         type: string
       runtime-image-android:
-        description: "forge-ci Android runtime image for Gradle Android jobs. Empty uses the resolved forge-ci version."
+        description: "forge-ci Android runtime image for Gradle Android jobs. Pinned by digest (image@sha256:<64 hex>); required when the plan runs a job in it, which refuses an empty or unpinned value before its container starts."
         required: false
         default: ""
         type: string
@@ -380,6 +380,8 @@ jobs:
     uses: ./.github/workflows/resolve-forge-ci-bootstrap.yml
     with:
       forge-ci-binary-ref: ${{ inputs['forge-ci-binary-ref'] }}
+      images: |
+        runtime-image=${{ inputs['runtime-image'] }}
   # ===== Stage 0: Configuration And Policy =====
   canonical-cli:
     needs: [resolve-bootstrap]
@@ -415,10 +417,6 @@ jobs:
       build-stage-plan-json: ${{ steps.plan.outputs.build-stage-plan-json }}
       publish-stage-plan-json: ${{ steps.plan.outputs.publish-stage-plan-json }}
       artifact-transfer-plan-json: ${{ steps.plan.outputs.artifact-transfer-plan-json }}
-
-      # Preserve concrete release tags for verified assets; source refs are
-      # already immutable commits, including Self Release's request commit.
-      forge-ci-binary-ref: ${{ needs.resolve-bootstrap.outputs.forge-ci-binary-ref }}
 
       # Final release tag (vX.Y.Z) derived from the pushed request ref
       # (release-request/vX.Y.Z). Downstream jobs key off this, not
@@ -499,12 +497,6 @@ jobs:
           CHECKOUT_REF: ${{ github.sha }}
           CHECKOUT_FETCH_ALL_REFS: "true"
         run: forge-ci platform checkout
-      - name: Resolve forge-ci ref to commit SHA
-        id: resolve-ref
-        env:
-          REMOTE_URL: ${{ github.server_url }}/${{ needs.resolve-bootstrap.outputs.forge-ci-repository }}
-          REF: ${{ needs.resolve-bootstrap.outputs.forge-ci-binary-ref }}
-        run: forge-ci platform resolve-ref
       - name: Derive release tag from request ref
         id: relctx
         # release-request/vX.Y.Z → vX.Y.Z (the final release tag). The CLI
@@ -575,7 +567,7 @@ jobs:
       canonical-producer-engine-commit: ${{ needs.canonical-cli.outputs.engine-commit }}
       canonical-producer-result: ${{ needs.canonical-cli.result }}
       enforce-reproducible-builds: ${{ inputs['enforce-reproducible-builds'] }}
-      forge-ci-binary-ref: ${{ needs.resolve-bootstrap.outputs.forge-ci-binary-ref }}
+      forge-ci-binary-ref: ${{ inputs['forge-ci-binary-ref'] }}
       config-plan-json: ${{ needs.parse-config.outputs.config-plan-json }}
       has-cargo-publish-target: ${{ fromJson(needs.parse-config.outputs['publish-stage-plan-json']).targets.cargo_container_first.runs || fromJson(needs.parse-config.outputs['build-stage-plan-json']).targets.cargo.runs }}
       publish-stage-plan-json: ${{ needs.parse-config.outputs.publish-stage-plan-json }}
@@ -589,8 +581,11 @@ jobs:
       branch: ${{ inputs.branch }}
       authorized-source-sha: ${{ github.sha }}
       # Cargo prerequisite validation checks Cargo.lock and `cargo --version`,
-      # so use the Rust runtime whenever Cargo artifacts (either mode) are present.
-      runtime-image: ${{ (fromJson(needs.parse-config.outputs['publish-stage-plan-json']).targets.cargo_container_first.runs || fromJson(needs.parse-config.outputs['build-stage-plan-json']).targets.cargo.runs) && (inputs['runtime-image-rust'] || (inputs['release-file-mode'] == 'classified-files' && inputs['runtime-image']) || needs.resolve-bootstrap.outputs['runtime-image-rust']) || inputs['runtime-image'] }}
+      # so it runs in the Rust runtime whenever Cargo artifacts (either mode)
+      # are present; the classified route keeps the base image when no Rust
+      # image is passed. Without one on the native route the value is empty
+      # and the callee refuses it before its container starts.
+      runtime-image: ${{ (fromJson(needs.parse-config.outputs['publish-stage-plan-json']).targets.cargo_container_first.runs || fromJson(needs.parse-config.outputs['build-stage-plan-json']).targets.cargo.runs) && (inputs['runtime-image-rust'] || inputs['release-file-mode'] == 'classified-files' && inputs['runtime-image']) || !(fromJson(needs.parse-config.outputs['publish-stage-plan-json']).targets.cargo_container_first.runs || fromJson(needs.parse-config.outputs['build-stage-plan-json']).targets.cargo.runs) && inputs['runtime-image'] || '' }}
   # ===== Stage 2: Release Preparation =====
   # Release preparation now lives below this control-plane stage call.
   execute-prepare-stage:
@@ -622,7 +617,7 @@ jobs:
       authorized-source-sha: ${{ github.sha }}
       existing-release-sha: ${{ needs.validate-prerequisites.outputs.existing-release-sha }}
       prepare-stage-plan-json: ${{ needs.parse-config.outputs.prepare-stage-plan-json }}
-      forge-ci-binary-ref: ${{ needs.parse-config.outputs.forge-ci-binary-ref }}
+      forge-ci-binary-ref: ${{ inputs['forge-ci-binary-ref'] }}
       # git_signing.method comes from artifacts.yml via the parsed config plan;
       # defaults to gpg, so repos that never set git-signing are unchanged.
       git-signing-method: ${{ fromJson(needs.parse-config.outputs.config-plan-json).git_signing.method }}
@@ -741,13 +736,13 @@ jobs:
       release-sha: ${{ needs.execute-prepare-stage.outputs.release-sha }}
       source-date-epoch: ${{ needs.execute-prepare-stage.outputs.source-date-epoch }}
       build-stage-plan-json: ${{ needs.parse-config.outputs.build-stage-plan-json }}
-      forge-ci-binary-ref: ${{ needs.parse-config.outputs.forge-ci-binary-ref }}
+      forge-ci-binary-ref: ${{ inputs['forge-ci-binary-ref'] }}
       runtime-image: ${{ inputs['runtime-image'] }}
-      runtime-image-java: ${{ inputs['runtime-image-java'] || needs.resolve-bootstrap.outputs['runtime-image-java'] }}
-      runtime-image-node: ${{ inputs['runtime-image-node'] || needs.resolve-bootstrap.outputs['runtime-image-node'] }}
-      runtime-image-go: ${{ inputs['runtime-image-go'] || needs.resolve-bootstrap.outputs['runtime-image-go'] }}
-      runtime-image-android: ${{ inputs['runtime-image-android'] || needs.resolve-bootstrap.outputs['runtime-image-android'] }}
-      runtime-image-rust: ${{ inputs['runtime-image-rust'] || needs.resolve-bootstrap.outputs['runtime-image-rust'] }}
+      runtime-image-java: ${{ inputs['runtime-image-java'] }}
+      runtime-image-node: ${{ inputs['runtime-image-node'] }}
+      runtime-image-go: ${{ inputs['runtime-image-go'] }}
+      runtime-image-android: ${{ inputs['runtime-image-android'] }}
+      runtime-image-rust: ${{ inputs['runtime-image-rust'] }}
   # ===== Stage 4: Publish =====
   # Publish fanout now lives below this control-plane stage call.
   # Container-first cargo publishes here: lockfile-derived SBOM and the
@@ -787,7 +782,7 @@ jobs:
       release-sha: ${{ needs.execute-prepare-stage.outputs.release-sha }}
       source-date-epoch: ${{ needs.execute-prepare-stage.outputs.source-date-epoch }}
       publish-stage-plan-json: ${{ needs.parse-config.outputs.publish-stage-plan-json }}
-      forge-ci-binary-ref: ${{ needs.parse-config.outputs.forge-ci-binary-ref }}
+      forge-ci-binary-ref: ${{ inputs['forge-ci-binary-ref'] }}
       canonical-artifact-id: ${{ needs.canonical-cli.outputs.artifact-id }}
       canonical-artifact-name: ${{ needs.canonical-cli.outputs.artifact-name }}
       canonical-producer-run-id: ${{ needs.canonical-cli.outputs.producer-run-id }}
@@ -796,11 +791,11 @@ jobs:
       canonical-producer-engine-commit: ${{ needs.canonical-cli.outputs.engine-commit }}
       canonical-producer-result: ${{ needs.canonical-cli.result }}
       runtime-image: ${{ inputs['runtime-image'] }}
-      runtime-image-full: ${{ inputs['runtime-image-full'] || needs.resolve-bootstrap.outputs['runtime-image-full'] }}
-      runtime-image-java: ${{ inputs['runtime-image-java'] || needs.resolve-bootstrap.outputs['runtime-image-java'] }}
-      runtime-image-node: ${{ inputs['runtime-image-node'] || needs.resolve-bootstrap.outputs['runtime-image-node'] }}
-      runtime-image-rust: ${{ inputs['runtime-image-rust'] || needs.resolve-bootstrap.outputs['runtime-image-rust'] }}
-      runtime-image-go: ${{ inputs['runtime-image-go'] || needs.resolve-bootstrap.outputs['runtime-image-go'] }}
+      runtime-image-full: ${{ inputs['runtime-image-full'] }}
+      runtime-image-java: ${{ inputs['runtime-image-java'] }}
+      runtime-image-node: ${{ inputs['runtime-image-node'] }}
+      runtime-image-rust: ${{ inputs['runtime-image-rust'] }}
+      runtime-image-go: ${{ inputs['runtime-image-go'] }}
       build-result-json: ${{ needs.execute-build-stage.outputs.result-json }}
       # Carry the config-plan + sign-artifacts policy through so the
       # publish stage can dispatch container image signing per
@@ -829,6 +824,7 @@ jobs:
       packages: write
     uses: ./.github/workflows/promote-stage.yml
     with:
+      forge-ci-binary-ref: ${{ inputs['forge-ci-binary-ref'] }}
       stage: dev
       runtime-image: ${{ inputs['runtime-image'] }}
       release-tag: ${{ needs.parse-config.outputs.release-tag }}
@@ -842,6 +838,7 @@ jobs:
       packages: write
     uses: ./.github/workflows/promote-stage.yml
     with:
+      forge-ci-binary-ref: ${{ inputs['forge-ci-binary-ref'] }}
       stage: staging
       runtime-image: ${{ inputs['runtime-image'] }}
       environment: ${{ inputs['promote-staging-environment'] }}
@@ -856,6 +853,7 @@ jobs:
       packages: write
     uses: ./.github/workflows/promote-stage.yml
     with:
+      forge-ci-binary-ref: ${{ inputs['forge-ci-binary-ref'] }}
       stage: release
       runtime-image: ${{ inputs['runtime-image'] }}
       environment: ${{ inputs['promote-release-environment'] }}
@@ -910,11 +908,11 @@ jobs:
       changelog-config: ${{ inputs['changelog.config'] }}
       make-latest: ${{ fromJson(needs.parse-config.outputs['release-plan-json']).policy.make_latest }}
       runtime-image: ${{ inputs['runtime-image'] }}
-      runtime-image-full: ${{ inputs['runtime-image-full'] || needs.resolve-bootstrap.outputs['runtime-image-full'] }}
+      runtime-image-full: ${{ inputs['runtime-image-full'] }}
       cosign-public-key: ${{ inputs['cosign-public-key'] }}
       cosign-public-key-sha256: ${{ inputs['cosign-public-key-sha256'] }}
       release-asset-retention: ${{ inputs['release-asset-retention'] }}
-      forge-ci-binary-ref: ${{ needs.parse-config.outputs.forge-ci-binary-ref }}
+      forge-ci-binary-ref: ${{ inputs['forge-ci-binary-ref'] }}
   # ===== Stage 6: Summary =====
   release-summary:
     name: Summary

@@ -88,14 +88,12 @@ on:
         default: true
         type: boolean
       runtime-image:
-        description: "forge-ci runtime image carrying Go + cyclonedx-gomod. Empty uses the image of the resolved forge-ci version."
-        required: false
-        default: ""
+        description: "forge-ci runtime image carrying Go + cyclonedx-gomod., pinned by digest (image@sha256:<64 hex>); the resolver refuses anything else before the job container starts."
+        required: true
         type: string
       forge-ci-binary-ref:
-        description: "forge-ci release tag or commit whose runtime image the jobs run in; empty resolves the current stable release tag"
-        required: false
-        default: ""
+        description: "Full engine commit (40 hex) the workflow ref names; a tag or branch is refused"
+        required: true
         type: string
 permissions:
   contents: read
@@ -106,13 +104,15 @@ jobs:
     uses: ./.github/workflows/resolve-forge-ci-bootstrap.yml
     with:
       forge-ci-binary-ref: ${{ inputs['forge-ci-binary-ref'] }}
+      images: |
+        runtime-image=${{ inputs['runtime-image'] }}
   build-go:
     needs: [resolve-bootstrap]
     name: Build Go Project
     runs-on: ubuntu-26.04
     timeout-minutes: 30
     container:
-      image: ${{ inputs['runtime-image'] || needs.resolve-bootstrap.outputs['runtime-image-go'] }}
+      image: ${{ inputs['runtime-image'] }}
     permissions:
       contents: read
     steps:

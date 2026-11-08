@@ -38,6 +38,10 @@ on:
         description: "Administrator-pinned forge-ci base runtime image@sha256 digest the SARIF upload job runs in (forge-ci baked in)"
         required: true
         type: string
+      forge-ci-binary-ref:
+        description: "Full engine commit (40 hex) the workflow ref names; a tag or branch is refused"
+        required: true
+        type: string
     secrets:
       CODE_SCANNING_TOKEN:
         description: "Token with security-events:write for SARIF upload"
@@ -45,6 +49,16 @@ on:
 permissions:
   contents: read
 jobs:
+  # Admits the engine commit and the runtime image by digest before the job
+  # container starts.
+  resolve-bootstrap:
+    permissions:
+      contents: read
+    uses: ./.github/workflows/resolve-forge-ci-bootstrap.yml
+    with:
+      forge-ci-binary-ref: ${{ inputs['forge-ci-binary-ref'] }}
+      images: |
+        runtime-image=${{ inputs['runtime-image'] }}
   # The scorecard publish webapp rejects any job whose steps aren't all `uses:`.
   # We keep this job strictly pure-actions and hand off SARIF to a separate
   # `publish-sarif` job via an artifact.
@@ -87,7 +101,7 @@ jobs:
   # admitted runtime image.
   publish-sarif:
     name: Upload SARIF to Code Scanning
-    needs: [analysis]
+    needs: [resolve-bootstrap, analysis]
     if: always() && needs.analysis.result != 'cancelled'
     runs-on: ubuntu-26.04
     timeout-minutes: 5

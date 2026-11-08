@@ -41,7 +41,7 @@ func TestAndroidDemoBindsBothJobsToPreparedEngine(t *testing.T) {
 
 	build := workflow.Jobs["build"]
 	require.Equal(t, "${{ github.event_name == 'workflow_dispatch' }}", build.If)
-	require.Equal(t, "ghcr.io/example-org/forge-ci-runtime-android-35:sha-aaaaaaa", build.With["runtime-image"])
+	require.Equal(t, "ghcr.io/example-org/forge-ci-runtime-android-35@"+trialEngine.Digests["forge-ci-runtime-android-35"], build.With["runtime-image"])
 	require.Equal(t, "false", build.With["enable-signing"])
 	require.Equal(t, "false", build.With["skip-tests"])
 	require.Equal(t, "true", build.With["include-aab"])

@@ -42,9 +42,8 @@ on:
         required: true
         type: string
       forge-ci-binary-ref:
-        description: "Full approved engine commit the canonical CLI was built from; the host jobs receive exactly that build"
-        required: false
-        default: ""
+        description: "Full engine commit (40 hex) the workflow ref names; a tag or branch is refused"
+        required: true
         type: string
       runtime-image:
         description: "Administrator-pinned forge-ci base runtime image@sha256 digest for the changelog, summary and canonical receive jobs; the orchestrator passes its admitted input"
@@ -125,6 +124,8 @@ jobs:
     uses: ./.github/workflows/resolve-forge-ci-bootstrap.yml
     with:
       forge-ci-binary-ref: ${{ inputs['forge-ci-binary-ref'] }}
+      images: |
+        runtime-image=${{ inputs['runtime-image'] }}
   generate-full-changelog:
     needs: [resolve-bootstrap]
     name: "Prepare: changelog"
@@ -142,7 +143,7 @@ jobs:
       canonical-producer-engine-repository: ${{ inputs['canonical-producer-engine-repository'] }}
       canonical-producer-engine-commit: ${{ inputs['canonical-producer-engine-commit'] }}
       canonical-producer-result: ${{ inputs['canonical-producer-result'] }}
-      forge-ci-binary-ref: ${{ needs.resolve-bootstrap.outputs.forge-ci-binary-ref }}
+      forge-ci-binary-ref: ${{ inputs['forge-ci-binary-ref'] }}
       release-policy: ${{ inputs['release-policy'] }}
       branch: ${{ inputs['authorized-source-sha'] }}
       runtime-image: ${{ inputs['runtime-image'] }}
@@ -168,7 +169,7 @@ jobs:
       canonical-producer-engine-repository: ${{ inputs['canonical-producer-engine-repository'] }}
       canonical-producer-engine-commit: ${{ inputs['canonical-producer-engine-commit'] }}
       canonical-producer-result: ${{ inputs['canonical-producer-result'] }}
-      forge-ci-binary-ref: ${{ needs.resolve-bootstrap.outputs.forge-ci-binary-ref }}
+      forge-ci-binary-ref: ${{ inputs['forge-ci-binary-ref'] }}
       release-policy: ${{ inputs['release-policy'] }}
       branch: ${{ inputs['authorized-source-sha'] }}
       runtime-image: ${{ inputs['runtime-image'] }}

@@ -71,9 +71,8 @@ on:
         required: true
         type: string
       runtime-image:
-        description: "forge-ci runtime image used by the Linux summary job. Empty uses the resolved forge-ci version."
-        required: false
-        default: ""
+        description: "forge-ci runtime image used by the Linux summary job, pinned by digest (image@sha256:<64 hex>); the resolver refuses anything else."
+        required: true
         type: string
 permissions:
   contents: read
@@ -84,6 +83,8 @@ jobs:
     uses: ./.github/workflows/resolve-forge-ci-bootstrap.yml
     with:
       forge-ci-binary-ref: ${{ inputs['forge-ci-binary-ref'] }}
+      images: |
+        runtime-image=${{ inputs['runtime-image'] }}
   swift-format-lint:
     needs: [resolve-bootstrap]
     name: Swift Format Lint
@@ -104,13 +105,13 @@ jobs:
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           repository: ${{ needs.resolve-bootstrap.outputs.forge-ci-repository }}
-          ref: ${{ needs.resolve-bootstrap.outputs.forge-ci-binary-ref }}
+          ref: ${{ inputs['forge-ci-binary-ref'] }}
           path: _forge_ci_engine
           persist-credentials: false
       - name: Build forge-ci for macOS from the approved engine
         uses: ./_forge_ci_engine/.github/actions/build-darwin-cli
         with:
-          engine-commit: ${{ needs.resolve-bootstrap.outputs.forge-ci-binary-ref }}
+          engine-commit: ${{ inputs['forge-ci-binary-ref'] }}
       - name: Install swift-format
         env:
           SWIFT_FORMAT_VERSION: ${{ inputs['swift-format-version'] }}
@@ -147,13 +148,13 @@ jobs:
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           repository: ${{ needs.resolve-bootstrap.outputs.forge-ci-repository }}
-          ref: ${{ needs.resolve-bootstrap.outputs.forge-ci-binary-ref }}
+          ref: ${{ inputs['forge-ci-binary-ref'] }}
           path: _forge_ci_engine
           persist-credentials: false
       - name: Build forge-ci for macOS from the approved engine
         uses: ./_forge_ci_engine/.github/actions/build-darwin-cli
         with:
-          engine-commit: ${{ needs.resolve-bootstrap.outputs.forge-ci-binary-ref }}
+          engine-commit: ${{ inputs['forge-ci-binary-ref'] }}
       - name: Install SwiftLint
         run: |
           brew install swiftlint
@@ -170,7 +171,7 @@ jobs:
     needs: [resolve-bootstrap, swift-format-lint, swiftlint]
     if: always() && needs.resolve-bootstrap.result == 'success'
     container:
-      image: ${{ inputs['runtime-image'] || needs.resolve-bootstrap.outputs['runtime-image'] }}
+      image: ${{ inputs['runtime-image'] }}
     steps:
       - name: Aggregate results
         env:

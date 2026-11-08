@@ -973,8 +973,10 @@ containers:
 - **Direct caller equivalent** (when invoking `publish-container.yml` directly, bypassing the orchestrator):
 
   ```yaml
-  uses: diggsweden/forge-ci/.github/workflows/publish-container.yml@v0.90.0
+  uses: diggsweden/forge-ci/.github/workflows/publish-container.yml@84180b5ac07af63d33917bec306e7f838aa8e366 # v0.90.0
   with:
+    runtime-image: ghcr.io/diggsweden/forge-ci-runtime-base@sha256:0000000000000000000000000000000000000000000000000000000000000000 # FIXME v0.90.0 digest
+    runtime-image-full: ghcr.io/diggsweden/forge-ci-runtime@sha256:0000000000000000000000000000000000000000000000000000000000000000 # FIXME v0.90.0 digest
     branch: main
     # plus runtime-image, runtime-image-full and the canonical-* inputs of a
     # canonical-cli-bootstrap.yml job in the same run; see publishing.md
@@ -1047,8 +1049,9 @@ containers:
   ```yaml
   jobs:
     release:
-      uses: diggsweden/forge-ci/.github/workflows/release-orchestrator.yml@v0.90.0
+      uses: diggsweden/forge-ci/.github/workflows/release-orchestrator.yml@84180b5ac07af63d33917bec306e7f838aa8e366 # v0.90.0
       with:
+        # Engine commit and image digests: see the Advanced Pinning Recipe.
         branch: main
       secrets:
         # ... your usual secret forwards ...

@@ -245,38 +245,37 @@ orchestrator requires `forge-ci-binary-ref` as the full engine commit and
 `runtime-image` and `canonical-builder-image` as `@sha256:` digests, admitted
 before any job runs; the
 [Advanced Pinning Recipe](runtime-images.md#advanced-pinning-recipe) reads them
-from the release you call. An empty family override (`runtime-image-java` and
-the others) resolves once to that commit's `sha-<short>` image tag, under
-`FORGE_CI_IMAGE_NAMESPACE` or the serving repository's owner on `ghcr.io`; an
-explicit override takes precedence. No workflow names a fixed image, and no
-`latest` image tag is used.
+from the release you call. `runtime-image-full` and the family images are
+digests too, passed for the artifact types the caller builds; the workflow that
+runs one refuses a tag or an empty value before its job starts. No workflow
+names a fixed image or picks one for its caller.
 [Runtime Images](runtime-images.md) has the roster, which workflow uses
 which image, tag and pinning conventions, and mirroring. Android images are
 linux/amd64 only.
 
-The release orchestrator pins instead of resolving: `forge-ci-binary-ref` is
-the full engine commit, and `runtime-image` and `canonical-builder-image` are
+Every orchestrator pins instead of resolving: `forge-ci-binary-ref` is the
+full engine commit, and `runtime-image` and `canonical-builder-image` are
 `@sha256:` digests, all required. Its first job admits them, builds the CLI
 from that commit in the builder image and hands the exact artifact to every
-plain-runner job of the route, which runs it with the hosted runner's
+Linux plain-runner job of the route, which runs it with the hosted runner's
 root-owned system tools ([canonical CLI delivery](../scripts/ci/canonical-cli-delivery.md),
-[tool profiles](trusted-runtime-tools.md)). Nothing on the release route
-downloads a binary onto a host. Lane images (`runtime-image-full`,
-`-java`, `-node`, `-go`, `-rust`, `-android`) may still be tags; they hold no
-key and no write authority.
+[tool profiles](trusted-runtime-tools.md)). No workflow downloads a forge-ci
+binary onto a host.
 
-The PR and snapshot plain-runner jobs, the container build and the macOS jobs
-install the binary named by `forge-ci-binary-ref`. A release tag installs the
-archive verified against `checksums.txt` and its Sigstore bundle; a branch or
-commit ref builds from source. [CLI binary channels](runtime-images.md#cli-binary-channels)
-and [Installing `forge-ci`](providers.md#installing-forge-ci) describe both.
-Keep the workflow ref, `forge-ci-binary-ref` and the runtime images on one
-version.
+Every other image a job runs is passed by digest too: `runtime-image-full` and
+the family images (`-java`, `-node`, `-go`, `-rust`, `-android`). The workflow
+that runs one admits it in its first job and refuses a tag or an empty value
+before the job's container starts, so a caller passes the family images its
+artifacts use and leaves out the others. A native release always runs release
+assembly in `runtime-image-full`. The macOS jobs build forge-ci from a checkout
+of the same commit ([Installing `forge-ci`](providers.md#installing-forge-ci)).
+Keep the workflow ref, `forge-ci-binary-ref` and the image digests on one
+release.
 
 Self Release supplies the exact commit named by its release-request tag and
-that commit's runtime images, even while the new stable release does not exist.
-Standalone container-only leaf workflows retain their documented explicit
-runtime defaults; orchestrators pass their resolved image overrides to them.
+that commit's image digests, even while the new stable release does not exist.
+A leaf workflow called on its own takes the same `forge-ci-binary-ref` and a
+`runtime-image` digest.
 
 ### Linux image builders
 
@@ -491,6 +490,8 @@ jobs:
       # the digests of the release you call (docs/runtime-images.md).
       runtime-image: ghcr.io/diggsweden/forge-ci-runtime-base@sha256:0000000000000000000000000000000000000000000000000000000000000000 # FIXME v0.90.0 digest
       canonical-builder-image: ghcr.io/diggsweden/forge-ci-runtime-go-1.27@sha256:0000000000000000000000000000000000000000000000000000000000000000 # FIXME v0.90.0 digest
+      runtime-image-full: ghcr.io/diggsweden/forge-ci-runtime@sha256:0000000000000000000000000000000000000000000000000000000000000000 # FIXME v0.90.0 digest
+      runtime-image-node: ghcr.io/diggsweden/forge-ci-runtime-node-24@sha256:0000000000000000000000000000000000000000000000000000000000000000 # FIXME v0.90.0 digest
       artifacts-config: .forge-ci/artifacts.yml
 ```
 

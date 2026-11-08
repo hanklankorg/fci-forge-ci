@@ -139,9 +139,8 @@ on:
         required: true
         type: string
       runtime-image-full:
-        description: "forge-ci full runtime image (needs syft for SBOM generation) for assembly only; it holds no key and no write authority. Empty uses the resolved forge-ci version."
-        required: false
-        default: ""
+        description: "forge-ci full runtime image (needs syft for SBOM generation) for assembly only; it holds no key and no write authority. Pinned by digest (image@sha256:<64 hex>); required when the plan runs a job in it, which refuses an empty or unpinned value before its container starts."
+        required: true
         type: string
       cosign-public-key:
         description: "The trusted Cosign public key, PEM, when artifacts.yml signs with sign.key env://COSIGN_KEY. Pass the COSIGN_PUBLIC_KEY repository or organization variable: each job that receives the key secret refuses to sign unless the key derives this public key."
@@ -191,6 +190,9 @@ jobs:
     uses: ./.github/workflows/resolve-forge-ci-bootstrap.yml
     with:
       forge-ci-binary-ref: ${{ inputs['forge-ci-binary-ref'] }}
+      images: |
+        runtime-image-full=${{ inputs['runtime-image-full'] }}
+        runtime-image=${{ inputs['runtime-image'] }}
   generate-changelog:
     needs: [resolve-bootstrap]
     name: "Publish: release notes"
@@ -199,7 +201,7 @@ jobs:
       actions: read # Callee's canonical receiver read cap.
     uses: ./.github/workflows/generate-changelog.yml
     with:
-      forge-ci-binary-ref: ${{ needs.resolve-bootstrap.outputs.forge-ci-binary-ref }}
+      forge-ci-binary-ref: ${{ inputs['forge-ci-binary-ref'] }}
       release-policy: ${{ inputs['release-policy'] }}
       branch: ${{ inputs['checkout-ref'] }}
       runtime-image: ${{ inputs['runtime-image'] }}
@@ -217,7 +219,7 @@ jobs:
     runs-on: ubuntu-26.04
     timeout-minutes: 20
     container:
-      image: ${{ inputs['runtime-image-full'] || needs.resolve-bootstrap.outputs['runtime-image-full'] }}
+      image: ${{ inputs['runtime-image-full'] }}
     permissions:
       actions: read
       contents: read

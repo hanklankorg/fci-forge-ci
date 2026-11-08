@@ -120,13 +120,13 @@ jobs:
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           repository: ${{ needs.resolve-bootstrap.outputs.forge-ci-repository }}
-          ref: ${{ needs.resolve-bootstrap.outputs.forge-ci-binary-ref }}
+          ref: ${{ inputs['forge-ci-binary-ref'] }}
           path: _forge_ci_engine
           persist-credentials: false
       - name: Build forge-ci for macOS from the approved engine
         uses: ./_forge_ci_engine/.github/actions/build-darwin-cli
         with:
-          engine-commit: ${{ needs.resolve-bootstrap.outputs.forge-ci-binary-ref }}
+          engine-commit: ${{ inputs['forge-ci-binary-ref'] }}
 
       # Defense-in-depth: refuse PR-context triggers — App Store Connect
       # credentials in env this job uses must never run with PR-HEAD code.

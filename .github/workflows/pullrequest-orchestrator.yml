@@ -115,6 +115,8 @@ jobs:
     uses: ./.github/workflows/resolve-forge-ci-bootstrap.yml
     with:
       forge-ci-binary-ref: ${{ inputs['forge-ci-binary-ref'] }}
+      images: |
+        runtime-image=${{ inputs['runtime-image'] }}
   canonical-cli:
     needs: [resolve-bootstrap]
     permissions:
@@ -191,7 +193,7 @@ jobs:
         env:
           PROJECT_TYPE: ${{ inputs['project-type'] }}
           BASE_BRANCH: ${{ inputs['base-branch'] }}
-          FORGE_CI_BINARY_REF: ${{ needs.resolve-bootstrap.outputs.forge-ci-binary-ref }}
+          FORGE_CI_BINARY_REF: ${{ inputs['forge-ci-binary-ref'] }}
           LINT_ENGINE: ${{ inputs['lint-engine'] }}
           NANOLINTER_IMAGE: ${{ inputs['nanolinter-image'] }}
           LINTER_SWIFTFORMAT: ${{ inputs['linters.swiftformat'] }}
@@ -216,7 +218,7 @@ jobs:
       runtime-image: ${{ inputs['runtime-image'] }}
       required-lints: ${{ inputs['required-lints'] }}
       megalinter-image: ${{ inputs['megalinter-image'] }}
-      forge-ci-binary-ref: ${{ needs.resolve-bootstrap.outputs.forge-ci-binary-ref }}
+      forge-ci-binary-ref: ${{ inputs['forge-ci-binary-ref'] }}
       canonical-artifact-id: ${{ needs.canonical-cli.outputs.artifact-id }}
       canonical-artifact-name: ${{ needs.canonical-cli.outputs.artifact-name }}
       canonical-producer-run-id: ${{ needs.canonical-cli.outputs.producer-run-id }}

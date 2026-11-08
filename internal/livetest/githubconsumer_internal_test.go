@@ -23,10 +23,25 @@ import (
 	"github.com/diggsweden/forge-ci/internal/domain/errs"
 )
 
-// trialEngine is an engine as EnsureEngine returns it: its admitted images
-// resolved to the digests the organization's registry serves for ImageTag.
+// trialEngine is an engine as EnsureEngine returns it: every runtime image it
+// published resolved to the digest the organization's registry serves for
+// ImageTag.
 var trialEngine = GitHubEngine{Owner: "Example-Org", Repository: "fc-forge-ci", Commit: strings.Repeat("a", 40),
-	Digests: map[string]string{"forge-ci-runtime-base": "sha256:" + strings.Repeat("b", 64), "forge-ci-runtime-go-1.27": "sha256:" + strings.Repeat("c", 64)}}
+	Digests: publishedDigests()}
+
+// publishedDigests is a distinct digest for every runtime image the engine
+// publishes; the base image's is all b and the Go builder's all c.
+func publishedDigests() map[string]string {
+	return map[string]string{
+		"forge-ci-runtime-base":        "sha256:" + strings.Repeat("b", 64),
+		"forge-ci-runtime-go-1.27":     "sha256:" + strings.Repeat("c", 64),
+		"forge-ci-runtime":             "sha256:" + strings.Repeat("d", 64),
+		"forge-ci-runtime-java-25":     "sha256:" + strings.Repeat("e", 64),
+		"forge-ci-runtime-node-24":     "sha256:" + strings.Repeat("f", 64),
+		"forge-ci-runtime-rust-stable": "sha256:" + strings.Repeat("1", 64),
+		"forge-ci-runtime-android-35":  "sha256:" + strings.Repeat("2", 64),
+	}
+}
 
 func TestReportRunRetriesTransientJobReads(t *testing.T) {
 	for _, tc := range []struct {
@@ -614,13 +629,14 @@ func TestRenderGitHubConsumer_RequiresTheRuntimeImageOfAnOrchestratorCall(t *tes
 
 // A release call's plain-runner jobs run the canonical CLI built from the
 // full engine commit, so its binary ref renders as that commit while a
-// pull-request call keeps the rolling pre-release; images the engine has no
-// digest for render by tag, and a fixture's own digest pin is replaced.
+// pull-request call keeps the rolling pre-release; every image renders by the
+// digest the engine published, a fixture's own pin or tag replaced, and an
+// image the engine published no digest for is refused.
 func TestRenderGitHubConsumer_ReleaseCallPinsTheEngineCommitAndDigests(t *testing.T) {
 	t.Parallel()
 
 	engine := GitHubEngine{Owner: "Example-Org", Repository: "fc-forge-ci", Commit: strings.Repeat("a", 40),
-		Digests: map[string]string{"forge-ci-runtime-base": "sha256:" + strings.Repeat("b", 64), "forge-ci-runtime-go-1.27": "sha256:" + strings.Repeat("c", 64)}}
+		Digests: publishedDigests()}
 
 	fixture := strings.Join([]string{
 		"jobs:",
@@ -644,7 +660,7 @@ func TestRenderGitHubConsumer_ReleaseCallPinsTheEngineCommitAndDigests(t *testin
 		"forge-ci-binary-ref: " + engine.Commit + "\n",
 		"runtime-image: ghcr.io/example-org/forge-ci-runtime-base@sha256:" + strings.Repeat("b", 64) + " # FIXME",
 		"canonical-builder-image: ghcr.io/example-org/forge-ci-runtime-go-1.27@sha256:" + strings.Repeat("c", 64),
-		"runtime-image-full: ghcr.io/example-org/forge-ci-runtime:sha-aaaaaaa",
+		"runtime-image-full: ghcr.io/example-org/forge-ci-runtime@sha256:" + strings.Repeat("d", 64),
 	} {
 		if !strings.Contains(rendered, want) {
 			t.Errorf("rendered release call lacks %q:\n%s", want, rendered)
@@ -653,6 +669,13 @@ func TestRenderGitHubConsumer_ReleaseCallPinsTheEngineCommitAndDigests(t *testin
 
 	if strings.Contains(rendered, strings.Repeat("0", 64)) || strings.Contains(rendered, GitHubPrerelease) {
 		t.Errorf("rendered release call keeps a placeholder digest or the pre-release binary:\n%s", rendered)
+	}
+
+	delete(engine.Digests, "forge-ci-runtime")
+
+	if _, _, err := RenderGitHubConsumer("release.yml", fixture, engine, nil); !errors.Is(err, errs.ErrValidation) ||
+		!strings.Contains(err.Error(), "forge-ci-runtime,") {
+		t.Errorf("an image the engine published no digest for must be refused, got %v", err)
 	}
 }
 

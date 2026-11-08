@@ -30,9 +30,8 @@ on:
         required: true
         type: string
       forge-ci-binary-ref:
-        description: "Full approved engine commit the canonical CLI was built from; the container publisher's host build legs receive exactly that build"
-        required: false
-        default: ""
+        description: "Full engine commit (40 hex) the workflow ref names; a tag or branch is refused"
+        required: true
         type: string
       # Canonical delivery of the same run: canonical-cli-bootstrap.yml's
       # outputs, forwarded by the orchestrator. The container publisher's host build
@@ -49,7 +48,7 @@ on:
         required: true
         type: string
       runtime-image-full:
-        description: "forge-ci full runtime image (syft) for the container publisher's image evidence job. Empty uses the resolved forge-ci version."
+        description: "forge-ci full runtime image (syft) for the container publisher's image evidence job. Pinned by digest (image@sha256:<64 hex>); required when the plan runs a job in it, which refuses an empty or unpinned value before its container starts."
         required: false
         default: ""
         type: string
@@ -165,6 +164,8 @@ jobs:
     uses: ./.github/workflows/resolve-forge-ci-bootstrap.yml
     with:
       forge-ci-binary-ref: ${{ inputs['forge-ci-binary-ref'] }}
+      images: |
+        runtime-image=${{ inputs['runtime-image'] }}
   # Cross-cutting publish jobs depend on the build stage as a whole.
   # Platform-specific store publishing still checks the relevant build-stage result.
   forge-packages:
@@ -186,7 +187,10 @@ jobs:
     uses: ./.github/workflows/publish-maven-github.yml
     with:
       # The publication runs in the toolchain image of its package type.
-      runtime-image: ${{ matrix.artifact.project_type == 'npm' && (inputs['runtime-image-node'] || needs.resolve-bootstrap.outputs['runtime-image-node']) || (inputs['runtime-image-java'] || needs.resolve-bootstrap.outputs['runtime-image-java']) }}
+      # Exactly the family image of the package type, empty when it was not
+      # passed: the callee's resolver refuses an empty image.
+      runtime-image: ${{ matrix.artifact.project_type == 'npm' && inputs['runtime-image-node'] || matrix.artifact.project_type != 'npm' && inputs['runtime-image-java'] || '' }}
+      forge-ci-binary-ref: ${{ inputs['forge-ci-binary-ref'] }}
       working-directory: ${{ matrix.artifact.working_directory }}
       branch: ${{ inputs.branch }}
       artifact-source: ${{ matrix.artifact.publication_artifact_name || matrix.artifact.build_artifact_name }}
@@ -218,7 +222,7 @@ jobs:
       RELEASE_GPG_PASSPHRASE: ${{ secrets.RELEASE_GPG_PASSPHRASE }}
     uses: ./.github/workflows/publish-maven-central.yml
     with:
-      forge-ci-binary-ref: ${{ needs.resolve-bootstrap.outputs.forge-ci-binary-ref }}
+      forge-ci-binary-ref: ${{ inputs['forge-ci-binary-ref'] }}
       release-policy: ${{ inputs['release-policy'] }}
       working-directory: ${{ matrix.artifact.working_directory }}
       branch: ${{ inputs.branch }}
@@ -228,7 +232,7 @@ jobs:
       private-dependencies: ${{ matrix.artifact.maven.private_dependencies || false }}
       settings-path: ${{ matrix.artifact.maven.settings_path }}
       profile: ${{ matrix.artifact.maven.profile || 'central-release' }}
-      runtime-image: ${{ inputs['runtime-image-java'] || needs.resolve-bootstrap.outputs['runtime-image-java'] }}
+      runtime-image: ${{ inputs['runtime-image-java'] }}
   xcode-ios:
     needs: [resolve-bootstrap]
     name: "Publish: ${{ matrix.artifact.name }} to the App Store"
@@ -252,7 +256,7 @@ jobs:
       macos-version: ${{ matrix.artifact.xcode_ios.macos_version || 'macos-26' }}
       submit-for-review: ${{ matrix.artifact.xcode_ios.submit_for_review || false }}
       skip-validation: ${{ matrix.artifact.xcode_ios.skip_validation || false }}
-      forge-ci-binary-ref: ${{ needs.resolve-bootstrap.outputs.forge-ci-binary-ref }}
+      forge-ci-binary-ref: ${{ inputs['forge-ci-binary-ref'] }}
   google-play:
     needs: [resolve-bootstrap]
     name: "Publish: ${{ matrix.artifact.name }} to Google Play"
@@ -268,7 +272,7 @@ jobs:
       GOOGLE_PLAY_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON }}
     uses: ./.github/workflows/publish-google-play.yml
     with:
-      forge-ci-binary-ref: ${{ needs.resolve-bootstrap.outputs.forge-ci-binary-ref }}
+      forge-ci-binary-ref: ${{ inputs['forge-ci-binary-ref'] }}
       aab-artifact-name: ${{ matrix.artifact.name }}
       branch: ${{ inputs.branch }}
       package-name: ${{ matrix.artifact.gradle_android.package_name }}
@@ -281,7 +285,7 @@ jobs:
       whats-new-directory: ${{ matrix.artifact.gradle_android.whats_new_directory || '' }}
       mapping-file: ${{ matrix.artifact.gradle_android.mapping_file || '' }}
       debug-symbols: ${{ matrix.artifact.gradle_android.debug_symbols || '' }}
-      runtime-image: ${{ inputs['runtime-image'] || needs.resolve-bootstrap.outputs['runtime-image'] }}
+      runtime-image: ${{ inputs['runtime-image'] }}
   containers:
     needs: [resolve-bootstrap]
     name: "Build: ${{ matrix.container.name }} image"
@@ -348,9 +352,9 @@ jobs:
       # no build-secrets, in which case the materialize step is a no-op.
       build-secrets: ${{ matrix.container.build_secrets && join(matrix.container.build_secrets, ' ') || '' }}
       push-image: true
-      forge-ci-binary-ref: ${{ needs.resolve-bootstrap.outputs.forge-ci-binary-ref }}
+      forge-ci-binary-ref: ${{ inputs['forge-ci-binary-ref'] }}
       runtime-image: ${{ inputs['runtime-image'] }}
-      runtime-image-full: ${{ inputs['runtime-image-full'] || needs.resolve-bootstrap.outputs['runtime-image-full'] }}
+      runtime-image-full: ${{ inputs['runtime-image-full'] }}
       canonical-artifact-id: ${{ inputs['canonical-artifact-id'] }}
       canonical-artifact-name: ${{ inputs['canonical-artifact-name'] }}
       canonical-producer-run-id: ${{ inputs['canonical-producer-run-id'] }}
@@ -388,7 +392,7 @@ jobs:
     # sbom-cargo uses only auto-provided GITHUB_TOKEN.
     uses: ./.github/workflows/sbom-cargo.yml
     with:
-      forge-ci-binary-ref: ${{ needs.resolve-bootstrap.outputs.forge-ci-binary-ref }}
+      forge-ci-binary-ref: ${{ inputs['forge-ci-binary-ref'] }}
       working-directory: ${{ matrix.artifact.working_directory }}
       branch: ${{ inputs.branch }}
       enable-build-sbom: ${{ contains(matrix.artifact.effective_sboms, 'build') }}
@@ -398,7 +402,7 @@ jobs:
       # `cargo-build-sbom` and the second matrix leg's actions/upload-artifact
       # would conflict with the first. Mirrors build-gradle's pattern.
       artifact-name: ${{ matrix.artifact.name }}
-      runtime-image: ${{ inputs['runtime-image-rust'] || needs.resolve-bootstrap.outputs['runtime-image-rust'] }}
+      runtime-image: ${{ inputs['runtime-image-rust'] }}
   go-container-first:
     needs: [resolve-bootstrap]
     name: "Build: ${{ matrix.artifact.name }} SBOM"
@@ -412,12 +416,12 @@ jobs:
     # sbom-go uses only auto-provided GITHUB_TOKEN.
     uses: ./.github/workflows/sbom-go.yml
     with:
-      forge-ci-binary-ref: ${{ needs.resolve-bootstrap.outputs.forge-ci-binary-ref }}
+      forge-ci-binary-ref: ${{ inputs['forge-ci-binary-ref'] }}
       working-directory: ${{ matrix.artifact.working_directory }}
       branch: ${{ inputs.branch }}
       artifact-name: ${{ matrix.artifact.name }}
       enable-build-sbom: ${{ contains(matrix.artifact.effective_sboms, 'build') }}
-      runtime-image: ${{ inputs['runtime-image-go'] || needs.resolve-bootstrap.outputs['runtime-image-go'] }}
+      runtime-image: ${{ inputs['runtime-image-go'] }}
   summarize-publish-stage:
     name: Summary
     needs: [resolve-bootstrap, forge-packages, maven-central, xcode-ios, google-play, containers, cargo-container-first, go-container-first]

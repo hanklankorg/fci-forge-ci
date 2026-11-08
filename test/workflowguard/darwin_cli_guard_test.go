@@ -70,14 +70,14 @@ func TestMacOSLanesBuildTheEngineFromItsApprovedCheckout(t *testing.T) {
 					continue
 				}
 
-				require.Equal(t, resolvedBinaryRefOutput, step.With["engine-commit"], "%s/%s", path, jobName)
+				require.Equal(t, approvedEngineCommit, step.With["engine-commit"], "%s/%s", path, jobName)
 				require.Positive(t, index, "%s/%s", path, jobName)
 
 				checkout := job.Steps[index-1]
 				require.True(t, strings.HasPrefix(checkout.Uses, "actions/checkout@"), "%s/%s", path, jobName)
 				require.Equal(t, "_forge_ci_engine", checkout.With["path"])
 				require.Equal(t, resolvedForgeCIRepository, checkout.With["repository"])
-				require.Equal(t, resolvedBinaryRefOutput, checkout.With["ref"])
+				require.Equal(t, approvedEngineCommit, checkout.With["ref"])
 				require.Equal(t, "false", checkout.With["persist-credentials"])
 
 				built = true
@@ -120,6 +120,6 @@ func TestMacOSLanesBuildTheEngineFromItsApprovedCheckout(t *testing.T) {
 	require.Contains(t, build.Run, `>>"$GITHUB_PATH"`)
 }
 
-// resolvedBinaryRefOutput is the resolver's admitted engine revision, which
-// the macOS lanes check out and build.
-const resolvedBinaryRefOutput = "${{ needs.resolve-bootstrap.outputs.forge-ci-binary-ref }}"
+// approvedEngineCommit is the raw forge-ci-binary-ref input, which the
+// resolver admits only as a full commit before a macOS job starts.
+const approvedEngineCommit = "${{ inputs['forge-ci-binary-ref'] }}"

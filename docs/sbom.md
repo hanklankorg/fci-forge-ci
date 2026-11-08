@@ -92,8 +92,9 @@ artifacts:
 # Release selection: include only Build SBOMs in the release SBOM bundle
 jobs:
   release:
-    uses: diggsweden/forge-ci/.github/workflows/release-orchestrator.yml@<sha>
+    uses: diggsweden/forge-ci/.github/workflows/release-orchestrator.yml@84180b5ac07af63d33917bec306e7f838aa8e366 # v0.90.0
     with:
+      # Engine commit and image digests: see the Advanced Pinning Recipe.
       branch: main
       artifacts-config: .forge-ci/artifacts.yml
       release.sboms: build      # release-orchestrator dot-prefix convention
@@ -103,8 +104,9 @@ jobs:
 # Snapshot flow: turn on full SBOM generation for testing
 jobs:
   release-snapshot:
-    uses: diggsweden/forge-ci/.github/workflows/release-snapshot-orchestrator.yml@<sha>
+    uses: diggsweden/forge-ci/.github/workflows/release-snapshot-orchestrator.yml@84180b5ac07af63d33917bec306e7f838aa8e366 # v0.90.0
     with:
+      # Engine commit and image digests: see the Advanced Pinning Recipe.
       branch: ${{ github.ref_name }}
       artifacts-config: .forge-ci/artifacts.yml
       sboms: all                # release-snapshot-orchestrator uses flat names

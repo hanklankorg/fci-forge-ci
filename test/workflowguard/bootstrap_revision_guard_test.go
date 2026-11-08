@@ -7,7 +7,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"testing"
 
@@ -124,62 +123,49 @@ func TestOnlyTheResolverReadsTheWorkflowRepository(t *testing.T) {
 	}
 }
 
-func TestBootstrapResolverPreservesSignedAssetsAndPinsSource(t *testing.T) {
+// TestBootstrapResolverAdmitsOnlyACommitAndDigests runs the resolver's
+// admission: the engine is named by its full commit, never a tag, a branch or
+// the latest release, and every image line is a digest, or empty where the
+// caller marked it as run only when its plan asks for it.
+func TestBootstrapResolverAdmitsOnlyACommitAndDigests(t *testing.T) {
 	t.Parallel()
 	workflow := readBootstrapWorkflow(t, filepath.Join(reporoot.Path(t), ".github", "workflows", "resolve-forge-ci-bootstrap.yml"))
-	script := bootstrapSelectionScript(t, workflow, "select")
+	script := bootstrapSelectionScript(t, workflow, "admit")
 
-	sha := strings.Repeat("a", 40)
-	for _, tc := range []struct{ ref, sha, want string }{
-		{"main", sha, sha},
-		{"vfeature", sha, sha},
-		{sha, sha, sha},
-		{strings.Repeat("b", 64), strings.Repeat("b", 64), strings.Repeat("b", 64)},
-		{"main", strings.Repeat("b", 64), strings.Repeat("b", 64)},
-		{"v0.92.1", sha, "v0.92.1"},
-		{"v0.92.1-rc.1", sha, "v0.92.1-rc.1"},
-		{"v0.90.0-pre", sha, "v0.90.0-pre"},
-		{"main", "", ""},
-		{"main", "short", ""},
+	commit := strings.Repeat("a", 40)
+	base := "ghcr.io/diggsweden/forge-ci-runtime-base@sha256:" + strings.Repeat("b", 64)
+
+	for _, tc := range []struct {
+		name, commit, images, say string
+	}{
+		{"commit and digest", commit, "runtime-image=" + base + "\n", ""},
+		{"no images", commit, "", ""},
+		{"optional family left out", commit, "runtime-image=" + base + "\nruntime-image-go?=\n", ""},
+		{"optional family by digest", commit, "runtime-image-go?=" + base + "\n", ""},
+		{"release tag", "v0.90.0", "", "full engine commit"},
+		{"branch", "main", "", "full engine commit"},
+		{"empty commit", "", "", "full engine commit"},
+		{"sha-256 object id", strings.Repeat("a", 64), "", "full engine commit"},
+		{"tagged image", commit, "runtime-image=ghcr.io/diggsweden/forge-ci-runtime-base:v0.90.0\n", "runtime-image must be a runtime image pinned by digest"},
+		{"empty required image", commit, "runtime-image-full=\n", "runtime-image-full must be a runtime image pinned by digest"},
+		{"tagged optional image", commit, "runtime-image-java?=ghcr.io/x/forge-ci-runtime-java-25:sha-abcdef0\n", "runtime-image-java must be"},
+		{"not a line", commit, "ghcr.io/x@sha256:" + strings.Repeat("c", 64) + "\n", "is not input=reference"},
 	} {
-		t.Run(tc.ref+tc.sha, func(t *testing.T) {
+		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			output := filepath.Join(t.TempDir(), "outputs")
 			cmd := exec.CommandContext(t.Context(), testBash(t), "--noprofile", "--norc", "-c", script)
-			cmd.Env = []string{"PATH=/usr/bin:/bin", "REQUESTED_REF=" + tc.ref, "SOURCE_SHA=" + tc.sha, "REPOSITORY=diggsweden/forge-ci", "IMAGE_NAMESPACE=", "GITHUB_OUTPUT=" + output}
+			cmd.Env = []string{"PATH=/usr/bin:/bin", "ENGINE_COMMIT=" + tc.commit, "IMAGES=" + tc.images}
 
 			out, err := cmd.CombinedOutput()
-			if tc.want == "" {
-				require.Error(t, err, "%s", out)
-
-				_, statErr := os.Stat(output)
-				require.True(t, os.IsNotExist(statErr))
+			if tc.say == "" {
+				require.NoError(t, err, "%s", out)
 
 				return
 			}
 
-			require.NoError(t, err, "%s", out)
-			body, err := os.ReadFile(output)
-			require.NoError(t, err)
-
-			selected := map[string]string{}
-
-			for line := range strings.SplitSeq(strings.TrimSpace(string(body)), "\n") {
-				key, value, _ := strings.Cut(line, "=")
-				selected[key] = value
-			}
-
-			require.Equal(t, tc.want, selected["ref"])
-
-			tag := tc.want
-			if len(tag) == 40 || len(tag) == 64 {
-				tag = "sha-" + tag[:7]
-			}
-
-			require.Equal(t, "ghcr.io/diggsweden/forge-ci-runtime-base:"+tag, selected["runtime-image"])
-			require.Equal(t, "ghcr.io/diggsweden/forge-ci-runtime:"+tag, selected["runtime-image-full"])
-			require.Len(t, selected, 8)
+			require.Error(t, err, "%s", out)
+			require.Contains(t, string(out), tc.say)
 		})
 	}
 }
@@ -189,7 +175,7 @@ func TestPRQualityForwardsTheSelectedBinaryToEveryLinter(t *testing.T) {
 
 	workflow := readBootstrapWorkflow(t, filepath.Join(reporoot.Path(t), ".github", "workflows", "pullrequest-quality-stage.yml"))
 	for _, job := range []string{"nanolinter", "megalinter", "swift"} {
-		require.Equal(t, "${{ needs.resolve-bootstrap.outputs.forge-ci-binary-ref }}", workflow.Jobs[job].With["forge-ci-binary-ref"], job)
+		require.Equal(t, engineCommitInput, workflow.Jobs[job].With["forge-ci-binary-ref"], job)
 	}
 }
 
@@ -207,64 +193,9 @@ func bootstrapSelectionScript(t *testing.T, workflow bootstrapWorkflow, id strin
 	return ""
 }
 
-func TestBootstrapDefaultResolvesOneConcreteStableTag(t *testing.T) {
-	t.Parallel()
-	workflow := readBootstrapWorkflow(t, filepath.Join(reporoot.Path(t), ".github", "workflows", "resolve-forge-ci-bootstrap.yml"))
-
-	script := bootstrapSelectionScript(t, workflow, "requested")
-	for _, tc := range []struct{ ref, metadata, want string }{
-		{"", "v0.93.0", "ref=v0.93.0\ncheckout=false\n"},
-		{"v0.92.1", "must-not-query", "ref=v0.92.1\ncheckout=false\n"},
-		{strings.Repeat("a", 64), "must-not-query", "ref=" + strings.Repeat("a", 64) + "\ncheckout=false\n"},
-		{"main", "must-not-query", "ref=main\ncheckout=true\n"},
-		{"", "v0.93.0-rc.1", ""},
-		{"", "", ""},
-	} {
-		t.Run(tc.ref+tc.metadata, func(t *testing.T) {
-			t.Parallel()
-
-			output := filepath.Join(t.TempDir(), "outputs")
-			body := `gh() { [[ "$METADATA" != must-not-query ]] || return 94; printf '%s' "$METADATA"; }; ` + script
-			cmd := exec.CommandContext(t.Context(), testBash(t), "--noprofile", "--norc", "-c", body)
-			cmd.Env = []string{"PATH=/usr/bin:/bin", "REQUESTED_REF=" + tc.ref, "METADATA=" + tc.metadata, "SERVER_URL=https://github.com", "REPOSITORY=diggsweden/forge-ci", "GITHUB_OUTPUT=" + output}
-
-			out, err := cmd.CombinedOutput()
-			if tc.want == "" {
-				require.Error(t, err, "%s", out)
-
-				return
-			}
-
-			require.NoError(t, err, "%s", out)
-			bodyBytes, err := os.ReadFile(output)
-			require.NoError(t, err)
-			require.Equal(t, tc.want, string(bodyBytes))
-		})
-	}
-}
-
-func TestSourceRefResolutionIsSharedAcrossPRAndSnapshotJobs(t *testing.T) {
-	t.Parallel()
-
-	for _, name := range []string{"pullrequest-orchestrator.yml", "release-snapshot-orchestrator.yml"} {
-		workflow := readBootstrapWorkflow(t, filepath.Join(reporoot.Path(t), ".github", "workflows", name))
-		for jobName, job := range workflow.Jobs {
-			if jobName == "resolve-bootstrap" {
-				continue
-			}
-
-			if ref, ok := job.With["forge-ci-binary-ref"]; ok {
-				require.Equal(t, "${{ needs.resolve-bootstrap.outputs.forge-ci-binary-ref }}", ref, "%s/%s", name, jobName)
-			}
-
-			for _, step := range job.Steps {
-				if ref, ok := step.Env["FORGE_CI_BINARY_REF"]; ok {
-					require.Equal(t, "${{ needs.resolve-bootstrap.outputs.forge-ci-binary-ref }}", ref, "%s/%s", name, jobName)
-				}
-			}
-		}
-	}
-}
+// engineCommitInput is how a workflow names its engine: the caller's full
+// commit, admitted by the resolver, never an output relayed from a job.
+const engineCommitInput = "${{ inputs['forge-ci-binary-ref'] }}"
 
 type reusableWorkflow struct {
 	On struct {
@@ -302,44 +233,40 @@ func readReusableWorkflows(t *testing.T) map[string]reusableWorkflow {
 }
 
 // TestRuntimeImageDefaultsResolveTheServingRepository keeps every runtime
-// image a reusable workflow runs in a resolver output. A literal default names
-// one registry and one release, so a fork serving these workflows, or a caller
-// on a later release, ran upstream's older image without asking for it.
+// image input free of a default. A literal default names one registry and one
+// release, so a fork serving these workflows, or a caller on a later release,
+// ran upstream's older image without asking for it; the caller passes the
+// digest of the release it calls instead.
 func TestRuntimeImageDefaultsResolveTheServingRepository(t *testing.T) {
 	t.Parallel()
 
 	for name, workflow := range readReusableWorkflows(t) {
 		for input, spec := range workflow.On.WorkflowCall.Inputs {
 			if strings.HasPrefix(input, "runtime-image") {
-				require.Emptyf(t, spec.Default, "%s: input %s defaults to a fixed image; default it to empty and fall back to needs.resolve-bootstrap.outputs['%s']", name, input, input)
+				require.Emptyf(t, spec.Default, "%s: input %s defaults to a fixed image; leave it without a default and pass the digest", name, input)
 			}
 		}
 	}
 }
 
-// TestLocalCallsForwardTheResolvedBinaryRef makes a workflow that resolved the
-// forge-ci revision hand it to every local reusable workflow that resolves its
-// own. Left empty, the callee asks for the latest stable release again: on a
-// branch or commit run that is another revision than the caller's, and on a
-// fork without releases it fails.
-// resolvedBinaryRef is the resolver's output, read directly or through a job
-// that relays it, as the release orchestrator's parse-config does.
-var resolvedBinaryRef = regexp.MustCompile(`^\$\{\{ needs\.[a-z0-9-]+\.outputs\.forge-ci-binary-ref \}\}$`)
-
-func TestLocalCallsForwardTheResolvedBinaryRef(t *testing.T) {
+// TestLocalCallsForwardTheEngineCommit makes every workflow hand its own
+// engine commit to each local reusable workflow that takes one, so one run
+// names one engine revision. The value is the caller's input, which the
+// resolver admits as a full commit; nothing relays or re-resolves it.
+func TestLocalCallsForwardTheEngineCommit(t *testing.T) {
 	t.Parallel()
 
 	workflows := readReusableWorkflows(t)
 	calls := 0
 
 	for name, workflow := range workflows {
-		if _, resolves := workflow.Jobs["resolve-bootstrap"]; !resolves {
-			continue
+		if _, own := workflow.On.WorkflowCall.Inputs[binaryRefInput]; !own {
+			continue // An entry workflow (Self Pull Request, Self Release) names its commit from its event.
 		}
 
 		for jobName, job := range workflow.Jobs {
 			callee, local := strings.CutPrefix(job.Uses, "./.github/workflows/")
-			if !local || callee == "resolve-forge-ci-bootstrap.yml" {
+			if !local {
 				continue
 			}
 
@@ -349,8 +276,8 @@ func TestLocalCallsForwardTheResolvedBinaryRef(t *testing.T) {
 
 			calls++
 
-			require.Regexpf(t, resolvedBinaryRef, job.With[binaryRefInput],
-				"%s/%s calls %s without the resolved %s", name, jobName, callee, binaryRefInput)
+			require.Equalf(t, engineCommitInput, job.With[binaryRefInput],
+				"%s/%s calls %s without its own %s", name, jobName, callee, binaryRefInput)
 		}
 	}
 

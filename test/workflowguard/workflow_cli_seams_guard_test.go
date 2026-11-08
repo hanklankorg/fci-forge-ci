@@ -6,7 +6,6 @@ package workflowguard
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/diggsweden/forge-ci/internal/testutil/reporoot"
@@ -14,49 +13,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v3"
 )
-
-func TestReleaseOrchestratorResolvesForgeCIRefFromCanonicalRemote(t *testing.T) {
-	t.Parallel()
-
-	env := workflowStepEnv(t, "release-orchestrator.yml", "parse-config", "Resolve forge-ci ref to commit SHA")
-	require.Equal(t, canonicalForgeCIRemote, env["REMOTE_URL"])
-	body, err := os.ReadFile(filepath.Join(reporoot.Path(t), ".github", "workflows", "release-orchestrator.yml"))
-	require.NoError(t, err)
-	require.True(t, canonicalResolveStep(body))
-}
-
-// canonicalForgeCIRemote is the repository the bootstrap resolver admitted:
-// repository configuration (a variable an administrator may set) or the
-// repository serving the called workflow, never caller input.
-const canonicalForgeCIRemote = "${{ github.server_url }}/${{ needs.resolve-bootstrap.outputs.forge-ci-repository }}"
-
-func canonicalResolveStep(body []byte) bool {
-	var workflow eventWorkflow
-	if yaml.Unmarshal(body, &workflow) != nil {
-		return false
-	}
-
-	job := workflow.Jobs["parse-config"]
-	for _, step := range job.Steps {
-		if step.Name != "Resolve forge-ci ref to commit SHA" {
-			continue
-		}
-
-		for _, env := range []*yaml.Node{&workflow.Env, &job.Env, &step.Env} {
-			for _, key := range []string{"BASH_ENV", "ENV"} {
-				if value := mappingChild(env, key); value != nil && value.Value != "" {
-					return false
-				}
-			}
-		}
-
-		remote := mappingChild(&step.Env, "REMOTE_URL")
-
-		return remote != nil && remote.Value == canonicalForgeCIRemote && strings.TrimSpace(step.Run) == "forge-ci platform resolve-ref" && step.Shell == ""
-	}
-
-	return false
-}
 
 func TestPublishContainerValidatesNamespaceForSelectedRegistry(t *testing.T) {
 	t.Parallel()

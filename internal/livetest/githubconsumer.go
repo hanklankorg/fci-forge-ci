@@ -25,7 +25,8 @@ import (
 // the live calls are in githubtrial.go.
 
 // GitHubPrerelease is the rolling pre-release Self Runtime Container moves to
-// the commit it built, and the binary ref a trial's consumer installs.
+// the commit it built. The trial waits for it as the sign that the engine's
+// images exist; no consumer installs from it.
 const GitHubPrerelease = "v0.90.0-pre"
 
 const githubWorkflowDirectory = ".github/workflows"
@@ -38,11 +39,22 @@ type GitHubEngine struct {
 	Commit     string // the full commit its reusable workflows are pinned to
 	Namespace  string // optional full runtime image namespace; empty preserves owner-global coordinates
 	// Digests are what the registry serves for ImageTag, by image name such as
-	// forge-ci-runtime-base. A fixture's image renders by digest when its name
-	// is here, as the release route admits only digest-pinned images; a name
-	// that is absent renders by tag.
+	// forge-ci-runtime-base. Every image a fixture names renders by digest, as
+	// every workflow admits only digest-pinned images; a fixture naming an
+	// image the engine has no digest for is refused.
 	Digests map[string]string
 	admin   *workflowAdmin
+}
+
+// RuntimeImage is the digest-pinned reference of a runtime image the engine
+// published, such as forge-ci-runtime-base, and false when it published none.
+func (engine GitHubEngine) RuntimeImage(image string) (string, bool) {
+	digest, ok := engine.Digests[image]
+	if !ok {
+		return "", false
+	}
+
+	return engine.Registry() + "/" + image + "@" + digest, true
 }
 
 // ImageTag is the runtime-image tag Self Runtime Container publishes for the
@@ -104,12 +116,29 @@ func RenderGitHubConsumer(name, text string, engine GitHubEngine, overrides map[
 
 	rendered := githubWorkflowUse.ReplaceAllString(text, "${1}"+engine.Owner+"/"+engine.Repository+"${2}@"+engine.Commit)
 	rendered = githubBinaryRef.ReplaceAllString(rendered, "${1}"+engine.Commit)
-	rendered = githubRuntimeRef.ReplaceAllStringFunc(rendered, engine.renderRuntimeImage)
 
-	if githubOrchestratorUse.MatchString(text) {
-		if err := requireAdmittedImages(name, rendered); err != nil {
-			return "", nil, err
+	var unresolved []string
+
+	rendered = githubRuntimeRef.ReplaceAllStringFunc(rendered, func(reference string) string {
+		image := githubRuntimeRef.FindStringSubmatch(reference)[1]
+
+		pinned, ok := engine.RuntimeImage(image)
+		if !ok {
+			unresolved = append(unresolved, image)
+
+			return reference
 		}
+
+		return pinned
+	})
+
+	if len(unresolved) > 0 {
+		return "", nil, fmt.Errorf("%s names %s, which the engine under test published no digest for; every workflow admits "+
+			"its images only by digest: %w", name, strings.Join(slices.Compact(slices.Sorted(slices.Values(unresolved))), ", "), errs.ErrValidation)
+	}
+
+	if err := requireAdmittedImages(name, rendered); err != nil {
+		return "", nil, err
 	}
 
 	rendered, applied := githubInputOverrides(rendered, overrides)
@@ -150,18 +179,6 @@ func githubInputOverrides(text string, overrides map[string]string) (string, []s
 	return text, applied
 }
 
-// renderRuntimeImage renders one fixture image reference at the engine's
-// registry: by digest when the engine resolved one for the image, by the
-// commit's tag otherwise.
-func (engine GitHubEngine) renderRuntimeImage(reference string) string {
-	image := githubRuntimeRef.FindStringSubmatch(reference)[1]
-	if digest, ok := engine.Digests[image]; ok {
-		return engine.Registry() + "/" + image + "@" + digest
-	}
-
-	return engine.Registry() + "/" + image + ":" + engine.ImageTag()
-}
-
 // requireOrchestratorImages refuses a fixture that calls an orchestrator
 // without passing runtime-image and the canonical builder image. Only an
 // image a fixture names can be pointed at the organization's build of it,
@@ -186,10 +203,9 @@ func requireOrchestratorImages(name, text string) error {
 	return nil
 }
 
-// requireAdmittedImages refuses a rendered orchestrator call whose admitted
-// images are not digest-pinned: the orchestrator's canonical admission would
-// refuse them in its first job, after the push. A leaf call beside it may
-// still name its toolchain image by tag.
+// requireAdmittedImages refuses a rendered call of an engine workflow that
+// passes a runtime image other than by digest: the callee's first job would
+// refuse it, after the push.
 func requireAdmittedImages(name, rendered string) error {
 	var workflow struct {
 		Jobs map[string]struct {
@@ -206,13 +222,17 @@ func requireAdmittedImages(name, rendered string) error {
 		call := workflow.Jobs[job]
 		workflowPath, _, _ := strings.Cut(call.Uses, "@")
 
-		if !strings.Contains(workflowPath, "/.github/workflows/") || !strings.HasSuffix(workflowPath, "-orchestrator.yml") {
+		if !strings.Contains(workflowPath, "/.github/workflows/") {
 			continue
 		}
 
-		for _, input := range []string{"runtime-image", "canonical-builder-image"} {
+		for _, input := range slices.Sorted(maps.Keys(call.With)) {
+			if !strings.HasPrefix(input, "runtime-image") && input != "canonical-builder-image" {
+				continue
+			}
+
 			if value := call.With[input]; !pinnedImage.MatchString(value) {
-				return fmt.Errorf("%s renders %s of job %s as %q, which the orchestrator admits only as image@sha256 digest; "+
+				return fmt.Errorf("%s renders %s of job %s as %q, which the workflow admits only as image@sha256 digest; "+
 					"the engine under test must resolve the digest of that image: %w", name, input, job, value, errs.ErrValidation)
 			}
 		}

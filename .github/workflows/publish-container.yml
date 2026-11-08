@@ -374,12 +374,17 @@ jobs:
     uses: ./.github/workflows/resolve-forge-ci-bootstrap.yml
     with:
       forge-ci-binary-ref: ${{ inputs['forge-ci-binary-ref'] }}
+      images: |
+        runtime-image=${{ inputs['runtime-image'] }}
+        runtime-image-full=${{ inputs['runtime-image-full'] }}
   prep:
     name: Prepare Build${{ inputs.name && format(' ({0})', inputs.name) || '' }}
+    needs: [resolve-bootstrap]
     runs-on: ubuntu-26.04
     timeout-minutes: 5
-    # The admitted base image: forge-ci and cosign baked in, so the early key
-    # check installs nothing. A job container starts before any step.
+    # The base image the resolver admitted: forge-ci and cosign baked in, so
+    # the early key check installs nothing. A job container starts before any
+    # step.
     container:
       image: ${{ inputs['runtime-image'] }}
     permissions:

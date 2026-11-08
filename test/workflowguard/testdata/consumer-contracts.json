@@ -408,9 +408,8 @@
         "default": ""
       },
       "runtime-image-full": {
-        "required": false,
-        "type": "string",
-        "default": ""
+        "required": true,
+        "type": "string"
       },
       "runtime-image-go": {
         "required": false,

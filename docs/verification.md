@@ -729,8 +729,9 @@ The engine input `release.requireallowlistedsigner` defaults to **false** so the
 # .github/workflows/release-workflow.yml
 jobs:
   release:
-    uses: diggsweden/forge-ci/.github/workflows/release-orchestrator.yml@v0.90.0
+    uses: diggsweden/forge-ci/.github/workflows/release-orchestrator.yml@84180b5ac07af63d33917bec306e7f838aa8e366 # v0.90.0
     with:
+      # Engine commit and image digests: see the Advanced Pinning Recipe.
       branch: main
       release.requireallowlistedsigner: true   # org default; override only for private repos
 ```
@@ -1078,20 +1079,17 @@ This is operative, not aspirational:
 `container: image:` references in workflow YAML come from inputs
 (caller-controlled), never hardcoded. There used to be one exception
 (`lint-swift.yml`) which now reads from the standard `runtime-image`
-input. The default values for those inputs are tied to this repo's own
-release version (bumped at release time, not by Renovate).
+input. Those inputs have no defaults: the caller passes each image by digest.
 
 ### Trust boundaries
 
 What's left after Renovate is one named choice, not a silent gap:
 
 - **Self-published GHCR images** (`ghcr.io/diggsweden/forge-ci-runtime-*`)
-  are referenced by tag (`:v0.90.0`), not by digest. These tags come from
-  workflow input defaults that this repo bumps at release time, not from
-  Renovate. The trust model is registry-side immutability of our own
-  org's tagged releases: we do not rewrite tags. Adopters who need
-  stricter determinism may pin to a digest (`@sha256:…`) on their
-  override of `runtime-image-*` inputs.
+  are passed by digest (`@sha256:…`). The first job of each workflow that
+  runs one refuses a tag or an empty value, so the content a job runs is the
+  content its caller reviewed; the caller reads each digest from the release
+  it calls.
 
 For the full picture of trust boundaries (consumer code, build extensions,
 multi-tenant secret reuse, etc.), see [docs/threat-model.md](threat-model.md).
