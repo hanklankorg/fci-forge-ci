@@ -182,12 +182,8 @@ func runForgejoConsumerDevelopment(t *testing.T, acceptance developmentAcceptanc
 			scenario := layerScenario{target: target, repo: repo, layer: layer, label: label}
 			scenario.logJobs(t, jobs)
 
-			if run.Status != jobSuccess || run.Event != "push" || run.TriggerEvent != "push" || run.WorkflowID != workflow {
-				t.Fatalf("want successful native development push, got %+v", run)
-			}
-
-			if runs := livetest.WorkflowRuns(t, target, repo); len(runs) != 1 || runs[0].ID != run.ID {
-				t.Fatalf("want only the development run, got %+v", runs)
+			if err := livetest.ValidateDevelopmentPush(run, livetest.WorkflowRuns(t, target, repo), workflow); err != nil {
+				t.Fatal(err)
 			}
 
 			assertLayerJobs(t, jobs, run.ID, jobLabel, acceptance.jobName)
@@ -197,11 +193,13 @@ func runForgejoConsumerDevelopment(t *testing.T, acceptance developmentAcceptanc
 			}
 
 			artifacts := livetest.RunArtifacts(t, target, repo, run.ID)
-			if len(artifacts) != 1 || artifacts[0].Name != acceptance.artifactPrefix+head || artifacts[0].Expired || artifacts[0].SizeInBytes <= 0 || artifacts[0].SizeInBytes > acceptance.maxArchive {
-				t.Fatalf("want one bounded exact-source development artifact, got %+v", artifacts)
+
+			artifact, err := livetest.SelectDevelopmentArtifact(artifacts, acceptance.artifactPrefix+head, acceptance.maxArchive)
+			if err != nil {
+				t.Fatal(err)
 			}
 
-			address := fmt.Sprintf("%s/api/v1/repos/%s/%s/actions/artifacts/%d/zip", target.BaseURL(), url.PathEscape(target.Owner), url.PathEscape(repo), artifacts[0].ID)
+			address := fmt.Sprintf("%s/api/v1/repos/%s/%s/actions/artifacts/%d/zip", target.BaseURL(), url.PathEscape(target.Owner), url.PathEscape(repo), artifact.ID)
 
 			body := livetest.Download(t, target, address, acceptance.maxArchive)
 			if acceptance.checkArchive != nil {
