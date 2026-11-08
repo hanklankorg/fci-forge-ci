@@ -164,7 +164,7 @@ func (trial *GitHubTrial) EnsureEngine(root, platforms string) GitHubEngine {
 	trial.tb.Logf("retained engine package coordinates (no deletion authority): %v", packageNames)
 	trial.SetVariable(name, "FORGE_CI_IMAGE_NAMESPACE", namespace)
 	trial.SetVariable(name, "FORGE_CI_REPOSITORY", trial.org+"/"+name)
-	trial.ensurePrerelease(name)
+	trial.ensurePrerelease(root, name)
 	trial.push(root, "--force", trial.remote(name), "HEAD:refs/heads/main")
 
 	run := trial.WaitRun(name, githubEngineWorkflow, "push", commit, githubEngineTimeout)
@@ -1420,7 +1420,7 @@ func signedBy(status, fingerprint string) bool {
 	return false
 }
 
-func (trial *GitHubTrial) ensurePrerelease(repo string) {
+func (trial *GitHubTrial) ensurePrerelease(root, repo string) {
 	ctx := trial.tb.Context()
 
 	_, response, err := trial.api.Repositories.GetReleaseByTag(ctx, trial.org, repo, GitHubPrerelease)
@@ -1433,14 +1433,47 @@ func (trial *GitHubTrial) ensurePrerelease(repo string) {
 	}
 
 	// Self Runtime Container replaces the assets of an existing pre-release
-	// and refuses when there is none (docs/github.md#forks).
+	// and refuses when there is none (docs/github.md#forks). GitHub refuses
+	// a release in an empty repository, as a new engine repository is, so
+	// the tag is first pushed at an empty seed commit. Its push starts no
+	// workflow (the push trigger excludes v*-pre tags), and Self Runtime
+	// Container moves it to the engine commit, which waitPrerelease awaits.
+	_, response, err = trial.api.Git.GetRef(ctx, trial.org, repo, "tags/"+GitHubPrerelease)
+
+	switch {
+	case err == nil:
+	case response != nil && (response.StatusCode == http.StatusNotFound || response.StatusCode == http.StatusConflict):
+		trial.push(root, trial.remote(repo), trial.seedCommit(root)+":refs/tags/"+GitHubPrerelease)
+	default:
+		trial.tb.Fatalf("livetest: look up tag %s: %v", GitHubPrerelease, err)
+	}
+
 	_, _, err = trial.api.Repositories.CreateRelease(ctx, trial.org, repo, github.CreateReleaseRequest{
-		TagName: GitHubPrerelease, TargetCommitish: new(defaultBranch), Name: new("forge-ci 0.90.0-pre (rolling pre-release)"),
+		TagName: GitHubPrerelease, Name: new("forge-ci 0.90.0-pre (rolling pre-release)"),
 		Prerelease: new(true), MakeLatest: new("false"), Body: new(""),
 	})
 	if err != nil {
 		trial.tb.Fatalf("livetest: create %s: %v", GitHubPrerelease, err)
 	}
+}
+
+// seedCommit writes a commit of the empty tree into the checkout's object
+// database, touching neither its index nor its refs, and returns its ID.
+func (trial *GitHubTrial) seedCommit(root string) string {
+	trial.tb.Helper()
+
+	dir, err := os.MkdirTemp("", "forge-ci-seed-")
+	if err != nil {
+		trial.tb.Fatalf("livetest: seed index directory: %v", err)
+	}
+
+	defer os.RemoveAll(dir)
+
+	index := filepath.Join(dir, "index")
+	tree := strings.TrimSpace(trial.run(root, append(trial.gitEnv(), "GIT_INDEX_FILE="+index), "git", "-C", root, "write-tree"))
+
+	return strings.TrimSpace(trial.git(root, "-c", "user.name=Forge CI trial", "-c", "user.email=trial@example.invalid",
+		"commit-tree", tree, "-m", "seed the rolling pre-release tag"))
 }
 
 func (trial *GitHubTrial) waitPrerelease(repo, commit string) {
