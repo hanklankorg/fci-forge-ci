@@ -8,6 +8,7 @@ package ci
 import (
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -27,7 +28,7 @@ func TestCanonicalConsumerRealHelpers(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	for _, scenario := range []string{"valid-hostile-sdk", "failed-producer", "stale", "missing-id", "missing-dependency", "foreign-metadata", "bad-hash", "missing-binary"} {
+	for _, scenario := range []string{"valid-hostile-sdk", "failed-producer", "stale", "missing-id", "missing-dependency", "foreign-metadata", "bad-hash", "missing-binary", "unknown-profile"} {
 		t.Run(scenario, func(t *testing.T) {
 			root := t.TempDir()
 			workspace, temp := filepath.Join(root, "workspace"), filepath.Join(root, "temp")
@@ -102,6 +103,12 @@ func TestCanonicalConsumerRealHelpers(t *testing.T) {
 				env["PRODUCER_ARTIFACT_ID"] = ""
 			}
 
+			if scenario == "unknown-profile" {
+				// Regex-valid, so the glue passes it on; only the tool-profile owner
+				// knows the finite set, and it refuses at the first verified probe.
+				env["TOOL_PROFILE"] = "hosted"
+			}
+
 			run := func(script string, args ...string) error {
 				t.Helper()
 
@@ -163,6 +170,17 @@ func TestCanonicalConsumerRealHelpers(t *testing.T) {
 					}
 
 					receiveErr := run(helper, "receive")
+					if scenario == "unknown-profile" {
+						var exit *exec.ExitError
+						if !errors.As(receiveErr, &exit) || exit.ExitCode() != 69 {
+							t.Fatalf("an unknown tool profile must refuse with exit 69, got %v", receiveErr)
+						}
+
+						if _, err := os.Lstat(filepath.Join(temp, "forge-ci-canonical-bin")); !os.IsNotExist(err) {
+							t.Fatal("a launcher was written for an unknown tool profile")
+						}
+					}
+
 					if scenario == "valid-hostile-sdk" {
 						if receiveErr != nil {
 							t.Fatal(receiveErr)

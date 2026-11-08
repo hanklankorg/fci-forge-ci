@@ -32,10 +32,22 @@ exactly one job, `prepare-version-files`, whose CLI runs the product's own
 version tools (`mvn`, `npm`) and holds no key. Those tools are unqualified by
 design: on the hosted image `mvn` resolves into a world-writable Maven tree
 and `/usr/local/bin` is world-writable. This is an explicitly stated
-trusted-platform premise, not a verified property; the privileged
-`version-bump` job re-verifies that job's output by exact artifact ID and
-digest before any private effect, so a tampered tool changes a file the next
-job can refuse, never a key operation. No profile reads a caller PATH or
+trusted-platform premise, not a verified property. A profile fixes `PATH`
+only (`runtime` also fixes the two Cargo homes); every other variable of the
+job environment, `JAVA_HOME` and the toolchain homes among them, reaches the
+CLI and its children unchanged, so the hosted runner's own environment is
+what lets `mvn`, `npm` and a JDK resolve there. That resolution is owed live
+proof by a Maven and an npm consumer release; the Go consumer exercises
+neither. The product tools run consumer code (`npm version` scripts, Maven
+plugins), and the patch and its digest are then produced by the same
+key-free job with the runner's inherited `PATH`: the digest is the
+producer's own statement, not an independent one. What the privileged
+`version-bump` job re-verifies is transport integrity, by exact artifact ID
+and digest, and the bump-plan validation of the patch (its file set and
+parseability), before any private effect. A tampered tool therefore
+changes a file the next job validates on those terms and can refuse, never
+a key operation; it does not make that content independently reviewed.
+No profile reads a caller PATH or
 tool-directory input, and no workspace, current directory, home bin,
 job-install directory or source-tree/Mise shim is searched. The image-owned
 directories must be immutable/trusted in the qualified runtime; a profile does

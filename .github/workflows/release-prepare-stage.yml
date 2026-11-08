@@ -47,9 +47,8 @@ on:
         default: ""
         type: string
       runtime-image:
-        description: "forge-ci runtime image for the summarize job (base is sufficient)"
-        required: false
-        default: ""
+        description: "Administrator-pinned forge-ci base runtime image@sha256 digest for the changelog, summary and canonical receive jobs; the orchestrator passes its admitted input"
+        required: true
         type: string
       git-signing-method:
         description: "How to sign the release commit + tag: gpg (default) or ssh. Orchestrator passes fromJSON(config-plan-json).git_signing.method."
@@ -146,7 +145,7 @@ jobs:
       forge-ci-binary-ref: ${{ needs.resolve-bootstrap.outputs.forge-ci-binary-ref }}
       release-policy: ${{ inputs['release-policy'] }}
       branch: ${{ inputs['authorized-source-sha'] }}
-      runtime-image: ${{ inputs['runtime-image'] || needs.resolve-bootstrap.outputs['runtime-image'] }}
+      runtime-image: ${{ inputs['runtime-image'] }}
       upload-as-artifact: true
       changelog-config: "/opt/forge-ci/templates/gitcliff/keepachangelog.toml"
       git-cliff-args: ""
@@ -172,7 +171,7 @@ jobs:
       forge-ci-binary-ref: ${{ needs.resolve-bootstrap.outputs.forge-ci-binary-ref }}
       release-policy: ${{ inputs['release-policy'] }}
       branch: ${{ inputs['authorized-source-sha'] }}
-      runtime-image: ${{ inputs['runtime-image'] || needs.resolve-bootstrap.outputs['runtime-image'] }}
+      runtime-image: ${{ inputs['runtime-image'] }}
       upload-as-artifact: true
       changelog-config: "/opt/forge-ci/templates/gitcliff/minimal.toml"
       git-cliff-args: "--latest --strip header"
@@ -542,7 +541,7 @@ jobs:
     if: always() && needs.resolve-bootstrap.result == 'success'
     runs-on: ubuntu-26.04
     container:
-      image: ${{ inputs['runtime-image'] || needs.resolve-bootstrap.outputs['runtime-image'] }}
+      image: ${{ inputs['runtime-image'] }}
     permissions:
       contents: read
       actions: read

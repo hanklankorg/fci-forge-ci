@@ -513,6 +513,8 @@ jobs:
     # runs inside that digest and installs nothing. The image digest was admitted
     # by this run's canonical delivery; the container starts before any step,
     # which is why the OpenPGP key never enters it (see sign-release-gpg).
+    # harden-runner is a host agent for plain-runner jobs and is not run here:
+    # the digest pin is this job's control, the egress inputs are the host jobs'.
     name: "Sign: release files"
     needs: [resolve-bootstrap, assemble-release]
     if: ${{ !(inputs['sign-artifacts'] && fromJSON(inputs['config-plan-json']).sign.imports_gpg_key) }}
@@ -533,7 +535,6 @@ jobs:
       SOURCE_DATE_EPOCH: ${{ needs.assemble-release.outputs.source-date-epoch }}
     steps:
       - *required-request-source
-      - *harden-runner
       - name: Refuse PR-context trigger (signing material in scope)
         run: forge-ci validate event-context
       - *download-assembly
