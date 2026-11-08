@@ -35,7 +35,12 @@ type GitHubEngine struct {
 	Repository string // repository name, without the owner
 	Commit     string // the full commit its reusable workflows are pinned to
 	Namespace  string // optional full runtime image namespace; empty preserves owner-global coordinates
-	admin      *workflowAdmin
+	// Digests are what the registry serves for ImageTag, by image name such as
+	// forge-ci-runtime-base. A fixture's image renders by digest when its name
+	// is here, as the release route admits only digest-pinned images; a name
+	// that is absent renders by tag.
+	Digests map[string]string
+	admin   *workflowAdmin
 }
 
 // ImageTag is the runtime-image tag Self Runtime Container publishes for the
@@ -67,13 +72,23 @@ func (engine GitHubEngine) KeylessIdentityRegexp() string {
 var (
 	githubWorkflowUse = regexp.MustCompile(`(uses:[ \t]*['"]?)[A-Za-z0-9_.-]+/forge-ci(/\.github/workflows/[^@\s'"]+)@[^\s'"#]+`)
 	githubBinaryRef   = regexp.MustCompile(`(?m)^([ \t]*forge-ci-binary-ref:[ \t]*).*$`)
-	githubRuntimeRef  = regexp.MustCompile(`ghcr\.io/[A-Za-z0-9_.-]+/(forge-ci-runtime[a-z0-9.-]*):[A-Za-z0-9._-]+`)
+	githubRuntimeRef  = regexp.MustCompile(`ghcr\.io/[A-Za-z0-9_.-]+/(forge-ci-runtime[a-z0-9.-]*)(?::[A-Za-z0-9._-]+|@sha256:[0-9a-f]{64})`)
 	githubLeftover    = regexp.MustCompile(`uses:[ \t]*['"]?([^\s'"#]+/\.github/workflows/[^\s'"#]+)`)
+	// githubReleaseOrchestratorUse is a call of the release orchestrator, whose
+	// plain-runner jobs run the canonical CLI built from the full engine commit
+	// and whose control-plane images must be digest-pinned.
+	githubReleaseOrchestratorUse = regexp.MustCompile(`uses:[ \t]*['"]?[A-Za-z0-9_.-]+/forge-ci/\.github/workflows/release-orchestrator\.yml@`)
+	// githubAdmittedImageInput is a release-route input the orchestrator admits
+	// only as image@sha256 digest, with its rendered value.
+	githubAdmittedImageInput = regexp.MustCompile(`(?m)^[ \t]+(runtime-image|canonical-builder-image):[ \t]*['"]?([^\s'"#]*)`)
 )
 
 // RenderGitHubConsumer puts the engine where a fixture names the published
-// one: its reusable workflows at the commit, the rolling pre-release binary,
-// and the runtime images Self Runtime Container built for the commit.
+// one: its reusable workflows at the commit, the binary (the full engine
+// commit for a release call, whose plain-runner jobs run the canonical CLI
+// built from it; the rolling pre-release otherwise), and the runtime images
+// Self Runtime Container built for the commit, by digest where the engine
+// knows one.
 // Overrides are further `input: value` lines the caller sets, such as a
 // mirrored nanolinter image. Each replaces the line wherever this workflow
 // writes it; the inputs it replaced are returned, so the caller can refuse a
@@ -93,9 +108,22 @@ func RenderGitHubConsumer(name, text string, engine GitHubEngine, overrides map[
 		return "", nil, err
 	}
 
+	release := githubReleaseOrchestratorUse.MatchString(text)
+
+	binaryRef := GitHubPrerelease
+	if release {
+		binaryRef = engine.Commit
+	}
+
 	rendered := githubWorkflowUse.ReplaceAllString(text, "${1}"+engine.Owner+"/"+engine.Repository+"${2}@"+engine.Commit)
-	rendered = githubBinaryRef.ReplaceAllString(rendered, "${1}"+GitHubPrerelease)
-	rendered = githubRuntimeRef.ReplaceAllString(rendered, engine.Registry()+"/${1}:"+engine.ImageTag())
+	rendered = githubBinaryRef.ReplaceAllString(rendered, "${1}"+binaryRef)
+	rendered = githubRuntimeRef.ReplaceAllStringFunc(rendered, engine.renderRuntimeImage)
+
+	if release {
+		if err := requireAdmittedReleaseImages(name, rendered); err != nil {
+			return "", nil, err
+		}
+	}
 
 	rendered, applied := githubInputOverrides(rendered, overrides)
 
@@ -135,18 +163,55 @@ func githubInputOverrides(text string, overrides map[string]string) (string, []s
 	return text, applied
 }
 
+// renderRuntimeImage renders one fixture image reference at the engine's
+// registry: by digest when the engine resolved one for the image, by the
+// commit's tag otherwise.
+func (engine GitHubEngine) renderRuntimeImage(reference string) string {
+	image := githubRuntimeRef.FindStringSubmatch(reference)[1]
+	if digest, ok := engine.Digests[image]; ok {
+		return engine.Registry() + "/" + image + "@" + digest
+	}
+
+	return engine.Registry() + "/" + image + ":" + engine.ImageTag()
+}
+
 // requireOrchestratorImages refuses a fixture that calls an orchestrator
-// without passing runtime-image. An orchestrator's image inputs default to the
-// released images, which an unreleased engine has not built; only an image a
-// fixture names can be pointed at the organization's build of it.
+// without passing runtime-image, and a release call without the canonical
+// builder image. An orchestrator's image inputs default to the released
+// images, which an unreleased engine has not built; only an image a fixture
+// names can be pointed at the organization's build of it.
 func requireOrchestratorImages(name, text string) error {
-	if !githubOrchestratorUse.MatchString(text) || githubRuntimeImageInput.MatchString(text) {
+	if !githubOrchestratorUse.MatchString(text) {
 		return nil
 	}
 
-	return fmt.Errorf("%s calls a forge-ci orchestrator without passing runtime-image; pass it, and the image of each "+
-		"project type the workflow builds (runtime-image-java for maven), as ghcr.io/diggsweden/forge-ci-runtime-*:<tag>, "+
-		"so the trial can point them at the engine under test: %w", name, errs.ErrValidation)
+	if !githubRuntimeImageInput.MatchString(text) {
+		return fmt.Errorf("%s calls a forge-ci orchestrator without passing runtime-image; pass it, and the image of each "+
+			"project type the workflow builds (runtime-image-java for maven), as ghcr.io/diggsweden/forge-ci-runtime-*:<tag> "+
+			"or @sha256:<digest>, so the trial can point them at the engine under test: %w", name, errs.ErrValidation)
+	}
+
+	if githubReleaseOrchestratorUse.MatchString(text) && !githubCanonicalBuilderInput.MatchString(text) {
+		return fmt.Errorf("%s calls the release orchestrator without passing canonical-builder-image; pass it as "+
+			"ghcr.io/diggsweden/forge-ci-runtime-go-1.27@sha256:<digest>, so the trial can point it at the engine under test: %w",
+			name, errs.ErrValidation)
+	}
+
+	return nil
+}
+
+// requireAdmittedReleaseImages refuses a rendered release call whose admitted
+// images are not digest-pinned: the orchestrator's canonical admission would
+// refuse them in its first job, after the push.
+func requireAdmittedReleaseImages(name, rendered string) error {
+	for _, match := range githubAdmittedImageInput.FindAllStringSubmatch(rendered, -1) {
+		if !pinnedImage.MatchString(match[2]) {
+			return fmt.Errorf("%s renders %s as %q, which the release route admits only as image@sha256 digest; "+
+				"the engine under test must resolve the digest of that image: %w", name, match[1], match[2], errs.ErrValidation)
+		}
+	}
+
+	return nil
 }
 
 var (
@@ -155,6 +220,9 @@ var (
 	githubOrchestratorUse = regexp.MustCompile(`uses:[ \t]*['"]?[A-Za-z0-9_.-]+/forge-ci/\.github/workflows/[a-z-]+-orchestrator\.yml@`)
 	// githubRuntimeImageInput is the base runtime image passed as an input.
 	githubRuntimeImageInput = regexp.MustCompile(`(?m)^[ \t]+runtime-image:[ \t]*\S`)
+	// githubCanonicalBuilderInput is the Go builder image the release route
+	// builds its canonical CLI in, passed as an input.
+	githubCanonicalBuilderInput = regexp.MustCompile(`(?m)^[ \t]+canonical-builder-image:[ \t]*\S`)
 )
 
 // SealGitHubSecret encrypts a secret value for GitHub's Actions secrets API:

@@ -175,9 +175,80 @@ func (trial *GitHubTrial) EnsureEngine(root, platforms string) GitHubEngine {
 	}
 
 	trial.waitPrerelease(name, commit)
+	engine.Digests = trial.resolveEngineDigests(engine)
 	trial.tb.Logf("engine under test: %s/%s at %s, images %s/forge-ci-runtime*:%s", trial.org, name, commit, engine.Registry(), engine.ImageTag())
 
 	return engine
+}
+
+// resolveEngineDigests asks the organization's packages what each runtime
+// image serves for the commit's tag, so release fixtures render the digests
+// the release route admits. The two images the route admits must exist; a
+// missing lane image renders by tag and fails where it is pulled, as before.
+func (trial *GitHubTrial) resolveEngineDigests(engine GitHubEngine) map[string]string {
+	trial.tb.Helper()
+
+	packages, err := engine.RuntimePackageNames()
+	if err != nil {
+		trial.tb.Fatalf("livetest: runtime package coordinates: %v", err)
+	}
+
+	digests := map[string]string{}
+
+	for _, name := range packages {
+		image := name[strings.LastIndex(name, "/")+1:]
+		if !strings.HasPrefix(image, "forge-ci-runtime") {
+			continue
+		}
+
+		if digest, ok := trial.packageDigest(name, engine.ImageTag()); ok {
+			digests[image] = digest
+		}
+	}
+
+	for _, image := range []string{"forge-ci-runtime-base", "forge-ci-runtime-go-1.27"} {
+		if digests[image] == "" {
+			trial.tb.Fatalf("livetest: %s/%s:%s has no published digest; the release route admits only digest-pinned images", engine.Registry(), image, engine.ImageTag())
+		}
+	}
+
+	return digests
+}
+
+// packageDigest finds the version of a container package that carries tag
+// and returns its digest.
+func (trial *GitHubTrial) packageDigest(name, tag string) (string, bool) {
+	trial.tb.Helper()
+
+	options := &github.PackageListOptions{State: github.Ptr("active"), ListOptions: github.ListOptions{PerPage: 100}}
+
+	for {
+		versions, response, err := trial.api.Organizations.PackageGetAllVersions(trial.tb.Context(), trial.org, "container", name, options)
+		if response != nil && response.StatusCode == http.StatusNotFound {
+			return "", false
+		}
+
+		if err != nil {
+			trial.tb.Fatalf("livetest: list versions of package %s: %v", name, err)
+		}
+
+		for _, version := range versions {
+			var metadata github.PackageMetadata
+			if json.Unmarshal(version.Metadata, &metadata) != nil || metadata.Container == nil {
+				continue
+			}
+
+			if slices.Contains(metadata.Container.Tags, tag) && pinnedImage.MatchString("x@"+version.GetName()) {
+				return version.GetName(), true
+			}
+		}
+
+		if response.NextPage == 0 {
+			return "", false
+		}
+
+		options.Page = response.NextPage
+	}
 }
 
 // ReuseEngine reads an engine prepared by EnsureEngine in this same hosted
@@ -213,7 +284,10 @@ func (trial *GitHubTrial) ReuseEngine(root string) GitHubEngine {
 
 	trial.tb.Logf("reusing prepared engine without mutations: %s/%s at %s", trial.org, name, commit)
 
-	return GitHubEngine{Owner: trial.org, Repository: name, Commit: commit, Namespace: "ghcr.io/" + strings.ToLower(trial.org+"/"+name), admin: admin}
+	engine := GitHubEngine{Owner: trial.org, Repository: name, Commit: commit, Namespace: "ghcr.io/" + strings.ToLower(trial.org+"/"+name), admin: admin}
+	engine.Digests = trial.resolveEngineDigests(engine)
+
+	return engine
 }
 
 // WithHistory returns the trial pushing the consumer's own history under the

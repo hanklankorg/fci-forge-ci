@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"slices"
 	"strings"
@@ -48,7 +49,22 @@ func TestReuseGitHubEngineOnlyReadsPreparedSessionEngine(t *testing.T) {
 			}
 
 			body = map[string]any{"workflow_runs": []map[string]string{{"status": "completed", "conclusion": "success"}}}
+		case "/orgs/example-org/packages/container/fc-forge-ci/forge-ci-runtime-base/versions", "/orgs/example-org/packages/container/fc-forge-ci/forge-ci-runtime-go-1.27/versions":
+			// The digests the release route admits, read from the packages the
+			// engine build published for the commit's tag; an older build's
+			// version carries another tag.
+			image := strings.TrimSuffix(strings.TrimPrefix(request.URL.Path, "/orgs/example-org/packages/container/fc-forge-ci/"), "/versions")
+			body = []map[string]any{
+				{"name": "sha256:" + strings.Repeat("d", 64), "metadata": map[string]any{"package_type": "container", "container": map[string]any{"tags": []string{"sha-0000000"}}}},
+				{"name": "sha256:" + strings.Repeat(string(image[len(image)-1]), 64), "metadata": map[string]any{"package_type": "container", "container": map[string]any{"tags": []string{"sha-" + commit[:7]}}}},
+			}
 		default:
+			if strings.HasPrefix(request.URL.Path, "/orgs/example-org/packages/container/") {
+				response.WriteHeader(http.StatusNotFound) // A lane image the test organization did not publish.
+
+				return
+			}
+
 			t.Errorf("unexpected engine request: %s", request.URL)
 			response.WriteHeader(http.StatusNotFound)
 
@@ -78,7 +94,9 @@ func TestReuseGitHubEngineOnlyReadsPreparedSessionEngine(t *testing.T) {
 	}
 
 	got.admin = nil
-	if got != (GitHubEngine{Owner: trial.org, Repository: "fc-forge-ci", Commit: commit, Namespace: "ghcr.io/example-org/fc-forge-ci"}) || len(reads) != 3 {
+	want := GitHubEngine{Owner: trial.org, Repository: "fc-forge-ci", Commit: commit, Namespace: "ghcr.io/example-org/fc-forge-ci",
+		Digests: map[string]string{"forge-ci-runtime-base": "sha256:" + strings.Repeat("e", 64), "forge-ci-runtime-go-1.27": "sha256:" + strings.Repeat("7", 64)}}
+	if !reflect.DeepEqual(got, want) || len(reads) != 10 {
 		t.Fatalf("reuse = %+v; reads = %v", got, reads)
 	}
 }
