@@ -8,11 +8,14 @@
 #
 #   base    — bash, ca-certificates, curl, git, gnupg, gzip, jq, openssh-client
 #             (ssh-keygen, for SSH tag verification), tar, unzip, xz, zip, yq, git-cliff, gh, glab, mise, publiccode-parser, cosign,
-#             and the matching architecture's forge-ci binary from this
+#             syft, and the matching architecture's forge-ci binary from this
 #             runtime run's cli-dist artifact. Used by config / plan / release /
 #             orchestrator / changelog / provider-dispatch / publiccode-lint
-#             jobs.
-#   full    — base + syft + trivy. Used by security and SBOM jobs.
+#             jobs. Syft is in base because the GitLab release's image
+#             publishing job runs in the consumer's job-image, the toolchain
+#             image its checks need, and requires Syft there without
+#             downloading it; so every toolchain image carries it.
+#   full    — base + trivy. Used by security jobs.
 #   rust    — base + Rust stable toolchain + cargo-cyclonedx. Used by
 #             build-cargo and sbom-cargo.
 #   go      — base + Go 1.27 toolchain, cyclonedx-gomod, GCC, libc headers
@@ -173,8 +176,10 @@ RUN bash -c 'set -euo pipefail \
   && source /opt/forge-ci/scripts/bootstrap/install-mise.sh && install_mise \
   && install -m 0755 "$(command -v mise)" /usr/local/bin/mise \
   && source /opt/forge-ci/scripts/bootstrap/install-cosign.sh && install_cosign \
-  && install -m 0755 "$(command -v cosign)" /usr/local/bin/cosign' \
-  && rm -rf /tmp/git-cliff-bin /tmp/gh-bin /tmp/glab-bin /tmp/mise-bin /tmp/cosign-bin \
+  && install -m 0755 "$(command -v cosign)" /usr/local/bin/cosign \
+  && source /opt/forge-ci/scripts/bootstrap/install-syft.sh && install_syft \
+  && install -m 0755 "$(command -v syft)" /usr/local/bin/syft' \
+  && rm -rf /tmp/git-cliff-bin /tmp/gh-bin /tmp/glab-bin /tmp/mise-bin /tmp/cosign-bin /tmp/syft-bin \
   && yq --version \
   && git-cliff --version \
   && gh --version \
@@ -182,6 +187,7 @@ RUN bash -c 'set -euo pipefail \
   && mise --version \
   && publiccode-parser --version \
   && cosign version \
+  && syft version \
   && forge-ci --version
 
 # Git aborts operations on a repository whose on-disk owner differs from the
@@ -214,12 +220,9 @@ FROM base AS full
 
 # hadolint ignore=SC1091
 RUN bash -c 'set -euo pipefail \
-  && source /opt/forge-ci/scripts/bootstrap/install-syft.sh && install_syft \
-  && install -m 0755 "$(command -v syft)" /usr/local/bin/syft \
   && source /opt/forge-ci/scripts/bootstrap/install-trivy.sh && install_trivy \
   && install -m 0755 "$(command -v trivy)" /usr/local/bin/trivy' \
-  && rm -rf /tmp/syft-bin /tmp/trivy-bin \
-  && syft version \
+  && rm -rf /tmp/trivy-bin \
   && trivy --version
 
 # =============================================================================

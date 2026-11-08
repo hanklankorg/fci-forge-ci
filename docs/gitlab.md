@@ -772,7 +772,9 @@ or treat a destination publication ledger as authority to delete source tags.
 
 Ordinary release-image publication retains the original platform inventories and
 pins index SBOMs before signing. The image publishing job requires Syft in the
-pinned `job-image` (for example the full runtime image); it does not download it.
+pinned `job-image`, which every Forge CI runtime image carries, the toolchain
+images included, so the image the consumer's checks run in serves; it does not
+download it.
 The exact ledger-pinned index and platform documents are added to the unsigned
 release manifest before the handoff digest, signed as evidence, and published with
 their bundles. Their URLs name this source project's public release downloads,
