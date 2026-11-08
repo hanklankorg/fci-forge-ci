@@ -73,7 +73,7 @@ consumer hello-go-cli release CI_JOB_IMAGE=@JOB_IMAGE_GO CI_IMAGE_BUILDER_JOB_IM
 scenario TestThird
 `)
 
-	plan, err := PlanCampaignLane(dir, "forgejo", cases, campaignHead, CampaignRun{})
+	plan, err := PlanCampaignLane(reporoot.Path(t), dir, "forgejo", cases, campaignHead, CampaignRun{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -119,7 +119,7 @@ func TestPlanCampaignLane_MapsAGitLabConsumerToItsRecipes(t *testing.T) {
 			"consumer hello-go-cli pull-request job-archive=@FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_JAVA\n")
 	writeFile(t, filepath.Join(dir, "demos", "hello-maven", filepath.FromSlash(GitLabGateFile)), lintingGate)
 
-	plan, err := PlanCampaignLane(dir, "gitlab", cases, campaignHead, CampaignRun{})
+	plan, err := PlanCampaignLane(reporoot.Path(t), dir, "gitlab", cases, campaignHead, CampaignRun{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -199,14 +199,14 @@ func TestPlanCampaignLane_RefusesWhatItCannotRead(t *testing.T) {
 
 			writeFile(t, filepath.Join(dir, "demos", "hello-maven", filepath.FromSlash(GitLabGateFile)), lintingGate)
 
-			_, err := PlanCampaignLane(dir, tc.provider, cases, campaignHead, CampaignRun{})
+			_, err := PlanCampaignLane(reporoot.Path(t), dir, tc.provider, cases, campaignHead, CampaignRun{})
 			if !errors.Is(err, errs.ErrValidation) || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("got %v, want a validation error naming %q", err, tc.want)
 			}
 		})
 	}
 
-	if _, err := PlanCampaignLane("relative/campaign", "forgejo", "lane.cases", campaignHead, CampaignRun{}); !errors.Is(err, errs.ErrValidation) {
+	if _, err := PlanCampaignLane(reporoot.Path(t), "relative/campaign", "forgejo", "lane.cases", campaignHead, CampaignRun{}); !errors.Is(err, errs.ErrValidation) {
 		t.Fatalf("a relative campaign directory: %v", err)
 	}
 }
@@ -342,7 +342,7 @@ func TestPlanCampaignLane_RefusesAGateImageTheCampaignLacks(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := PlanCampaignLane(dir, "gitlab", cases, campaignHead, CampaignRun{}); !errors.Is(err, errs.ErrValidation) ||
+	if _, err := PlanCampaignLane(reporoot.Path(t), dir, "gitlab", cases, campaignHead, CampaignRun{}); !errors.Is(err, errs.ErrValidation) ||
 		!strings.Contains(err.Error(), "FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_NODE") {
 		t.Fatalf("a missing gate image was not refused: %v", err)
 	}
@@ -353,7 +353,7 @@ func TestPlanCampaignLane_RefusesAGateImageTheCampaignLacks(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := PlanCampaignLane(dir, "forgejo", forgejo, campaignHead, CampaignRun{}); err != nil {
+	if _, err := PlanCampaignLane(reporoot.Path(t), dir, "forgejo", forgejo, campaignHead, CampaignRun{}); err != nil {
 		t.Fatal(err)
 	}
 }

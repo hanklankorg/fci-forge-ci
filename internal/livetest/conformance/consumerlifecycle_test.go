@@ -87,10 +87,7 @@ func runForgejoConsumerLifecycle(t *testing.T, root string, private bool) {
 
 	// The service's readiness runs the published image with Podman, on the
 	// contract's runner that permits it, whichever builder builds the image.
-	containerLabel := livetest.PrivilegedRunnerLabel(t, target)
-	if containerLabel == "" {
-		livetest.NotCoveredf(t, "service readiness runs the published image with Podman and needs the contract's runner.privileged_label")
-	}
+	containerLabel := livetest.ContainerRunnerLabel(t, target, "service readiness runs the published image with Podman")
 
 	recipe, err := filepath.Abs("../../../test/live/demos/hello-maven-service/consumer")
 	if err != nil {

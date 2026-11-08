@@ -140,7 +140,13 @@ before building images. The checked-in private k3s lanes require private visibil
 and Kaniko; set the corresponding Forgejo or GitLab image-builder selector.
 The four administrator settings are independent and default to `false`. For these
 lanes the controller sets lint, vulnerabilities and application tests to `false`,
-explicitly enabling reproducible builds as their declarations require. Each controller variable accepts exactly
+and for the GitLab lane explicitly enables reproducible builds, as its declaration
+requires. An administrator setting is declared only where an orchestrator of the
+lane's forge declares its input, `enforce-<check>`, read from this checkout's
+`.forgejo/workflows` and `.forgejo/actions` or `templates/`: no Forgejo
+orchestrator takes `enforce-reproducible-builds`, so the Forgejo lanes declare
+none, and a declaration nothing on the lane consumes is refused at preparation
+and before the lane runs. Each controller variable accepts exactly
 `true` or `false`; invalid values refuse preflight. Checks still run when their
 findings are nonblocking.
 
@@ -232,21 +238,24 @@ is not a validation entry point for this profile. No scenario is duplicated ther
 
 `test/live/campaigns/lifecycle-forgejo.cases` and
 `test/live/campaigns/lifecycle-gitlab.cases` run the linked flow of one
-consumer in one scratch repository, the `lifecycle` event, public and with
-Buildah, the published snapshot's profile:
+consumer in one scratch repository, the `lifecycle` event:
 
 ```text
 consumer hello-maven-service lifecycle CI_JOB_IMAGE=@JOB_IMAGE_JAVA CI_IMAGE_BUILDER=buildah RELEASE_PLATFORMS=linux/amd64
+consumer hello-maven-service lifecycle CI_JOB_IMAGE=@JOB_IMAGE_JAVA CI_IMAGE_BUILDER=kaniko CI_IMAGE_BUILDER_JOB_IMAGE=@KANIKO_JOB_IMAGE RELEASE_PLATFORMS=linux/amd64
 consumer hello-maven-service lifecycle job-archive=@FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_JAVA build-archive=@FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_JAVA signer-archive=@FORGE_CI_LIVE_SIGNER_IMAGE_ARCHIVE lint-archive=@LINT_IMAGE_ARCHIVE_JAVA version=0.2.0 version-bump=maven job-user=65532:65532
 ```
 
-`test/live/campaigns/lifecycle-private-forgejo.cases` and
-`test/live/campaigns/lifecycle-private-gitlab.cases` run the same flow in
-the k3s campaigns' profile, private and with kaniko on the ordinary runner
-(`FORGE_CI_LIVE_CONSUMER_VISIBILITY=private` and the provider's image-builder
-selector set to `kaniko` by the caller); the Forgejo case adds
-`CI_IMAGE_BUILDER=kaniko CI_IMAGE_BUILDER_JOB_IMAGE=@KANIKO_JOB_IMAGE`, the
-GitLab case is the public one's under the lane's builder.
+Neither file declares a visibility or a builder. The visibility is the run's
+selector: `FORGE_CI_LIVE_CONSUMER_VISIBILITY` unset or `both` runs each line
+public and private. The builder on GitLab is the lane's selector,
+`FORGE_CI_LIVE_GITLAB_IMAGE_BUILDER` (unset or `buildah`, or `kaniko`), under
+which the one GitLab line runs; on Forgejo it is the consumer's
+`CI_IMAGE_BUILDER` variable, so the Forgejo file carries one line per builder,
+and `FORGE_CI_LIVE_FORGEJO_IMAGE_BUILDER` stays unset (set, it refuses the other
+builder's line). On Forgejo both builders' image builds, and the service's
+readiness, run on the contract's container/readiness runner
+(`CI_RUNNER_LABEL_CONTAINER`); on GitLab kaniko builds on the ordinary runner.
 
 The same reader, `key=value` words and `@NAME` expansion as the other consumer
 events; only the event word is new. On Forgejo the phases, each ending the
@@ -278,9 +287,11 @@ builder as the other events do, with the consumer's `CI_IMAGE_BUILDER`, and
 runs in the consumer trial's layer repository (`fci-consumer-trial-layer`,
 beside its own `fci-consumer-lifecycle`): a run admits a kaniko job image only
 for the repository its source label names, and the campaign's is labelled for
-that one, so one prepared image serves every event. It needs what the
-published snapshot and a Forgejo release need: the contract's
-container/readiness runner, whichever builder builds the image,
+that one, so one prepared image serves every event; under kaniko,
+`CI_IMAGE_BUILDER_JOB_IMAGE` pinned by digest is required before anything is
+created, as the run admits it by digest and label in the development phase.
+It needs what the published snapshot and a Forgejo release need: the
+contract's container/readiness runner, whichever builder builds the image,
 `FORGE_CI_LIVE_SIGNER_IMAGE`, ssh-keygen and gpg.
 
 On GitLab (`TestGitLabLayer_ConsumerLifecycle`) the same five phases run in

@@ -5,16 +5,20 @@
 # pinned policy: a merge request on branch development judged by the demo's
 # gate, its native merge, the service development snapshot the policy's
 # snapshot-images component takes on the merged main, then a signed release
-# request from it. The profile is the GitLab release's: the runtime java
+# request from it. The images are the GitLab release's: the runtime java
 # image as job and build image (the build image is also the Java image the
-# snapshot builds the service with), the signer image, the Buildah job image
-# for the snapshot's and the release's image builds, and the java lint image
-# for the gate. Prepare with gitlab=<this file> and job-image=java:<reviewed
-# local image>. amd64 runners only for now.
+# snapshot builds the service with), the signer image, the selected builder's
+# job image for the snapshot's and the release's image builds, and the java
+# lint image for the gate. The builder is the lane's,
+# FORGE_CI_LIVE_GITLAB_IMAGE_BUILDER: unset or buildah, the Buildah job image
+# on the contract's runner that permits user namespaces; kaniko, the kaniko
+# job image of FORGE_CI_LIVE_KANIKO_JOB_IMAGE_ARCHIVE, labelled for the
+# project the lifecycle serves the layer from as it is pushed. The visibility
+# is the run's: FORGE_CI_LIVE_CONSUMER_VISIBILITY unset or both runs the line
+# public and private. Prepare with gitlab=<this file> and
+# job-image=java:<reviewed local image>. amd64 runners only for now.
 #
 #   just campaign-lane <dir> gitlab test/live/campaigns/lifecycle-gitlab.cases
-setting visibility=public
-setting image-builder=buildah
 setting admin-lint=false
 setting admin-vulnerabilities=false
 setting admin-application-tests=false

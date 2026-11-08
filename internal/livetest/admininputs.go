@@ -245,7 +245,15 @@ func (admin *workflowAdmin) bindCall(call *yaml.Node, prefixes map[string]string
 }
 
 func (admin *workflowAdmin) declaredInputs(file string) (*yaml.Node, error) {
-	body, err := admin.read(file)
+	return declaredInputs(admin.read, file)
+}
+
+// declaredInputs reads the inputs an engine orchestrator declares, from the
+// file read gives: a GitLab component's spec.inputs under templates/, an
+// action's inputs, or a reusable workflow's workflow_call inputs. It is nil
+// for a file that declares none.
+func declaredInputs(read func(string) ([]byte, error), file string) (*yaml.Node, error) {
+	body, err := read(file)
 	if err != nil {
 		return nil, fmt.Errorf("read engine input declaration %s: %w", file, err)
 	}

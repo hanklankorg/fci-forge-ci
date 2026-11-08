@@ -144,9 +144,11 @@ func relativePackages(verdict *livetest.LiveRunVerdict) {
 }
 
 // campaign runs a campaign mode. `campaign-env-check <file>` validates a
-// campaign.env before campaign-prepare puts it in place; `campaign-plan <dir>
-// <forgejo|gitlab> <cases-file>` prints the lane the script runs, for the
-// commit checked out in the working directory; `campaign-runtime-targets
+// campaign.env before campaign-prepare puts it in place; `campaign-plan
+// <repository> <dir> <forgejo|gitlab> <cases-file>` prints the lane the
+// script runs, for the commit checked out in the working directory, whose
+// orchestrators at <repository> decide which administrator settings a cases
+// file may declare; `campaign-runtime-targets
 // <repository> <forgejo|gitlab>=<cases-file>... [flavor=<job-image flavor>...]`
 // prints the runtime targets campaign-prepare builds for those lanes, one a
 // line, and refuses a case naming a nanolinter image of another flavor.
@@ -173,18 +175,18 @@ func campaign(mode string, args []string) error {
 		}
 
 		return err
-	case mode == "campaign-plan" && len(args) == 3:
+	case mode == "campaign-plan" && len(args) == 4:
 		head, err := exec.CommandContext(context.Background(), "git", "rev-parse", "--verify", "HEAD").Output()
 		if err != nil {
 			return fmt.Errorf("read HEAD: %w", err)
 		}
 
-		settings, err := livetest.CampaignRunSettings(args[1], os.Getenv)
+		settings, err := livetest.CampaignRunSettings(args[2], os.Getenv)
 		if err != nil {
 			return err
 		}
 
-		plan, err := livetest.PlanCampaignLane(args[0], args[1], args[2], strings.TrimSpace(string(head)), settings)
+		plan, err := livetest.PlanCampaignLane(args[0], args[1], args[2], args[3], strings.TrimSpace(string(head)), settings)
 		if err != nil {
 			return err
 		}
@@ -232,7 +234,7 @@ func usage() {
 	fmt.Fprintln(os.Stderr, "       preflight classify-run <exit-code> <retained-log>")
 	fmt.Fprintln(os.Stderr, "       preflight campaign-env-check <campaign.env>")
 	fmt.Fprintln(os.Stderr, "       preflight gitlab-consumer-scenario | gitlab-lifecycle-settings (validates FORGE_CI_LIVE_CONSUMER_SETTINGS)")
-	fmt.Fprintln(os.Stderr, "       preflight campaign-plan <dir> <forgejo|gitlab> <cases-file>")
+	fmt.Fprintln(os.Stderr, "       preflight campaign-plan <repository> <dir> <forgejo|gitlab> <cases-file>")
 	fmt.Fprintln(os.Stderr, "       preflight campaign-runtime-targets <repository> <forgejo|gitlab>=<cases-file>... [flavor=<flavor>...]")
 	fmt.Fprintln(os.Stderr, "usage: preflight [signing-inputs | runner-arch | consumer-trial-layer | host-tools] (signing-inputs checks only FORGE_CI_LIVE_SIGNING_KEY_DIR; host-tools checks only this host; other modes read the forgeci lab contract)")
 	os.Exit(2)

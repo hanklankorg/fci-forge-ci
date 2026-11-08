@@ -242,14 +242,20 @@ func (settings *TrialSettings) ResolvedVariables(layerCommit, requestCommit stri
 	return resolved
 }
 
-// lifecycleImages holds a lifecycle to the Java job image its development
-// phase builds the service with, pinned by digest, before anything is
-// created. The image builder is the consumer's CI_IMAGE_BUILDER, as in every
-// consumer trial event; a kaniko job image is held to its digest where the
-// trial's is (MergeConsumerVariables) and to its source label by the run.
+// lifecycleImages holds a lifecycle to the images its development phase
+// builds with, before anything is created: the Java job image pinned by
+// digest, and under kaniko, the consumer's CI_IMAGE_BUILDER as in every
+// consumer trial event, the kaniko job image pinned by digest too. The run
+// then admits that image by its digest and source label in the development
+// phase (setup-image-builder); refusing a floating reference here saves the
+// two phases before it.
 func (settings *TrialSettings) lifecycleImages() error {
 	if !container.ValidDigestReference(settings.Variables[lifecycleJobImage]) {
 		return fmt.Errorf("%s requires %s=<digest reference>, the Java job image its development phase builds the service with: %w", TrialLifecycle, lifecycleJobImage, errs.ErrValidation)
+	}
+
+	if settings.Variables["CI_IMAGE_BUILDER"] == ImageBuilderKaniko && !container.ValidDigestReference(settings.Variables["CI_IMAGE_BUILDER_JOB_IMAGE"]) {
+		return fmt.Errorf("%s with CI_IMAGE_BUILDER=kaniko requires CI_IMAGE_BUILDER_JOB_IMAGE=<digest reference>, the kaniko job image its development phase builds the image in: %w", TrialLifecycle, errs.ErrValidation)
 	}
 
 	return nil

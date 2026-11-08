@@ -161,7 +161,7 @@ lane() {
   plan=$(mktemp "${TMPDIR:-/tmp}/forge-ci-campaign-plan.XXXXXXXX")
   case_output=$(mktemp "${TMPDIR:-/tmp}/forge-ci-campaign.XXXXXXXX")
   trap 'rm -f -- "$plan" "$case_output"' EXIT
-  preflight campaign-plan "$dir" "$provider" "$cases" >"$plan" || exit 2
+  preflight campaign-plan "$repo_root" "$dir" "$provider" "$cases" >"$plan" || exit 2
 
   local results=$dir/$provider.results kind field count text started status verdict failed=0 ran=0
   local -a args
