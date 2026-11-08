@@ -157,19 +157,22 @@ func addSnapshotArtifactJobs(out snapshotJobs, plan snapshotimage.Plan, in Snaps
 // snapshotArtifactImage is the digest-pinned runtime image that builds one
 // artifact family, falling back to the job image.
 func snapshotArtifactImage(projectType projecttype.Type, in SnapshotPipelineOptions) (string, error) {
+	family, err := snapshotimage.ToolchainFamily(projectType)
+	if err != nil {
+		return "", fmt.Errorf("unsupported snapshot artifact family %s: %w", projectType, errs.ErrValidation)
+	}
+
 	var image string
 
-	switch projectType {
-	case "go":
+	switch family {
+	case snapshotimage.FamilyGo:
 		image = in.Images.Go
-	case "maven", "gradle":
+	case snapshotimage.FamilyJava:
 		image = in.Images.Java
-	case "npm":
+	case snapshotimage.FamilyNode:
 		image = in.Images.Node
-	case "cargo":
+	case snapshotimage.FamilyRust:
 		image = in.Images.Rust
-	default:
-		return "", fmt.Errorf("unsupported snapshot artifact family %s: %w", projectType, errs.ErrValidation)
 	}
 
 	if image == "" {
