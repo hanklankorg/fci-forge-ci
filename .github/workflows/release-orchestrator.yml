@@ -757,7 +757,7 @@ jobs:
   # release-artifact transfer plumbing the Go path uses.
   execute-publish-stage:
     name: Publish
-    needs: [resolve-bootstrap, parse-config, execute-prepare-stage, execute-build-stage]
+    needs: [resolve-bootstrap, parse-config, execute-prepare-stage, execute-build-stage, canonical-cli]
     if: ${{ !failure() && !cancelled() && inputs['release-file-mode'] == 'native' }}
     permissions:
       contents: write
@@ -788,8 +788,17 @@ jobs:
       source-date-epoch: ${{ needs.execute-prepare-stage.outputs.source-date-epoch }}
       publish-stage-plan-json: ${{ needs.parse-config.outputs.publish-stage-plan-json }}
       forge-ci-binary-ref: ${{ needs.parse-config.outputs.forge-ci-binary-ref }}
+      canonical-artifact-id: ${{ needs.canonical-cli.outputs.artifact-id }}
+      canonical-artifact-name: ${{ needs.canonical-cli.outputs.artifact-name }}
+      canonical-producer-run-id: ${{ needs.canonical-cli.outputs.producer-run-id }}
+      canonical-producer-run-attempt: ${{ needs.canonical-cli.outputs.producer-run-attempt }}
+      canonical-producer-engine-repository: ${{ needs.canonical-cli.outputs.engine-repository }}
+      canonical-producer-engine-commit: ${{ needs.canonical-cli.outputs.engine-commit }}
+      canonical-producer-result: ${{ needs.canonical-cli.result }}
       runtime-image: ${{ inputs['runtime-image'] }}
+      runtime-image-full: ${{ inputs['runtime-image-full'] || needs.resolve-bootstrap.outputs['runtime-image-full'] }}
       runtime-image-java: ${{ inputs['runtime-image-java'] || needs.resolve-bootstrap.outputs['runtime-image-java'] }}
+      runtime-image-node: ${{ inputs['runtime-image-node'] || needs.resolve-bootstrap.outputs['runtime-image-node'] }}
       runtime-image-rust: ${{ inputs['runtime-image-rust'] || needs.resolve-bootstrap.outputs['runtime-image-rust'] }}
       runtime-image-go: ${{ inputs['runtime-image-go'] || needs.resolve-bootstrap.outputs['runtime-image-go'] }}
       build-result-json: ${{ needs.execute-build-stage.outputs.result-json }}

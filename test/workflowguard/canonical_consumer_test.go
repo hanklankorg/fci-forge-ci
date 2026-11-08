@@ -115,6 +115,7 @@ func TestCanonicalConsumerWorkflowGraph(t *testing.T) {
 		"release-prepare-stage.yml":          {"prepare-version-files", "version-bump", "summarize-prepare-stage"},
 		"generate-changelog.yml":             {"generate-changelog"},
 		"release-create-github.yml":          {"sign-release-gpg", "create-release"},
+		"publish-container.yml":              {"build-arch"},
 	} {
 		workflow := readCanonicalConsumerWorkflow(t, file)
 		for _, name := range jobs {
@@ -135,6 +136,12 @@ func TestCanonicalConsumerWorkflowGraph(t *testing.T) {
 
 				require.Equal(t, "Admit protected release route before consumer checkout", job.Steps[1].Name)
 				require.NotContains(t, job.Steps[1].Run, "forge-ci")
+			}
+
+			if file == "publish-container.yml" {
+				offset = 1
+
+				require.Equal(t, "Harden GitHub runner", job.Steps[0].Name)
 			}
 
 			if file == "release-create-github.yml" {
@@ -203,7 +210,7 @@ func TestCanonicalConsumerWorkflowGraph(t *testing.T) {
 	root := readCanonicalConsumerWorkflow(t, "release-orchestrator.yml")
 	require.Equal(t, "${{ needs.canonical-cli.outputs.artifact-id }}", root.Jobs["parse-config"].Steps[2].Env["PRODUCER_ARTIFACT_ID"])
 
-	for _, caller := range []string{"validate-prerequisites", "execute-prepare-stage", "create-release"} {
+	for _, caller := range []string{"validate-prerequisites", "execute-prepare-stage", "execute-publish-stage", "create-release"} {
 		require.Contains(t, root.Jobs[caller].Needs, "canonical-cli")
 		require.Equal(t, "${{ needs.canonical-cli.result }}", root.Jobs[caller].With["canonical-producer-result"])
 	}

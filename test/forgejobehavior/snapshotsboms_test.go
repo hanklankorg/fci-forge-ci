@@ -123,7 +123,12 @@ func TestSnapshotSBOMLayerStepThroughTheEngine(t *testing.T) {
 	}
 }
 
-func TestPackagePublisherKeepsTheSelectedEngineRevision(t *testing.T) {
+// The package publisher runs in a forge-ci runtime image: the Java image for
+// Maven and Gradle publications, the Node image for npm, each carrying the
+// engine of the forge-ci version the route resolved or the consumer pinned.
+// It therefore takes no engine ref; the stage selects the image by the
+// artifact's package type.
+func TestPackagePublisherRunsInTheToolchainImageOfItsPackageType(t *testing.T) {
 	t.Parallel()
 
 	var workflow struct {
@@ -149,7 +154,12 @@ func TestPackagePublisherKeepsTheSelectedEngineRevision(t *testing.T) {
 		t.Fatal("package publisher must wait for the frozen bootstrap revision")
 	}
 
-	if got := publisher.With["forge-ci-binary-ref"]; got != "${{ needs.resolve-bootstrap.outputs.forge-ci-binary-ref }}" {
-		t.Fatalf("package publisher loses the selected engine revision: %v", got)
+	if _, forwarded := publisher.With["forge-ci-binary-ref"]; forwarded {
+		t.Fatal("package publisher takes its engine from the runtime image, not an engine ref")
+	}
+
+	want := "${{ matrix.artifact.project_type == 'npm' && (inputs['runtime-image-node'] || needs.resolve-bootstrap.outputs['runtime-image-node']) || (inputs['runtime-image-java'] || needs.resolve-bootstrap.outputs['runtime-image-java']) }}"
+	if got := publisher.With["runtime-image"]; got != want {
+		t.Fatalf("package publisher image is not selected by package type: %v", got)
 	}
 }

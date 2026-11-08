@@ -97,11 +97,12 @@ jobs:
       working-directory: ${{ matrix.artifact.working_directory }}
       artifact-source: ${{ matrix.artifact.publication_artifact_name || matrix.artifact.build_artifact_name }}
       package-type: ${{ matrix.artifact.project_type }}
-      java-version: ${{ matrix.artifact.maven.java_version || '25' }}
       profile: ${{ matrix.artifact.project_type == 'maven' && matrix.artifact.build_type == 'library' && (matrix.artifact.maven.maven_profile || 'central-release') || '' }}
       from-build: ${{ matrix.artifact.project_type == 'maven' && matrix.artifact.build_type == 'library' }}
       snapshot: true
-      forge-ci-binary-ref: ${{ needs.resolve-bootstrap.outputs.forge-ci-binary-ref }}
+      # Maven-format snapshots only (npm is refused with snapshot); the
+      # publication runs in the toolchain image of its package type.
+      runtime-image: ${{ matrix.artifact.project_type == 'npm' && (inputs['runtime-image-node'] || needs.resolve-bootstrap.outputs['runtime-image-node']) || (inputs['runtime-image-java'] || needs.resolve-bootstrap.outputs['runtime-image-java']) }}
   maven-central:
     needs: [resolve-bootstrap]
     name: "Publish: ${{ matrix.artifact.name }} to Central snapshots"

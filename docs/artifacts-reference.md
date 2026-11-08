@@ -976,7 +976,9 @@ containers:
   uses: diggsweden/forge-ci/.github/workflows/publish-container.yml@v0.90.0
   with:
     branch: main
-    forge-ci-binary-ref: v0.90.0
+    # plus runtime-image, runtime-image-full and the canonical-* inputs of a
+    # canonical-cli-bootstrap.yml job in the same run; see publishing.md
+    forge-ci-binary-ref: <full-engine-commit>
     artifact-types: cargo
     build-args: |
       RUST_VERSION=1.94

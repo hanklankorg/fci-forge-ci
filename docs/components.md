@@ -113,6 +113,7 @@ jobs:
       package-type: npm
       npm-tag: release-{version}
       artifact-source: npm-build-artifacts
+      runtime-image: ghcr.io/diggsweden/forge-ci-runtime-node-24@sha256:<digest>
 
   build-container:
     needs: build-npm
@@ -128,7 +129,12 @@ jobs:
       CODE_SCANNING_TOKEN: ${{ secrets.CODE_SCANNING_TOKEN }}
     with:
       branch: main
-      forge-ci-binary-ref: v0.90.0
+      # The canonical CLI of this run: a full engine commit, the admitted
+      # image digests and the canonical-* outputs of a canonical-cli-bootstrap.yml
+      # job in the same run (see publish-container.yml below).
+      forge-ci-binary-ref: <full-engine-commit>
+      runtime-image: ghcr.io/diggsweden/forge-ci-runtime-base@sha256:<digest>
+      runtime-image-full: ghcr.io/diggsweden/forge-ci-runtime@sha256:<digest>
       container-file: Containerfile
       artifact-types: npm
 ```
@@ -318,6 +324,8 @@ with:
   package-type: maven          # maven, npm, or gradle
   artifact-source: maven-build-artifacts  # Name of workflow artifact
   working-directory: "."
+  # The job container: the Java image for maven/gradle, the Node image for npm.
+  runtime-image: ghcr.io/diggsweden/forge-ci-runtime-java-25@sha256:<digest>
 ```
 
 #### `publish-maven-central.yml`
@@ -342,11 +350,28 @@ with:
 
 #### `publish-container.yml`
 Production container builds with full security features. Supports multiple registries.
+The key-holding jobs (early key check, layout publication, manifest signing and
+attestation) run in `runtime-image`, the per-platform SBOM evidence in
+`runtime-image-full`; the Buildah build legs are host jobs that receive the
+canonical CLI of the run. A direct caller therefore runs
+`canonical-cli-bootstrap.yml` first and forwards its outputs as the
+`canonical-*` inputs, with `forge-ci-binary-ref` as the full engine commit and
+`runtime-image` as the admitted base image digest, exactly as
+`release-publish-stage.yml` does.
 ```yaml
 uses: diggsweden/forge-ci/.github/workflows/publish-container.yml@v0.90.0
 with:
   branch: main
-  forge-ci-binary-ref: v0.90.0
+  forge-ci-binary-ref: <full-engine-commit>
+  runtime-image: ghcr.io/diggsweden/forge-ci-runtime-base@sha256:<digest>
+  runtime-image-full: ghcr.io/diggsweden/forge-ci-runtime@sha256:<digest>
+  canonical-artifact-id: ${{ needs.canonical-cli.outputs.artifact-id }}
+  canonical-artifact-name: ${{ needs.canonical-cli.outputs.artifact-name }}
+  canonical-producer-run-id: ${{ needs.canonical-cli.outputs.producer-run-id }}
+  canonical-producer-run-attempt: ${{ needs.canonical-cli.outputs.producer-run-attempt }}
+  canonical-producer-engine-repository: ${{ needs.canonical-cli.outputs.engine-repository }}
+  canonical-producer-engine-commit: ${{ needs.canonical-cli.outputs.engine-commit }}
+  canonical-producer-result: ${{ needs.canonical-cli.result }}
   container-file: "Containerfile"
   context: "."
   artifact-types: maven

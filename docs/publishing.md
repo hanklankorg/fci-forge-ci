@@ -568,10 +568,27 @@ destination names together for your project. For the custom GHCR destination,
 configure `REGISTRY_USER` as a variable and `REGISTRY_TOKEN` as a secret
 authorized to publish under `my-custom-org`.
 
+A direct caller supplies what the release orchestrator supplies: the
+canonical CLI of the same run. `canonical-cli-bootstrap.yml` builds it from
+the full engine commit in a pinned Go builder image (the image the
+orchestrator's `canonical-builder-image` input takes); the host build legs
+of `publish-container.yml` receive it, and its other jobs run in the
+`runtime-image` and `runtime-image-full` digests. Tags are refused there.
+
 ```yaml
 jobs:
+  canonical-cli:
+    permissions:
+      contents: read
+      actions: read
+    uses: diggsweden/forge-ci/.github/workflows/canonical-cli-bootstrap.yml@v0.90.0
+    with:
+      engine-repository: diggsweden/forge-ci
+      engine-commit: <full-engine-commit> # the commit the pinned forge-ci tag points at
+      runtime-image: <go-builder-image>@sha256:<digest>
+      receive-runtime-image: ghcr.io/diggsweden/forge-ci-runtime-base@sha256:<digest>
   publish-container:
-    needs: build-maven
+    needs: [build-maven, canonical-cli]
     uses: diggsweden/forge-ci/.github/workflows/publish-container.yml@v0.90.0
     permissions:
       contents: read
@@ -580,7 +597,16 @@ jobs:
       actions: read
     with:
       branch: main
-      forge-ci-binary-ref: v0.90.0
+      forge-ci-binary-ref: <full-engine-commit>
+      runtime-image: ghcr.io/diggsweden/forge-ci-runtime-base@sha256:<digest>
+      runtime-image-full: ghcr.io/diggsweden/forge-ci-runtime@sha256:<digest>
+      canonical-artifact-id: ${{ needs.canonical-cli.outputs.artifact-id }}
+      canonical-artifact-name: ${{ needs.canonical-cli.outputs.artifact-name }}
+      canonical-producer-run-id: ${{ needs.canonical-cli.outputs.producer-run-id }}
+      canonical-producer-run-attempt: ${{ needs.canonical-cli.outputs.producer-run-attempt }}
+      canonical-producer-engine-repository: ${{ needs.canonical-cli.outputs.engine-repository }}
+      canonical-producer-engine-commit: ${{ needs.canonical-cli.outputs.engine-commit }}
+      canonical-producer-result: ${{ needs.canonical-cli.result }}
       container-file: Containerfile
       artifact-types: maven
       registry: ghcr.io
@@ -615,7 +641,7 @@ secret:
 ```yaml
 jobs:
   publish-container:
-    needs: build-maven
+    needs: [build-maven, canonical-cli]
     uses: diggsweden/forge-ci/.github/workflows/publish-container.yml@v0.90.0
     permissions:
       contents: read
@@ -624,7 +650,8 @@ jobs:
       actions: read
     with:
       branch: main
-      forge-ci-binary-ref: v0.90.0
+      # forge-ci-binary-ref, runtime-image, runtime-image-full and the
+      # canonical-* inputs exactly as in the GHCR example above.
       container-file: Containerfile
       artifact-types: maven
       registry: docker.io
@@ -653,7 +680,7 @@ namespace and repository name, producing `registry.example.com/source-org/my-app
 ```yaml
 jobs:
   publish-container:
-    needs: build-maven
+    needs: [build-maven, canonical-cli]
     uses: diggsweden/forge-ci/.github/workflows/publish-container.yml@v0.90.0
     permissions:
       contents: read
@@ -662,7 +689,8 @@ jobs:
       actions: read
     with:
       branch: main
-      forge-ci-binary-ref: v0.90.0
+      # forge-ci-binary-ref, runtime-image, runtime-image-full and the
+      # canonical-* inputs exactly as in the GHCR example above.
       container-file: Containerfile
       artifact-types: maven
       registry: registry.example.com
