@@ -75,7 +75,7 @@ the planned artifacts; "container-first" builds from the declared container.
 | hello-maven-service (java · artifact-first · one image) | ✅ (2026-11-02) / ✅ (2026-11-02) / ✅ (2026-11-04) | ✅ (A run 517, the retired published snapshot) / ✅ (lifecycle phase 3, 22ddcfd9) / 📝 lifecycle | — | ✅ (2026-11-02) / ✅ (2026-11-02) / 📝 | ✅ (3c178f94) / ◐ (phases 1–3 22ddcfd9, run 4 ec2380ef queued) / 📝 |
 | hello-monorepo (java, node · artifact-first · nested artifacts (monorepo)) | ⬚ / ✅ (2026-11-02) / ⬚ | ⛔ / ⛔ / ⛔ | — | — / — / — | ⛔ / ⛔ / ⛔ |
 | hello-npm-package (node · no container · no image) | ✅ (2026-11-02) / ✅ (2026-11-02) / ✅ (2026-11-04) | — | — | ✅ (2026-11-02) / ✅ (2026-11-02) / ✅ (2026-11-04) | ⛔ / ⛔ / ⛔ |
-| hello-npm-service (node · artifact-first · one image) | ✅ (2026-11-02) / ✅ (2026-11-02) / ✅ (2026-11-04) | admitted / admitted / admitted | — | ✅ (2026-11-02) / ✅ (2026-11-02) / 📝 | ⬚ (admitted, no line) / ⬚ (admitted, no line) / ⬚ (admitted, no line) |
+| hello-npm-service (node · artifact-first · one image) | ✅ (2026-11-02) / ✅ (2026-11-02) / ✅ (2026-11-04) | 📝 lifecycle / 📝 lifecycle / admitted | — | ✅ (2026-11-02) / ✅ (2026-11-02) / 📝 | 📝 / 📝 / ⬚ (admitted, no line) |
 
 Refused snapshots and lifecycles, with the planner's or the admission's reason:
 
@@ -116,7 +116,7 @@ marks are the owner's judgements of the evidence roots in `testing-parity.md`.
 | ecosystem | go | ⛔ hello-go-cli | ⛔ hello-go-cli | ⛔ hello-go-cli |
 |  | gradle-android | ⛔ hello-android | ⛔ hello-android | ⛔ hello-android |
 |  | java | ✅ hello-maven-service (3c178f94) | ◐ hello-maven-service (phases 1–3 22ddcfd9, run 4 ec2380ef queued) | 📝 hello-maven-service |
-|  | node | ⬚ hello-npm-service (admitted, no line) | ⬚ hello-npm-service (admitted, no line) | ⬚ hello-npm-service (admitted, no line) |
+|  | node | 📝 hello-npm-service | 📝 hello-npm-service | ⬚ hello-npm-service (admitted, no line) |
 |  | rust | 📝 hello-cargo-container | 📝 hello-cargo-container | ⬚ hello-cargo-container (admitted, no line) |
 |  | xcode-ios | ⛔ hello-ios | ⛔ hello-ios | ⛔ hello-ios |
 | route | artifact-first | ✅ hello-maven-service (3c178f94) | ◐ hello-maven-service (phases 1–3 22ddcfd9, run 4 ec2380ef queued) | 📝 hello-maven-service |
@@ -138,7 +138,7 @@ marks are the owner's judgements of the evidence roots in `testing-parity.md`.
 |  | admin vulnerabilities | ⬚ no lane | ⬚ no lane | ⬚ no lane |
 |  | admin application-tests | ⬚ no lane | ⬚ no lane | ⬚ no lane |
 |  | admin reproducible-builds | ⬚ no lane | ⬚ no lane | ⬚ no lane |
-|  | none enforced | ✅ lifecycle-forgejo (3c178f94) | ◐ lifecycle-gitlab (phases 1–3 22ddcfd9, run 4 ec2380ef queued) | ⬚ no lane |
+|  | none enforced | ⬚ no lane | ⬚ no lane | ⬚ no lane |
 | architecture | amd64 | ✅ hello-maven-service (3c178f94) | ◐ hello-maven-service (phases 1–3 22ddcfd9, run 4 ec2380ef queued) | 📝 hello-maven-service |
 |  | arm64 | — D-5 | — D-5 | — D-5 |
 

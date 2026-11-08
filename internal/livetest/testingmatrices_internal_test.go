@@ -33,10 +33,10 @@ func TestReadMatrixEvidenceRefusesMalformedLines(t *testing.T) {
 }
 
 // The matrices are read from the tree, so the shipped tree decides them: the
-// Maven service is the one demo with a lifecycle on both forges, the Cargo
-// container has a GitLab line, the npm service is admitted on GitLab without
-// a line, a GitHub line is the fixture workflow a demo ships, and a refusal
-// carries the planner's or the admission's reason.
+// service demos have lifecycle lines on both lab forges, the npm service is
+// admitted on GitHub without a fixture for its development build, a GitHub
+// line is the fixture workflow a demo ships, and a refusal carries the
+// planner's or the admission's reason.
 func TestRenderTestingMatricesReadsTheShippedTree(t *testing.T) {
 	t.Parallel()
 
@@ -49,7 +49,7 @@ func TestRenderTestingMatricesReadsTheShippedTree(t *testing.T) {
 		"| hello-maven-service (java · artifact-first · one image) |",
 		"| hello-cargo-container (rust · container-first · one image) |",
 		"| hello-npm-service (node · artifact-first · one image) |",
-		"| admitted / admitted / admitted |",
+		"| 📝 lifecycle / 📝 lifecycle / admitted |",
 		"| hello-ios (xcode-ios · no container · no image) | ⬚ / ⬚ / 📝 |",
 		"- hello-monorepo, github: the demo has no root Containerfile",
 		"| hello-go-cli (go · no container · no image) |",

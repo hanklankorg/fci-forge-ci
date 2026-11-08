@@ -25,9 +25,14 @@ const lifecycleKanikoJobImage = "forgejo.compose.forgelab:8443/forgeci/forge-ci-
 // flavour, the Cargo container's lifecycle job image.
 const lifecycleRustJobImage = "registry.invalid/rust@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 
-// lifecycleCampaignEnv is a campaign with the Java, Rust and kaniko job
-// images of the Forgejo lifecycle and the archives of the GitLab one.
+// lifecycleNodeJobImage is the campaign's nanolinter image of the
+// javascript-typescript flavour, the npm service's lifecycle job image.
+const lifecycleNodeJobImage = "registry.invalid/node@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+
+// lifecycleCampaignEnv is a campaign with the Java, Rust, Node and kaniko
+// job images of the Forgejo lifecycle and the archives of the GitLab one.
 const lifecycleCampaignEnv = "CAMPAIGN_COMMIT=" + campaignHead + "\nJOB_IMAGE_JAVA=" + snapshotJobImage + "\nJOB_IMAGE_RUST=" + lifecycleRustJobImage +
+	"\nJOB_IMAGE_JAVASCRIPT_TYPESCRIPT=" + lifecycleNodeJobImage +
 	"\nKANIKO_JOB_IMAGE=" + lifecycleKanikoJobImage + "\n" +
 	"FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_JAVA=/c/java.tar\nFORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_RUST=/c/rust.tar\nFORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_NODE=/c/node.tar\n" +
 	"FORGE_CI_LIVE_SIGNER_IMAGE_ARCHIVE=/c/signer.tar\nLINT_IMAGE_ARCHIVE_JAVA=/c/lint-java.tar\nLINT_IMAGE_ARCHIVE_RUST=/c/lint-rust.tar\nLINT_IMAGE_ARCHIVE_JAVASCRIPT_TYPESCRIPT=/c/lint-js.tar\n"
@@ -94,8 +99,8 @@ func newLifecycleCampaign(t *testing.T, cases string) (string, string) {
 // planCheckedInLifecycle plans the shipped cases file of a provider's
 // lifecycle, with the run its declared settings describe: the visibility and
 // the image builder selected as the file's header says, without admin
-// enforcement.
-func planCheckedInLifecycle(t *testing.T, provider, casesFile, visibility, builder string) (string, CampaignPlan) {
+// enforcement, narrowed to the cases the selectors name.
+func planCheckedInLifecycle(t *testing.T, provider, casesFile, visibility, builder string, selectors ...string) (string, CampaignPlan) {
 	t.Helper()
 
 	dir, cases := newLifecycleCampaign(t, string(reporoot.ReadFile(t, casesFile)))
@@ -114,6 +119,8 @@ func planCheckedInLifecycle(t *testing.T, provider, casesFile, visibility, build
 		t.Fatal(err)
 	}
 
+	run.Select = selectors
+
 	plan, err := PlanCampaignLane(reporoot.Path(t), dir, provider, cases, campaignHead, run)
 	if err != nil {
 		t.Fatal(err)
@@ -125,7 +132,8 @@ func planCheckedInLifecycle(t *testing.T, provider, casesFile, visibility, build
 // On Forgejo the lifecycle runs every demo with a service snapshot, each in
 // the nanolinter image of its toolchain flavour: the Maven service,
 // artifact-first, whose producer the snapshot builds in that image, under
-// both builders, and the Cargo container, container-first. The shipped file
+// both builders, the Cargo container, container-first, and the npm service,
+// artifact-first. The shipped file
 // declares neither visibility nor builder: the visibility is the run's
 // selector, both by default, and the builder each line's CI_IMAGE_BUILDER,
 // Buildah or the campaign's kaniko job image, labelled for the layer
@@ -144,6 +152,10 @@ func TestCampaignLifecycle_RunsTheServiceDemosOnForgejo(t *testing.T) {
 			campaignConsumerRecipe, campaignForgejo, filepath.Join(dir, "demos/hello-cargo-container"), TrialLifecycle,
 			"CI_JOB_IMAGE=" + lifecycleRustJobImage, "CI_IMAGE_BUILDER=buildah", "RELEASE_PLATFORMS=linux/amd64",
 		},
+		{
+			campaignConsumerRecipe, campaignForgejo, filepath.Join(dir, "demos/hello-npm-service"), TrialLifecycle,
+			"CI_JOB_IMAGE=" + lifecycleNodeJobImage, "CI_IMAGE_BUILDER=buildah", "RELEASE_PLATFORMS=linux/amd64",
+		},
 	}
 
 	if len(plan.Cases) != len(want) {
@@ -159,8 +171,8 @@ func TestCampaignLifecycle_RunsTheServiceDemosOnForgejo(t *testing.T) {
 
 // On GitLab the lifecycle takes a release's archives and settings: the
 // recipe takes the archives apart, as for a release. The lane runs the Maven
-// service, artifact-first with its image, and the Cargo container,
-// container-first. The builder is the lane's selector, so the one file plans
+// and npm services, artifact-first with their images, and the Cargo
+// container, container-first. The builder is the lane's selector, so the one file plans
 // under either builder, and the visibility the run's.
 func TestCampaignLifecycle_RunsTheServiceDemosOnGitLab(t *testing.T) {
 	t.Parallel()
@@ -179,6 +191,10 @@ func TestCampaignLifecycle_RunsTheServiceDemosOnGitLab(t *testing.T) {
 				campaignConsumerRecipe, campaignGitLab, filepath.Join(dir, "demos/hello-cargo-container"), TrialLifecycle,
 				"job-archive=/c/rust.tar", "build-archive=/c/rust.tar", "signer-archive=/c/signer.tar", "lint-archive=/c/lint-rust.tar",
 				"version=0.2.0", "version-bump=cargo", "job-user=65532:65532",
+			}, {
+				campaignConsumerRecipe, campaignGitLab, filepath.Join(dir, "demos/hello-npm-service"), TrialLifecycle,
+				"job-archive=/c/node.tar", "build-archive=/c/node.tar", "signer-archive=/c/signer.tar", "lint-archive=/c/lint-js.tar",
+				"version=0.2.0", "version-bump=npm", "job-user=65532:65532",
 			}}
 
 			if len(plan.Cases) != len(want) {
@@ -194,22 +210,75 @@ func TestCampaignLifecycle_RunsTheServiceDemosOnGitLab(t *testing.T) {
 	}
 }
 
-const npmLifecycleLine = "consumer hello-npm-service lifecycle job-archive=@FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_NODE build-archive=@FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_NODE signer-archive=@FORGE_CI_LIVE_SIGNER_IMAGE_ARCHIVE lint-archive=@LINT_IMAGE_ARCHIVE_JAVASCRIPT_TYPESCRIPT version=0.2.0 version-bump=npm job-user=65532:65532"
-
-// The npm service's declaration is a service snapshot's and the demo ships
-// its GitLab release build, so the planner admits its GitLab lifecycle. Its
-// lane line follows the snapshot-npm-layout merge (docs/live-campaigns.md,
-// Lifecycle); that is the engine's layout, not an admission rule.
-func TestCampaignLifecycle_AdmitsTheNpmServiceOnGitLab(t *testing.T) {
+// A selector reruns one matrix cell from the shipped lifecycle files, and the
+// run's visibility narrows it to one run: each of these selections plans
+// exactly one case under one visibility. They are the commands the matrix
+// cells repeat with (docs/live-campaigns.md, Rerun one cell).
+func TestCampaignLifecycle_SelectsOneCell(t *testing.T) {
 	t.Parallel()
 
-	dir, cases := newLifecycleCampaign(t, npmLifecycleLine+"\n")
+	for name, test := range map[string]struct {
+		provider, file, visibility, selector string
+		want                                 func(dir string) []string
+	}{
+		"gitlab maven service": {campaignGitLab, "lifecycle-gitlab.cases", visibilityPublic, "hello-maven-service/lifecycle", func(dir string) []string {
+			return []string{
+				campaignConsumerRecipe, campaignGitLab, filepath.Join(dir, "demos/hello-maven-service"), TrialLifecycle,
+				"job-archive=/c/java.tar", "build-archive=/c/java.tar", "signer-archive=/c/signer.tar", "lint-archive=/c/lint-java.tar",
+				"version=0.2.0", "version-bump=maven", "job-user=65532:65532",
+			}
+		}},
+		"forgejo cargo container-first": {campaignForgejo, "lifecycle-forgejo.cases", visibilityPublic, "hello-cargo-container/lifecycle", func(dir string) []string {
+			return []string{
+				campaignConsumerRecipe, campaignForgejo, filepath.Join(dir, "demos/hello-cargo-container"), TrialLifecycle,
+				"CI_JOB_IMAGE=" + lifecycleRustJobImage, "CI_IMAGE_BUILDER=buildah", "RELEASE_PLATFORMS=linux/amd64",
+			}
+		}},
+		"forgejo kaniko": {campaignForgejo, "lifecycle-forgejo.cases", visibilityPublic, "hello-maven-service/lifecycle/CI_IMAGE_BUILDER=kaniko", func(dir string) []string {
+			return []string{
+				campaignConsumerRecipe, campaignForgejo, filepath.Join(dir, "demos/hello-maven-service"), TrialLifecycle,
+				"CI_JOB_IMAGE=" + snapshotJobImage, "CI_IMAGE_BUILDER=kaniko", "CI_IMAGE_BUILDER_JOB_IMAGE=" + lifecycleKanikoJobImage, "RELEASE_PLATFORMS=linux/amd64",
+			}
+		}},
+		"forgejo private": {campaignForgejo, "lifecycle-forgejo.cases", visibilityPrivate, "hello-maven-service/lifecycle/CI_IMAGE_BUILDER=buildah", func(dir string) []string {
+			return []string{
+				campaignConsumerRecipe, campaignForgejo, filepath.Join(dir, "demos/hello-maven-service"), TrialLifecycle,
+				"CI_JOB_IMAGE=" + snapshotJobImage, "CI_IMAGE_BUILDER=buildah", "RELEASE_PLATFORMS=linux/amd64",
+			}
+		}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 
-	plan, err := PlanCampaignLane(reporoot.Path(t), dir, campaignGitLab, cases, campaignHead, CampaignRun{})
-	if err != nil || len(plan.Cases) != 1 || plan.Cases[0].Args[2] != filepath.Join(dir, "demos/hello-npm-service") {
-		t.Fatalf("npm service lifecycle: %+v %v, want one admitted case", plan, err)
+			dir, plan := planCheckedInLifecycle(t, test.provider, "test/live/campaigns/"+test.file, test.visibility, "", test.selector)
+			if len(plan.Cases) != 1 || !slices.Equal(plan.Cases[0].Args, test.want(dir)) {
+				t.Fatalf("selection %q: %+v, want the one case %v", test.selector, plan.Cases, test.want(dir))
+			}
+
+			if visibilities, err := parseConsumerVisibilities(test.visibility); err != nil || len(visibilities) != 1 {
+				t.Fatalf("visibility %q runs %v, %v; want one run", test.visibility, visibilities, err)
+			}
+		})
 	}
 }
+
+// A selector that names no case is refused, so a typo never runs nothing in
+// silence; the other cases are still planned before the selection.
+func TestCampaignLane_RefusesASelectorThatMatchesNoCase(t *testing.T) {
+	t.Parallel()
+
+	for _, selector := range []string{"hello-maven-service/release", "hello-maven-service/lifecycle/CI_IMAGE_BUILDER=docker", "hello-mavn", "TestNoSuchScenario"} {
+		dir, cases := newLifecycleCampaign(t, string(reporoot.ReadFile(t, "test/live/campaigns/lifecycle-forgejo.cases")))
+
+		run := CampaignRun{Settings: map[string]string{"visibility": "both", "image-builder": ImageBuilderBuildah}, Select: []string{selector}}
+		if _, err := PlanCampaignLane(reporoot.Path(t), dir, campaignForgejo, cases, campaignHead, run); !errors.Is(err, errs.ErrValidation) || !strings.Contains(err.Error(), "matches no case") {
+			t.Fatalf("selector %q: %v, want a refusal", selector, err)
+		}
+	}
+}
+
+// npmLifecycleLine is the shipped GitLab lifecycle line of the npm service.
+const npmLifecycleLine = "consumer hello-npm-service lifecycle job-archive=@FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_NODE build-archive=@FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_NODE signer-archive=@FORGE_CI_LIVE_SIGNER_IMAGE_ARCHIVE lint-archive=@LINT_IMAGE_ARCHIVE_JAVASCRIPT_TYPESCRIPT version=0.2.0 version-bump=npm job-user=65532:65532"
 
 // A GitLab lifecycle ends in a release, so a demo without the GitLab release
 // build is refused at plan time, as its release would be.
