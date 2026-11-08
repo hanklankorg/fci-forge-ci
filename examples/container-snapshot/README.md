@@ -61,12 +61,14 @@ modes `0644`/`0755` so ZIP transport does not lose executable intent. Expected r
 Go/Cargo binaries are normalized as executables; other files are not blanket
 chmodded.
 
-Npm requires exactly one valid packaged tarball. For an artifact named `web`, its
-isolated destination is `<context>/.forge-ci/snapshot-inputs/web`; the Containerfile
-can copy the package relative to its context:
+An npm producer yields exactly one packed tarball. For an artifact named `web`,
+the engine unpacks and verifies it under `<context>/.forge-ci/snapshot-inputs/web`
+and, right before the image build, lays the verified files over the context
+root, where the release image jobs lay the unpacked package. The Containerfile
+copies the package's files by their package paths, as it does in a release:
 
 ```dockerfile
-COPY .forge-ci/snapshot-inputs/web/*.tgz /tmp/
+COPY dist/ /app/
 ```
 
 This line illustrates the input path for a consuming application; the minimal

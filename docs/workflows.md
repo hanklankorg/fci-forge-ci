@@ -402,10 +402,17 @@ complete bundle and destination paths in Go, confines writes to planned inputs,
 and refuses source/Git/plan replacement or symlink escapes. This is run-local
 integrity evidence, not a signature or independent proof of CI-run origin.
 
-Npm inputs require exactly one valid packaged tarball and are staged at
-`<context>/.forge-ci/snapshot-inputs/<name>`. A Containerfile uses a context-relative
-path such as `COPY .forge-ci/snapshot-inputs/web/*.tgz /tmp/` for artifact `web`.
-This isolated destination avoids overwriting checkout files or mixing packages.
+An npm producer yields exactly one packed tarball, whose `name` and `version`
+must match the committed `package.json`. The engine unpacks it (the tarball's
+`package/` root dropped) and verifies the files under the isolated
+`<context>/.forge-ci/snapshot-inputs/<name>`, where the inventory owns them.
+Right before each image build, `build` lays the verified files over the
+context root with their recorded bytes and modes, where the release image jobs
+lay the unpacked package, so the same Containerfile serves release and snapshot
+and copies the package's files by their package paths: `COPY dist/ /app/`, and
+`COPY package.json /app/` when the runtime needs it. Package files replace
+checkout files of the same path, `package.json` among them, as in a release;
+an image takes one npm package, since two would both carry `package.json`.
 
 Container build secrets, binary extraction and explicit snapshot OCI
 signing/provenance requests remain unsupported and fail explicitly. See the

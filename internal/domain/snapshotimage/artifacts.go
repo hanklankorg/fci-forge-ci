@@ -41,8 +41,12 @@ const DefaultDownloadDir = "_snapshot-downloads"
 // ProducerManifest is the file name of a snapshot producer's artifact receipt.
 const ProducerManifest = "snapshot-artifact.json"
 
-// ArtifactDestination returns where a planned artifact is placed relative to
-// the container build context, or an empty string for unsupported types.
+// ArtifactDestination returns where a planned artifact's verified files are
+// placed, or an empty string for unsupported types. Go, Cargo, Maven and
+// Gradle land where their release builds leave the same files, so one
+// Containerfile serves release and snapshot. An npm package is verified under
+// an isolated directory of the context and, right before the build, laid over
+// the context root, where the release image jobs lay the unpacked package.
 func ArtifactDestination(a pipeline.PlannedArtifact, containerContext string) string {
 	switch a.ProjectType {
 	case projecttype.Go, projecttype.Cargo:
@@ -113,6 +117,10 @@ func (p Plan) validateArtifacts() error {
 	for _, build := range p.Builds {
 		if err := validateBuildDependencies(build, byName, needed); err != nil {
 			return err
+		}
+
+		if err := requireOneNPMPackage(build.RequiredArtifacts); err != nil {
+			return fmt.Errorf("snapshot build %s: %w", build.Name, err)
 		}
 	}
 

@@ -1432,8 +1432,9 @@ The shared Go `restore-context` command verifies the source SHA, exact plan,
 manifest, dependency names, platforms, file sizes, digests and canonical string
 modes `0644`/`0755`, then restores only confined planned inputs. Shell adapters
 provide native transport, not context-validation business rules. Do not recreate
-the producer inventory after transport. Npm inputs require one valid packaged
-tarball at `<context>/.forge-ci/snapshot-inputs/<name>`. See the
+the producer inventory after transport. An npm package is verified under
+`<context>/.forge-ci/snapshot-inputs/<name>` and laid over the context root by
+the build, where the release's image jobs lay `image-context/`. See the
 [shared contract](workflows.md#snapshot-container-contract-all-three-forges) for
 branch-hashed, final `-snapshot` tags, an always-on scan, independent SBOM policy and unsupported
 build secrets, extraction and explicit snapshot OCI signing/provenance requests.

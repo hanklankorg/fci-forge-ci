@@ -17,6 +17,7 @@ import (
 	"testing"
 
 	"github.com/diggsweden/forge-ci/internal/adapters/npm"
+	"github.com/diggsweden/forge-ci/internal/adapters/ociregistry"
 	appbuild "github.com/diggsweden/forge-ci/internal/app/build"
 	appsnapshot "github.com/diggsweden/forge-ci/internal/app/snapshotimage"
 	"github.com/diggsweden/forge-ci/internal/domain/config"
@@ -69,6 +70,9 @@ func tarball(t *testing.T, path, manifest, extra string) {
 	require.NoError(t, file.Close())
 }
 
+// npmBuildInput builds the npm fixture's amd64 image on an amd64 host.
+var npmBuildInput = appsnapshot.BuildInput{Name: "web", Arch: "amd64", HostArch: "amd64", MetadataDir: "metadata", ServerURL: "https://forge.example", Repository: "team/app"}
+
 func npmProducerPlan(t *testing.T) snapshotimage.Plan {
 	t.Helper()
 	t.Chdir(t.TempDir())
@@ -90,9 +94,11 @@ func TestNPMProducerSafePreparationAndGather(t *testing.T) {
 	raw := filepath.Join(snapshotimage.DefaultDownloadDir, "web")
 	require.NoError(t, os.MkdirAll(raw, 0o700))
 
-	body, err := os.ReadFile("web/package.json")
+	source, err := os.ReadFile("web/package.json")
 	require.NoError(t, err)
-	tarball(t, filepath.Join(raw, "fixture.tgz"), string(body), "")
+	// The packed manifest may differ from the committed one beyond its identity.
+	packed := strings.Replace(string(source), `"files"`, `"main":"dist/built.js","files"`, 1)
+	tarball(t, filepath.Join(raw, "fixture.tgz"), packed, "")
 	require.NoError(t, appsnapshot.PrepareInputs(t.Context(), &git{head: plan.SourceSHA}, plan, snapshotimage.DefaultDownloadDir, snapshotimage.DefaultProducerDir))
 	require.NoError(t, appsnapshot.GatherContext(t.Context(), &git{head: plan.SourceSHA}, plan, "snapshot-plan.json", snapshotimage.DefaultProducerDir, "context-bundle"))
 
@@ -101,11 +107,136 @@ func TestNPMProducerSafePreparationAndGather(t *testing.T) {
 	require.FileExists(t, filepath.Join(packageDir, "package.json"))
 	require.NoFileExists(t, filepath.Join(packageDir, "build.cjs"))
 	require.NoFileExists(t, filepath.Join(packageDir, "fixture.tgz"))
+	// Gathering verifies the package; the checkout's own files are untouched
+	// until a build lays the package over its context.
+	require.NoFileExists(t, "web/dist/built.js")
 
 	var inventory snapshotimage.DependencyInventory
 	require.NoError(t, appsnapshot.ReadJSON(snapshotimage.DefaultDependenciesFile, &inventory))
 	require.Len(t, inventory.Dependencies, 2)
 	require.NoError(t, appsnapshot.RestoreContext(t.Context(), &git{head: plan.SourceSHA}, plan, "snapshot-plan.json", "context-bundle"))
+
+	// The build lays the verified package over the context root, where the
+	// Containerfile copies it as a release image build does: COPY dist/ ...
+	builder := &countingBuilder{}
+	err = appsnapshot.Build(t.Context(), &git{head: plan.SourceSHA}, builder, ociregistry.NewAnonymous(), io.Discard, output.Annotator{}, plan, npmBuildInput)
+	require.ErrorIs(t, err, errBuilderReached)
+	require.Equal(t, 1, builder.calls)
+
+	built, err := os.ReadFile("web/dist/built.js")
+	require.NoError(t, err)
+	require.Equal(t, "module.exports = 42;", string(built))
+
+	manifest, err := os.ReadFile("web/package.json")
+	require.NoError(t, err)
+	require.Equal(t, packed, string(manifest), "the packed manifest replaces the committed one, as the release image build's unpacked package does")
+	require.FileExists(t, filepath.Join(packageDir, "package.json"), "the verified inputs stay where the inventory records them")
+}
+
+func TestNPMLayoutRefusesSymlinkedTargetsBeforeTheBuilder(t *testing.T) {
+	plan := npmProducerPlan(t)
+	require.NoError(t, os.Mkdir("raw", 0o700))
+
+	body, err := os.ReadFile("web/package.json")
+	require.NoError(t, err)
+	tarball(t, "raw/a.tgz", string(body), "")
+	require.NoError(t, appsnapshot.BuildArtifact(t.Context(), &git{head: plan.SourceSHA}, nil, plan, appsnapshot.BuildArtifactInput{Name: "web", FromArtifact: "raw"}))
+	require.NoError(t, appsnapshot.GatherContext(t.Context(), &git{head: plan.SourceSHA}, plan, "snapshot-plan.json", snapshotimage.DefaultProducerDir, "bundle"))
+
+	outside := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(outside, "built.js"), []byte("outside unchanged"), 0o600))
+	require.NoError(t, os.Symlink(outside, "web/dist"))
+
+	builder := &countingBuilder{}
+	err = appsnapshot.Build(t.Context(), &git{head: plan.SourceSHA}, builder, ociregistry.NewAnonymous(), io.Discard, output.Annotator{}, plan, npmBuildInput)
+	require.Error(t, err)
+	require.Zero(t, builder.calls)
+
+	canary, err := os.ReadFile(filepath.Join(outside, "built.js"))
+	require.NoError(t, err)
+	require.Equal(t, "outside unchanged", string(canary))
+
+	manifest, err := os.ReadFile("web/package.json")
+	require.NoError(t, err)
+	require.Equal(t, body, manifest, "a refused layout writes nothing to the checkout")
+}
+
+// npmBesideGoFixture plans one image at the checkout root from a Go binary
+// and an npm package, lays both verified inputs by hand where the plan
+// records them, the npm package also carrying the named file, and records the
+// inventory as the context producer does.
+func npmBesideGoFixture(t *testing.T, carried string) snapshotimage.Plan {
+	t.Helper()
+	t.Chdir(t.TempDir())
+	require.NoError(t, os.Mkdir("web", 0o700))
+	require.NoError(t, os.WriteFile("web/package.json", []byte(`{"name":"web","version":"1.2.3"}`), 0o600))
+	in := input(t, "artifacts:\n  - name: server\n    project-type: go\n  - name: web\n    project-type: npm\n    working-directory: web\n    sboms: none\ncontainers:\n  - name: app\n    from: [server, web]\n    platforms: linux/amd64\n")
+	plan, err := appsnapshot.Plan(t.Context(), &git{head: in.SourceSHA}, in)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile("Containerfile", []byte("FROM scratch\nCOPY dist /dist\n"), 0o600))
+	require.NoError(t, os.MkdirAll("dist/linux-amd64", 0o700))
+	require.NoError(t, os.WriteFile("dist/linux-amd64/server-linux-amd64", []byte("producer-built bytes"), 0o700))
+
+	verified := ".forge-ci/snapshot-inputs/web"
+	for path, body := range map[string]string{"package.json": `{"name":"web","version":"1.2.3"}`, carried: "evil"} {
+		require.NoError(t, os.MkdirAll(filepath.Join(verified, filepath.Dir(path)), 0o700))
+		require.NoError(t, os.WriteFile(filepath.Join(verified, path), []byte(body), 0o600))
+	}
+
+	require.NoError(t, appsnapshot.RecordContext(t.Context(), &git{head: plan.SourceSHA}, plan, snapshotimage.DefaultDependenciesFile))
+
+	return plan
+}
+
+func TestNPMLayoutRefusesReplacingBuildInputsBeforeTheBuilder(t *testing.T) {
+	inputs := []string{"Containerfile", "dist/linux-amd64/server-linux-amd64", ".forge-ci/snapshot-inputs/web/package.json"}
+	for _, carried := range inputs {
+		t.Run(carried, func(t *testing.T) {
+			plan := npmBesideGoFixture(t, carried)
+
+			before := map[string][]byte{}
+
+			for _, path := range inputs {
+				body, err := os.ReadFile(path)
+				require.NoError(t, err)
+
+				before[path] = body
+			}
+
+			builder := &countingBuilder{}
+			err := appsnapshot.Build(t.Context(), &git{head: plan.SourceSHA}, builder, ociregistry.NewAnonymous(), io.Discard, output.Annotator{}, plan, appsnapshot.BuildInput{Name: "app", Arch: "amd64", HostArch: "amd64", MetadataDir: "metadata", ServerURL: "https://forge.example", Repository: "team/app"})
+			require.ErrorContains(t, err, "would replace the build's Containerfile or a dependency input: "+carried)
+			require.Zero(t, builder.calls)
+
+			for path, body := range before {
+				after, err := os.ReadFile(path)
+				require.NoError(t, err)
+				require.Equal(t, body, after, "%s keeps its verified bytes", path)
+			}
+
+			require.NoFileExists(t, "package.json", "a refused layout lays none of the package's files")
+		})
+	}
+}
+
+func TestPlanRefusesTwoNPMPackagesInOneImage(t *testing.T) {
+	t.Chdir(t.TempDir())
+
+	for _, dir := range []string{"web", "api"} {
+		require.NoError(t, os.Mkdir(dir, 0o700))
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "package.json"), []byte(`{"name":"`+dir+`","version":"1.2.3"}`), 0o600))
+	}
+
+	artifacts := "artifacts:\n  - name: web\n    project-type: npm\n    working-directory: web\n    sboms: none\n  - name: api\n    project-type: npm\n    working-directory: api\n    sboms: none\n"
+	_, err := appsnapshot.Plan(t.Context(), &git{head: strings.Repeat("a", 40)}, input(t, artifacts+"containers:\n  - name: image\n    from: [web, api]\n    platforms: linux/amd64\n"))
+	require.ErrorContains(t, err, "one npm package")
+
+	// A frozen plan read back admits the same rule.
+	plan, err := appsnapshot.Plan(t.Context(), &git{head: strings.Repeat("a", 40)}, input(t, artifacts+"containers:\n  - name: image\n    from: [web]\n    platforms: linux/amd64\n  - name: other\n    image-name: team/other\n    from: [api]\n    platforms: linux/amd64\n"))
+	require.NoError(t, err)
+	require.NoError(t, plan.Validate())
+	plan.Builds[0].RequiredArtifacts = append(plan.Builds[0].RequiredArtifacts, plan.Builds[1].RequiredArtifacts[0])
+	require.ErrorContains(t, plan.Validate(), "one npm package")
 }
 
 func TestNPMProducerRejectsMissingAmbiguousForeignAndUnsafeTarballs(t *testing.T) {

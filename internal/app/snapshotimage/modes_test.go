@@ -148,6 +148,21 @@ func TestNPMPackagedExecutableSurvivesBothZIPTransports(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, test.mode, info.Mode().Perm())
 	}
+
+	// The build lays the package over the context root with the recorded
+	// modes, so a packaged executable stays executable where COPY reads it.
+	builder := &countingBuilder{}
+	err := appsnapshot.Build(t.Context(), &git{head: plan.SourceSHA}, builder, ociregistry.NewAnonymous(), io.Discard, output.Annotator{}, plan, npmBuildInput)
+	require.ErrorIs(t, err, errBuilderReached)
+
+	for _, test := range []struct {
+		path string
+		mode fs.FileMode
+	}{{"bin/tool.js", 0o755}, {"README.txt", 0o644}, {"package.json", 0o644}} {
+		info, err := os.Stat(filepath.Join("web", test.path))
+		require.NoError(t, err)
+		require.Equal(t, test.mode, info.Mode().Perm())
+	}
 }
 
 func TestUnsafeOrMissingRecordedModesRefuseBeforeAnyRestore(t *testing.T) {

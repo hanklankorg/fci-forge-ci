@@ -6,6 +6,7 @@ package snapshotimage
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -296,7 +297,14 @@ func Build(ctx context.Context, ops appversion.GenerateSnapshotOps, tool appcont
 			continue
 		}
 
-		if err := validateDependencies(plan, in.DependenciesFile); err != nil {
+		inventoryFile := cmp.Or(in.DependenciesFile, snapshotimage.DefaultDependenciesFile)
+
+		inventory, err := validateDependencies(plan, inventoryFile)
+		if err != nil {
+			return err
+		}
+
+		if err := layNPMPackage(build, inventory, inventoryFile); err != nil {
 			return err
 		}
 
@@ -306,7 +314,7 @@ func Build(ctx context.Context, ops appversion.GenerateSnapshotOps, tool appcont
 		}
 
 		sort.Strings(args)
-		_, err := appcontainer.StageSignerImageArch(ctx, tool, inspector, out, appcontainer.SignerImageBuildArchInput{
+		_, err = appcontainer.StageSignerImageArch(ctx, tool, inspector, out, appcontainer.SignerImageBuildArchInput{
 			AuthFile: in.AuthFile, Arch: in.Arch, HostArch: in.HostArch,
 			SourceSHA: plan.SourceSHA, ServerURL: in.ServerURL, Repository: in.Repository,
 			ImageRepository: build.ImageRepository, TagName: build.Tag, Name: in.Name, Title: in.Name,
