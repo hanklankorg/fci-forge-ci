@@ -49,6 +49,7 @@ func TestForgejoLayer_ContainerDevelopment(t *testing.T) {
 			}
 
 			consumer := livetest.OpenConsumer(t, target, root)
+			consumer = livetest.NewCargoDevelopmentFixture(t, consumer)
 
 			const workflow = "development.yml"
 

@@ -77,6 +77,9 @@ func runForgejoConsumerDevelopment(t *testing.T, acceptance developmentAcceptanc
 			}
 
 			consumer := livetest.OpenConsumer(t, target, root)
+			if acceptance.jobName == "Check: development package" {
+				consumer = livetest.NewPackageDevelopmentFixture(t, consumer)
+			}
 
 			const workflow = "development.yml"
 
