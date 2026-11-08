@@ -97,17 +97,7 @@ func RenderGitHubConsumer(name, text string, engine GitHubEngine, overrides map[
 	rendered = githubBinaryRef.ReplaceAllString(rendered, "${1}"+GitHubPrerelease)
 	rendered = githubRuntimeRef.ReplaceAllString(rendered, engine.Registry()+"/${1}:"+engine.ImageTag())
 
-	var applied []string
-
-	for _, input := range sortedKeys(overrides) {
-		line := regexp.MustCompile(`(?m)^([ \t]*` + regexp.QuoteMeta(input) + `:[ \t]*).*$`)
-		if !line.MatchString(rendered) {
-			continue
-		}
-
-		rendered = line.ReplaceAllString(rendered, "${1}"+strings.ReplaceAll(overrides[input], "$", "$$"))
-		applied = append(applied, input)
-	}
+	rendered, applied := githubInputOverrides(rendered, overrides)
 
 	prefix := engine.Owner + "/" + engine.Repository + "/.github/workflows/"
 	for _, use := range githubLeftover.FindAllStringSubmatch(rendered, -1) {
@@ -125,6 +115,24 @@ func RenderGitHubConsumer(name, text string, engine GitHubEngine, overrides map[
 	}
 
 	return rendered, applied, nil
+}
+
+// githubInputOverrides is shared by precredential admission and rendering so
+// admission checks the same effective input text that the installer will use.
+func githubInputOverrides(text string, overrides map[string]string) (string, []string) {
+	var applied []string
+
+	for _, input := range sortedKeys(overrides) {
+		line := regexp.MustCompile(`(?m)^([ \t]*` + regexp.QuoteMeta(input) + `:[ \t]*).*$`)
+		if !line.MatchString(text) {
+			continue
+		}
+
+		text = line.ReplaceAllString(text, "${1}"+strings.ReplaceAll(overrides[input], "$", "$$"))
+		applied = append(applied, input)
+	}
+
+	return text, applied
 }
 
 // requireOrchestratorImages refuses a fixture that calls an orchestrator

@@ -362,12 +362,16 @@ func (trial *GitHubTrial) stageConsumer(root, fixtures string, engine GitHubEngi
 
 	prefix := filepath.ToSlash(filepath.Join(fixtures, "workflows")) + "/"
 
-	listed, err := git.output(trial.tb.Context(), source.stage, nil, "ls-tree", "-rz", "--name-only", source.Commit, "--", prefix)
+	fixtureWorkflows, err := githubFixtureWorkflows(trial.tb.Context(), source, prefix)
 	if err != nil {
 		trial.tb.Fatalf("livetest: list fixture blobs: %v", err)
 	}
 
-	applied := trial.stageFixtureWorkflows(source, staged, prefix, string(listed), engine, overrides)
+	if err = validateGitHubGPGFixtureSource(trial.tb.Context(), source, fixtures, fixtureWorkflows, overrides); err != nil {
+		trial.tb.Fatalf("livetest: fixture profile: %v", err)
+	}
+
+	applied := trial.stageFixtureWorkflows(staged, fixtureWorkflows, engine, overrides)
 
 	for _, input := range sortedKeys(overrides) {
 		if !applied[input] {
@@ -481,23 +485,15 @@ func frozenEngineChecksum(engine GitHubEngine) (string, error) {
 	return digest, nil
 }
 
-// stageFixtureWorkflows renders each top-level fixture workflow under prefix
+// stageFixtureWorkflows renders every workflow from the admitted fixture directory
 // into the staged consumer and returns the overridden inputs they pass.
-func (trial *GitHubTrial) stageFixtureWorkflows(source, staged Consumer, prefix, listed string, engine GitHubEngine, overrides map[string]string) map[string]bool { //nolint:funcorder // keep the staging helper beside stageConsumer.
+func (trial *GitHubTrial) stageFixtureWorkflows(staged Consumer, workflows map[string]string, engine GitHubEngine, overrides map[string]string) map[string]bool { //nolint:funcorder // keep the staging helper beside stageConsumer.
 	trial.tb.Helper()
 
 	applied := map[string]bool{}
 
-	for path := range strings.SplitSeq(listed, "\x00") {
-		name := strings.TrimPrefix(path, prefix)
-		if path == "" || strings.Contains(name, "/") || filepath.Ext(name) != ".yml" {
-			continue
-		}
-
-		text, readErr := githubWorkflow(trial.tb.Context(), source, path)
-		if readErr != nil {
-			trial.tb.Fatalf("livetest: %v", readErr)
-		}
+	for _, name := range sortedKeys(workflows) {
+		text := workflows[name]
 
 		rendered, inputs, renderErr := RenderGitHubConsumer(name, text, engine, overrides)
 		if renderErr != nil {

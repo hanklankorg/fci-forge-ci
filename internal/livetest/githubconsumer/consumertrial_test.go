@@ -78,6 +78,10 @@ func TestGitHubLayer_ConsumerTrial(t *testing.T) {
 	}
 
 	fixtures := fixtureDir(t, root, settings.Fixtures)
+	if err := livetest.ValidateGitHubGPGFixtureProfile(t.Context(), root, fixtures, settings.Overrides); err != nil {
+		t.Fatal(err)
+	}
+
 	visibilities := livetest.ConsumerVisibilities(t)
 
 	if livetest.DemoName() != "" && settings.Event != livetest.TrialRelease {
