@@ -3,7 +3,7 @@
 
 # Testing parity and proof
 
-Last reviewed: **2026-11-08 UTC**. Documentation base: `558444b8`;
+Last reviewed: **2026-11-08 UTC**. Documentation base: `3c5be102`;
 current bounded-acquisition runtime proof is pinned to `51781c82`, not this
 later documentation base. This is a retained-evidence snapshot, not a release
 readiness declaration, exhaustive suite audit or production adoption claim.
@@ -64,14 +64,15 @@ production trust, Cargo, ARM runtime or full 81-file/image parity.
 
 | Lane | Snapshot outcome / gate |
 | --- | --- |
-| A: artifact-first snapshot image/service | **TERMINAL FAILED**, FORGE-LAB, old controller `f40838cf` / demo `43d085aa`. Predispatch HTTP 422: empty `CI_IMAGE_BUILDER_JOB_IMAGE`, `[Value]: Required`. No producer, image build, service or readiness executed [E6](#e6-e2e-a-terminal-failure). |
-| B: development acceptance; C: release-bundle checks | ◐ Source-only candidates on `6190579e`; current-base offline checks passed, but unmerged and blocked on actual A acceptance. Source review/GO is not live acceptance [E7](#e7-bc-source-only). |
+| A: artifact-first snapshot image/service | ✅ Live-proven · FORGE-LAB: public Linux/amd64 Buildah unsigned snapshot, run **517**, controller `063a49d9` / demo `3d5108ad`; native case PASS in 290 s [E6](#e6-e2e-a-native-pass-and-retained-failures). Earlier failures remain failed; the previous `image=true` cause is unresolved. |
+| B: development acceptance | ◐ Reviewed source integrated locally at `3c5be102`; representative Forgejo generic/Cargo native proofs are still pending. A's PASS satisfies the prerequisite, not B acceptance [E7](#e7-b-source-integration-and-c-hold). |
+| C: release-bundle checks | ◐ Source-only reviewed candidate on `34894e69`, **HOLD / unmerged** as a separate milestone. No C live acceptance [E7](#e7-b-source-integration-and-c-hold). |
 | D: linked flow | ⏳ Plan only; ordered A → B → C → D gates remain. Whole-file deletion: **NONE**. |
 
-A's cleanup returned without a reported error; no standalone per-object absence
-proof was emitted. Neither that cleanup result nor package PASS lines with no
-matching tests convert A into acceptance. A fix requires separate review and
-fresh authorized execution, not reinterpretation of the failed attempt.
+A's latest native cleanup completed without a reported error; no standalone
+per-object absence proof was emitted. Its acceptance is the actual run-517 native
+verdict, not cleanup or package PASS lines with no matching tests. The older
+failed attempts are not reinterpreted as passes or as established causal proof.
 
 ## Evidence coordinates and source anchors
 
@@ -140,19 +141,59 @@ The caller's classified budgets are 32 MiB compressed/expanded and 128 entries
 per artifact, not a whole-job disk cap. Classified leaf/module work at
 `76609471`/`8340ef85` is earlier source progress, not hosted acceptance.
 
-### E6: E2E A terminal failure
+### E6: E2E A native pass and retained failures
+
+The accepted public Forgejo case is `TestForgejoLayer_ConsumerDevelopment/public`,
+native verdict **passed**, exit **0**, run **517**, in **290 s**. Controller
+`063a49d9f01f93dc7f143579ae6b043a4e69da4a`, demo
+`3d5108ada3f18792e092d04569721691d0f07974`; native Linux/amd64, Buildah.
+Retained coordinates under `e2e-a-live-063a49d9-20261108T015701Z/`:
+
+- `native-runs/20261108T021422Z-1303682/verdict.json` — actual native acceptance.
+- `result-summary.json` — source identities, run/jobs and proof boundaries.
+- `publication-receipt-from-log.json` — the native collector's logged image
+  digest `sha256:ab87227bd1655998fed0586840f4f1bd1b9d0177c783a482ffeeb60b1de7e7f6`.
+
+The producer selected the approved Java image
+`ghcr.io/hanklankorg/fc-forge-ci/forge-ci-runtime-java-25@sha256:77654a74eb9a71e062935ac94b333b4d14b4d4dcee59fa6c9d2cc6193a4bcc0d`.
+The native case accepted six producer tests, six independent check tests, one
+checked JAR, the plan/JAR/receipt/image-config/readiness oracles and unchanged
+demo-source modes. Those bodies were checked in memory, not separately persisted
+by the existing hooks; actual served workflow bytes were not separately retained.
+Cleanup reported no error, not an independent per-object absence receipt.
+Crypto-absence, independent scan readback, checked-JAR/image byte equality,
+linked flow, cross-forge parity and production approval are not established.
+
+Historical failures remain unchanged. In particular, the old HTTP-422 attempt:
 
 `e2e-snapshot-image-368/live-f40838cf-20261107T174001Z/result.md` and
 `native-runs/20261107T174459Z-2178192/{live-run.log,verdict.json}` beneath it.
 Actual selected case: `TestForgejoLayer_ConsumerDevelopment/public`, failed
 7.85 s, native verdict `failed`, exit 1. No per-job/readiness receipt exists.
 
-### E7: B/C source only
+Run 516 later reached a producer on v13.2.0 but attempted `image=true`; its root
+cause is still unknown. The old selector also returned correct strings in the
+cached v12 interpreter. Run 517's PASS does not prove that selector hardening
+explained that failure, and neither failed record is overwritten.
+
+### E7: B source integration and C hold
+
+B's four reviewed development-acceptance files are locally integrated in signed
+merge `3c5be102bafd8cbbdb7f7753bec003dd28cec9f5`: pure run/artifact predicates,
+their complete negative tables and the existing Forgejo generic/container
+callers. Current-base helper races, docs/sync, unchanged native snapshot/Maven
+regressions and configured lint passed. The live conformance suite was compiled
+only; representative generic/Cargo B proofs have **not** been executed here.
+
+The latest reviewed nine-file preparation was based on `34894e69`; its five C
+release-bundle/code/docs paths remain unmerged. A's actual PASS removes the A
+prerequisite block but does not authorize C integration or establish B/C proof.
+The original source-only evidence also remains historical:
 
 `e2e-bc-current-6190579e-20261107/{review.md,test-summary.json,checks.json}`
 records offline helper/race, compile-only conformance, lint and docs/sync checks.
-The compiled live suite was **not executed**. These candidates do not authorize
-integration or change A's actual terminal failure.
+That compiled live suite was **not executed**. No source-review GO or compilation
+is promoted to live acceptance; C and D remain separate gated milestones.
 
 ## Keeping the snapshot honest
 
