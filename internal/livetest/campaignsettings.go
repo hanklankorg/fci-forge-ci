@@ -158,7 +158,7 @@ func (run CampaignRun) caseSettings(args []string) (map[string]string, error) {
 		return run.withBuilder(ImageBuilderBuildah), nil
 	}
 
-	if len(args) < 4 || args[0] != "test-live-consumer" || args[1] != campaignForgejo {
+	if len(args) < 4 || args[0] != campaignConsumerRecipe || args[1] != campaignForgejo {
 		return run.Settings, nil
 	}
 

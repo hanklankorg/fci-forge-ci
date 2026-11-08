@@ -86,6 +86,10 @@ func campaignFlavorKey(flavor string) string {
 	return strings.ToUpper(strings.ReplaceAll(flavor, "-", "_"))
 }
 
+// campaignConsumerRecipe is the just recipe a campaign lane runs a consumer
+// trial through: test-live-consumer <forge> <checkout> <event> [settings].
+const campaignConsumerRecipe = "test-live-consumer"
+
 // campaignLintArchive is a GitLab consumer's setting of the nanolinter image
 // archive its gate lints in, the trial's FORGE_CI_LIVE_LINT_IMAGE_ARCHIVE.
 const campaignLintArchive = "lint-archive"
@@ -374,13 +378,13 @@ func consumerRecipe(provider, event, checkout string, archives map[string]string
 
 	switch {
 	case provider == campaignForgejo:
-		return append([]string{"test-live-consumer", campaignForgejo, checkout, event}, settings...), nil
+		return append([]string{campaignConsumerRecipe, campaignForgejo, checkout, event}, settings...), nil
 	case event == "pull-request":
 		if images != 1 || archives["job-archive"] == "" || len(settings) != 0 {
 			return nil, fmt.Errorf("a GitLab merge request takes job-archive= and lint-archive= alone: %w", errs.ErrValidation)
 		}
 
-		args := []string{"test-live-consumer", campaignGitLab, checkout, event, "job-archive=" + archives["job-archive"]}
+		args := []string{campaignConsumerRecipe, campaignGitLab, checkout, event, "job-archive=" + archives["job-archive"]}
 		if lints {
 			args = append(args, campaignLintArchive+"="+lint)
 		}
@@ -392,7 +396,7 @@ func consumerRecipe(provider, event, checkout string, archives map[string]string
 		}
 
 		args := []string{
-			"test-live-consumer", campaignGitLab, checkout, event,
+			campaignConsumerRecipe, campaignGitLab, checkout, event,
 			"job-archive=" + archives["job-archive"],
 			"build-archive=" + archives["build-archive"],
 			"signer-archive=" + archives["signer-archive"],
