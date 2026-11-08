@@ -437,16 +437,18 @@ jobs:
           RELEASE_REQUEST_IS_RELEASE: ${{ inputs['request-is-release'] }}
           TAG_NAME: ${{ inputs['release-name'] }}
           REQUIRE_ALLOWLISTED_SIGNER: ${{ inputs['require-allowlisted-signer'] }}
-          REQUIRE_VALID_SIGNATURE: "true"
           ALLOWED_SIGNERS_FILE: ${{ runner.temp }}/release-request-metadata/.forge-ci/allowed_signers
           ALLOWED_GPG_KEYS_FILE: ${{ runner.temp }}/release-request-metadata/.forge-ci/allowed_gpg_keys.asc
           RELEASE_GPG_PUBLIC_KEY: ${{ secrets.RELEASE_GPG_PUBLIC_KEY }}
         run: |
           set -euo pipefail
+          # The request keeps the prerequisite gate's policy: the plan's
+          # allowlist requirement, with no validity requirement of its own.
           forge-ci validate tag signature --tag "release-request/$TAG_NAME"
-          # The bot's final GPG signature uses the configured public release
-          # key, not the human request's GPG allowlist. SSH retains its list.
-          forge-ci validate tag signature --tag "$TAG_NAME" --require-allowlisted-signer=false --allowed-gpg-keys-file /dev/null
+          # The bot's final GPG signature must verify with the configured
+          # public release key, not the request's GPG allowlist. SSH retains
+          # its list.
+          forge-ci validate tag signature --tag "$TAG_NAME" --require-valid-signature --require-allowlisted-signer=false --allowed-gpg-keys-file /dev/null
           # Last read before key setup/publication: remote request object AND
           # peeled Q, exact final P and supersession. Not an atomic remote lease.
           forge-ci release validate-tag --expected-parent "$RELEASE_REQUEST_SHA"
