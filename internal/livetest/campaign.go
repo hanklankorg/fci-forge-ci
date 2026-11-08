@@ -237,7 +237,7 @@ func campaignCaseArgs(dir, provider string, env map[string]string, words []strin
 
 	events := "pull-request or release"
 	if len(words) > 1 && campaignSupportsPublishedSnapshot(provider, words[1]) {
-		events += ", " + campaignPublishedSnapshot + " or " + TrialLifecycle
+		events = "pull-request, release, " + campaignPublishedSnapshot + " or " + TrialLifecycle
 	}
 
 	if len(words) < 3 {
@@ -273,7 +273,7 @@ func campaignCaseArgs(dir, provider string, env map[string]string, words []strin
 // what its gate and release need.
 func campaignAdmitConsumer(checkout, provider, demo, event string, words, settings []string, env map[string]string) error {
 	if event == TrialLifecycle {
-		return campaignAdmitLifecycle(provider, demo, settings)
+		return campaignAdmitLifecycle(provider, demo)
 	}
 
 	if provider == campaignGitLab {

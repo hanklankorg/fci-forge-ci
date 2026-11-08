@@ -245,85 +245,91 @@ func runForgejoConsumerTrial(t *testing.T, root string, private bool) {
 		livetest.SetRepoSecret(t, target, repo, secret, value)
 	}
 
-	event := "pull_request"
-
-	if release {
-		event = "push"
-
-		requester.PushTag(t, target, repo, "release-request/v"+settings.Version, layerMain, "Request release v"+settings.Version)
-	} else {
+	if !release {
 		requirePullRequest(t, livetest.OpenPullRequest(t, target, repo, trialBranch, layerMain, "test: consumer trial"), trialBranch, head, main)
-	}
 
-	run := livetest.WaitForConsumerRun(t, target, repo, settings.Workflow, event, settings.InterruptAfter)
-
-	scenario.logJobs(t, livetest.RunJobs(t, target, repo, run.ID), facts.Secrets, plan.Secrets)
-	logArtifacts(t, run, livetest.RunArtifacts(t, target, repo, run.ID))
-
-	if settings.InterruptAfter != "" {
-		requireInterrupted(t, target, repo, run, "v"+settings.Version)
-
+		run := livetest.WaitForConsumerRun(t, target, repo, settings.Workflow, "pull_request", "")
+		scenario.logJobs(t, livetest.RunJobs(t, target, repo, run.ID), facts.Secrets, plan.Secrets)
+		logArtifacts(t, run, livetest.RunArtifacts(t, target, repo, run.ID))
+		requireRunSuccess(t, run)
+	} else if run, released := requestRelease(t, scenario, requester, keys, settings, external, main, 0, facts.Secrets, plan.Secrets); released == "" {
+		// Interrupted: what the cancelled run left is shown by a rerun.
 		return
-	}
-
-	if run.Status != jobSuccess {
-		t.Fatalf("run %d of %s ended %q, want %s", run.ID, run.WorkflowID, run.Status, jobSuccess)
-	}
-
-	if release {
-		requireReleaseGit(t, target, repo, keys, main, "release-request/v"+settings.Version, "v"+settings.Version)
-		requireSignedRelease(t, target, repo, keys, "v"+settings.Version, main)
-		requireExternalImages(t, external, keys, settings)
-
-		if settings.NextVersion != "" {
-			_, npmErr := os.Stat(filepath.Join(root, "package.json"))
-			if npmErr != nil && !os.IsNotExist(npmErr) {
-				t.Fatal(npmErr)
-			}
-
-			if npmErr == nil {
-				requireNPMVersionContract(t, target, repo, "v"+settings.Version)
-			}
-			// The generated release commit carries [skip ci]. Admit a fresh
-			// ordinary candidate without rewriting the first release or tags.
-			parent := livetest.CommitFiles(t, target, repo, livetest.FileCommit{
-				Branch: layerMain, Message: "test: prepare next release candidate",
-				Files: map[string]string{"next-release-request.txt": "request the next release\n"},
-			})
-
-			previous := settings.ResolvedVariables(scenario.layer.Commit, main)
-			for variable, value := range settings.ResolvedVariables(scenario.layer.Commit, parent) {
-				if value != previous[variable] {
-					livetest.SetRepoVariable(t, target, repo, variable, value)
-				}
-			}
-
-			requestTag, finalTag := "release-request/v"+settings.NextVersion, "v"+settings.NextVersion
-			requester.PushTag(t, target, repo, requestTag, layerMain, "Request release "+finalTag)
-			next := livetest.WaitForConsumerRunAfter(t, target, repo, settings.Workflow, event, run.ID)
-			scenario.logJobs(t, livetest.RunJobs(t, target, repo, next.ID), facts.Secrets, plan.Secrets)
-
-			if next.Status != jobSuccess {
-				t.Fatalf("second release run %d ended %q", next.ID, next.Status)
-			}
-
-			requireReleaseGit(t, target, repo, keys, parent, requestTag, finalTag)
-			requireSignedRelease(t, target, repo, keys, finalTag, parent)
-
-			settings.Version = settings.NextVersion
-			requireExternalImages(t, external, keys, settings)
-
-			if npmErr == nil {
-				requireNPMVersionContract(t, target, repo, finalTag)
-			}
-
-			t.Logf("second consecutive Forgejo release %s: run %d, same repository and signing authority", finalTag, next.ID)
+	} else if settings.NextVersion != "" {
+		_, npmErr := os.Stat(filepath.Join(root, "package.json"))
+		if npmErr != nil && !os.IsNotExist(npmErr) {
+			t.Fatal(npmErr)
 		}
+
+		if npmErr == nil {
+			requireNPMVersionContract(t, target, repo, "v"+settings.Version)
+		}
+		// The generated release commit carries [skip ci]. Admit a fresh
+		// ordinary candidate without rewriting the first release or tags.
+		parent := livetest.CommitFiles(t, target, repo, livetest.FileCommit{
+			Branch: layerMain, Message: "test: prepare next release candidate",
+			Files: map[string]string{"next-release-request.txt": "request the next release\n"},
+		})
+
+		previous := settings.ResolvedVariables(scenario.layer.Commit, main)
+		for variable, value := range settings.ResolvedVariables(scenario.layer.Commit, parent) {
+			if value != previous[variable] {
+				livetest.SetRepoVariable(t, target, repo, variable, value)
+			}
+		}
+
+		settings.Version = settings.NextVersion
+		next, _ := requestRelease(t, scenario, requester, keys, settings, external, parent, run.ID, facts.Secrets, plan.Secrets)
+
+		if npmErr == nil {
+			requireNPMVersionContract(t, target, repo, "v"+settings.Version)
+		}
+
+		t.Logf("second consecutive Forgejo release v%s: run %d, same repository and signing authority", settings.Version, next.ID)
 	}
 
 	if demo != "" {
 		runDemoPullRequest(t, scenario, consumer, main, facts.Secrets, plan.Secrets)
 	}
+}
+
+// requestRelease pushes a signed request for settings.Version at request, the
+// head of main, waits for the release run (the repository's first, or the one
+// after afterID), logs it and judges the release: the run succeeded, main
+// advanced by one signed release commit, the tags, the signed release and the
+// external images. It returns the run and the release commit. A run the
+// settings interrupt is checked to have released nothing, and its release
+// commit is "".
+func requestRelease(t *testing.T, scenario layerScenario, requester livetest.RequestSigner, keys releaseKeys, settings livetest.TrialSettings, external *livetest.ExternalRegistry, request string, afterID int64, secrets ...map[string]string) (livetest.WorkflowRun, string) {
+	t.Helper()
+
+	target, repo := scenario.target, scenario.repo
+	requestTag, finalTag := "release-request/v"+settings.Version, "v"+settings.Version
+	requester.PushTag(t, target, repo, requestTag, layerMain, "Request release "+finalTag)
+
+	var run livetest.WorkflowRun
+	if afterID == 0 {
+		run = livetest.WaitForConsumerRun(t, target, repo, settings.Workflow, "push", settings.InterruptAfter)
+	} else {
+		run = livetest.WaitForConsumerRunAfter(t, target, repo, settings.Workflow, "push", afterID)
+	}
+
+	scenario.logJobs(t, livetest.RunJobs(t, target, repo, run.ID), secrets...)
+	logArtifacts(t, run, livetest.RunArtifacts(t, target, repo, run.ID))
+
+	if settings.InterruptAfter != "" {
+		requireInterrupted(t, target, repo, run, finalTag)
+
+		return run, ""
+	}
+
+	requireRunSuccess(t, run)
+
+	released := requireReleaseGit(t, target, repo, keys, request, requestTag, finalTag)
+	requireSignedRelease(t, target, repo, keys, finalTag, request)
+	requireExternalImages(t, external, keys, settings)
+
+	return run, released
 }
 
 // trialVariables adds the layer's and the caller's variables to the trial's
@@ -431,10 +437,7 @@ func runDemoPullRequest(t *testing.T, scenario layerScenario, consumer livetest.
 
 	run := livetest.WaitForConsumerRun(t, target, repo, demoPullRequestWorkflow, "pull_request", "")
 	scenario.logJobs(t, livetest.RunJobs(t, target, repo, run.ID), secrets...)
-
-	if run.Status != jobSuccess {
-		t.Fatalf("pull-request run %d of %s ended %q, want %s", run.ID, run.WorkflowID, run.Status, jobSuccess)
-	}
+	requireRunSuccess(t, run)
 }
 
 // logArtifacts records what the run left in the forge's artifact store, which

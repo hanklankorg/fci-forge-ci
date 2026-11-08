@@ -262,7 +262,10 @@ it fails, with their acceptance owners unchanged:
 
 The event takes the release's settings but `workflow=`, `next-version=` and
 `interrupt-after=`; `CI_JOB_IMAGE`, pinned by digest, is also the Java image the
-snapshot builds the service with. It is admitted for the Forgejo
+snapshot builds the service with. It builds with Buildah for now: the campaign's
+kaniko job image is labelled for the consumer trial's layer repository, which a
+lifecycle's layer is not, so `CI_IMAGE_BUILDER=kaniko` is refused before anything
+is created. It is admitted for the Forgejo
 `hello-maven-service` demo alone, the one demo with a development route; a demo
 without one is refused rather than run as a shorter flow, and GitLab and hosted
 GitHub refuse the event. It needs what the published snapshot and a Forgejo

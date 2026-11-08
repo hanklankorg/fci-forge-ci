@@ -19,6 +19,7 @@ import (
 	"codefloe.com/itiquette/forge-lab-contract/labcontract"
 
 	"github.com/diggsweden/forge-ci/internal/domain/container"
+	"github.com/diggsweden/forge-ci/internal/domain/errs"
 )
 
 // A release through the layer needs what a consumer's organization brings:
@@ -438,6 +439,21 @@ func MirrorRepo(tb TB, target Target, repo string) RepoMirror {
 	return mirror
 }
 
+// RequireMergeOf holds merge to a merge commit of base and head, in that
+// order, whose tree is head's: what a native merge of a change that builds on
+// its base leaves. The forge takes no base commit when it merges, so a base
+// that moved shows here.
+func (mirror RepoMirror) RequireMergeOf(tb TB, merge, base, head string) {
+	tb.Helper()
+
+	ctx, cancel := context.WithTimeout(Context(tb), timeoutAPI)
+	defer cancel()
+
+	if err := mirror.mergeOf(ctx, merge, base, head); err != nil {
+		tb.Fatalf("livetest: the merge %s %v", merge, err)
+	}
+}
+
 // Git runs one git command in the mirror and returns its trimmed output.
 func (mirror RepoMirror) Git(tb TB, args ...string) (string, error) {
 	tb.Helper()
@@ -446,4 +462,31 @@ func (mirror RepoMirror) Git(tb TB, args ...string) (string, error) {
 	defer cancel()
 
 	return mirror.git.run(ctx, mirror.dir, args...)
+}
+
+func (mirror RepoMirror) mergeOf(ctx context.Context, merge, base, head string) error {
+	parents, err := mirror.git.run(ctx, mirror.dir, "rev-list", "--parents", "-n", "1", merge)
+	if err != nil {
+		return err
+	}
+
+	if parents != merge+" "+base+" "+head {
+		return fmt.Errorf("is %q, want the parents %s and %s: %w", parents, base, head, errs.ErrValidation)
+	}
+
+	mergeTree, err := mirror.git.run(ctx, mirror.dir, "rev-parse", merge+"^{tree}")
+	if err != nil {
+		return err
+	}
+
+	headTree, err := mirror.git.run(ctx, mirror.dir, "rev-parse", head+"^{tree}")
+	if err != nil {
+		return err
+	}
+
+	if mergeTree != headTree {
+		return fmt.Errorf("has the tree %s, want the change's %s: %w", mergeTree, headTree, errs.ErrValidation)
+	}
+
+	return nil
 }

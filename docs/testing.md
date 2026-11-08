@@ -361,7 +361,7 @@ setup, evidence and cleanup.
 
 | Forge / event | Command | Preparation |
 |---|---|---|
-| Forgejo PR or release | `just test-live-consumer forgejo <checkout> <pull-request\|release> [setting ...]` | Local `forgeci` contract and runner; consumer job image; signer image for releases |
+| Forgejo PR, release or lifecycle | `just test-live-consumer forgejo <checkout> <pull-request\|release\|lifecycle> [setting ...]` | Local `forgeci` contract and runner; consumer job image; signer image for releases; lifecycle: the Maven service demo and the container/readiness runner (docs/live-campaigns.md, Lifecycle) |
 | GitLab MR | `just test-live-consumer gitlab <checkout> pull-request job-archive=<image-archive>` | Local `forgeci` contract and runner; prepared MR job image archive |
 | GitLab release | `just test-live-consumer gitlab <checkout> release job-archive=<archive> build-archive=<archive> signer-archive=<archive> [setting ...]` | Local contract, prepared image archives and guarded full-release runner profile |
 | GitHub PR, development build or release | `just test-live-consumer github <checkout> <pull-request\|dev-release\|release> org=<org-id> [setting ...]` | Forge Lab's hosted `github run` session, consumer workflow fixtures and public engine images |
@@ -828,11 +828,16 @@ published anywhere: does this repository still pass its own workflow with the
 layer of this checkout?
 
 ```text
-just test-live-consumer forgejo <consumer-checkout> <pull-request|release> [setting ...]
+just test-live-consumer forgejo <consumer-checkout> <pull-request|release|lifecycle> [setting ...]
 
 just test-live-consumer forgejo /absolute/myapp pull-request CI_JOB_IMAGE=<digest reference>
 just test-live-consumer forgejo /absolute/myapp release
+just test-live-consumer forgejo /absolute/hello-maven-service/consumer lifecycle CI_JOB_IMAGE=<digest reference>
 ```
+
+`lifecycle` is the Maven service demo's linked flow, pull request to merge to
+development snapshot to release, `TestForgejoLayer_ConsumerLifecycle`;
+docs/live-campaigns.md, Lifecycle, describes its phases and limits.
 
 It is `TestForgejoLayer_ConsumerTrial` behind `just test-live`'s script, so
 the contract, the lock, the preflight and the log are the same. The test

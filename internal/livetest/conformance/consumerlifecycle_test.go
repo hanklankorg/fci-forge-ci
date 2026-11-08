@@ -8,7 +8,6 @@ package conformance_test
 import (
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"testing"
 
@@ -175,7 +174,8 @@ func runForgejoConsumerLifecycle(t *testing.T, root string, private bool) {
 
 	review := livetest.WaitForConsumerRun(t, target, repo, demoPullRequestWorkflow, "pull_request", "")
 	scenario.logJobs(t, livetest.RunJobs(t, target, repo, review.ID), facts.Secrets, plan.Secrets)
-	requireLifecycleRun(t, "1 pull request", review)
+	logArtifacts(t, review, livetest.RunArtifacts(t, target, repo, review.ID))
+	requireRunSuccess(t, review)
 	requireRunIDs(t, target, repo, review.ID)
 	scenario.requireNone(t, "/tags", "/releases")
 	t.Logf("lifecycle phase 1 pull request: #%d, %s@%s into %s@%s, run %d", pull.Number, lifecycleBranch, head, layerMain, base, review.ID)
@@ -214,18 +214,8 @@ func runForgejoConsumerLifecycle(t *testing.T, root string, private bool) {
 		livetest.SetRepoSecret(t, target, repo, secret, value)
 	}
 
-	requestTag, finalTag := "release-request/v"+settings.Version, "v"+settings.Version
-	requester.PushTag(t, target, repo, requestTag, layerMain, "Request release "+finalTag)
-
-	release := livetest.WaitForConsumerRunAfter(t, target, repo, settings.Workflow, "push", development.ID)
-	scenario.logJobs(t, livetest.RunJobs(t, target, repo, release.ID), facts.Secrets, plan.Secrets)
-	logArtifacts(t, release, livetest.RunArtifacts(t, target, repo, release.ID))
-	requireLifecycleRun(t, "4 release", release)
-
-	released := requireReleaseGit(t, target, repo, keys, request, requestTag, finalTag)
-	requireSignedRelease(t, target, repo, keys, finalTag, request)
-	requireExternalImages(t, external, keys, settings)
-	t.Logf("lifecycle phase 4 release: %s requested at %s, release commit %s, run %d", finalTag, request, released, release.ID)
+	release, released := requestRelease(t, scenario, requester, keys, settings, external, request, development.ID, facts.Secrets, plan.Secrets)
+	t.Logf("lifecycle phase 4 release: v%s requested at %s, release commit %s, run %d", settings.Version, request, released, release.ID)
 
 	// Phase 5: the repository holds the lifecycle and nothing else.
 	scenario.requireBranches(t, map[string]string{layerMain: released, lifecycleBranch: head})
@@ -246,59 +236,13 @@ func runForgejoConsumerLifecycle(t *testing.T, root string, private bool) {
 	t.Logf("lifecycle complete: base %s, change %s, merge %s, release %s; runs %d, %d, %d", base, head, request, released, review.ID, development.ID, release.ID)
 }
 
-// requireLifecycleRun ends the lifecycle at the phase whose run did not succeed.
-func requireLifecycleRun(t *testing.T, phase string, run livetest.WorkflowRun) {
-	t.Helper()
-
-	if run.Status != jobSuccess {
-		t.Fatalf("lifecycle phase %s: run %d of %s ended %q, want %s", phase, run.ID, run.WorkflowID, run.Status, jobSuccess)
-	}
-}
-
-// requireRunIDs holds the repository to exactly the runs the lifecycle
-// started: a phase starts no run but its own.
-func requireRunIDs(t *testing.T, target livetest.Target, repo string, want ...int64) {
-	t.Helper()
-
-	runs := livetest.WorkflowRuns(t, target, repo)
-	got := make([]int64, 0, len(runs))
-
-	for _, run := range runs {
-		got = append(got, run.ID)
-	}
-
-	slices.Sort(got)
-	slices.Sort(want)
-
-	if !slices.Equal(got, want) {
-		t.Fatalf("the repository has runs %v, want exactly %v", got, want)
-	}
-}
-
-// requireMerge asks a mirror what the native merge did: main is at the merge
-// commit, whose parents are the base the pull request was opened on and the
-// change under review, and whose tree is the change's. The forge was told
-// the head commit and takes no base commit, so a base that moved shows here.
+// requireMerge checks what the native merge did: the forge's branches are at
+// the merge commit and the change, and a mirror shows the merge commit to be
+// one of the base the pull request was opened on and the change under
+// review, with the change's tree.
 func requireMerge(t *testing.T, scenario layerScenario, merge, base, head string) {
 	t.Helper()
 
 	scenario.requireBranches(t, map[string]string{layerMain: merge, lifecycleBranch: head})
-
-	mirror := livetest.MirrorRepo(t, scenario.target, scenario.repo)
-	git := func(args ...string) string {
-		out, err := mirror.Git(t, args...)
-		if err != nil {
-			t.Fatalf("merge history: %v", err)
-		}
-
-		return out
-	}
-
-	if parents := git("rev-list", "--parents", "-n", "1", merge); parents != merge+" "+base+" "+head {
-		t.Fatalf("the merge is %q, want %s with the parents %s and %s", parents, merge, base, head)
-	}
-
-	if mergeTree, headTree := git("rev-parse", merge+"^{tree}"), git("rev-parse", head+"^{tree}"); mergeTree != headTree {
-		t.Fatalf("the merge's tree is %s, want the change's %s", mergeTree, headTree)
-	}
+	livetest.MirrorRepo(t, scenario.target, scenario.repo).RequireMergeOf(t, merge, base, head)
 }

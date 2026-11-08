@@ -204,8 +204,19 @@ func ParseTrialSettings(event string, words []string) (TrialSettings, error) {
 		return TrialSettings{}, fmt.Errorf("next-version requires an increasing release version and cannot accompany interrupt-after: %w", errs.ErrValidation)
 	}
 
+	if settings.Event == TrialLifecycle {
+		if err := settings.lifecycleImages(); err != nil {
+			return TrialSettings{}, err
+		}
+	}
+
 	return settings, nil
 }
+
+// lifecycleJobImage is the variable a lifecycle's development phase takes the
+// Java job image from, the image its service snapshot builds with: the same
+// image the consumer's own workflows run in.
+const lifecycleJobImage = "CI_JOB_IMAGE"
 
 // ResolvedVariables returns the caller's variables with the two references
 // replaced: the commit of the layer under test, and the commit the trial
@@ -225,6 +236,24 @@ func (settings *TrialSettings) ResolvedVariables(layerCommit, requestCommit stri
 	}
 
 	return resolved
+}
+
+// lifecycleImages holds a lifecycle to the images its development phase can
+// build with, before anything is created: the Java job image pinned by
+// digest, and Buildah. The campaign's kaniko job image is labelled for the
+// consumer trial's layer repository, which a lifecycle's layer is not, so a
+// lifecycle's snapshot would refuse it; kaniko waits for a lifecycle that
+// publishes its own, as the standalone snapshot does.
+func (settings *TrialSettings) lifecycleImages() error {
+	if !container.ValidDigestReference(settings.Variables[lifecycleJobImage]) {
+		return fmt.Errorf("%s requires %s=<digest reference>, the Java job image its development phase builds the service with: %w", TrialLifecycle, lifecycleJobImage, errs.ErrValidation)
+	}
+
+	if settings.Variables["CI_IMAGE_BUILDER"] == ImageBuilderKaniko {
+		return fmt.Errorf("%s builds with Buildah for now: the campaign's kaniko job image is labelled for the consumer trial's layer repository, not a lifecycle's; leave CI_IMAGE_BUILDER=kaniko out: %w", TrialLifecycle, errs.ErrValidation)
+	}
+
+	return nil
 }
 
 // set takes one setting and reports whether it is one.

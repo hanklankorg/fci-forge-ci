@@ -124,9 +124,7 @@ func runForgejoMavenServiceCase(t *testing.T, root string, private bool) {
 	jobs := livetest.RunJobs(t, target, repo, run.ID)
 	scenario.logJobs(t, jobs)
 
-	if runs := livetest.WorkflowRuns(t, target, repo); len(runs) != 1 || runs[0].ID != run.ID {
-		t.Fatalf("want exactly the policy dispatch, got %+v", runs)
-	}
+	requireRunIDs(t, target, repo, run.ID)
 
 	receipt, jars, producers := requireMavenServiceDevelopment(t, target, repo, run, consumer, config, head, image)
 

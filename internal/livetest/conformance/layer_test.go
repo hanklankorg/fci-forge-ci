@@ -297,3 +297,32 @@ func requireJobsOnRunner(t *testing.T, jobs []livetest.RunJob, runID int64, labe
 
 	return onRunner, wrappers
 }
+
+// requireRunSuccess ends the scenario at a run that did not succeed.
+func requireRunSuccess(t *testing.T, run livetest.WorkflowRun) {
+	t.Helper()
+
+	if run.Status != jobSuccess {
+		t.Fatalf("run %d of %s ended %q, want %s", run.ID, run.WorkflowID, run.Status, jobSuccess)
+	}
+}
+
+// requireRunIDs holds the repository to exactly the runs the scenario
+// started: a step starts no run but its own.
+func requireRunIDs(t *testing.T, target livetest.Target, repo string, want ...int64) {
+	t.Helper()
+
+	runs := livetest.WorkflowRuns(t, target, repo)
+	got := make([]int64, 0, len(runs))
+
+	for _, run := range runs {
+		got = append(got, run.ID)
+	}
+
+	slices.Sort(got)
+	slices.Sort(want)
+
+	if !slices.Equal(got, want) {
+		t.Fatalf("the repository has runs %v, want exactly %v", got, want)
+	}
+}

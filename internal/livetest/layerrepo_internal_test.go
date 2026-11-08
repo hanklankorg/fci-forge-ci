@@ -65,14 +65,17 @@ func TestMergePullRequest_NamesTheHeadAndReadsTheMergeBack(t *testing.T) {
 			defer transport.CloseIdleConnections()
 
 			target := Target{Forge: provider.ForgeForgejo, Host: labHost, Owner: "fixture", CAFile: "captured", caPEM: ca, accepted: true}
-			tb := &recordingTB{}
 
-			var merged PullRequest
+			var (
+				merged  PullRequest
+				failure acceptanceFailure
+				stopped bool
+			)
 
 			func() {
-				defer func() { _ = recover() }()
+				defer func() { failure, stopped = recover().(acceptanceFailure) }()
 
-				merged = MergePullRequest(stopOnFatalTB{TB: tb}, target, "scratch", 7, mergeTestHead)
+				merged = MergePullRequest(stopOnFatalTB{TB: &recordingTB{}}, target, "scratch", 7, mergeTestHead)
 			}()
 
 			if len(merges) != 1 || merges[0]["Do"] != "merge" || merges[0]["head_commit_id"] != mergeTestHead ||
@@ -81,15 +84,15 @@ func TestMergePullRequest_NamesTheHeadAndReadsTheMergeBack(t *testing.T) {
 			}
 
 			if test.fatal == "" {
-				if merged.MergeCommitSHA != mergeTestMerge || !merged.Merged || merged.State != "closed" {
-					t.Fatalf("merged = %+v, want the merge commit read back", merged)
+				if stopped || merged.MergeCommitSHA != mergeTestMerge || !merged.Merged || merged.State != "closed" {
+					t.Fatalf("merged = %+v (stopped %t: %s), want the merge commit read back", merged, stopped, failure)
 				}
 
 				return
 			}
 
-			if merged.MergeCommitSHA != "" {
-				t.Fatalf("a refused merge returned %+v", merged)
+			if !stopped || !strings.Contains(string(failure), test.fatal) || merged.MergeCommitSHA != "" {
+				t.Fatalf("a refused merge stopped %t with %q and returned %+v, want the refusal %q", stopped, failure, merged, test.fatal)
 			}
 		})
 	}
