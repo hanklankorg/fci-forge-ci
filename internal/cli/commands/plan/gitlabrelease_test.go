@@ -83,6 +83,16 @@ func TestGitlabReleasePipelineCmd_WritesTheReleaseJobsFromTheDeclaration(t *test
 	if body, err := os.ReadFile(names); err != nil || string(body) != "backend-api\n" {
 		t.Errorf("java artifacts = %q, %v; want backend-api", body, err)
 	}
+
+	// A job that checks which planned jobs ran names them without the images.
+	jobNames := filepath.Join(dir, "job-names")
+	if err := plancmd.New().Run(t.Context(), []string{"plan", "gitlab-release-pipeline", "--file", declaration, "--job-names-output", jobNames}); err != nil {
+		t.Fatal(err)
+	}
+
+	if body, err := os.ReadFile(jobNames); err != nil || string(body) != "Prepare: version java\nPrepare: version node\nBuild: java\nBuild: node\n" {
+		t.Errorf("job names = %q, %v", body, err)
+	}
 }
 
 func TestGitlabReleasePipelineCmd_RefusesWhatItCannotPlan(t *testing.T) {

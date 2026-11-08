@@ -16,6 +16,26 @@ import (
 	"github.com/diggsweden/forge-ci/internal/domain/pipeline"
 )
 
+// The runtime image flags the GitLab planners take, one a toolchain family.
+const (
+	flagRuntimeImageJava    = "runtime-image-java"
+	flagRuntimeImageNode    = "runtime-image-node"
+	flagRuntimeImageGo      = "runtime-image-go"
+	flagRuntimeImageRust    = "runtime-image-rust"
+	flagRuntimeImageAndroid = "runtime-image-android"
+)
+
+// runtimeImages reads the runtime image flags the command defines.
+func runtimeImages(cmd *cli.Command) gitlabpipeline.RuntimeImages {
+	return gitlabpipeline.RuntimeImages{
+		Java:    cmd.String(flagRuntimeImageJava),
+		Node:    cmd.String(flagRuntimeImageNode),
+		Go:      cmd.String(flagRuntimeImageGo),
+		Rust:    cmd.String(flagRuntimeImageRust),
+		Android: cmd.String(flagRuntimeImageAndroid),
+	}
+}
+
 // gitlabBuildPipelineCmd materialises a GitLab child pipeline for the release
 // build stage. GitLab cannot expand a runtime matrix, so the build fan-out is
 // generated from the same plan JSON GitHub feeds to `strategy: matrix`: one
@@ -37,11 +57,11 @@ EXAMPLE:
 			&cli.StringFlag{Name: "component-base", Required: true, Sources: cli.EnvVars("COMPONENT_BASE"), Usage: "explicit CI/CD Catalog path prefix for the build-<eco> components"},
 			&cli.StringFlag{Name: "component-ref", Required: true, Sources: cli.EnvVars("COMPONENT_REF"), Usage: "component version to pin (e.g. 1.0.0)"},
 			&cli.StringFlag{Name: "version", Sources: cli.EnvVars("VERSION"), Usage: "release version forwarded to each build component"},
-			&cli.StringFlag{Name: "runtime-image-java", Usage: "runtime image of build-maven and build-gradle; required when the plan builds them"},
-			&cli.StringFlag{Name: "runtime-image-node", Usage: "runtime image of build-npm; required when the plan builds npm"},
-			&cli.StringFlag{Name: "runtime-image-go", Usage: "runtime image of build-go; required when the plan builds Go"},
-			&cli.StringFlag{Name: "runtime-image-rust", Usage: "runtime image of build-cargo; required when the plan builds Cargo"},
-			&cli.StringFlag{Name: "runtime-image-android", Usage: "runtime image of build-gradle-android; required when the plan builds Android"},
+			&cli.StringFlag{Name: flagRuntimeImageJava, Usage: "runtime image of build-maven and build-gradle; required when the plan builds them"},
+			&cli.StringFlag{Name: flagRuntimeImageNode, Usage: "runtime image of build-npm; required when the plan builds npm"},
+			&cli.StringFlag{Name: flagRuntimeImageGo, Usage: "runtime image of build-go; required when the plan builds Go"},
+			&cli.StringFlag{Name: flagRuntimeImageRust, Usage: "runtime image of build-cargo; required when the plan builds Cargo"},
+			&cli.StringFlag{Name: flagRuntimeImageAndroid, Usage: "runtime image of build-gradle-android; required when the plan builds Android"},
 			&cli.StringFlag{Name: flagOutput, Sources: cli.EnvVars("OUTPUT_FILE"), Usage: "destination path for the child pipeline (default: stdout)"},
 		},
 		Action: func(_ context.Context, cmd *cli.Command) error {
@@ -64,13 +84,7 @@ EXAMPLE:
 				ComponentRef:  cmd.String("component-ref"),
 				Version:       cmd.String("version"),
 				Stage:         plan.Stage,
-				RuntimeImages: gitlabpipeline.RuntimeImages{
-					Java:    cmd.String("runtime-image-java"),
-					Node:    cmd.String("runtime-image-node"),
-					Go:      cmd.String("runtime-image-go"),
-					Rust:    cmd.String("runtime-image-rust"),
-					Android: cmd.String("runtime-image-android"),
-				},
+				RuntimeImages: runtimeImages(cmd),
 			})
 			if err != nil {
 				return err

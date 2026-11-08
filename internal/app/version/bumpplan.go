@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -42,6 +43,11 @@ type BumpPlanInput struct {
 	// carries one toolchain prepares its share of a patch the release job
 	// applies whole. It takes no patch.
 	ProjectTypes []projecttype.Type
+	// PathsFile, with a patch, receives the repository-relative paths the
+	// bump wrote besides the root CHANGELOG.md, one a line, for
+	// commit-changelog-release --include-paths-file: the native files the
+	// patch changed, the changelog copies and the text-written version files.
+	PathsFile string
 }
 
 // defaultChangelogFile is the path the changelog verbs assume when the caller
@@ -93,47 +99,24 @@ func BumpPlan(ctx context.Context, ops BumpOps, sink ci.OutputSink, out, stderr 
 	}
 	// Validate the engine-owned local prerequisites for every item before changing
 	// the first project. This is not rollback of later tool or filesystem failures.
-	inputs := make([]bumpTarget, 0, len(items))
-	for _, artifact := range items {
-		dir, err := normalizedPlanWorkingDir(artifact.WorkingDirectory)
-		if err != nil {
-			return err
-		}
-
-		gradleVersionFile := ""
-		if artifact.Gradle != nil {
-			gradleVersionFile = artifact.Gradle.GradleVersionFile
-		}
-
-		if artifact.GradleAndroid != nil {
-			gradleVersionFile = artifact.GradleAndroid.GradleVersionFile
-		}
-
-		bump, err := normalizeBumpTarget(BumpInput{ProjectType: artifact.ProjectType, Library: artifact.BuildType == config.BuildTypeLibrary, Version: in.Version, WorkingDir: dir,
-			GradleVersionFile: gradleVersionFile, XcconfigFile: in.XcconfigFile, MavenCLIOpts: in.MavenCLIOpts})
-		if err != nil {
-			return fmt.Errorf("preflight artifact %q: %w", artifact.Name, err)
-		}
-
-		if !supportedPlanLiteralPath(bump.file) {
-			return fmt.Errorf("preflight artifact %q: version file cannot be represented by file-pattern: %w", artifact.Name, errs.ErrUsage)
-		}
-
-		if err := preflightPlanBump(ops, bump, in.PatchPath != ""); err != nil {
-			return fmt.Errorf("preflight artifact %q: %w", artifact.Name, err)
-		}
-
-		inputs = append(inputs, bump)
+	inputs, err := preflightBumpPlan(ops, items, in)
+	if err != nil {
+		return err
 	}
 
 	if err := validatePlanBumpAliases(inputs, changelogPath); err != nil {
 		return err
 	}
 
+	var written []string
+
 	if in.PatchPath != "" {
-		if err := applyPlannedNativeBumps(ctx, ops.Git, inputs, in, out); err != nil {
+		native, err := applyPlannedNativeBumps(ctx, ops.Git, inputs, in, out)
+		if err != nil {
 			return err
 		}
+
+		written = native
 	}
 
 	pathspecs := make([]string, 0, len(items)*3)
@@ -147,9 +130,17 @@ func BumpPlan(ctx context.Context, ops BumpOps, sink ci.OutputSink, out, stderr 
 			return fmt.Errorf("artifact %q: %w", artifact.Name, err)
 		}
 
+		if workingDir != "." {
+			written = append(written, path.Join(filepath.ToSlash(workingDir), defaultChangelogFile))
+		}
+
 		if in.PatchPath == "" || !nativeBump(bump.ProjectType) {
 			if err := Bump(ctx, ops, out, stderr, annot, bump.BumpInput); err != nil {
 				return fmt.Errorf("bump artifact %q: %w", artifact.Name, err)
+			}
+
+			if bump.file != "" {
+				written = append(written, path.Join(filepath.ToSlash(workingDir), filepath.ToSlash(bump.file)))
 			}
 		}
 
@@ -176,7 +167,38 @@ func BumpPlan(ctx context.Context, ops BumpOps, sink ci.OutputSink, out, stderr 
 		}
 	}
 
+	if err := writeBumpPlanPaths(in.PathsFile, written); err != nil {
+		return err
+	}
+
 	return setBumpPlanPattern(ctx, sink, strings.Join(pathspecs, " "))
+}
+
+// writeBumpPlanPaths writes each path once, in the order the bump wrote them.
+func writeBumpPlanPaths(file string, paths []string) error {
+	if file == "" {
+		return nil
+	}
+
+	var body strings.Builder
+
+	seen := make(map[string]bool, len(paths))
+
+	for _, written := range paths {
+		if seen[written] || written == defaultChangelogFile {
+			continue
+		}
+
+		seen[written] = true
+
+		body.WriteString(written + "\n")
+	}
+
+	if err := os.WriteFile(file, []byte(body.String()), 0o600); err != nil {
+		return fmt.Errorf("write the bumped paths: %w", err)
+	}
+
+	return nil
 }
 
 // plannedBumpItems is the plan's projects of the selected types, or every
@@ -209,6 +231,10 @@ func validateBumpPlanInput(in BumpPlanInput) error {
 
 	if len(in.ProjectTypes) > 0 && in.PatchPath != "" {
 		return fmt.Errorf("project-type selects native tools to run; a prepared patch runs none: %w", errs.ErrUsage)
+	}
+
+	if in.PathsFile != "" && in.PatchPath == "" {
+		return fmt.Errorf("paths-file names what a prepared patch's bump wrote; give the patch: %w", errs.ErrUsage)
 	}
 
 	if (in.PatchPath == "") != (in.PatchSHA256 == "") {
@@ -494,4 +520,43 @@ func setBumpPlanPattern(ctx context.Context, sink ci.OutputSink, pattern string)
 	}
 
 	return nil
+}
+
+// preflightBumpPlan resolves each planned item's bump and checks what the
+// engine can check before it changes anything.
+func preflightBumpPlan(ops BumpOps, items []pipeline.PlannedArtifact, in BumpPlanInput) ([]bumpTarget, error) {
+	inputs := make([]bumpTarget, 0, len(items))
+	for _, artifact := range items {
+		dir, err := normalizedPlanWorkingDir(artifact.WorkingDirectory)
+		if err != nil {
+			return nil, err
+		}
+
+		gradleVersionFile := ""
+		if artifact.Gradle != nil {
+			gradleVersionFile = artifact.Gradle.GradleVersionFile
+		}
+
+		if artifact.GradleAndroid != nil {
+			gradleVersionFile = artifact.GradleAndroid.GradleVersionFile
+		}
+
+		bump, err := normalizeBumpTarget(BumpInput{ProjectType: artifact.ProjectType, Library: artifact.BuildType == config.BuildTypeLibrary, Version: in.Version, WorkingDir: dir,
+			GradleVersionFile: gradleVersionFile, XcconfigFile: in.XcconfigFile, MavenCLIOpts: in.MavenCLIOpts})
+		if err != nil {
+			return nil, fmt.Errorf("preflight artifact %q: %w", artifact.Name, err)
+		}
+
+		if !supportedPlanLiteralPath(bump.file) {
+			return nil, fmt.Errorf("preflight artifact %q: version file cannot be represented by file-pattern: %w", artifact.Name, errs.ErrUsage)
+		}
+
+		if err := preflightPlanBump(ops, bump, in.PatchPath != ""); err != nil {
+			return nil, fmt.Errorf("preflight artifact %q: %w", artifact.Name, err)
+		}
+
+		inputs = append(inputs, bump)
+	}
+
+	return inputs, nil
 }

@@ -289,7 +289,7 @@ func runReleasePrepareIn(t *testing.T, dir, script, input string, extraEnv ...st
 	defer cancel()
 
 	command := exec.CommandContext(ctx, componentBash(t), "--noprofile", "--norc", "-c",
-		`set -eu; source "$1"; rc_engine() { printf 'engine %s\n' "$*"; }; git() { case "$*" in *ls-files*) for path in ${FAKE_BUMP_PATHS:-}; do printf '%s\n' "$path"; done ;; *) printf 'git %s\n' "$*" ;; esac; }; rc_release_context; rc_request_checkout() { rc_engine validate tag commit --branch "${RC_RELEASE_BRANCH}"; }; rc_prepare_release`,
+		`set -eu; source "$1"; rc_engine() { printf 'engine %s\n' "$*"; local previous='' arg path; for arg in "$@"; do if [ "$previous" = --paths-file ]; then : >"$arg"; for path in ${FAKE_BUMP_PATHS:-}; do printf '%s\n' "$path" >>"$arg"; done; fi; previous=$arg; done; }; git() { printf 'git %s\n' "$*"; }; rc_release_context; rc_request_checkout() { rc_engine validate tag commit --branch "${RC_RELEASE_BRANCH}"; }; rc_prepare_release`,
 		"branch-guard", script)
 	command.Dir = dir
 	command.Env = []string{
@@ -328,7 +328,8 @@ func TestReleasePreparePassesTheGitURLOnlyWhenGiven(t *testing.T) {
 // release-prepare runs no build tool: it joins the patches the plan's
 // key-free version jobs made, each checked against its job's digest, hands
 // the joined patch with its digest and the plan to the engine's text check,
-// and commits what the check wrote beside the changelog. Without a version
+// and commits the paths the engine says it wrote beside the changelog, not
+// whatever else the checkout holds, such as commit-msg.txt. Without a version
 // job it hands an empty patch, so the engine runs no native tool either, and
 // a patch that differs from its digest stops the release.
 func TestReleasePrepareAppliesOnlyAVerifiedVersionBump(t *testing.T) {
@@ -373,7 +374,8 @@ func TestReleasePrepareAppliesOnlyAVerifiedVersionBump(t *testing.T) {
 		joined := patches["java"] + patches["node"]
 		for _, want := range []string{
 			"engine plan gitlab-release-pipeline --prepare-plan-output " + dir + "/prepare-plan.json",
-			"engine version bump-plan --plan-json  --version 1.2.3 --release-policy stable --patch " + dir + "/version-bump.patch --patch-sha256 " + digestOf(joined),
+			"engine version bump-plan --plan-json  --version 1.2.3 --release-policy stable --patch " + dir + "/version-bump.patch --patch-sha256 " + digestOf(joined) +
+				" --paths-file " + dir + "/bump-paths",
 			"--include-paths-file " + dir + "/bump-paths",
 		} {
 			if !strings.Contains(output, want) {
@@ -505,5 +507,43 @@ func TestReleaseJobKeepsTheCredentialsOfItsRole(t *testing.T) {
 				t.Fatalf("the role's own credential was refused: %v\n%s", err, output)
 			}
 		})
+	}
+}
+
+// A family's version job hands on the diff of the version files its own bump
+// names, its file-pattern without the changelog copies, so two families'
+// patches never both carry one file.
+func TestReleaseVersionJobDiffsOnlyItsFamilyFiles(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "_release-render"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(filepath.Join(dir, "_release-render", "CHANGELOG.md"), []byte("x\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+
+	command := exec.CommandContext(ctx, componentBash(t), "--noprofile", "--norc", "-eu", "-c",
+		`source "$1"; rc_request_checkout() { :; }; rc_new_handoff() { mkdir -- "$1"; }
+rc_engine() { printf 'engine %s\n' "$*"; case "$*" in *bump-plan*) printf 'FILE_PATTERN=services/backend/CHANGELOG.md :(glob)services/backend/**/pom.xml\n' >"${CI_OUTPUT}" ;; esac; }
+git() { printf 'git %s\n' "$*"; }; rc_bump_version java`,
+		"bump", filepath.Join(reporoot.Path(t), ".gitlab", "bin", "release.sh"))
+	command.Dir = dir
+	command.Env = []string{"PATH=" + componentTools(t), "CI_PROJECT_DIR=" + dir, "RC_WORK=" + dir, "RC_ARTIFACTS_CONFIG=",
+		"RELEASE_VERSION=1.2.3", "RELEASE_POLICY=stable"}
+
+	out, err := command.CombinedOutput()
+	if err != nil {
+		t.Fatalf("version job failed: %v\n%s", err, out)
+	}
+
+	patch, err := os.ReadFile(filepath.Join(dir, "_release-bump-java", "version-bump.patch"))
+	if err != nil || !strings.Contains(string(out), "--project-type maven") || !strings.HasSuffix(string(patch), "--dst-prefix=b/ -- :(glob)services/backend/**/pom.xml\n") {
+		t.Errorf("the version job diffed more than its family's files: %v\n%s\n%s", err, patch, out)
 	}
 }

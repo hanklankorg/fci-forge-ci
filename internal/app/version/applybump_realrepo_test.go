@@ -10,6 +10,8 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -19,7 +21,10 @@ import (
 
 	gitadapter "github.com/diggsweden/forge-ci/internal/adapters/git"
 	appversion "github.com/diggsweden/forge-ci/internal/app/version"
+	"github.com/diggsweden/forge-ci/internal/domain/output"
+	"github.com/diggsweden/forge-ci/internal/domain/pipeline"
 	"github.com/diggsweden/forge-ci/internal/domain/projecttype"
+	"github.com/diggsweden/forge-ci/internal/testutil/fakeoutputsink"
 	"github.com/diggsweden/forge-ci/internal/testutil/isolatedgit"
 )
 
@@ -72,4 +77,58 @@ func TestApplyBump_RealGitRoundTrip(t *testing.T) {
 	paths, err := os.ReadFile(pathsFile)
 	require.NoError(t, err)
 	require.Equal(t, "core/pom.xml\npom.xml\n", string(paths))
+}
+
+// The release commit's job copies the rendered changelog and commit-msg.txt
+// into the checkout, then applies the version jobs' patch. What it commits is
+// what bump-plan says it wrote, never a scan of the working tree: with real
+// git, staging those paths beside CHANGELOG.md leaves commit-msg.txt out.
+func TestBumpPlan_RealGitPathsFileIsTheReleaseCommit(t *testing.T) {
+	repo := isolatedgit.NewRepo(t)
+	pom := strings.ReplaceAll(applyBumpPOM, "%s", "0.1.9")
+
+	repo.AddFile("CHANGELOG.md", "# Changes\n", "chore: changelog")
+	repo.AddFile("services/backend/pom.xml", pom, "chore: backend")
+	repo.AddFile("apps/tool/gradle.properties", "version=0.1.9\n", "chore: tool")
+
+	// The key-free version job: the native tool, then the patch of its files.
+	backend := filepath.Join(repo.Dir, "services/backend/pom.xml")
+	require.NoError(t, os.WriteFile(backend, []byte(strings.ReplaceAll(pom, "0.1.9", "0.2.0")), 0o600))
+
+	patch := repo.Git("diff", "--binary", "--no-ext-diff", "--no-textconv", "--no-color", "--no-renames",
+		"--src-prefix=a/", "--dst-prefix=b/", "--", "services/backend/pom.xml") + "\n"
+	repo.Git("checkout", "--", ".")
+
+	scratch := t.TempDir()
+	patchPath, pathsFile := filepath.Join(scratch, "version-bump.patch"), filepath.Join(scratch, "bump-paths")
+	require.NoError(t, os.WriteFile(patchPath, []byte(patch), 0o600))
+
+	// The release commit's job: the rendered files laid into the checkout.
+	for name, body := range map[string]string{"CHANGELOG.md": "# Changes\n\n## 0.2.0\n", "commit-msg.txt": "chore(release): 0.2.0\n"} {
+		require.NoError(t, os.WriteFile(filepath.Join(repo.Dir, name), []byte(body), 0o600))
+	}
+
+	plan, err := json.Marshal(pipeline.ReleasePrepareStagePlan{Version: pipeline.ReleasePlanVersion, Stage: "prepare",
+		Targets: pipeline.ReleasePrepareTargets{VersionBump: pipeline.TargetPlan[pipeline.PlannedArtifact]{Runs: true, Items: []pipeline.PlannedArtifact{
+			{Name: "backend", ProjectType: projecttype.Maven, WorkingDirectory: "services/backend"},
+			{Name: "tool", ProjectType: projecttype.Gradle, WorkingDirectory: "apps/tool"},
+		}}}})
+	require.NoError(t, err)
+
+	t.Chdir(repo.Dir)
+
+	sum := sha256.Sum256([]byte(patch))
+	require.NoError(t, appversion.BumpPlan(t.Context(), appversion.BumpOps{Git: gitadapter.New()}, fakeoutputsink.New(t), io.Discard, io.Discard,
+		output.Annotator{}, appversion.BumpPlanInput{PlanJSON: string(plan), Version: "0.2.0", ChangelogFile: "CHANGELOG.md",
+			PatchPath: patchPath, PatchSHA256: hex.EncodeToString(sum[:]), PathsFile: pathsFile}))
+
+	body, err := os.ReadFile(pathsFile)
+	require.NoError(t, err)
+
+	paths := strings.Fields(string(body))
+	require.Equal(t, []string{"services/backend/pom.xml", "services/backend/CHANGELOG.md", "apps/tool/CHANGELOG.md", "apps/tool/gradle.properties"}, paths)
+
+	repo.Git(append([]string{"add", "--", "CHANGELOG.md"}, paths...)...)
+	require.Equal(t, "?? commit-msg.txt", repo.Git("status", "--porcelain", "--untracked-files=all", "--", "commit-msg.txt"))
+	require.ElementsMatch(t, append([]string{"CHANGELOG.md"}, paths...), strings.Fields(repo.Git("diff", "--cached", "--name-only")))
 }

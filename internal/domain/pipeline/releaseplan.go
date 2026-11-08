@@ -340,17 +340,24 @@ func validateContainerSigning(plan ConfigPlan, policy ReleasePolicy) error {
 	return nil
 }
 
+// VersionBumpRuns is the version-bump rule every forge's release shares: the
+// release commit bumps the planned projects when the release renders the
+// changelog that commit carries, unless the caller skips the bump.
+func VersionBumpRuns(rendersChangelog, skipBump bool) bool {
+	return rendersChangelog && !skipBump
+}
+
 // NewPolicyReleaseStagePlans returns the prepare and build stage plans of a
 // declaration for a release whose policy, not artifacts.yml, decides signing
 // and publication: the GitLab release component's. The stages are the ones
-// NewReleasePlan derives from the same declaration; the release commit bumps
-// every declared project, whichever renderer writes the changelog.
+// NewReleasePlan derives from the same declaration. The GitLab release
+// renders its changelog with either renderer and has no skip, so it bumps.
 func NewPolicyReleaseStagePlans(configPlan ConfigPlan) (ReleasePrepareStagePlan, ReleaseBuildStagePlan, error) {
 	if err := ValidateConfigPlan(configPlan); err != nil {
 		return ReleasePrepareStagePlan{}, ReleaseBuildStagePlan{}, err
 	}
 
-	policy := ReleasePolicy{RunVersionBump: true}
+	policy := ReleasePolicy{RunVersionBump: VersionBumpRuns(true, false)}
 
 	return newReleasePrepareStagePlan(configPlan, policy, ""), newReleaseBuildStagePlan(configPlan), nil
 }

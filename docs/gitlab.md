@@ -901,8 +901,10 @@ A Cargo or Go artifact built `container-first` is built by its Containerfile
 (see [Files exported from a Containerfile](#files-exported-from-a-containerfile)),
 not by a family job, though it is still version-bumped.
 
-`Build: release files` then lays every family's and export job's `dist/` and
-`image-context/` together, refusing a top-level path two of them hold, and
+`Build: release files` then plans the release again, requires a hand-off
+from exactly the planned build jobs, lays every family's and export job's
+`dist/` and `image-context/` together, refusing a top-level path two of them
+hold, and
 runs `build` once more in `job-image` as `job-user`, with both variables
 empty: that run writes the release notes and declares the files with
 `forge-ci release files declare`. One script serves every run; a sketch for a
@@ -946,10 +948,12 @@ digest, joins them, and `forge-ci version bump-plan --patch` admits the
 joined patch only as version substitutions of the plan's project files,
 each changed line the version or the reproducible-build timestamp, before it
 applies it, writes the Gradle and Xcode version files as text and the
-changelog copies, and commits all of it beside `CHANGELOG.md`. Every job
+changelog copies, and names those paths with `--paths-file`; the release
+commit carries them beside `CHANGELOG.md` and nothing else. Every job
 that checks the release commit out re-checks it with `forge-ci release
 validate-tag --prepare-plan-file`: the changelog, the copies and the planned
-version files, native ones a version substitution, and nothing else. The
+version files, native ones a version substitution, Gradle and Xcode ones
+byte for byte the engine's text bump of the parent's, and nothing else. The
 build then finds the release version already declared.
 
 #### The merge-request gate under a policy

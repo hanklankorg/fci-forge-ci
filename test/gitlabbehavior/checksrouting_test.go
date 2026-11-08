@@ -5,7 +5,6 @@ package gitlabbehavior
 
 import (
 	"bytes"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"reflect"
@@ -96,7 +95,9 @@ func TestReleaseChecksRoutingAndPreparationBarrier(t *testing.T) {
 
 	families := map[string][]string{"version": {"java", "node", "rust"}, "build": {"java", "node", "go", "rust", "android"}}
 
-	prepareNeeds := []any{map[string]any{"job": "Prepare: changelog", "artifacts": true}}
+	prepareNeeds := make([]any, 0, 1+len(families["version"]))
+	prepareNeeds = append(prepareNeeds, map[string]any{"job": "Prepare: changelog", "artifacts": true})
+
 	for _, family := range families["version"] {
 		prepareNeeds = append(prepareNeeds, map[string]any{"job": "Prepare: version " + family, "artifacts": true, "optional": true})
 	}
@@ -111,11 +112,13 @@ func TestReleaseChecksRoutingAndPreparationBarrier(t *testing.T) {
 		t.Fatalf("a family build bypasses gated release preparation: %+v", family)
 	}
 
-	buildNeeds := []any{
+	buildNeeds := make([]any, 0, 3+len(families["build"]))
+	buildNeeds = append(buildNeeds,
 		map[string]any{"job": "Prepare: release commit and tag", "artifacts": false},
 		map[string]any{"job": "Build: export amd64", "artifacts": true, "optional": true},
 		map[string]any{"job": "Build: export arm64", "artifacts": true, "optional": true},
-	}
+	)
+
 	for _, family := range families["build"] {
 		buildNeeds = append(buildNeeds, map[string]any{"job": "Build: " + family, "artifacts": true, "optional": true})
 	}
@@ -175,36 +178,39 @@ func TestReleaseChecksRoutingAndPreparationBarrier(t *testing.T) {
 	}
 }
 
-// The summary lists the plan's family jobs whose hand-offs reached it, and
-// no other.
+// The summary lists the family jobs the request's plan names, and no other;
+// it plans again rather than downloading the jobs' files.
 func TestReleaseSummaryIncludesChecksAndOnlyThePlannedFamilyJobs(t *testing.T) {
 	t.Parallel()
 
-	for _, handoffs := range [][]string{nil, {"_release-bump-rust", "_release-build-java", "_release-build-node"}} {
-		t.Run(strings.Join(handoffs, ","), func(t *testing.T) {
+	for _, planned := range [][]string{nil, {"Prepare: version rust", "Build: java", "Build: node"}} {
+		t.Run(strings.Join(planned, ","), func(t *testing.T) {
 			t.Parallel()
 
-			dir := t.TempDir()
-			for _, handoff := range handoffs {
-				if err := os.Mkdir(filepath.Join(dir, handoff), 0o700); err != nil {
-					t.Fatal(err)
-				}
+			command := exec.CommandContext(t.Context(), componentBash(t), "--noprofile", "--norc", "-eu", "-c",
+				`source "$1"; rc_engine() { printf '%s\n' "$@"; }; rc_checkout() { printf 'checkout %s\n' "$1"; }
+rc_planned_jobs() { printf '%s' "${FAKE_PLANNED}" >"$1"; }; rc_release_summary`, "summary",
+				filepath.Join(reporoot.Path(t), ".gitlab/bin/release.sh"))
+
+			jobs := ""
+			if len(planned) > 0 {
+				jobs = strings.Join(planned, "\n") + "\n"
 			}
 
-			command := exec.CommandContext(t.Context(), componentBash(t), "--noprofile", "--norc", "-eu", "-c",
-				`source "$1"; rc_engine() { printf '%s\n' "$@"; }; rc_release_summary`, "summary",
-				filepath.Join(reporoot.Path(t), ".gitlab/bin/release.sh"))
-			command.Env = []string{"PATH=/usr/bin:/bin", "RELEASE_TAG=v1.2.3", "RC_RELEASE_BRANCH=main", "CI_PROJECT_DIR=" + dir}
+			command.Env = []string{"PATH=/usr/bin:/bin", "RELEASE_TAG=v1.2.3", "RC_RELEASE_BRANCH=main", "RELEASE_REQUEST_SHA=" + strings.Repeat("a", 40),
+				"RC_WORK=" + t.TempDir(), "FAKE_PLANNED=" + jobs}
 
 			out, err := command.CombinedOutput()
 			if err != nil || !strings.Contains(string(out), "Check: consumer checks=success") || !strings.Contains(string(out), "Build: release files=success") {
 				t.Fatalf("summary misrepresents the checks or the release files: %v\n%s", err, out)
 			}
 
+			if !strings.Contains(string(out), "checkout "+strings.Repeat("a", 40)) {
+				t.Errorf("summary did not plan the request:\n%s", out)
+			}
+
 			for _, job := range []string{"Prepare: version rust", "Prepare: version java", "Build: java", "Build: node", "Build: go"} {
-				ran := map[string]string{"Prepare: version rust": "_release-bump-rust", "Prepare: version java": "_release-bump-java",
-					"Build: java": "_release-build-java", "Build: node": "_release-build-node", "Build: go": "_release-build-go"}[job]
-				if strings.Contains(string(out), job+"=success") != slices.Contains(handoffs, ran) {
+				if strings.Contains(string(out), job+"=success") != slices.Contains(planned, job) {
 					t.Errorf("summary misrepresents %s:\n%s", job, out)
 				}
 			}

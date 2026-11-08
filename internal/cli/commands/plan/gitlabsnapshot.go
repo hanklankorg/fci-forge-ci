@@ -19,7 +19,7 @@ import (
 )
 
 func gitlabSnapshotPipelineCmd() *cli.Command {
-	names := []string{"plan", flagOutput, "project", "engine-sha", "server-url", "registry", "pipeline-id", "context-job", "job-image", "build-image", "image-builder", "builder-job-image", "runtime-image-go", "runtime-image-java", "runtime-image-node", "runtime-image-rust"}
+	names := []string{"plan", flagOutput, "project", "engine-sha", "server-url", "registry", "pipeline-id", "context-job", "job-image", "build-image", "image-builder", "builder-job-image", flagRuntimeImageGo, flagRuntimeImageJava, flagRuntimeImageNode, flagRuntimeImageRust}
 	tagNames := []string{"runner-tags", "amd64-tags", flagARM64Tags}
 
 	flags := make([]cli.Flag, 0, len(names)+len(tagNames))
@@ -60,7 +60,7 @@ func gitlabSnapshotPipelineCmd() *cli.Command {
 				return err
 			}
 
-			in := gitlabpipeline.SnapshotPipelineOptions{Project: cmd.String("project"), Pin: cmd.String("engine-sha"), Server: cmd.String("server-url"), Registry: cmd.String("registry"), Pipeline: cmd.String("pipeline-id"), Context: cmd.String("context-job"), JobImage: cmd.String("job-image"), BuildImage: cmd.String("build-image"), Builder: cmd.String("image-builder"), BuilderImage: cmd.String("builder-job-image"), ApplicationTests: tests, Vulnerabilities: vulnerabilities, Images: gitlabpipeline.RuntimeImages{Go: cmd.String("runtime-image-go"), Java: cmd.String("runtime-image-java"), Node: cmd.String("runtime-image-node"), Rust: cmd.String("runtime-image-rust")}}
+			in := gitlabpipeline.SnapshotPipelineOptions{Project: cmd.String("project"), Pin: cmd.String("engine-sha"), Server: cmd.String("server-url"), Registry: cmd.String("registry"), Pipeline: cmd.String("pipeline-id"), Context: cmd.String("context-job"), JobImage: cmd.String("job-image"), BuildImage: cmd.String("build-image"), Builder: cmd.String("image-builder"), BuilderImage: cmd.String("builder-job-image"), ApplicationTests: tests, Vulnerabilities: vulnerabilities, Images: gitlabpipeline.RuntimeImages{Go: cmd.String(flagRuntimeImageGo), Java: cmd.String(flagRuntimeImageJava), Node: cmd.String(flagRuntimeImageNode), Rust: cmd.String(flagRuntimeImageRust)}}
 			for name, dest := range map[string]*[]string{"runner-tags": &in.Tags, "amd64-tags": &in.AMD64Tags, flagARM64Tags: &in.ARM64Tags} {
 				if err := json.Unmarshal([]byte(cmd.String(name)), dest); err != nil {
 					return fmt.Errorf("%s: %w", name, err)

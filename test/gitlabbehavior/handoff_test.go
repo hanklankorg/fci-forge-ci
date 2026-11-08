@@ -8,10 +8,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/diggsweden/forge-ci/internal/testutil/gitlabrender"
+	"github.com/diggsweden/forge-ci/internal/testutil/reporoot"
 )
 
 func TestReleaseArtifactsAreReadableWithoutOpeningPrivateFiles(t *testing.T) {
@@ -133,5 +135,55 @@ func requireMode(t *testing.T, path string, mode os.FileMode) {
 
 	if info.Mode().Perm() != mode {
 		t.Fatalf("%s mode=%#o, want %#o", path, info.Mode().Perm(), mode)
+	}
+}
+
+// "Build: release files" gathers exactly the planned build jobs' hand-offs: a
+// planned family that handed nothing on, or files from a family the plan
+// does not build, stops the release before the declaring build runs.
+func TestReleaseFilesGatherExactlyThePlannedFamilies(t *testing.T) {
+	t.Parallel()
+
+	script := filepath.Join(reporoot.Path(t), ".gitlab", "bin", "release.sh")
+
+	for name, scenario := range map[string]struct {
+		handoffs []string
+		refusal  string
+	}{
+		"as planned":                  {handoffs: []string{"java"}},
+		"a planned build is gone":     {refusal: `the plan builds the java family, but "Build: java" handed nothing on`},
+		"an unplanned family's files": {handoffs: []string{"java", "node"}, refusal: `"Build: node" handed files on, but the plan builds no node family`},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			dir := t.TempDir()
+			for _, family := range scenario.handoffs {
+				if err := os.Mkdir(filepath.Join(dir, "_release-build-"+family), 0o700); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+			defer cancel()
+
+			command := exec.CommandContext(ctx, componentBash(t), "--noprofile", "--norc", "-eu", "-c",
+				`source "$1"; rc_engine() { printf 'engine %s\n' "$*"; }; rc_planned_jobs() { printf 'Prepare: version java\nBuild: java\n' >"$1"; }; rc_gather_families`,
+				"gather", script)
+			command.Env = []string{"PATH=/usr/bin:/bin", "CI_PROJECT_DIR=" + dir, "RC_WORK=" + t.TempDir()}
+
+			out, err := command.CombinedOutput()
+			if scenario.refusal == "" {
+				if err != nil || !strings.Contains(string(out), "engine release gather-exports") {
+					t.Fatalf("gather refused the planned hand-offs: %v\n%s", err, out)
+				}
+
+				return
+			}
+
+			if err == nil || !strings.Contains(string(out), scenario.refusal) || strings.Contains(string(out), "gather-exports") {
+				t.Fatalf("gather went on: %v\n%s", err, out)
+			}
+		})
 	}
 }

@@ -40,24 +40,11 @@ var nativeBumpFamilies = map[projecttype.Type]string{
 	projecttype.Cargo: familyRust,
 }
 
-// NativeBumpProjectTypes are the project types whose native version tool a
-// family's version job runs, in a stable order.
-func NativeBumpProjectTypes(family string) []projecttype.Type {
-	var kinds []projecttype.Type
-
-	for _, kind := range []projecttype.Type{projecttype.Maven, projecttype.NPM, projecttype.Cargo} {
-		if nativeBumpFamilies[kind] == family {
-			kinds = append(kinds, kind)
-		}
-	}
-
-	return kinds
-}
-
 // PlanReleaseFamilies selects the release child's families from the plan and
-// refuses one the policy gives no runtime image, or a target no GitLab
-// runner builds.
-func PlanReleaseFamilies(prepare pipeline.ReleasePrepareStagePlan, build pipeline.ReleaseBuildStagePlan, images RuntimeImages) (ReleaseFamilies, error) {
+// refuses a target no GitLab runner builds. The jobs that run them need the
+// families' images (RequireImages); a job that only checks which ran does
+// not.
+func PlanReleaseFamilies(prepare pipeline.ReleasePrepareStagePlan, build pipeline.ReleaseBuildStagePlan) (ReleaseFamilies, error) {
 	if targetPlanned(build.Targets.XcodeIOS) {
 		return ReleaseFamilies{}, fmt.Errorf("the GitLab release has no macOS runner for the planned xcode-ios build: %w", errs.ErrUnsupported)
 	}
@@ -72,14 +59,11 @@ func PlanReleaseFamilies(prepare pipeline.ReleasePrepareStagePlan, build pipelin
 		}
 	}
 
-	imageOf := map[string]string{}
-
-	for _, target := range buildFamilies(build.Targets, images, "") {
+	for _, target := range buildFamilies(build.Targets, RuntimeImages{}, "") {
 		if err := validateTargetContract(target.component, target.target); err != nil {
 			return ReleaseFamilies{}, err
 		}
 
-		imageOf[target.family] = target.image
 		if target.target.Runs {
 			buildSet[target.family] = true
 		}
@@ -88,10 +72,6 @@ func PlanReleaseFamilies(prepare pipeline.ReleasePrepareStagePlan, build pipelin
 	out := ReleaseFamilies{}
 
 	for _, family := range releaseFamilyOrder {
-		if (version[family] || buildSet[family]) && strings.TrimSpace(imageOf[family]) == "" {
-			return ReleaseFamilies{}, fmt.Errorf("the plan has %s projects, which need the runtime-image-%s input: %w", family, family, errs.ErrUsage)
-		}
-
 		if version[family] {
 			out.Version = append(out.Version, family)
 		}
@@ -104,6 +84,39 @@ func PlanReleaseFamilies(prepare pipeline.ReleasePrepareStagePlan, build pipelin
 	return out, nil
 }
 
+// RequireImages refuses a planned family the policy gives no runtime image.
+func (f ReleaseFamilies) RequireImages(images RuntimeImages) error {
+	imageOf := map[string]string{familyJava: images.Java, familyNode: images.Node, familyGo: images.Go, familyRust: images.Rust, familyAndroid: images.Android}
+
+	for _, family := range releaseFamilyOrder {
+		if (slices.Contains(f.Version, family) || slices.Contains(f.Build, family)) && strings.TrimSpace(imageOf[family]) == "" {
+			return fmt.Errorf("the plan has %s projects, which need the runtime-image-%s input: %w", family, family, errs.ErrUsage)
+		}
+	}
+
+	return nil
+}
+
+// JobNames are the names of the generated jobs, version jobs first, each in
+// family order.
+func (f ReleaseFamilies) JobNames() []string {
+	names := make([]string, 0, len(f.Version)+len(f.Build))
+
+	for _, family := range f.Version {
+		names = append(names, versionJobName(family))
+	}
+
+	for _, family := range f.Build {
+		names = append(names, buildJobName(family))
+	}
+
+	return names
+}
+
+func versionJobName(family string) string { return "Prepare: version " + family }
+
+func buildJobName(family string) string { return "Build: " + family }
+
 // Jobs renders the generated part of the release child: each job extends its
 // family's hidden job of templates/release-jobs.yml. Without a family the file
 // holds one hidden key, since GitLab refuses an empty configuration file.
@@ -111,11 +124,11 @@ func (f ReleaseFamilies) Jobs() map[string]any {
 	jobs := map[string]any{}
 
 	for _, family := range f.Version {
-		jobs["Prepare: version "+family] = map[string]any{keyExtends: ".forge-ci-release-version-" + family}
+		jobs[versionJobName(family)] = map[string]any{keyExtends: ".forge-ci-release-version-" + family}
 	}
 
 	for _, family := range f.Build {
-		jobs["Build: "+family] = map[string]any{keyExtends: ".forge-ci-release-build-" + family}
+		jobs[buildJobName(family)] = map[string]any{keyExtends: ".forge-ci-release-build-" + family}
 	}
 
 	if len(jobs) == 0 {

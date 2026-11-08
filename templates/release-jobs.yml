@@ -826,9 +826,9 @@ stages: [check, prepare, build, images, sign, publish]
     - rc_cleanup_release
 # The release overview, as a "Summary" section of this job's log. It needs the
 # last job of the chain, so it runs only after a successful release; GitLab's
-# pipeline view shows which job failed in an unsuccessful one. The plan's
-# family jobs it lists are those whose hand-offs it finds. It holds no
-# release secret.
+# pipeline view shows which job failed in an unsuccessful one. It plans the
+# request again to list the family jobs that ran, and downloads nothing. It
+# holds no release secret.
 "Summary: release":
   extends: .forge-ci-release
   stage: .post
@@ -836,29 +836,5 @@ stages: [check, prepare, build, images, sign, publish]
   needs:
     - job: "Publish: tidy up"
       artifacts: false
-    - job: "Prepare: version java"
-      artifacts: true
-      optional: true
-    - job: "Prepare: version node"
-      artifacts: true
-      optional: true
-    - job: "Prepare: version rust"
-      artifacts: true
-      optional: true
-    - job: "Build: java"
-      artifacts: true
-      optional: true
-    - job: "Build: node"
-      artifacts: true
-      optional: true
-    - job: "Build: go"
-      artifacts: true
-      optional: true
-    - job: "Build: rust"
-      artifacts: true
-      optional: true
-    - job: "Build: android"
-      artifacts: true
-      optional: true
   script:
     - rc_release_summary '$[[ inputs.release-images ]]' '$[[ inputs.build-runner-tags-arm64 ]]'

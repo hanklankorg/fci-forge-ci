@@ -205,17 +205,32 @@ rc_bump_version() {
   # The plan copies the full changelog into each project; take the rendered one.
   rc_require_regular_file "${CI_PROJECT_DIR}/_release-render/CHANGELOG.md"
   cp --remove-destination -- "${CI_PROJECT_DIR}/_release-render/CHANGELOG.md" CHANGELOG.md
-  rc_engine version bump-plan --plan-json "$(cat -- "${RC_WORK}/prepare-plan.json")" --version "${RELEASE_VERSION:?}" \
-    --release-policy "${RELEASE_POLICY:?}" --project-type "${kind}" \
+  # The bump's own outputs, apart from the job's: its file-pattern names the
+  # version files of this family's planned projects alone.
+  CI_OUTPUT="${RC_WORK}/bump-plan.env" rc_engine version bump-plan --plan-json "$(cat -- "${RC_WORK}/prepare-plan.json")" \
+    --version "${RELEASE_VERSION:?}" --release-policy "${RELEASE_POLICY:?}" --project-type "${kind}" \
     --maven-cli-opts '--batch-mode --no-transfer-progress --errors --fail-at-end'
+  local line pathspec
+  local -a pathspecs=()
+  while IFS= read -r line || [ -n "${line}" ]; do
+    case "${line}" in FILE_PATTERN=*) read -r -a pathspecs <<<"${line#FILE_PATTERN=}" ;; esac
+  done <"${RC_WORK}/bump-plan.env"
+  local -a native=()
+  for pathspec in "${pathspecs[@]}"; do
+    # The release commit's job writes the changelog copies itself.
+    case "${pathspec##*/}" in CHANGELOG.md) ;; *) native+=("${pathspec}") ;; esac
+  done
   local handoff="${CI_PROJECT_DIR}/_release-bump-${family}"
   rc_new_handoff "${handoff}" || return
   # Literal paths and plain text whatever the project's Git configuration
-  # says, and the native version files alone: the release commit's job
-  # writes the changelogs and the other types' version files itself.
-  git -c core.quotePath=true diff --binary --no-ext-diff --no-textconv --no-color --no-renames \
-    --src-prefix=a/ --dst-prefix=b/ -- ':(glob)**/pom.xml' ':(glob)**/package.json' ':(glob)**/package-lock.json' \
-    ':(glob)**/npm-shrinkwrap.json' ':(glob)**/Cargo.toml' ':(glob)**/Cargo.lock' >"${handoff}/version-bump.patch"
+  # says, and this family's native version files alone. A family without a
+  # planned project hands on an empty patch.
+  if [ "${#native[@]}" -eq 0 ]; then
+    : >"${handoff}/version-bump.patch"
+  else
+    git -c core.quotePath=true diff --binary --no-ext-diff --no-textconv --no-color --no-renames \
+      --src-prefix=a/ --dst-prefix=b/ -- "${native[@]}" >"${handoff}/version-bump.patch"
+  fi
   sha256sum -- "${handoff}/version-bump.patch" | cut -d' ' -f1 >"${handoff}/digest"
 }
 
@@ -246,11 +261,11 @@ rc_prepare_release() {
     cat -- "${bump}/version-bump.patch" >>"${patch}"
   done
   rc_release_plan --prepare-plan-output "${RC_WORK}/prepare-plan.json"
+  # The engine names the paths it wrote besides the root changelog, and the
+  # release commit carries those alone.
   rc_engine version bump-plan --plan-json "$(cat -- "${RC_WORK}/prepare-plan.json")" --version "${RELEASE_VERSION:?}" \
-    --release-policy "${RELEASE_POLICY:?}" --patch "${patch}" --patch-sha256 "$(sha256sum -- "${patch}" | cut -d' ' -f1)"
-  # What the bump wrote besides the root changelog, literal and plain.
-  git -c core.quotePath=true ls-files --modified --others --exclude-standard |
-    { grep -vxF CHANGELOG.md || true; } >"${RC_WORK}/bump-paths"
+    --release-policy "${RELEASE_POLICY:?}" --patch "${patch}" --patch-sha256 "$(sha256sum -- "${patch}" | cut -d' ' -f1)" \
+    --paths-file "${RC_WORK}/bump-paths"
   if [ -s "${RC_WORK}/bump-paths" ]; then
     include=(--include-paths-file "${RC_WORK}/bump-paths")
   fi
@@ -292,12 +307,34 @@ rc_family_handoff() {
   done
 }
 
+# rc_planned_jobs writes the names of the release child's plan-driven jobs,
+# one a line, to $1, planned again from the checkout as "Release: plan"
+# planned them.
+rc_planned_jobs() {
+  rc_release_plan --job-names-output "$1"
+}
+
 # rc_gather_families lays every family build's dist/ and image-context/ into
 # the release files job's, refusing a path two of them, or the checkout,
-# both hold. The build commands then run with no family.
+# both hold. The hand-offs must be exactly the planned build jobs', so a
+# child that diverged from the plan cannot skip a build. The build commands
+# then run with no family.
 rc_gather_families() {
-  local tree family
+  local tree family planned handoff
   local -a sources
+  rc_planned_jobs "${RC_WORK:?}/planned-jobs" || return
+  for family in java node go rust android; do
+    planned=false handoff="${CI_PROJECT_DIR}/_release-build-${family}"
+    if grep -qxF "Build: ${family}" "${RC_WORK}/planned-jobs"; then planned=true; fi
+    if [ "${planned}" = true ] && { [ ! -d "${handoff}" ] || [ -L "${handoff}" ]; }; then
+      echo "ERROR: the plan builds the ${family} family, but \"Build: ${family}\" handed nothing on." >&2
+      return 1
+    fi
+    if [ "${planned}" = false ] && { [ -e "${handoff}" ] || [ -L "${handoff}" ]; }; then
+      echo "ERROR: \"Build: ${family}\" handed files on, but the plan builds no ${family} family." >&2
+      return 1
+    fi
+  done
   for tree in dist image-context; do
     sources=()
     for family in java node go rust android; do
@@ -751,17 +788,19 @@ rc_cleanup_release() {
 # scheduled release job succeeded, so each included row is a success by construction.
 rc_release_summary() {
   local images=${1:-false} arm64_tags=${2:-[]} name jobs=()
+  # The plan names the family jobs that ran; their files stay where they are.
+  rc_checkout "${RELEASE_REQUEST_SHA:?}" || return
+  rc_planned_jobs "${RC_WORK:?}/planned-jobs" || return
   for name in "Check: signing access" "Check: publishing access" "Check: registry access" \
     "Check: release request" "Check: consumer checks" "Prepare: changelog" "Prepare: version java" \
     "Prepare: version node" "Prepare: version rust" "Prepare: release commit and tag" "Build: java" \
     "Build: node" "Build: go" "Build: rust" "Build: android" "Build: release files" "Images: plan" "Images: build amd64" \
     "Images: build arm64" "Images: publish" "Sign: files and images" \
     "Publish: images" "Publish: release" "Publish: tidy up"; do
-    # A family job ran when the plan named it; its hand-off is here.
+    # A family job ran when the plan named it.
     case "${name}" in
-    "Prepare: version "*) if [ ! -d "${CI_PROJECT_DIR:-}/_release-bump-${name#Prepare: version }" ]; then continue; fi ;;
     "Build: release files") ;;
-    "Build: "*) if [ ! -d "${CI_PROJECT_DIR:-}/_release-build-${name#Build: }" ]; then continue; fi ;;
+    "Prepare: version "* | "Build: "*) if ! grep -qxF "${name}" "${RC_WORK}/planned-jobs"; then continue; fi ;;
     esac
     if [ "${name}" = "Check: registry access" ] && [ "${images}" != true ] && [ "${RC_BASE_IMAGES:-false}" != true ]; then continue; fi
     case "${name}" in "Images: "*) if [ "${images}" != true ]; then continue; fi ;; esac

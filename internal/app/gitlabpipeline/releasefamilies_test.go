@@ -41,7 +41,7 @@ func TestPlanReleaseFamilies_NamesThePlannedFamiliesJobs(t *testing.T) {
 
 	prepare, build := monorepoRelease()
 
-	families, err := gitlabpipeline.PlanReleaseFamilies(prepare, build, testRuntimeImages)
+	families, err := gitlabpipeline.PlanReleaseFamilies(prepare, build)
 	require.NoError(t, err)
 	assert.Equal(t, gitlabpipeline.ReleaseFamilies{Version: []string{"java", "node"}, Build: []string{"java", "node", "go"}}, families)
 	assert.Equal(t, map[string]any{
@@ -51,10 +51,11 @@ func TestPlanReleaseFamilies_NamesThePlannedFamiliesJobs(t *testing.T) {
 		"Build: node":           map[string]any{"extends": ".forge-ci-release-build-node"},
 		"Build: go":             map[string]any{"extends": ".forge-ci-release-build-go"},
 	}, families.Jobs())
+	assert.Equal(t, []string{"Prepare: version java", "Prepare: version node", "Build: java", "Build: node", "Build: go"}, families.JobNames())
 
 	// A plan that does not bump runs no version job.
 	prepare.Targets.VersionBump.Runs = false
-	families, err = gitlabpipeline.PlanReleaseFamilies(prepare, build, testRuntimeImages)
+	families, err = gitlabpipeline.PlanReleaseFamilies(prepare, build)
 	require.NoError(t, err)
 	assert.Empty(t, families.Version)
 }
@@ -66,7 +67,7 @@ func TestReleaseFamilies_JobsOfNoFamilyIsOneHiddenKey(t *testing.T) {
 
 	prepare, build := pipeline.UndeclaredReleaseStagePlans()
 
-	families, err := gitlabpipeline.PlanReleaseFamilies(prepare, build, gitlabpipeline.RuntimeImages{})
+	families, err := gitlabpipeline.PlanReleaseFamilies(prepare, build)
 	require.NoError(t, err)
 	assert.Equal(t, map[string]any{".forge-ci-release-families": map[string]any{}}, families.Jobs())
 }
@@ -79,17 +80,21 @@ func TestPlanReleaseFamilies_RefusesWhatNoJobCanRun(t *testing.T) {
 	images := testRuntimeImages
 	images.Node = ""
 
-	_, err := gitlabpipeline.PlanReleaseFamilies(prepare, build, images)
+	families, err := gitlabpipeline.PlanReleaseFamilies(prepare, build)
+	require.NoError(t, err)
+	require.NoError(t, families.RequireImages(testRuntimeImages))
+	err = families.RequireImages(images)
 	require.ErrorIs(t, err, errs.ErrUsage)
 	require.ErrorContains(t, err, "runtime-image-node")
 
 	// The bump alone needs the family's image too.
 	build.Targets.NPM = pipeline.TargetPlan[pipeline.PlannedArtifact]{}
-	_, err = gitlabpipeline.PlanReleaseFamilies(prepare, build, images)
-	require.ErrorContains(t, err, "runtime-image-node")
+	families, err = gitlabpipeline.PlanReleaseFamilies(prepare, build)
+	require.NoError(t, err)
+	require.ErrorContains(t, families.RequireImages(images), "runtime-image-node")
 
 	build.Targets.XcodeIOS = runningTarget(pipeline.PlannedArtifact{Name: "app", ProjectType: projecttype.XcodeIOS, WorkingDirectory: "ios"})
-	_, err = gitlabpipeline.PlanReleaseFamilies(prepare, build, testRuntimeImages)
+	_, err = gitlabpipeline.PlanReleaseFamilies(prepare, build)
 	require.ErrorIs(t, err, errs.ErrUnsupported)
 }
 
@@ -109,13 +114,4 @@ func TestReleaseFamilyArtifacts_ListsTheFamilyPlannedArtifacts(t *testing.T) {
 
 	_, err = gitlabpipeline.ReleaseFamilyArtifacts(build, "python")
 	require.ErrorIs(t, err, errs.ErrUsage)
-}
-
-func TestNativeBumpProjectTypes_AreTheFamilyNativeTools(t *testing.T) {
-	t.Parallel()
-
-	assert.Equal(t, []projecttype.Type{projecttype.Maven}, gitlabpipeline.NativeBumpProjectTypes("java"))
-	assert.Equal(t, []projecttype.Type{projecttype.NPM}, gitlabpipeline.NativeBumpProjectTypes("node"))
-	assert.Equal(t, []projecttype.Type{projecttype.Cargo}, gitlabpipeline.NativeBumpProjectTypes("rust"))
-	assert.Empty(t, gitlabpipeline.NativeBumpProjectTypes("go"))
 }

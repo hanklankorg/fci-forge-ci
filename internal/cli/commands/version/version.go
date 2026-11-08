@@ -63,6 +63,7 @@ func bumpPlanCmd() *cli.Command {
 			&cli.StringFlag{Name: "plan-json", Required: true, Sources: cli.EnvVars("PREPARE_STAGE_PLAN_JSON"), Usage: "typed release prepare-stage plan JSON"},
 			&cli.StringFlag{Name: "patch", Usage: "native version changes produced by a separate key-free job; never run native tools in this mode"},
 			&cli.StringFlag{Name: "patch-sha256", Usage: "expected sha256 reported by the key-free patch job"},
+			&cli.StringFlag{Name: "paths-file", Usage: "with --patch, file the paths the bump wrote besides CHANGELOG.md are written to, one per line, for commit-changelog-release --include-paths-file"},
 			&cli.StringFlag{Name: "release-policy", Value: "stable", Sources: cli.EnvVars("RELEASE_POLICY"), Usage: "accepted release versions: stable or stable-prerelease"},
 			&cli.StringFlag{Name: flagVersion, Required: true, Sources: cli.EnvVars("VERSION"), Usage: "release version without a leading v"},
 			&cli.StringFlag{Name: "changelog-file", Value: defaultChangelogFile, Sources: cli.EnvVars("CHANGELOG_FILE"), Usage: "full changelog copied into each planned artifact directory"},
@@ -79,11 +80,13 @@ func bumpPlanCmd() *cli.Command {
 					XcconfigFile:  cmd.String("xcode-version-file"),
 					PatchPath:     cmd.String("patch"),
 					PatchSHA256:   cmd.String("patch-sha256"),
+					PathsFile:     cmd.String("paths-file"),
 					ReleasePolicy: cmd.String("release-policy"),
 				}
 				for _, kind := range cmd.StringSlice("project-type") {
 					in.ProjectTypes = append(in.ProjectTypes, projecttype.Type(kind))
 				}
+
 				if opts := cmd.String("maven-cli-opts"); opts != "" {
 					in.MavenCLIOpts = strings.Fields(opts)
 				}

@@ -3068,6 +3068,8 @@ Plans the release's version bump and builds from the declaration, as
                           and 'release validate-tag --prepare-plan-file'.
    --artifacts-output     with --family, the names of the artifacts that
                           family's build job builds, one a line.
+   --job-names-output     the names of the generated jobs, one a line, for
+                          the jobs that check every planned job ran.
 
    Without --file and without .forge-ci/artifacts.yml the release has no
    planned bump and no family; a file named by --file must exist.
@@ -3090,6 +3092,7 @@ EXAMPLE:
 | `--prepare-plan-output` | file to write the prepare-stage plan JSON to | string | `""` | n/a |
 | `--family` | build family whose artifacts --artifacts-output lists: java, node, go, rust or android | string | `""` | n/a |
 | `--artifacts-output` | file to write --family's artifact names to, one a line | string | `""` | n/a |
+| `--job-names-output` | file to write the generated jobs' names to, one a line | string | `""` | n/a |
 
 ### `forge-ci plan gitlab-snapshot-pipeline`
 
@@ -5991,6 +5994,7 @@ apply every artifact mutation in a prepare-stage plan to one working tree
 | `--plan-json` | typed release prepare-stage plan JSON (required) | string | `""` | `$PREPARE_STAGE_PLAN_JSON` |
 | `--patch` | native version changes produced by a separate key-free job; never run native tools in this mode | string | `""` | n/a |
 | `--patch-sha256` | expected sha256 reported by the key-free patch job | string | `""` | n/a |
+| `--paths-file` | with --patch, file the paths the bump wrote besides CHANGELOG.md are written to, one per line, for commit-changelog-release --include-paths-file | string | `""` | n/a |
 | `--release-policy` | accepted release versions: stable or stable-prerelease | string | `"stable"` | `$RELEASE_POLICY` |
 | `--version` | release version without a leading v (required) | string | `""` | `$VERSION` |
 | `--changelog-file` | full changelog copied into each planned artifact directory | string | `"CHANGELOG.md"` | `$CHANGELOG_FILE` |

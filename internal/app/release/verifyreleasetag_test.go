@@ -49,6 +49,8 @@ type fakeTagGit struct {
 	changed             []string
 	changeErr           error
 	diff                string
+	// files are the version files by commit then path, as FileAt reads them.
+	files map[string]map[string]string
 }
 
 type tagVerifyCall struct {
@@ -89,6 +91,12 @@ func (f fakeTagGit) ChangedPaths(context.Context, string, string) ([]string, err
 
 func (f fakeTagGit) PathsDiff(context.Context, string, string, []string) (string, error) {
 	return f.diff, nil
+}
+
+func (f fakeTagGit) FileAt(_ context.Context, commit, path string) (string, bool, error) {
+	body, exists := f.files[commit][path]
+
+	return body, exists, nil
 }
 
 // pomBumpDiff is the diff a verified Maven bump to 1.2.3 leaves in a POM.
@@ -553,14 +561,26 @@ func TestVerifyReleaseTag_ChangelogOnlyAdmitsEveryPlannedProject(t *testing.T) {
 		}},
 	}}
 	backend := strings.ReplaceAll(pomBumpDiff, "pom.xml", "services/backend/pom.xml")
+	// The Gradle version file before the bump, and the release's.
+	properties := func(release string) map[string]map[string]string {
+		return map[string]map[string]string{
+			parent: {"apps/android/gradle.properties": "org.gradle.jvmargs=-Xmx1g\nversion=1.2.2\n"},
+			sha:    {"apps/android/gradle.properties": release},
+		}
+	}
+	bumped := properties("org.gradle.jvmargs=-Xmx1g\nversion=1.2.3\n")
 
 	for _, scenario := range []struct {
 		name    string
 		changed []string
+		files   map[string]map[string]string
 		want    error
 	}{
 		{name: "every project", changed: []string{"CHANGELOG.md", "apps/android/CHANGELOG.md", "apps/android/gradle.properties",
-			"packages/frontend/CHANGELOG.md", "services/backend/CHANGELOG.md", "services/backend/pom.xml"}},
+			"packages/frontend/CHANGELOG.md", "services/backend/CHANGELOG.md", "services/backend/pom.xml"}, files: bumped},
+		{name: "a version file with more than the bump", changed: []string{"CHANGELOG.md", "apps/android/gradle.properties"},
+			files: properties("org.gradle.jvmargs=-Xmx1g\nversion=1.2.3\norg.gradle.java.home=/tmp/evil\n"), want: errs.ErrValidation},
+		{name: "another Gradle file of the project", changed: []string{"CHANGELOG.md", "apps/android/build.gradle.kts"}, want: errs.ErrValidation},
 		{name: "a changelog of no project", changed: []string{"CHANGELOG.md", "docs/CHANGELOG.md"}, want: errs.ErrValidation},
 		{name: "a POM outside the project", changed: []string{"CHANGELOG.md", "pom.xml"}, want: errs.ErrValidation},
 		{name: "a Gradle file outside the project", changed: []string{"CHANGELOG.md", "gradle.properties"}, want: errs.ErrValidation},
@@ -569,7 +589,7 @@ func TestVerifyReleaseTag_ChangelogOnlyAdmitsEveryPlannedProject(t *testing.T) {
 		t.Run(scenario.name, func(t *testing.T) {
 			t.Parallel()
 
-			git := fakeTagGit{head: sha, tagCommit: sha, parents: []string{parent}, request: parent, changed: scenario.changed, diff: backend}
+			git := fakeTagGit{head: sha, tagCommit: sha, parents: []string{parent}, request: parent, changed: scenario.changed, diff: backend, files: scenario.files}
 			err := apprelease.VerifyReleaseTag(t.Context(), git, io.Discard, apprelease.VerifyReleaseTagInput{
 				ReleaseSHA: sha, Tag: "v1.2.3", ExpectedParent: parent, ChangelogOnly: true, PreparePlan: plan,
 			})

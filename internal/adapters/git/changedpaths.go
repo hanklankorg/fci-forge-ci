@@ -5,7 +5,10 @@ package git
 
 import (
 	"context"
+	"fmt"
 	"strings"
+
+	"github.com/diggsweden/forge-ci/internal/domain/errs"
 )
 
 // PathsDiff returns the plain-text diff of paths between two commits, with the
@@ -28,4 +31,32 @@ func (r *Repo) ChangedPaths(ctx context.Context, before, after string) ([]string
 	}
 
 	return strings.Split(strings.TrimSuffix(output, "\x00"), "\x00"), nil
+}
+
+// FileAt returns the exact bytes of the regular file path in commit, and
+// false when the commit has no such path. A link or a tree there is refused.
+func (r *Repo) FileAt(ctx context.Context, commit, path string) (string, bool, error) {
+	entry, err := r.Output(ctx, "ls-tree", "-z", commit, "--", path)
+	if err != nil {
+		return "", false, err
+	}
+
+	if entry == "" {
+		return "", false, nil
+	}
+
+	// <mode> SP <type> SP <object> TAB <path> NUL
+	meta, name, _ := strings.Cut(strings.TrimSuffix(entry, "\x00"), "\t")
+	fields := strings.Fields(meta)
+
+	if name != path || len(fields) != 3 || fields[1] != "blob" || (fields[0] != "100644" && fields[0] != "100755") {
+		return "", false, fmt.Errorf("%s at %s is not one regular file: %w", path, commit, errs.ErrValidation)
+	}
+
+	body, err := r.Output(ctx, "cat-file", "blob", fields[2])
+	if err != nil {
+		return "", false, err
+	}
+
+	return body, true, nil
 }
