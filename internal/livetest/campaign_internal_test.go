@@ -24,10 +24,10 @@ func newCampaign(t *testing.T, env, cases string) (string, string) {
 	t.Helper()
 
 	dir := t.TempDir()
-	// Each stub demo ships a GitLab release build, as the demos with a GitLab
-	// release do.
+	// The stub demos have what the shipped demos have, the GitLab release
+	// build among them.
 	for _, demo := range []string{"hello-go-cli", "hello-maven"} {
-		writeFile(t, filepath.Join(dir, "demos", demo, filepath.FromSlash(GitLabConsumerBuildScript)), "#!/usr/bin/env bash\n")
+		writeShippedDemoStubs(t, dir, demo)
 	}
 
 	casesPath := filepath.Join(t.TempDir(), "lane.cases")
@@ -183,7 +183,7 @@ func TestPlanCampaignLane_RefusesWhatItCannotRead(t *testing.T) {
 		"a lint gate without lint": {"gitlab", good, "consumer hello-maven pull-request job-archive=/a.tar\n", "name its nanolinter flavor's archive"},
 		"lint for no lint gate":    {"gitlab", good, "consumer hello-go-cli pull-request job-archive=/a.tar lint-archive=/l.tar\n", "takes no lint-archive="},
 		"a lint archive twice":     {"gitlab", good, "consumer hello-maven release job-archive=/a lint-archive=/l lint-archive=/m\n", "lint-archive= is named twice"},
-		"a GitLab release short":   {"gitlab", good, "consumer hello-go-cli release job-archive=/a.tar\n", "build-archive="},
+		"a GitLab release short":   {"gitlab", good, "consumer hello-maven release job-archive=/a.tar lint-archive=/l.tar\n", "build-archive="},
 		"a GitLab release unbuilt": {"gitlab", good, "consumer hello-gradle release job-archive=/a.tar build-archive=/b.tar signer-archive=/s.tar\n", "no .gitlab/build-release.sh"},
 		"a GitLab archive twice":   {"gitlab", good, "consumer hello-go-cli pull-request job-archive=/a.tar job-archive=/b.tar\n", "job-archive= is named twice"},
 		"a NUL byte":               {"forgejo", good, "scenario TestA\x00\n", "a NUL byte"},

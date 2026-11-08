@@ -1011,7 +1011,7 @@ test-live-consumer forge repo event *settings:
     case "$forge:$event" in
     forgejo:lifecycle)
         # The development phase is the Maven service's, with the demo's
-        # readiness probe and no runtime fixture, as test-live-forgejo-snapshot.
+        # readiness probe and no runtime fixture.
         export FORGE_CI_LIVE_SERVICE_READINESS_URL=http://127.0.0.1:8080/health FORGE_CI_LIVE_SERVICE_FIXTURE=''
         exec bash scripts/ci/run-live-tests.sh focused '^TestForgejoLayer_ConsumerLifecycle$'
         ;;
@@ -1058,22 +1058,6 @@ test-live-consumer forge repo event *settings:
         exit 2
         ;;
     esac
-
-# Published snapshot in unsigned mode, not an ephemeral checks-only build.
-# Reuses the native service trial and the normal launcher/locks/evidence path.
-# No signer is provisioned. Signature/attestation absence and scan readbacks
-# are not independently verified by this trial.
-[arg('repo', help='Absolute clean Maven-service consumer checkout with its original Containerfile')]
-[arg('image', help='Reviewed Java job image pinned by full SHA-256 digest')]
-[doc('Live Forgejo; unsigned development snapshot')]
-[group('live')]
-test-live-forgejo-snapshot repo image:
-    @FORGE_CI_LIVE_CONSUMER="$1" FORGE_CI_LIVE_MAVEN_APPLICATION_IMAGE="$2" FORGE_CI_LIVE_PROVIDER=forgejo \
-        FORGE_CI_LIVE_CONSUMER_EVENT=published-unsigned-snapshot FORGE_CI_LIVE_CONSUMER_SETTINGS='' \
-        FORGE_CI_LIVE_SERVICE_BRANCH=development FORGE_CI_LIVE_SERVICE_READINESS_URL=http://127.0.0.1:8080/health \
-        FORGE_CI_LIVE_SERVICE_FIXTURE='' FORGE_CI_LIVE_DEMO='' FORGE_CI_LIVE_SIGNING_KEY_DIR='' \
-        FORGE_CI_LIVE_SNAPSHOT_JOB_IMAGE='' FORGE_CI_LIVE_SNAPSHOT_DEPENDENCY_TOKEN_FILE='' \
-        exec bash scripts/ci/run-live-tests.sh focused '^TestForgejoLayer_ConsumerDevelopment$'
 
 # Show a consumer and keep it: a demo. `just demo-list` finds demos and
 # `just demo-delete` removes one.

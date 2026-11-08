@@ -225,12 +225,23 @@ func PlanCampaignLane(dir, provider, casesPath, head string, run CampaignRun) (C
 	return plan, nil
 }
 
+// caseConsumer opens a case line that runs a shipped demo through an event.
+const caseConsumer = "consumer"
+
+// demosDir holds the shipped demos, relative to the repository root.
+const demosDir = "test/live/demos"
+
+// demoConsumerDir is the consumer checkout a shipped demo is run from.
+func demoConsumerDir(root, demo string) string {
+	return filepath.Join(root, filepath.FromSlash(demosDir), demo, caseConsumer)
+}
+
 // campaignCaseArgs maps one case's words to the recipe that runs it.
 func campaignCaseArgs(dir, provider string, env map[string]string, words []string) ([]string, error) {
 	switch words[0] {
 	case settingScenario:
 		return campaignScenarioRecipe(provider, env, words)
-	case "consumer":
+	case caseConsumer:
 	default:
 		return nil, fmt.Errorf("a case is consumer or scenario: %w", errs.ErrValidation)
 	}
@@ -240,20 +251,12 @@ func campaignCaseArgs(dir, provider string, env map[string]string, words []strin
 		events = append(events, TrialLifecycle)
 	}
 
-	if len(words) > 1 && campaignSupportsPublishedSnapshot(provider, words[1]) {
-		events = append(events, campaignPublishedSnapshot)
-	}
-
 	if len(words) < 3 {
 		return nil, fmt.Errorf("want consumer <demo> <%s> [key=value ...]: %w", campaignEventList(events), errs.ErrValidation)
 	}
 
 	if !campaignDemo.MatchString(words[1]) || !isDir(filepath.Join(dir, "demos", words[1])) {
 		return nil, fmt.Errorf("no such demo in %s: %w", filepath.Join(dir, "demos"), errs.ErrValidation)
-	}
-
-	if words[2] == campaignPublishedSnapshot {
-		return campaignSnapshotRecipe(dir, provider, env, words)
 	}
 
 	if !slices.Contains([]string{TrialPullRequest, TrialRelease, TrialLifecycle}, words[2]) {
@@ -583,12 +586,12 @@ func campaignCaseTargets(root, provider string, words []string, prepared, target
 	case provider != campaignGitLab:
 	case words[0] == "scenario":
 		targets[campaignScenarioTarget] = true
-	case words[0] == "consumer" && len(words) > 1:
+	case words[0] == caseConsumer && len(words) > 1:
 		if !campaignDemo.MatchString(words[1]) {
 			return fmt.Errorf("not a demo name: %q: %w", words[1], errs.ErrValidation)
 		}
 
-		gate, err := readCampaignGate(filepath.Join(root, "test", "live", "demos", words[1], "consumer", filepath.FromSlash(GitLabGateFile)), words[2:])
+		gate, err := readCampaignGate(filepath.Join(demoConsumerDir(root, words[1]), filepath.FromSlash(GitLabGateFile)), words[2:])
 		if err != nil {
 			return err
 		}

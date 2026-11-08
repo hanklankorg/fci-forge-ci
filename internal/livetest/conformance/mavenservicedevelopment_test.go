@@ -12,125 +12,13 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 
-	"github.com/diggsweden/forge-ci/internal/domain/provider"
 	"github.com/diggsweden/forge-ci/internal/domain/snapshotimage"
 	"github.com/diggsweden/forge-ci/internal/livetest"
 )
-
-func runForgejoMavenServiceDevelopment(t *testing.T) {
-	t.Helper()
-
-	root := os.Getenv(consumerCheckoutEnv)
-	if root == "" {
-		t.Fatal("set FORGE_CI_LIVE_CONSUMER to the clean selected source checkout")
-	}
-
-	if livetest.DemoName() != "" {
-		t.Fatal("service development requires disposable scratch repositories")
-	}
-
-	for _, visibility := range livetest.ConsumerVisibilities(t) {
-		t.Run(visibility.Name, func(t *testing.T) {
-			runForgejoMavenServiceCase(t, root, visibility.Private)
-		})
-	}
-}
-
-func runForgejoMavenServiceCase(t *testing.T, root string, private bool) {
-	t.Helper()
-
-	if !livetest.Requires(t, provider.ForgeForgejo, livetest.NeedsInRunner, livetest.NeedsPackages) {
-		livetest.NotCoveredf(t, "service development needs a native runner and packages")
-	}
-
-	target := livetest.Accept(t, provider.ForgeForgejo)
-	if livetest.RunnerArch(t, target) != "amd64" {
-		t.Fatal("service development requires native linux/amd64")
-	}
-
-	builder := livetest.ChooseImageBuilder(t, target)
-	// This end-to-end trial also starts the published service with Podman.
-	// Keep its existing container runner for both builders and readiness.
-	buildLabel := livetest.PrivilegedRunnerLabel(t, target)
-	if buildLabel == "" {
-		livetest.NotCoveredf(t, "service readiness runs the published image with Podman and needs the contract's runner.privileged_label independently of the image builder")
-	}
-
-	t.Logf("development image builder: %s; container/readiness runner: %q", builder.Builder, buildLabel)
-
-	recipe, err := filepath.Abs("../../../test/live/demos/hello-maven-service/consumer")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	config := livetest.MavenServiceDevelopmentConfig{
-		RecipeDirectory: recipe, JavaImage: os.Getenv("FORGE_CI_LIVE_MAVEN_APPLICATION_IMAGE"),
-		Branch: os.Getenv("FORGE_CI_LIVE_SERVICE_BRANCH"), ReadinessURL: os.Getenv("FORGE_CI_LIVE_SERVICE_READINESS_URL"),
-		Fixture: os.Getenv("FORGE_CI_LIVE_SERVICE_FIXTURE"),
-	}
-	source := livetest.OpenConsumer(t, target, root)
-	admitted := source.Commit
-	consumer := livetest.NewMavenServiceDevelopmentFixture(t, source, config)
-	layer, repo := newConsumerRepos(t, target, consumer, "consumer-development", private)
-	jobImage := consumerBuilderJobImage(t, target, builder, layer)
-
-	registry, err := livetest.RegistryHost(target)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	image := registry + "/" + strings.ToLower(livetest.RepoSlug(target, repo))
-
-	plan, err := layer.PlanConsumer(consumer.Workflows(t), livetest.ConsumerFacts{Inputs: map[string]string{"forge-ci-repository": layer.Repository}})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	variables, err := livetest.MergeConsumerVariables(plan.Variables, map[string]string{
-		"CI_IMAGE_BUILDER": builder.Builder, "CI_IMAGE_BUILDER_JOB_IMAGE": jobImage,
-		layerRunnerVariable:     runnerLabelsJSON(t, livetest.RunnerLabel(t, target)),
-		containerRunnerVariable: runnerLabelsJSON(t, buildLabel), "FORGE_CI_REPOSITORY": layer.Repository,
-		"SERVICE_IMAGE_REPOSITORY": image, "DEVELOPMENT_REGISTRY_USERNAME": target.CredentialUsername,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	main := consumer.Push(t, repo, plan)
-	head := consumer.PushChange(t, repo, config.Branch, main)
-	requireObjectFormats(t, consumer.ObjectFormat, head, layer.Commit)
-	scenario := layerScenario{target: target, repo: repo, layer: layer, label: buildLabel}
-
-	defer func() {
-		scenario.requireBranches(t, map[string]string{"main": main, config.Branch: head})
-		scenario.requireNone(t, "/tags", "/releases")
-	}()
-
-	// Forgejo's variables API is unavailable while repository Actions are off.
-	livetest.EnableActions(t, target, repo)
-
-	for name, value := range variables {
-		livetest.SetRepoVariable(t, target, repo, name, value)
-	}
-
-	livetest.SetRepoSecret(t, target, repo, "DEVELOPMENT_REGISTRY_TOKEN", target.Token)
-	livetest.DispatchConsumerDevelopment(t, target, repo)
-	run := livetest.WaitForConsumerRun(t, target, repo, developmentWorkflow, "workflow_dispatch", "")
-	jobs := livetest.RunJobs(t, target, repo, run.ID)
-	scenario.logJobs(t, jobs)
-
-	requireRunIDs(t, target, repo, run.ID)
-
-	receipt, jars, producers := requireMavenServiceDevelopment(t, target, repo, run, consumer, config, head, image)
-
-	t.Logf("admitted=%s policy=%s selected=%s branch=%s engine=%s image=%s readiness=%s; checked JARs=%d producers=%d; declared build route preserved, no checked-JAR/image byte-equality claim", admitted, main, head, config.Branch, layer.Commit, receipt.Ref, config.ReadinessURL, jars, producers)
-}
 
 // developmentWorkflow is the workflow file a consumer's development run is
 // dispatched from.

@@ -139,17 +139,6 @@ func CampaignRunSettings(provider string, getenv func(string) string) (CampaignR
 }
 
 func (run CampaignRun) caseSettings(args []string) (map[string]string, error) {
-	if len(args) != 0 && args[0] == "test-live-forgejo-snapshot" {
-		// Native development chooses directly from the run selector, unlike
-		// the PR/release consumer's CI_IMAGE_BUILDER repository variable.
-		builder, valid := imageBuilderValue(run.BuilderSelector)
-		if !valid {
-			return nil, fmt.Errorf("%s must be buildah or kaniko: %w", ForgejoImageBuilderEnv, errs.ErrValidation)
-		}
-
-		return run.withBuilder(builder), nil
-	}
-
 	if len(args) != 0 && args[0] == "test-live-gitlab-buildah" {
 		if run.BuilderSelector != "" && run.BuilderSelector != ImageBuilderBuildah {
 			return nil, fmt.Errorf("build-image capability probes Buildah; select a Buildah lane: %w", errs.ErrValidation)

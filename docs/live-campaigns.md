@@ -156,8 +156,9 @@ The run header and verdict record the controller's four `FORGE_CI_LIVE_ADMIN_*`
 inputs. The embedded engine default stays report-only; no lab-only policy source
 edit or checksum rebuild is needed to choose the run's settings.
 
-A cases file then holds one case a line: `consumer <demo> <pull-request|release>
-[key=value ...]` or `scenario <TestName> [key=value ...]`. Explicit scenario inputs
+A cases file then holds one case a line: `consumer <demo>
+<pull-request|release|lifecycle> [key=value ...]` or `scenario <TestName>
+[key=value ...]`. Explicit scenario inputs
 are supported by the GitLab recipes described below. A value `@NAME` is campaign.env's
 `NAME`; a GitLab consumer names its archives with `job-archive=` (and for a
 release `build-archive=` and `signer-archive=`), for example
@@ -175,58 +176,6 @@ demo's gate, the campaign was not prepared with, and a GitLab consumer whose
 gate lints without `lint-archive=`. The lane then runs past failures and fails when any case did. Read the outcome from
 `<dir>/<provider>.results`, one tab-separated line a case: interval, case,
 exit status and the `verdict.json` to read, as above.
-
-### Published development snapshot (Forgejo Maven service only)
-
-`test/live/campaigns/published-snapshot-forgejo.cases` adds one standalone event:
-
-```text
-consumer hello-maven-service published-unsigned-snapshot job-image=@JOB_IMAGE_JAVA
-```
-
-Prepare with `forgejo=<that cases file>` and `job-image=java:<reviewed local image>`.
-The Java job image must support the existing native Maven build/check recipe.
-The consumer's declaration selects the existing route: artifact-first dependencies
-are built and gathered by the native snapshot producer before the original
-Containerfile wraps them; a declared container-only service builds from source
-inside its original Containerfile. The fixture preserves that choice. A literal
-full SHA-256 digest reference is also accepted. No other case settings are accepted.
-The checked-in profile requires public visibility and Buildah. Declarations are
-expectations, not overrides: an explicit conflicting builder refuses the whole
-plan. The native driver uses the Forgejo run selector (default Buildah), not an
-inherited consumer `CI_IMAGE_BUILDER` setting. A separately declared Kaniko run
-still requires its existing reviewed archive. Both builders require the contract's
-container/readiness runner, because readiness runs the published digest with Podman.
-Budget that runner and the builder before launch; this profile claims native Linux
-amd64 only, not ARM images or a multi-platform product matrix.
-
-Fresh scratch-repository bindings keep `CI_IMAGE_BUILDER=buildah` explicit and omit
-its empty optional `CI_IMAGE_BUILDER_JOB_IMAGE`: Forgejo requires nonempty Actions
-variable values, and Buildah uses the privileged runner's default image. This is
-not an update/unset operation on an existing repository. A nonempty image remains
-unchanged; Kaniko still requires its qualified digest image and reviewed archive.
-Conflicting bindings and other empty required values refuse the complete merge.
-
-The recipe calls the existing guarded launcher and
-`TestForgejoLayer_ConsumerDevelopment` / `runForgejoMavenServiceDevelopment`.
-It fixes branch `development`, readiness `/health`, an empty optional runtime
-fixture and disposable repository mode. It overrides stale consumer event/settings,
-ephemeral-snapshot image/dependency selectors and reused signing-key selection;
-administrator settings, builder selection, targets, acknowledgements, resource
-admission, locks, evidence retention and cleanup authority remain the existing ones.
-Only the development registry credential is provisioned by the native trial.
-
-Acceptance binds the frozen snapshot plan and image receipt to source, architecture,
-registry digest/tag and readiness, rejects stable image aliases, and checks unchanged
-policy main plus absence of Git tags/releases. This is **unsigned snapshot mode;
-signature/attestation absence and scan readbacks are not independently verified**.
-It is not the ephemeral `ConsumerSnapshotTrial`, a linked PR/snapshot/release run,
-or full Gommi/Nano inventory acceptance. GitLab and hosted GitHub do not support this
-campaign event and refuse admission; hosted GitHub keeps its separate guarded road.
-
-Forge CI owns these CI consumer scenarios. Forge Lab owns its CLI/infrastructure
-tests and provides the existing contract/SDK guards; its destructive live TestMain
-is not a validation entry point for this profile. No scenario is duplicated there.
 
 ### Lifecycle
 
@@ -311,38 +260,42 @@ route on the provider, read from the demo's own files, not its name; a demo
 without one is refused rather than run as a shorter flow, and hosted GitHub
 refuses the event. The route is a *service snapshot*: the snapshot-images
 policy, the reusable workflow on Forgejo and the component on GitLab, over
-the demo's declaration of one container built from the root Containerfile and
-context on native amd64, plain (no image name, tag suffix, build secrets,
-extraction or provenance), from at most one root producer of a family the
-snapshot builds (go, java, node, rust; an application where the family has
-libraries). The harness overlays that declaration for the trial, native
-linux/amd64 and unsigned, into `.forge-ci/service-development.yml`
-(`livetest.ServiceSnapshotDeclarationFile`). On GitLab the declaration is the
-one the demo's release builds its images from, `.forge-ci/release-images.yml`
-when the demo has one (its `artifacts.yml` then serves another forge's flow
-in a shape the snapshot refuses too), else `.forge-ci/artifacts.yml`
-(`livetest.ServiceSnapshotSource`), and the demo must ship the GitLab release
-build, `.gitlab/build-release.sh`. On Forgejo the one route is the Maven
-service development workflow, so the demo is also a root Maven application
-whose producers are Maven. The campaign refuses a case before anything is
-created (`campaignAdmitLifecycle`), with the planner's reason:
+the demo's declaration. What the snapshot builds is the planner's rule
+(`snapshotimage.New`): the harness plans the declaration, overlaid for the
+trial as native linux/amd64 and unsigned into
+`.forge-ci/service-development.yml` (`livetest.ServiceSnapshotDeclarationFile`),
+and keeps no copy of the planner's rules. The trial's own scope is one
+container of the root Containerfile and context with native amd64 declared,
+without image name, tag suffix or declared provenance, from at most one
+artifact, since that is the one image it judges. On GitLab the declaration is
+the one the demo's release builds its images from,
+`.forge-ci/release-images.yml` when the demo has one (its `artifacts.yml` then
+serves another forge's flow in a shape the snapshot refuses too), else
+`.forge-ci/artifacts.yml` (`livetest.ServiceSnapshotSource`), and the demo must
+ship the GitLab release build, `.gitlab/build-release.sh`. On Forgejo the one
+route is the Maven service development workflow, which checks the root Maven
+application's JAR after the snapshot, so the demo is also a root Maven
+application and the snapshot's producers, when it has any, are that
+application alone. The campaign refuses a case before anything is created
+(`campaignAdmitLifecycle`), with the planner's reason:
 
-| Demo | Forgejo | GitLab | Why not |
+| Demo | Forgejo | GitLab | Why |
 |---|---|---|---|
-| hello-maven-service | lifecycle | lifecycle | — artifact-first Maven application and its runtime image |
-| hello-cargo-container | — | lifecycle | Forgejo: not a Maven application. GitLab: container-first from `release-images.yml` |
-| hello-npm-service | — | — | `artifacts.yml` is a service snapshot's (one npm producer), but the demo's Containerfile copies the unpacked package's `dist/` as the releases lay it out, while a snapshot lays the packed tarball at `.forge-ci/snapshot-inputs/<name>` (docs/workflows.md); one Containerfile cannot serve both until the two conventions agree. Forgejo also has no npm service route: the npm application fixture is a CLI package's (`bin`) with the rest-service case's oracle |
-| hello-cargo-workspace | — | — | two runtime images; a service snapshot is of one container |
-| hello-go-service | — | — | extraction, which the snapshot planner refuses; no GitLab release build either |
+| hello-maven-service | lifecycle | lifecycle | artifact-first Maven application and its runtime image |
+| hello-cargo-container | — | lifecycle | GitLab: container-first from `release-images.yml`. Forgejo reads `artifacts.yml`, whose container extracts, which the planner refuses |
+| hello-npm-service | — | admitted, no line | `artifacts.yml` is a service snapshot's (one npm producer) and the demo ships its GitLab release build, so the planner admits the GitLab lifecycle; the lane leaves it out until the npm snapshot layout and the demo's Containerfile agree (the snapshot lays the packed tarball at `.forge-ci/snapshot-inputs/<name>`, docs/workflows.md, and the Containerfile copies the unpacked `dist/`; the engine is making the snapshot unpack npm inputs). Forgejo: no root Maven application |
+| hello-cargo-workspace | — | — | two runtime images; the trial judges one container |
+| hello-go-service | — | — | extraction, which the planner refuses; no GitLab release build either |
 | hello-go-cli, hello-maven, hello-npm-package | — | — | no container, so no snapshot; hello-maven's library development route publishes a SNAPSHOT package, another shape |
 | hello-gradle, hello-monorepo, hello-android, hello-ios | — | — | no Forgejo flow or no container; the example demos ship no GitLab release build |
 
 amd64 runners only for now. Standalone
 `test-live-consumer <forgejo|gitlab> <checkout> lifecycle …` runs the same
 test outside a campaign; the GitLab lifecycle reads the checkout's snapshot
-source itself. The standalone pull-request, release and snapshot trials
-remain the single-phase entrypoints; the lifecycle calls their extracted
-checks. A GPG-signed lifecycle has no demo yet: `hello-go-cli` has the GPG
+source itself. The standalone pull-request and release trials remain the
+single-phase entrypoints; the lifecycle calls their extracted checks, and its
+development phase is the one published development snapshot trial (the
+standalone `published-unsigned-snapshot` event retired into it). A GPG-signed lifecycle has no demo yet: `hello-go-cli` has the GPG
 declaration (`artifacts-gpg.yml`) but no development route, and the Forgejo
 demos' release workflows take the default declaration, so selecting another
 would be a workflow of the demo's, not a setting.
