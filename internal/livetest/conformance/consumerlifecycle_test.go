@@ -213,6 +213,9 @@ func runForgejoConsumerLifecycle(t *testing.T, root string, private bool) {
 	receipt, jars, producers := requireMavenServiceDevelopment(t, target, repo, development, consumer, config, head, image)
 	requireRunIDs(t, target, repo, review.ID, development.ID)
 	scenario.requireNone(t, "/tags", "/releases")
+	// The snapshot moves neither branch: main stays the merge, the source the
+	// reviewed head.
+	scenario.requireBranches(t, map[string]string{layerMain: request, lifecycleBranch: head})
 	t.Logf("lifecycle phase 3 development: run %d dispatched on %s@%s snapshots %s@%s as %s; checked JARs %d, producers %d", development.ID, layerMain, request, lifecycleBranch, head, receipt.Ref, jars, producers)
 
 	// Phase 4: the signed release request at the merged main. The release's
