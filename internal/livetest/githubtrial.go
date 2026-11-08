@@ -1256,28 +1256,23 @@ func (trial *GitHubTrial) checkReleaseCommit(repo string, tree GitHubConsumerTre
 }
 
 // verifyBundles verifies each <subject>.bundle asset against its subject with
-// trust, and counts them.
+// trust. An orphan bundle now fails acceptance instead of being silently skipped.
 func (trial *GitHubTrial) verifyBundles(repo string, assets map[string]int64, trust CosignTrust, evidence ...*ReleaseEvidence) map[string]bool {
 	trial.tb.Helper()
 
 	cosign := HostTool(trial.tb, "cosign")
 	dir := trial.tempDir("release")
-	verified := map[string]bool{}
 
-	for name, id := range assets {
-		subject, isBundle := strings.CutSuffix(name, ".bundle")
-		subjectID, hasSubject := assets[subject]
-
-		if !isBundle || !hasSubject {
-			continue
-		}
-
-		trial.download(repo, id, filepath.Join(dir, name), evidence...)
-		trial.download(repo, subjectID, filepath.Join(dir, subject), evidence...)
-		args := append(append([]string{"verify-blob", "--bundle", filepath.Join(dir, name)}, trust.verifyArgs()...), filepath.Join(dir, subject))
+	verified, err := VerifyReleaseBundles(slices.Collect(maps.Keys(assets)), func(subject, bundle string) error {
+		trial.download(repo, assets[bundle], filepath.Join(dir, bundle), evidence...)
+		trial.download(repo, assets[subject], filepath.Join(dir, subject), evidence...)
+		args := append(append([]string{"verify-blob", "--bundle", filepath.Join(dir, bundle)}, trust.verifyArgs()...), filepath.Join(dir, subject))
 		trial.run(dir, nil, cosign, args...)
 
-		verified[subject] = true
+		return nil
+	})
+	if err != nil {
+		trial.tb.Errorf("livetest: %v", err)
 	}
 
 	return verified
