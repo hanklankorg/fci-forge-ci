@@ -62,35 +62,53 @@ func TestSnapshotImageWorkflowKeepsWholeMatrixPublicationBarrier(t *testing.T) {
 	require.Equal(t, "write", scalarChild(mappingChild(publish, "permissions"), "packages"))
 }
 
-func TestSnapshotImageWorkflowUsesVerifiedRunEngineAndFrozenSource(t *testing.T) {
+// Every job runs the engine of the run and installs nothing: the container
+// jobs the forge-ci baked into the admitted runtime image of their role, the
+// host build legs the canonical CLI the caller's delivery built, received
+// before the frozen source checkout.
+func TestSnapshotImageWorkflowRunsTheAdmittedEngineAndFrozenSource(t *testing.T) {
 	t.Parallel()
-	doc, err := effectiveWorkflow(reporoot.ReadFile(t, ".github/workflows/snapshot-images.yml"))
+
+	body := reporoot.ReadFile(t, ".github/workflows/snapshot-images.yml")
+	for _, legacy := range []string{"install-forge-ci.sh", "sha256sum --check", "install_trivy", "install_syft", "actions/setup-go@", "engine-sha256"} {
+		require.NotContains(t, string(body), legacy)
+	}
+
+	doc, err := effectiveWorkflow(body)
 	require.NoError(t, err)
 
 	jobs := mappingChild(doc, "jobs")
+	for id, image := range map[string]string{
+		"plan":            "${{ inputs['runtime-image'] }}",
+		"prepare-context": "${{ inputs['runtime-image'] }}",
+		"collect":         "${{ inputs['runtime-image'] }}",
+		"publish":         "${{ inputs['runtime-image-full'] }}",
+	} {
+		require.Equal(t, image, scalarChild(mappingChild(mappingChild(jobs, id), "container"), "image"), id)
+	}
+
+	require.Contains(t, scalarChild(mappingChild(mappingChild(jobs, "build-artifacts"), "container"), "image"), "inputs['runtime-image-go']")
+	require.Nil(t, mappingChild(mappingChild(jobs, "build"), "container"), "Buildah needs the host")
+
 	for _, id := range []string{"build-artifacts", "prepare-context", "build", "publish", "collect"} {
 		job := mappingChild(jobs, id)
-		verified, used, downloaded, sourceCheckout := false, false, false, false
+		sourceCheckout, received := false, id != "build"
 
 		for _, step := range mappingChild(job, "steps").Content {
 			run, uses := scalarChild(step, "run"), scalarChild(step, "uses")
-			if strings.HasPrefix(uses, "actions/download-artifact@") {
-				require.Equal(t, "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c", uses)
+			if uses == "./_forge_ci_bootstrap/.github/actions/consume-canonical-cli" {
+				require.Equal(t, "host", scalarChild(mappingChild(step, "with"), "tool-profile"))
+				require.False(t, sourceCheckout, "the canonical CLI is received before the frozen source checkout")
 
-				if strings.HasSuffix(scalarChild(mappingChild(step, "with"), "name"), "-inputs") {
-					downloaded = true
-				}
-			}
-
-			if strings.Contains(run, "sha256sum --check") {
-				require.True(t, downloaded, "verify the engine downloaded from this plan run")
-				require.Contains(t, scalarChild(mappingChild(step, "env"), "ENGINE_SHA256"), "needs.plan.outputs.engine-sha256")
-
-				verified = true
+				received = true
 			}
 
 			if strings.HasPrefix(uses, "actions/checkout@") {
 				with := mappingChild(step, "with")
+				if scalarChild(with, "path") == "_forge_ci_bootstrap" {
+					continue
+				}
+
 				require.Equal(t, "${{ needs.plan.outputs.source-sha }}", scalarChild(with, "ref"))
 				require.Equal(t, "false", scalarChild(with, "persist-credentials"))
 
@@ -105,9 +123,7 @@ func TestSnapshotImageWorkflowUsesVerifiedRunEngineAndFrozenSource(t *testing.T)
 			}
 
 			if strings.Contains(run, "forge-ci ") {
-				require.True(t, verified, "no engine command may precede run-engine verification in %s", id)
-
-				used = true
+				require.True(t, received, "no engine command may precede the canonical receive in %s", id)
 			}
 
 			if strings.Contains(run, "snapshot-images build ") {
@@ -128,7 +144,7 @@ func TestSnapshotImageWorkflowUsesVerifiedRunEngineAndFrozenSource(t *testing.T)
 			}
 		}
 
-		require.True(t, verified && used && downloaded, id)
+		require.True(t, received, id)
 
 		if id != "collect" {
 			require.True(t, sourceCheckout, "%s must check out the frozen source before producer, context or policy work", id)
@@ -136,63 +152,30 @@ func TestSnapshotImageWorkflowUsesVerifiedRunEngineAndFrozenSource(t *testing.T)
 	}
 }
 
-func TestSnapshotImageNativeEngineMatchesRunnerArchitecture(t *testing.T) {
+// Both native legs receive the file of their own architecture from the one
+// canonical delivery, so no leg installs from source and the plan retains
+// only the plan: an arch-conditional engine step would be the old split.
+func TestSnapshotImageNativeLegsShareOneDelivery(t *testing.T) {
 	t.Parallel()
 	doc, err := effectiveWorkflow(reporoot.ReadFile(t, ".github/workflows/snapshot-images.yml"))
 	require.NoError(t, err)
 
 	jobs := mappingChild(doc, "jobs")
-	plan := mappingChild(jobs, "plan")
-	outputs := mappingChild(plan, "outputs")
+	outputs := mappingChild(mappingChild(jobs, "plan"), "outputs")
 	require.Equal(t, "${{ steps.source.outputs.sha }}", scalarChild(outputs, "source-sha"))
-	require.Equal(t, "${{ needs.resolve-bootstrap.outputs.forge-ci-binary-ref }}", scalarChild(outputs, "engine-ref"))
-	require.Equal(t, "${{ steps.forge-ci-bootstrap.outputs.commit }}", scalarChild(outputs, "bootstrap-sha"))
-
-	retainedModule := false
+	require.Nil(t, mappingChild(outputs, "engine-ref"))
+	require.Nil(t, mappingChild(outputs, "bootstrap-sha"))
 
 	for _, step := range mappingChild(mappingChild(jobs, "plan"), "steps").Content {
-		if strings.Contains(scalarChild(step, "run"), `cp .github-shared/go.mod "${RUNNER_TEMP}/snapshot-inputs/engine.go.mod"`) {
-			retainedModule = true
-		}
+		require.NotContains(t, scalarChild(step, "run"), "command -v forge-ci", "the plan does not retain an engine copy")
 	}
 
-	require.True(t, retainedModule)
+	build := mappingChild(jobs, "build")
+	require.Contains(t, scalarChild(build, "runs-on"), "matrix.build.arch == 'arm64'")
 
-	verifiedAMD64, nativeToolchain, installedARM64 := false, false, false
-
-	for _, step := range mappingChild(mappingChild(jobs, "build"), "steps").Content {
-		run := scalarChild(step, "run")
-		if strings.Contains(run, "sha256sum --check") {
-			require.Equal(t, "${{ matrix.build.arch == 'amd64' }}", scalarChild(step, "if"), "never put the plan runner's amd64 engine on an arm64 PATH")
-
-			verifiedAMD64 = true
-		}
-
-		if strings.HasPrefix(scalarChild(step, "uses"), "actions/setup-go@") {
-			require.Equal(t, "${{ matrix.build.arch == 'arm64' }}", scalarChild(step, "if"))
-			require.Equal(t, "${{ runner.temp }}/snapshot-inputs/engine.go.mod", scalarChild(mappingChild(step, "with"), "go-version-file"))
-
-			nativeToolchain = true
-		}
-
-		if strings.Contains(run, "bootstrap/install-forge-ci.sh") {
-			require.True(t, nativeToolchain, "native source bootstrap needs the retained engine's Go version")
-			require.Equal(t, "${{ matrix.build.arch == 'arm64' }}", scalarChild(step, "if"))
-			env := mappingChild(step, "env")
-			require.Equal(t, "${{ needs.plan.outputs.engine-ref }}", scalarChild(env, "FORGE_CI_BINARY_REF"))
-			require.Equal(t, "${{ needs.plan.outputs.bootstrap-sha }}", scalarChild(env, "FORGE_CI_SOURCE_SHA"))
-			require.Equal(t, "${{ runner.temp }}/snapshot-native-bin", scalarChild(env, "FORGE_CI_INSTALL_DIR"))
-			require.Equal(t, `bash "${RUNNER_TEMP}/snapshot-inputs/bootstrap/install-forge-ci.sh" "$FORGE_CI_BINARY_REF"`, strings.TrimSpace(run))
-
-			installedARM64 = true
-		}
-
-		if strings.Contains(run, "forge-ci ") {
-			require.True(t, verifiedAMD64 && installedARM64, "every native path must install its admitted engine before commands run")
-		}
+	for _, step := range mappingChild(build, "steps").Content {
+		require.NotContains(t, scalarChild(step, "if"), "matrix.build.arch", "no arch-conditional engine step: %s", scalarChild(step, "name"))
 	}
-
-	require.True(t, verifiedAMD64 && installedARM64)
 }
 
 func TestSnapshotRootPreservesLogicalBranchAndSameSourceAcrossOutputs(t *testing.T) {

@@ -43,6 +43,7 @@ func declaredWritingContainerJobs() map[string]string {
 		"publish-maven-github.yml/publish-maven-github": "packages: write",
 		"publish-snapshot-npm.yml/build-and-publish":    "packages: write",
 		"release-create-github.yml/sign-release":        "id-token: write",
+		"snapshot-images.yml/publish":                   "packages: write",
 		"version-bump.yml/bump-version":                 "contents: write",
 	}
 }

@@ -116,6 +116,8 @@ func TestCanonicalConsumerWorkflowGraph(t *testing.T) {
 		"generate-changelog.yml":             {"generate-changelog"},
 		"release-create-github.yml":          {"sign-release-gpg", "create-release"},
 		"publish-container.yml":              {"build-arch"},
+		"snapshot-images.yml":                {"build"},
+		"release-snapshot-orchestrator.yml":  {"setup-snapshot", "snapshot-release-summary"},
 	} {
 		workflow := readCanonicalConsumerWorkflow(t, file)
 		for _, name := range jobs {
@@ -218,6 +220,18 @@ func TestCanonicalConsumerWorkflowGraph(t *testing.T) {
 	for _, input := range []string{"runtime-image", "canonical-builder-image", "forge-ci-binary-ref"} {
 		spec, _ := root.On.Call.Inputs[input].(map[string]any)
 		require.Equal(t, true, spec["required"], "%s is an administrator pin the route admits, not a resolved default", input)
+	}
+
+	// The snapshot route admits the same pins and forwards the delivery to
+	// the image workflow, whose host build legs receive it.
+	snapshot := readCanonicalConsumerWorkflow(t, "release-snapshot-orchestrator.yml")
+	require.Contains(t, snapshot.Jobs["execute-snapshot-images"].Needs, "canonical-cli")
+	require.Equal(t, "${{ needs.canonical-cli.result }}", snapshot.Jobs["execute-snapshot-images"].With["canonical-producer-result"])
+	require.Equal(t, "${{ needs.canonical-cli.outputs.artifact-id }}", snapshot.Jobs["execute-snapshot-images"].With["canonical-artifact-id"])
+
+	for _, input := range []string{"runtime-image", "canonical-builder-image", "forge-ci-binary-ref"} {
+		spec, _ := snapshot.On.Call.Inputs[input].(map[string]any)
+		require.Equal(t, true, spec["required"], "snapshot route: %s is an administrator pin", input)
 	}
 }
 

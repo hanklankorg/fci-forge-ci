@@ -134,14 +134,16 @@ on:
         default: true
         type: boolean
       forge-ci-binary-ref:
-        description: "forge-ci ref/version passed downstream; empty resolves the current stable release tag once"
-        required: false
-        default: ""
+        description: "Full approved engine commit (40 hex). The canonical CLI every control-plane job and host build leg runs is built from exactly this commit; the stages pin their callees to it."
+        required: true
         type: string
       runtime-image:
-        description: "forge-ci base runtime image for control-plane jobs. Empty uses the resolved forge-ci version."
-        required: false
-        default: ""
+        description: "Administrator-pinned forge-ci base runtime image@sha256 digest for control-plane, canonical receive and snapshot-image plan, context and collect jobs. Tags are refused by canonical admission."
+        required: true
+        type: string
+      canonical-builder-image:
+        description: "Administrator-pinned Go-qualified image@sha256 digest for the canonical CLI build only. No fallback to policy or product runtimes."
+        required: true
         type: string
       runtime-image-full:
         description: "forge-ci full runtime image for SBOM-capable snapshot publish jobs. Empty uses the resolved forge-ci version."
@@ -243,6 +245,19 @@ jobs:
     uses: ./.github/workflows/resolve-forge-ci-bootstrap.yml
     with:
       forge-ci-binary-ref: ${{ inputs['forge-ci-binary-ref'] }}
+  canonical-cli:
+    needs: [resolve-bootstrap]
+    permissions:
+      contents: read
+      actions: read
+    # Integrated delivery owner; the approved engine commit must also contain
+    # the consumer action/script used by each receiving job.
+    uses: ./.github/workflows/canonical-cli-bootstrap.yml
+    with:
+      engine-repository: ${{ needs.resolve-bootstrap.outputs.forge-ci-repository }}
+      engine-commit: ${{ inputs['forge-ci-binary-ref'] }}
+      runtime-image: ${{ inputs['canonical-builder-image'] }}
+      receive-runtime-image: ${{ inputs['runtime-image'] }}
 
   # ===== Stage 0: Configuration And Policy =====
   # Single Setup job mirroring release-orchestrator.yml's parse-config shape.
@@ -250,13 +265,15 @@ jobs:
   # (multi-artefact path); always composes the snapshot control-plane interface
   # consumed by every later stage.
   setup-snapshot:
-    needs: [resolve-bootstrap]
+    needs: [resolve-bootstrap, canonical-cli]
+    if: ${{ !failure() && !cancelled() && needs.canonical-cli.result == 'success' }}
     name: Prepare
     runs-on: ubuntu-26.04
     container:
-      image: ${{ inputs['runtime-image'] || needs.resolve-bootstrap.outputs['runtime-image'] }}
+      image: ${{ inputs['runtime-image'] }}
     permissions:
       contents: read
+      actions: read # Canonical metadata/download; intentional read-only increase.
     outputs:
       config-plan-json: ${{ steps.parse.outputs.config-plan-json }}
       snapshot-release-plan-json: ${{ steps.plan.outputs.snapshot-release-plan-json }}
@@ -264,6 +281,48 @@ jobs:
       snapshot-publish-stage-plan-json: ${{ steps.plan.outputs.snapshot-publish-stage-plan-json }}
       artifact-transfer-plan-json: ${{ steps.plan.outputs.artifact-transfer-plan-json }}
     steps:
+      - &canonical-context
+        name: Require original canonical success and approved identity
+        shell: /bin/bash --noprofile --norc -peuo pipefail {0}
+        env:
+          ENGINE_REPOSITORY: ${{ needs.resolve-bootstrap.outputs.forge-ci-repository }}
+          ENGINE_COMMIT: ${{ inputs['forge-ci-binary-ref'] }}
+          ENGINE_ORIGIN: ${{ github.server_url }}/${{ needs.resolve-bootstrap.outputs.forge-ci-repository }}
+          RUNTIME_IMAGE: ${{ inputs['runtime-image'] }}
+          PRODUCER_ARTIFACT_ID: ${{ needs.canonical-cli.outputs.artifact-id }}
+          PRODUCER_ARTIFACT_NAME: ${{ needs.canonical-cli.outputs.artifact-name }}
+          PRODUCER_RUN_ID: ${{ needs.canonical-cli.outputs.producer-run-id }}
+          PRODUCER_RUN_ATTEMPT: ${{ needs.canonical-cli.outputs.producer-run-attempt }}
+          PRODUCER_ENGINE_REPOSITORY: ${{ needs.canonical-cli.outputs.engine-repository }}
+          PRODUCER_ENGINE_COMMIT: ${{ needs.canonical-cli.outputs.engine-commit }}
+          CANONICAL_PRODUCER_RESULT: ${{ needs.canonical-cli.result }}
+        run: |
+          [[ "$GITHUB_RUN_ID" =~ ^[1-9][0-9]*$ && "$GITHUB_RUN_ATTEMPT" =~ ^[1-9][0-9]*$ ]]
+          [[ "$CANONICAL_PRODUCER_RESULT" == success && "$PRODUCER_RUN_ID" == "$GITHUB_RUN_ID" && "$PRODUCER_RUN_ATTEMPT" == "$GITHUB_RUN_ATTEMPT" ]]
+          [[ "$ENGINE_REPOSITORY" =~ ^[A-Za-z0-9_-][A-Za-z0-9_.-]*/[A-Za-z0-9_-][A-Za-z0-9_.-]*$ && "$ENGINE_COMMIT" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$PRODUCER_ENGINE_REPOSITORY" == "$ENGINE_REPOSITORY" && "$PRODUCER_ENGINE_COMMIT" == "$ENGINE_COMMIT" ]]
+          [[ "$PRODUCER_ARTIFACT_ID" =~ ^[1-9][0-9]*$ && "$PRODUCER_ARTIFACT_NAME" == "forge-ci-canonical-linux-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-$ENGINE_COMMIT" ]]
+          [[ "$RUNTIME_IMAGE" =~ ^[a-z0-9][a-z0-9./:_-]*@sha256:[0-9a-f]{64}$ ]]
+          [[ "$GITHUB_SERVER_URL" =~ ^https://[^/?#@[:space:]]+$ && "$ENGINE_ORIGIN" == "$GITHUB_SERVER_URL/$ENGINE_REPOSITORY" ]]
+          for variable in ENGINE_REPOSITORY ENGINE_COMMIT ENGINE_ORIGIN RUNTIME_IMAGE PRODUCER_ARTIFACT_ID PRODUCER_ARTIFACT_NAME PRODUCER_RUN_ID PRODUCER_RUN_ATTEMPT PRODUCER_ENGINE_REPOSITORY PRODUCER_ENGINE_COMMIT CANONICAL_PRODUCER_RESULT; do
+            printf '%s=%s\n' "$variable" "${!variable}" >>"$GITHUB_ENV"
+          done
+      - &canonical-checkout
+        name: Checkout only the approved engine before consumer or private steps
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          repository: ${{ env.ENGINE_REPOSITORY }}
+          ref: ${{ env.ENGINE_COMMIT }}
+          path: _forge_ci_bootstrap
+          persist-credentials: false
+          submodules: false
+          lfs: false
+      - &canonical-consume
+        name: Consume canonical CLI from the independently pinned engine checkout
+        id: canonical-bootstrap
+        uses: ./_forge_ci_bootstrap/.github/actions/consume-canonical-cli
+        with:
+          tool-profile: runtime # The job container is the approved image.
       # Defense-in-depth gate at the top of the snapshot-release pipeline.
       # Every downstream job depends on setup-snapshot via `needs:`, so
       # refusal here aborts the whole snapshot release. forge-ci is
@@ -329,7 +388,7 @@ jobs:
       snapshot-release-plan-json: ${{ needs.setup-snapshot.outputs.snapshot-release-plan-json }}
       snapshot-build-stage-plan-json: ${{ needs.setup-snapshot.outputs.snapshot-build-stage-plan-json }}
       forge-ci-binary-ref: ${{ needs.resolve-bootstrap.outputs.forge-ci-binary-ref }}
-      runtime-image: ${{ inputs['runtime-image'] || needs.resolve-bootstrap.outputs['runtime-image'] }}
+      runtime-image: ${{ inputs['runtime-image'] }}
       runtime-image-java: ${{ inputs['runtime-image-java'] || needs.resolve-bootstrap.outputs['runtime-image-java'] }}
       runtime-image-node: ${{ inputs['runtime-image-node'] || needs.resolve-bootstrap.outputs['runtime-image-node'] }}
       runtime-image-go: ${{ inputs['runtime-image-go'] || needs.resolve-bootstrap.outputs['runtime-image-go'] }}
@@ -371,7 +430,7 @@ jobs:
 
   execute-snapshot-images:
     name: "Publish: snapshot images"
-    needs: [resolve-bootstrap, setup-snapshot, execute-snapshot-build-stage]
+    needs: [resolve-bootstrap, canonical-cli, setup-snapshot, execute-snapshot-build-stage]
     if: ${{ !failure() && !cancelled() }}
     permissions:
       actions: read
@@ -389,6 +448,15 @@ jobs:
       registry: ${{ inputs.registry }}
       registry-user: ${{ inputs['container-registry-user'] }}
       forge-ci-binary-ref: ${{ needs.resolve-bootstrap.outputs.forge-ci-binary-ref }}
+      runtime-image: ${{ inputs['runtime-image'] }}
+      runtime-image-full: ${{ inputs['runtime-image-full'] || needs.resolve-bootstrap.outputs['runtime-image-full'] }}
+      canonical-artifact-id: ${{ needs.canonical-cli.outputs.artifact-id }}
+      canonical-artifact-name: ${{ needs.canonical-cli.outputs.artifact-name }}
+      canonical-producer-run-id: ${{ needs.canonical-cli.outputs.producer-run-id }}
+      canonical-producer-run-attempt: ${{ needs.canonical-cli.outputs.producer-run-attempt }}
+      canonical-producer-engine-repository: ${{ needs.canonical-cli.outputs.engine-repository }}
+      canonical-producer-engine-commit: ${{ needs.canonical-cli.outputs.engine-commit }}
+      canonical-producer-result: ${{ needs.canonical-cli.result }}
       use-build-artifacts: true
       runtime-image-go: ${{ inputs['runtime-image-go'] || needs.resolve-bootstrap.outputs['runtime-image-go'] }}
       runtime-image-java: ${{ inputs['runtime-image-java'] || needs.resolve-bootstrap.outputs['runtime-image-java'] }}
@@ -402,6 +470,7 @@ jobs:
     name: Summary
     needs:
       - execute-snapshot-images
+      - canonical-cli
       - resolve-bootstrap
       - setup-snapshot
       - execute-snapshot-build-stage
@@ -409,10 +478,14 @@ jobs:
     if: always() && needs.resolve-bootstrap.result == 'success'
     runs-on: ubuntu-26.04
     container:
-      image: ${{ inputs['runtime-image'] || needs.resolve-bootstrap.outputs['runtime-image'] }}
+      image: ${{ inputs['runtime-image'] }}
     permissions:
       contents: read
+      actions: read
     steps:
+      - *canonical-context
+      - *canonical-checkout
+      - *canonical-consume
       - name: Generate Snapshot Release Summary
         env:
           # Snapshot release context.

@@ -110,8 +110,11 @@ func TestPublishedLayoutScanCannotLosePrerequisiteOrReports(t *testing.T) {
 	}
 }
 
-// Snapshot images publish too: their providers install the scanner for every
-// image, whatever the plan's legacy scan field says, and the engine scans.
+// Snapshot images publish too: every published image is scanned, whatever
+// the plan's legacy scan field says. On GitHub the publish job runs in the
+// full runtime image, where Trivy is baked in, with no install step a
+// consumer could condition; the Forgejo and GitLab providers install the
+// scanner for every image.
 func TestSnapshotPublicationAlwaysInstallsTheScanner(t *testing.T) {
 	t.Parallel()
 
@@ -124,6 +127,9 @@ func TestSnapshotPublicationAlwaysInstallsTheScanner(t *testing.T) {
 
 	var workflow struct {
 		Jobs map[string]struct {
+			Container struct {
+				Image string `yaml:"image"`
+			} `yaml:"container"`
 			Steps []struct {
 				Name string            `yaml:"name"`
 				If   string            `yaml:"if"`
@@ -136,24 +142,31 @@ func TestSnapshotPublicationAlwaysInstallsTheScanner(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	publish := workflow.Jobs["publish"]
+	if publish.Container.Image != "${{ inputs['runtime-image-full'] }}" {
+		t.Fatalf("the GitHub snapshot publisher does not run where the scanner is baked in: %q", publish.Container.Image)
+	}
+
 	checked := false
 
-	for _, job := range workflow.Jobs {
-		for _, step := range job.Steps {
-			if step.Name != "Install configured evidence tools" {
-				continue
-			}
+	for _, step := range publish.Steps {
+		if strings.Contains(step.Run, "install_trivy") || strings.Contains(step.Run, "install_syft") || step.Name == "Install configured evidence tools" {
+			t.Fatalf("the GitHub snapshot publisher installs evidence tools: %s", step.Name)
+		}
 
-			checked = true
+		if !strings.Contains(step.Run, "snapshot-images publish") {
+			continue
+		}
 
-			if step.If != "" || step.Env["SCAN"] != "" || !strings.Contains(step.Run, "install_trivy") || strings.Contains(step.Run, "SCAN") {
-				t.Fatalf("the snapshot scanner install is conditional: if=%q env=%v run=%s", step.If, step.Env, step.Run)
-			}
+		checked = true
+
+		if step.If != "" || step.Env["SCAN"] != "" || strings.Contains(step.Run, "SCAN") {
+			t.Fatalf("the snapshot publication is conditional on a scan toggle: if=%q env=%v run=%s", step.If, step.Env, step.Run)
 		}
 	}
 
 	if !checked {
-		t.Fatal("no GitHub snapshot evidence-tools step was checked")
+		t.Fatal("no GitHub snapshot publication step was checked")
 	}
 
 	forgejo, err := os.ReadFile(filepath.Join(root, ".forgejo/bin/snapshot-images.sh"))

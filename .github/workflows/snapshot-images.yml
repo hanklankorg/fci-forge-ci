@@ -1,5 +1,13 @@
 # SPDX-FileCopyrightText: 2026 Digg - Agency for Digital Government
 # SPDX-License-Identifier: CC0-1.0
+#
+# Where forge-ci comes from: plan, prepare-context and collect run inside the
+# base runtime image digest the caller admits, publish inside the full one
+# (Trivy and syft baked in) and the producers inside the toolchain images of
+# their project type, so none of them installs anything. The build legs are
+# host jobs because Buildah needs the host: before the frozen source checkout
+# they receive the canonical CLI built in this run from the approved engine
+# commit, through the same consume-canonical-cli action the release jobs use.
 name: Publish Snapshot Images
 on:
   workflow_call:
@@ -41,19 +49,19 @@ on:
         default: false
         type: boolean
       runtime-image-go:
-        description: "Go producer runtime override; empty uses the resolved bootstrap family"
+        description: "Go producer runtime image (forge-ci runtime family, forge-ci baked in); empty uses the resolved bootstrap family"
         default: ""
         type: string
       runtime-image-java:
-        description: "Maven/Gradle producer runtime override; empty uses the resolved bootstrap family"
+        description: "Maven/Gradle producer runtime image (forge-ci runtime family, forge-ci baked in); empty uses the resolved bootstrap family"
         default: ""
         type: string
       runtime-image-node:
-        description: "NPM producer runtime override; empty uses the resolved bootstrap family"
+        description: "NPM producer runtime image (forge-ci runtime family, forge-ci baked in); empty uses the resolved bootstrap family"
         default: ""
         type: string
       runtime-image-rust:
-        description: "Cargo producer runtime override; empty uses the resolved bootstrap family"
+        description: "Cargo producer runtime image (forge-ci runtime family, forge-ci baked in); empty uses the resolved bootstrap family"
         default: ""
         type: string
       image-repository:
@@ -68,8 +76,27 @@ on:
         default: ""
         type: string
       forge-ci-binary-ref:
-        default: ""
+        description: "Full approved engine commit the canonical CLI was built from; the host build legs receive exactly that build"
+        required: true
         type: string
+      runtime-image:
+        description: "Administrator-pinned forge-ci base runtime image@sha256 digest for the plan, context and collect jobs; the orchestrator passes the digest its canonical delivery admitted"
+        required: true
+        type: string
+      runtime-image-full:
+        description: "forge-ci full runtime image (Trivy and syft baked in) for the publish job: every published image is scanned there, and its SBOM taken when configured"
+        required: true
+        type: string
+      # Canonical delivery of the same run: canonical-cli-bootstrap.yml's
+      # outputs, forwarded by the snapshot orchestrator or a direct caller.
+      # The host build legs admit them before the frozen source checkout.
+      canonical-artifact-id: {type: string, required: true}
+      canonical-artifact-name: {type: string, required: true}
+      canonical-producer-run-id: {type: string, required: true}
+      canonical-producer-run-attempt: {type: string, required: true}
+      canonical-producer-engine-repository: {type: string, required: true}
+      canonical-producer-engine-commit: {type: string, required: true}
+      canonical-producer-result: {type: string, required: true}
       artifact-name:
         description: "Distinct artifact namespace when calling more than once"
         default: snapshot-images
@@ -95,6 +122,9 @@ jobs:
     needs: [resolve-bootstrap]
     runs-on: ubuntu-26.04
     timeout-minutes: 20
+    # The admitted base image: forge-ci baked in, so the plan installs nothing.
+    container:
+      image: ${{ inputs['runtime-image'] }}
     permissions:
       actions: read
       contents: read
@@ -102,10 +132,7 @@ jobs:
       source-sha: ${{ steps.source.outputs.sha }}
       builds: ${{ steps.plan.outputs.builds }}
       images: ${{ steps.plan.outputs.images }}
-      engine-sha256: ${{ steps.engine.outputs.sha256 }}
-      engine-ref: ${{ needs.resolve-bootstrap.outputs.forge-ci-binary-ref }}
       engine-repository: ${{ needs.resolve-bootstrap.outputs.forge-ci-repository }}
-      bootstrap-sha: ${{ steps.forge-ci-bootstrap.outputs.commit }}
       artifact-transfers: ${{ steps.plan.outputs.artifact-transfer-plan-json }}
       artifacts: ${{ steps.plan.outputs.artifacts }}
       builder: ${{ steps.builder.outputs.builder }}
@@ -113,6 +140,7 @@ jobs:
     steps:
       - name: Resolve image builder
         id: builder
+        shell: bash
         env:
           BUILDER: ${{ inputs['image-builder'] || vars.CI_IMAGE_BUILDER || 'buildah' }}
           JOB_IMAGE: ${{ inputs['image-builder-job-image'] || vars.CI_IMAGE_BUILDER_JOB_IMAGE }}
@@ -129,27 +157,6 @@ jobs:
             *) echo 'ERROR: image-builder must be buildah or kaniko' >&2; exit 1 ;;
           esac
           printf 'builder=%s\nbuilder-job-image=%s\n' "$BUILDER" "$JOB_IMAGE" >> "$GITHUB_OUTPUT"
-      - name: Checkout forge-ci bootstrap installers
-        id: forge-ci-bootstrap
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
-        with:
-          repository: ${{ needs.resolve-bootstrap.outputs.forge-ci-repository }}
-          ref: ${{ needs.resolve-bootstrap.outputs.forge-ci-binary-ref }}
-          path: .github-shared
-          sparse-checkout: scripts/bootstrap
-          persist-credentials: false
-      - name: Set up Go for source bootstraps
-        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
-        with:
-          go-version-file: .github-shared/go.mod
-          cache: false
-      - name: Install forge-ci binary
-        env:
-          CGO_ENABLED: "0"
-          FORGE_CI_BINARY_REF: ${{ needs.resolve-bootstrap.outputs.forge-ci-binary-ref }}
-          FORGE_CI_SOURCE_SHA: ${{ steps.forge-ci-bootstrap.outputs.commit }}
-          FORGE_CI_REPOSITORY: ${{ needs.resolve-bootstrap.outputs.forge-ci-repository }}
-        run: bash .github-shared/scripts/bootstrap/install-forge-ci.sh "$FORGE_CI_BINARY_REF"
       - name: Admit development publication
         env:
           SOURCE_BRANCH: ${{ inputs.branch }}
@@ -169,6 +176,7 @@ jobs:
         run: printf 'sha=%s\n' "$(git rev-parse HEAD)" >>"$GITHUB_OUTPUT"
       - name: Plan declared snapshot images
         id: plan
+        shell: bash
         working-directory: source
         env:
           SOURCE_BRANCH: ${{ inputs.branch }}
@@ -185,15 +193,6 @@ jobs:
             --branch "$SOURCE_BRANCH" --source-sha "$SOURCE_SHA" \
             --image-repository "$IMAGE_REPOSITORY" --publish="$PUBLISH_CONTAINERS" \
             --output "${RUNNER_TEMP}/snapshot-inputs/snapshot-plan.json"
-      - name: Retain exact trusted engine and bootstrap helpers
-        id: engine
-        run: |
-          set -euo pipefail
-          cp "$(command -v forge-ci)" "${RUNNER_TEMP}/snapshot-inputs/forge-ci"
-          cp -R .github-shared/scripts/bootstrap "${RUNNER_TEMP}/snapshot-inputs/bootstrap"
-          cp .github-shared/go.mod "${RUNNER_TEMP}/snapshot-inputs/engine.go.mod"
-          digest=$(sha256sum "${RUNNER_TEMP}/snapshot-inputs/forge-ci")
-          printf 'sha256=%s\n' "${digest%% *}" >>"$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ${{ inputs['artifact-name'] }}-inputs
@@ -227,14 +226,6 @@ jobs:
         with:
           name: ${{ inputs['artifact-name'] }}-inputs
           path: ${{ runner.temp }}/snapshot-inputs
-      - name: Install the verified run engine
-        env:
-          ENGINE_SHA256: ${{ needs.plan.outputs.engine-sha256 }}
-        run: |
-          set -euo pipefail
-          printf '%s  %s\n' "$ENGINE_SHA256" "${RUNNER_TEMP}/snapshot-inputs/forge-ci" | sha256sum --check
-          chmod +x "${RUNNER_TEMP}/snapshot-inputs/forge-ci"
-          printf '%s\n' "${RUNNER_TEMP}/snapshot-inputs" >>"$GITHUB_PATH"
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           ref: ${{ needs.plan.outputs.source-sha }}
@@ -262,6 +253,8 @@ jobs:
     if: ${{ !cancelled() && needs.plan.result == 'success' && (needs.build-artifacts.result == 'success' || needs.build-artifacts.result == 'skipped') }}
     runs-on: ubuntu-26.04
     timeout-minutes: 20
+    container:
+      image: ${{ inputs['runtime-image'] }}
     permissions:
       actions: read
       contents: read
@@ -270,14 +263,6 @@ jobs:
         with:
           name: ${{ inputs['artifact-name'] }}-inputs
           path: ${{ runner.temp }}/snapshot-inputs
-      - name: Install the verified run engine
-        env:
-          ENGINE_SHA256: ${{ needs.plan.outputs.engine-sha256 }}
-        run: |
-          set -euo pipefail
-          printf '%s  %s\n' "$ENGINE_SHA256" "${RUNNER_TEMP}/snapshot-inputs/forge-ci" | sha256sum --check
-          chmod +x "${RUNNER_TEMP}/snapshot-inputs/forge-ci"
-          printf '%s\n' "${RUNNER_TEMP}/snapshot-inputs" >>"$GITHUB_PATH"
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           ref: ${{ needs.plan.outputs.source-sha }}
@@ -318,7 +303,7 @@ jobs:
           if-no-files-found: error
           retention-days: 7
   build:
-    needs: [plan, prepare-context]
+    needs: [resolve-bootstrap, plan, prepare-context]
     if: ${{ !failure() && !cancelled() && needs.prepare-context.result == 'success' && needs.plan.outputs.builds != '[]' }}
     strategy:
       fail-fast: false
@@ -330,33 +315,52 @@ jobs:
       actions: read
       contents: read
     steps:
+      - name: Require original canonical success and approved identity
+        # Before the frozen source checkout: the canonical CLI of this run,
+        # built from the approved engine commit for both native
+        # architectures, is the only forge-ci this leg runs.
+        shell: /bin/bash --noprofile --norc -peuo pipefail {0}
+        env:
+          ENGINE_REPOSITORY: ${{ needs.resolve-bootstrap.outputs.forge-ci-repository }}
+          ENGINE_COMMIT: ${{ inputs['forge-ci-binary-ref'] }}
+          ENGINE_ORIGIN: ${{ github.server_url }}/${{ needs.resolve-bootstrap.outputs.forge-ci-repository }}
+          RUNTIME_IMAGE: ${{ inputs['runtime-image'] }}
+          PRODUCER_ARTIFACT_ID: ${{ inputs['canonical-artifact-id'] }}
+          PRODUCER_ARTIFACT_NAME: ${{ inputs['canonical-artifact-name'] }}
+          PRODUCER_RUN_ID: ${{ inputs['canonical-producer-run-id'] }}
+          PRODUCER_RUN_ATTEMPT: ${{ inputs['canonical-producer-run-attempt'] }}
+          PRODUCER_ENGINE_REPOSITORY: ${{ inputs['canonical-producer-engine-repository'] }}
+          PRODUCER_ENGINE_COMMIT: ${{ inputs['canonical-producer-engine-commit'] }}
+          CANONICAL_PRODUCER_RESULT: ${{ inputs['canonical-producer-result'] }}
+        run: |
+          [[ "$GITHUB_RUN_ID" =~ ^[1-9][0-9]*$ && "$GITHUB_RUN_ATTEMPT" =~ ^[1-9][0-9]*$ ]]
+          [[ "$CANONICAL_PRODUCER_RESULT" == success && "$PRODUCER_RUN_ID" == "$GITHUB_RUN_ID" && "$PRODUCER_RUN_ATTEMPT" == "$GITHUB_RUN_ATTEMPT" ]]
+          [[ "$ENGINE_REPOSITORY" =~ ^[A-Za-z0-9_-][A-Za-z0-9_.-]*/[A-Za-z0-9_-][A-Za-z0-9_.-]*$ && "$ENGINE_COMMIT" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$PRODUCER_ENGINE_REPOSITORY" == "$ENGINE_REPOSITORY" && "$PRODUCER_ENGINE_COMMIT" == "$ENGINE_COMMIT" ]]
+          [[ "$PRODUCER_ARTIFACT_ID" =~ ^[1-9][0-9]*$ && "$PRODUCER_ARTIFACT_NAME" == "forge-ci-canonical-linux-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-$ENGINE_COMMIT" ]]
+          [[ "$RUNTIME_IMAGE" =~ ^[a-z0-9][a-z0-9./:_-]*@sha256:[0-9a-f]{64}$ ]]
+          [[ "$GITHUB_SERVER_URL" =~ ^https://[^/?#@[:space:]]+$ && "$ENGINE_ORIGIN" == "$GITHUB_SERVER_URL/$ENGINE_REPOSITORY" ]]
+          for variable in ENGINE_REPOSITORY ENGINE_COMMIT ENGINE_ORIGIN RUNTIME_IMAGE PRODUCER_ARTIFACT_ID PRODUCER_ARTIFACT_NAME PRODUCER_RUN_ID PRODUCER_RUN_ATTEMPT PRODUCER_ENGINE_REPOSITORY PRODUCER_ENGINE_COMMIT CANONICAL_PRODUCER_RESULT; do
+            printf '%s=%s\n' "$variable" "${!variable}" >>"$GITHUB_ENV"
+          done
+      - name: Checkout only the approved engine before consumer or private steps
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          repository: ${{ env.ENGINE_REPOSITORY }}
+          ref: ${{ env.ENGINE_COMMIT }}
+          path: _forge_ci_bootstrap
+          persist-credentials: false
+          submodules: false
+          lfs: false
+      - name: Consume canonical CLI from the independently pinned engine checkout
+        id: canonical-bootstrap
+        uses: ./_forge_ci_bootstrap/.github/actions/consume-canonical-cli
+        with:
+          tool-profile: host # Buildah and the frozen source in scope: root-owned system tools only.
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: ${{ inputs['artifact-name'] }}-inputs
           path: ${{ runner.temp }}/snapshot-inputs
-      - name: Install the verified run engine
-        if: ${{ matrix.build.arch == 'amd64' }}
-        env:
-          ENGINE_SHA256: ${{ needs.plan.outputs.engine-sha256 }}
-        run: |
-          printf '%s  %s\n' "$ENGINE_SHA256" "${RUNNER_TEMP}/snapshot-inputs/forge-ci" | sha256sum --check
-          chmod +x "${RUNNER_TEMP}/snapshot-inputs/forge-ci"
-          printf '%s\n' "${RUNNER_TEMP}/snapshot-inputs" >>"$GITHUB_PATH"
-      - name: Set up native arm64 source toolchain
-        if: ${{ matrix.build.arch == 'arm64' }}
-        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
-        with:
-          go-version-file: ${{ runner.temp }}/snapshot-inputs/engine.go.mod
-          cache: false
-      - name: Install arm64 engine from the same frozen revision
-        if: ${{ matrix.build.arch == 'arm64' }}
-        env:
-          CGO_ENABLED: "0"
-          FORGE_CI_BINARY_REF: ${{ needs.plan.outputs.engine-ref }}
-          FORGE_CI_SOURCE_SHA: ${{ needs.plan.outputs.bootstrap-sha }}
-          FORGE_CI_REPOSITORY: ${{ needs.plan.outputs.engine-repository }}
-          FORGE_CI_INSTALL_DIR: ${{ runner.temp }}/snapshot-native-bin
-        run: bash "${RUNNER_TEMP}/snapshot-inputs/bootstrap/install-forge-ci.sh" "$FORGE_CI_BINARY_REF"
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           ref: ${{ needs.plan.outputs.source-sha }}
@@ -432,6 +436,10 @@ jobs:
         image: ${{ fromJson(needs.plan.outputs.images) }}
     runs-on: ubuntu-26.04
     timeout-minutes: 20
+    # The full image: Trivy for the scan every published image gets, syft
+    # for the configured SBOMs. forge-ci is baked in.
+    container:
+      image: ${{ inputs['runtime-image-full'] }}
     permissions:
       contents: read
       packages: write
@@ -440,13 +448,6 @@ jobs:
         with:
           name: ${{ inputs['artifact-name'] }}-inputs
           path: ${{ runner.temp }}/snapshot-inputs
-      - name: Install the verified run engine
-        env:
-          ENGINE_SHA256: ${{ needs.plan.outputs.engine-sha256 }}
-        run: |
-          printf '%s  %s\n' "$ENGINE_SHA256" "${RUNNER_TEMP}/snapshot-inputs/forge-ci" | sha256sum --check
-          chmod +x "${RUNNER_TEMP}/snapshot-inputs/forge-ci"
-          printf '%s\n' "${RUNNER_TEMP}/snapshot-inputs" >>"$GITHUB_PATH"
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: ${{ inputs['artifact-name'] }}-layout-${{ matrix.image.name }}-*
@@ -454,18 +455,6 @@ jobs:
           merge-multiple: true
       - name: Refuse pull-request publication
         run: forge-ci validate event-context
-      - name: Install configured evidence tools
-        env:
-          SBOM: ${{ matrix.image.sbom }}
-        run: |
-          # Every published image is scanned; the administrator policy in
-          # the engine decides whether findings block.
-          source "${RUNNER_TEMP}/snapshot-inputs/bootstrap/install-trivy.sh"
-          install_trivy
-          if [[ "$SBOM" == true ]]; then
-            source "${RUNNER_TEMP}/snapshot-inputs/bootstrap/install-syft.sh"
-            install_syft
-          fi
       - name: Read scan policy from the frozen source
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
@@ -506,6 +495,8 @@ jobs:
     needs: [plan, prepare-context, build, publish]
     if: ${{ !cancelled() && needs.plan.result == 'success' && needs.prepare-context.result == 'success' && ((needs.build.result == 'success' && needs.publish.result == 'success') || (needs.plan.outputs.images == '[]' && needs.build.result == 'skipped' && needs.publish.result == 'skipped')) }}
     runs-on: ubuntu-26.04
+    container:
+      image: ${{ inputs['runtime-image'] }}
     permissions:
       contents: read
     outputs:
@@ -515,13 +506,6 @@ jobs:
         with:
           name: ${{ inputs['artifact-name'] }}-inputs
           path: ${{ runner.temp }}/snapshot-inputs
-      - name: Install the verified run engine
-        env:
-          ENGINE_SHA256: ${{ needs.plan.outputs.engine-sha256 }}
-        run: |
-          printf '%s  %s\n' "$ENGINE_SHA256" "${RUNNER_TEMP}/snapshot-inputs/forge-ci" | sha256sum --check
-          chmod +x "${RUNNER_TEMP}/snapshot-inputs/forge-ci"
-          printf '%s\n' "${RUNNER_TEMP}/snapshot-inputs" >>"$GITHUB_PATH"
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         if: ${{ needs.publish.result == 'success' }}
         with:
