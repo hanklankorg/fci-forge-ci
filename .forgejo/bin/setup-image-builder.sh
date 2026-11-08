@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-FileCopyrightText: 2026 Digg - Agency for Digital Government
-# SPDX-License-Identifier: EUPL-1.2 OR GPL-3.0-or-later
+# SPDX-License-Identifier: CC0-1.0
 
 # Shared exec glue for the composite action and callable workflows that fetch
 # their own pinned layer. Policy and engine effects stay behind the CLI.

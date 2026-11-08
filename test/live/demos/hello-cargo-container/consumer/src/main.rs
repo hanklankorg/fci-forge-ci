@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Digg - Agency for Digital Government
+// SPDX-License-Identifier: CC0-1.0
+
 //! A tiny HTTP service: `GET /` answers with a greeting and `GET /health`
 //! with `ok`, on port 8080. Only the standard library, so the image build
 //! fetches no crate.

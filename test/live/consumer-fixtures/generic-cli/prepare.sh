@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SPDX-FileCopyrightText: The Forge CI Authors
+# SPDX-FileCopyrightText: 2026 Digg - Agency for Digital Government
 # SPDX-License-Identifier: CC0-1.0
 # Operator-only: create an unsigned disposable adapter snapshot; never a request tag.
 set -euo pipefail
@@ -60,12 +60,12 @@ if [ "${kind}" = go ]; then
 	# The Go check owner verifies its tree identity before running its full gate.
 	git -C "${destination}" read-tree --prefix=.gitlab/generic-cli-original-source/ "${expected}"
 	printf '%s\n' buildah-integration | stage .gitlab/generic-cli-checks
-	stage_license .gitlab/generic-cli-checks 'The Forge CI Authors'
+	stage_license .gitlab/generic-cli-checks '2026 Digg - Agency for Digital Government'
 fi
 jq -n --arg commit "${expected}" --arg tree "$(git -C "${source_root}" rev-parse "${expected}^{tree}")" --arg objectFormat "$(git -C "${source_root}" rev-parse --show-object-format)" \
 	'{commit:$commit,tree:$tree,objectFormat:$objectFormat,lintPolicy:"informational",excludedChecks:[],coverageLimitation:"Full Nanolinter plan runs diagnostically; its findings are not an acceptance gate. Prior findings, including 64 KICS findings, remain unresolved. Application tests/build/release/signatures/payload verification remain blocking; not a full original just verify pass."}' | stage .gitlab/generic-cli-source.json
 for path in .gitlab/generic-cli-kind .gitlab/generic-cli-source.json; do
-	stage_license "${path}" 'The Forge CI Authors'
+	stage_license "${path}" '2026 Digg - Agency for Digital Government'
 done
 for path in .chglog/config-keepachangelog.yml .chglog/CHANGELOG-keepachangelog.tpl .chglog/config-minimal.yml .chglog/CHANGELOG-minimal.tpl; do
 	stage "${path}" <"${engine}/test/live/demos/hello-maven/consumer/${path}"

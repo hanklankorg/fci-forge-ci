@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Digg - Agency for Digital Government
+// SPDX-License-Identifier: CC0-1.0
+
 //! Fixture-only evidence writer, built statically before Kaniko replaces the
 //! job filesystem. BusyBox supplies sha256sum after the image builds.
 use std::env;

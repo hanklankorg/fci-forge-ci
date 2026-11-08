@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# SPDX-FileCopyrightText: The Forge CI Authors
-# SPDX-License-Identifier: EUPL-1.2 OR GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Digg - Agency for Digital Government
+# SPDX-License-Identifier: CC0-1.0
 
 # Repository publication orchestration, not an engine CLI or consumer contract.
 # Image operations belong to forge-ci; this script binds this runtime roster to

@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: The Forge CI Authors
+# SPDX-FileCopyrightText: 2026 Digg - Agency for Digital Government
 # SPDX-License-Identifier: CC0-1.0
 # Thin caller for a Forge CI softfork. Publish/authenticate the layer and its
 # matching signer before replacing these immutable-pin placeholders.
