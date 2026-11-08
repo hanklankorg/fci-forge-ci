@@ -24,15 +24,19 @@ artifacts:
     config:
       node-version: 24
       npm-tag: release-{version}
-# Containers are separate - they reference artifacts by name
+# Containers are separate - they reference artifacts by name. A release
+# publishes every container to one image repository, so each container
+# needs its own tag-suffix to keep the two images apart there.
 containers:
   - name: backend-api
     from: [backend-api]
     container-file: services/backend/Containerfile
     context: .
+    tag-suffix: -backend
     platforms: linux/amd64,linux/arm64
   - name: frontend-ui
     from: [frontend-ui]
     container-file: packages/frontend/Containerfile
     context: .
+    tag-suffix: -frontend
     platforms: linux/amd64,linux/arm64

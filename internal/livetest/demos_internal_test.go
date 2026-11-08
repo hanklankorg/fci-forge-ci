@@ -10,9 +10,70 @@ import (
 	"strings"
 	"testing"
 
+	appconfig "github.com/diggsweden/forge-ci/internal/app/config"
 	"github.com/diggsweden/forge-ci/internal/domain/config"
+	"github.com/diggsweden/forge-ci/internal/domain/output"
+	"github.com/diggsweden/forge-ci/internal/domain/pipeline"
 	"github.com/diggsweden/forge-ci/internal/testutil/reporoot"
 )
+
+// A release publishes every container a demo declares to one image
+// repository, so each declaration with containers must plan as release images
+// there: two containers that would publish the same tag are refused by the
+// planner, and a shipped demo must never carry that shape. A container that
+// declares extract is an extraction image, which release images never are;
+// such a demo declares its release images in another file.
+func TestDemoContainersPlanAsReleaseImages(t *testing.T) {
+	t.Parallel()
+
+	demos, err := filepath.Glob(filepath.Join(reporoot.Path(t), "test", "live", "demos", "*", "consumer"))
+	if err != nil || len(demos) == 0 {
+		t.Fatalf("demo consumers: %v", err)
+	}
+
+	for _, consumer := range demos {
+		t.Run(filepath.Base(filepath.Dir(consumer)), func(t *testing.T) {
+			t.Parallel()
+
+			images, declaration, err := GitLabReleaseImages(consumer)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if !images {
+				t.Skip("declares no containers")
+			}
+
+			path := filepath.Join(consumer, cmp.Or(declaration, GitLabDefaultArtifactsConfig))
+
+			declared, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			parsed, err := config.Parse(declared)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			for _, container := range parsed.Containers {
+				if container.Extract != nil {
+					t.Skip("declares an extraction image")
+				}
+			}
+
+			_, err = appconfig.ResolveReleaseImagesPlan(appconfig.EmitReleaseImagesPlanInput{
+				Config: appconfig.EmitConfigPlanInput{Path: path},
+				Images: pipeline.ReleaseImagesInput{
+					ImageRepository: "registry.invalid/demo", Repository: "demo/demo", ReleaseTag: "v1.2.3", ReleasePlatforms: "linux/amd64",
+				},
+			}, output.Annotator{})
+			if err != nil {
+				t.Fatalf("release images: %v", err)
+			}
+		})
+	}
+}
 
 // The GitLab image demos push no image of their own: the release's image jobs
 // build the one container their declaration holds, artifacts.yml unless it

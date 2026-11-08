@@ -1376,12 +1376,18 @@ containers:
     from: [backend]
     container-file: java-backend/Containerfile
     context: .
+    tag-suffix: -backend
 
   - name: frontend
     from: [frontend]
     container-file: frontend/Containerfile
     context: .
+    tag-suffix: -frontend
 ```
+
+A release publishes every container to one image repository, so separate
+containers each carry a `tag-suffix`; without it the release-image plan
+refuses two containers that would publish the same tag.
 
 ### Combined Container (Multiple Artifacts → One Container)
 
