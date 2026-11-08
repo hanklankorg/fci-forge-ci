@@ -327,7 +327,7 @@ func npmFixtureFiles(recipeDirectory, workflow string, oracle []byte, developmen
 
 // readNPMChangelogInputs copies the recipe's changelog inputs into files.
 func readNPMChangelogInputs(recipeDirectory string, files map[string]string) error {
-	for _, path := range []string{".chglog/config-keepachangelog.yml", ".chglog/config-minimal.yml", ".chglog/CHANGELOG-keepachangelog.tpl", ".chglog/CHANGELOG-minimal.tpl"} {
+	for _, path := range []string{chglogKeepAChangelogConfig, chglogMinimalConfig, ".chglog/CHANGELOG-keepachangelog.tpl", ".chglog/CHANGELOG-minimal.tpl"} {
 		text, err := os.ReadFile(filepath.Join(recipeDirectory, path)) //nolint:gosec // operator-supplied recipe directory joined with a fixed changelog file name.
 		if err != nil {
 			return err

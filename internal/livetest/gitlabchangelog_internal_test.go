@@ -4,6 +4,8 @@
 package livetest
 
 import (
+	"bytes"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -11,11 +13,29 @@ import (
 )
 
 // A demo chooses its GitLab renderer by the configuration it carries: the
-// component's default git-cliff one, or git-chglog's .chglog/.
+// component's default git-cliff one, or git-chglog's .chglog/. The git-cliff
+// demo's configurations are init's templates byte for byte.
 func TestGitLabChangelogInputsFollowTheConsumersConfiguration(t *testing.T) {
 	t.Parallel()
 
-	demos := filepath.Join(reporoot.Path(t), "test", "live", "demos")
+	root := reporoot.Path(t)
+	demos := filepath.Join(root, "test", "live", "demos")
+
+	for _, name := range []string{"keepachangelog.toml", "minimal.toml"} {
+		template, err := os.ReadFile(filepath.Join(root, "templates", "gitcliff", name))
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		consumer, err := os.ReadFile(filepath.Join(demos, "hello-cargo-workspace", "consumer", ".forge-ci", "gitcliff", name))
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if !bytes.Equal(consumer, template) {
+			t.Errorf("hello-cargo-workspace's %s differs from templates/gitcliff/%s", name, name)
+		}
+	}
 
 	for root, creator := range map[string]string{
 		"": "git-chglog",

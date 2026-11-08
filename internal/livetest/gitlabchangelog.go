@@ -10,6 +10,13 @@ import "path/filepath"
 // writes.
 const gitlabGitCliffConfig = ".forge-ci/gitcliff/keepachangelog.toml"
 
+// The git-chglog configurations the harness's fixtures and the demo recipes
+// seed in .chglog/: the full changelog's and the commit body's.
+const (
+	chglogKeepAChangelogConfig = ".chglog/config-keepachangelog.yml"
+	chglogMinimalConfig        = ".chglog/config-minimal.yml"
+)
+
 // GitLabChangelogInputs are the release policy's renderer inputs the
 // consumer's files call for. A consumer that carries the component's default
 // configuration gets none, so the component renders with its default,
@@ -29,7 +36,7 @@ func GitLabChangelogInputs(consumerRoot string) (map[string]any, error) {
 
 	return map[string]any{
 		"changelog-creator":  "git-chglog",
-		"changelog-config":   ".chglog/config-keepachangelog.yml",
-		"commit-body-config": ".chglog/config-minimal.yml",
+		"changelog-config":   chglogKeepAChangelogConfig,
+		"commit-body-config": chglogMinimalConfig,
 	}, nil
 }

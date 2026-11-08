@@ -16,8 +16,8 @@ import (
 var mavenConsumerRecipeFiles = []string{
 	".forgejo/workflows/pullrequest.yml",
 	".forgejo/workflows/release.yml",
-	".chglog/config-keepachangelog.yml",
-	".chglog/config-minimal.yml",
+	chglogKeepAChangelogConfig,
+	chglogMinimalConfig,
 	".chglog/CHANGELOG-keepachangelog.tpl",
 	".chglog/CHANGELOG-minimal.tpl",
 }

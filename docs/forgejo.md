@@ -1388,14 +1388,14 @@ and the signer's own toolchain/key checks remain mandatory. A misspelled skip
 value fails instead of silently bypassing the check.
 
 **A version bump never runs where the key is.** A bump of project files runs
-the project's build tool, and with it the project's plugins or scripts: `mvn
-versions:set` for `version-bump: maven`, `npm version` for `npm`, and a
-`Cargo.toml` edit with `cargo update --workspace` for `cargo`. So it runs in a `version-bump` job of
-its own, in the `version-bump-image` the caller pins by digest, and that job
-references no secret at all, not even a presence check. It runs the engine's
-`version bump`, the same verb GitHub's and GitLab's release preparation run,
-and hands over only `git diff` of the result, uploaded as an artifact, with
-the patch's sha256 as a job output.
+the project's build tool, and with it the project's plugins or scripts:
+`mvn versions:set` for `version-bump: maven`, `npm version` for `npm`, and a
+`Cargo.toml` edit with `cargo update --workspace` for `cargo`. So it runs in a
+`version-bump` job of its own, in the `version-bump-image` the caller pins by
+digest, and that job references no secret at all, not even a presence check.
+It runs the engine's `version bump`, the same verb GitHub's and GitLab's
+release preparation run, and hands over only `git diff` of the result,
+uploaded as an artifact, with the patch's sha256 as a job output.
 
 The `prepare` job runs no build tool. `forge-ci version apply-bump` checks the
 patch as text before Git applies it: it matches the reported digest, touches
@@ -1406,9 +1406,9 @@ current version replaced by the release version and nothing else. After
 applying it, the root project file must declare the release version. One
 limit: a line naming another artifact at exactly the project's old version,
 such as a sibling module or a dependency released in step, also passes,
-because `versions:set` legitimately moves reactor modules the same way. The files it changed are committed beside `CHANGELOG.md`
-in the signed release commit; any other file the bump job touched never
-reaches it.
+because `versions:set` legitimately moves reactor modules the same way. The
+files it changed are committed beside `CHANGELOG.md` in the signed release
+commit; any other file the bump job touched never reaches it.
 
 This is stricter than GitHub's `version-bump.yml`, which runs the bump in the
 job that later signs and pushes the release commit. A POM whose version is a

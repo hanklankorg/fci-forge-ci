@@ -192,6 +192,20 @@ func TestCanonicalConsumerWorkflowGraph(t *testing.T) {
 	}
 }
 
+// withoutDescription is a workflow input's definition without its
+// description, which may be reworded without changing the contract.
+func withoutDescription(input any) any {
+	spec, ok := input.(map[string]any)
+	if !ok {
+		return input
+	}
+
+	spec = maps.Clone(spec)
+	delete(spec, "description")
+
+	return spec
+}
+
 func TestCanonicalConsumerNativeCommandsSecretsAndReadCaps(t *testing.T) {
 	t.Parallel()
 
@@ -214,7 +228,7 @@ func TestCanonicalConsumerNativeCommandsSecretsAndReadCaps(t *testing.T) {
 		require.Equal(t, original.On.Call.Secrets, current.On.Call.Secrets)
 
 		for key, value := range original.On.Call.Inputs {
-			require.Equal(t, value, current.On.Call.Inputs[key], file+key)
+			require.Equal(t, withoutDescription(value), withoutDescription(current.On.Call.Inputs[key]), file+key)
 		}
 
 		for name, before := range original.Jobs {
