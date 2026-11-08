@@ -35,11 +35,15 @@ const (
 // whose includes serve its three pipelines.
 const gitlabLifecyclePolicyFile = "lifecycle.yml"
 
-// gitlabMainPushRule admits an include for the push pipelines of main alone:
-// the push a merge makes, not a tag's push, whose ref name is the tag's, and
-// not a merge request's pipeline. Both variables are among those GitLab
-// documents for include rules.
-const gitlabMainPushRule = `$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_REF_NAME == "main"`
+// gitlabMainPushRule admits an include for the push pipelines that move main
+// alone: the push a merge makes, not the push that creates main, not a tag's
+// push, whose ref name is the tag's, and not a merge request's pipeline.
+// GitLab gives a push that creates a branch an all-zero CI_COMMIT_BEFORE_SHA.
+// It evaluates a push's pipeline in a later background job, which may run
+// after the policy is in place, so the push that seeds main must match no
+// rule of the policy rather than rely on arriving first. All three variables
+// are pre-pipeline variables, which GitLab documents for include rules.
+const gitlabMainPushRule = `$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_REF_NAME == "main" && $CI_COMMIT_BEFORE_SHA !~ /^0+$/`
 
 // A consumer lifecycle on GitLab: the linked flow TestForgejoLayer_ConsumerLifecycle
 // runs, in one GitLab project under one pinned policy. It is the Maven service
@@ -199,7 +203,8 @@ func runGitLabConsumerLifecycle(t *testing.T, root string, private bool) {
 	// The snapshot component takes the development phase: the consumer's
 	// declaration, the snapshot's image repository in the project's own
 	// registry, the Maven build in the build image, the image build with the
-	// selected builder on its runner. It runs on the push pipelines of main.
+	// selected builder on its runner. It runs on the push pipelines that move
+	// main.
 	snapshotInclude := map[string]any{
 		"component": gitlabComponent(target, layer, "snapshot-images"),
 		"inputs": layer.ComponentAdminInputs(t, "snapshot-images", map[string]any{
@@ -239,8 +244,8 @@ func runGitLabConsumerLifecycle(t *testing.T, root string, private bool) {
 
 	head := consumer.PushChange(t, repo, lifecycleBranch, base)
 
-	// Nothing has run so far: the pushes arrived before the project had a
-	// pipeline configuration.
+	// Nothing runs for these two pushes, whenever GitLab evaluates them: they
+	// create main and the change branch, which no rule of the policy admits.
 	useGitLabAdminPolicy(ctx, t, client, project, gitlabLifecyclePolicyFile+"@"+policyProject+":"+policy.ID)
 	waitGitLabBranch(t, ctx, client, project, lifecycleBranch, head)
 
