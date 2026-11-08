@@ -43,7 +43,13 @@ func TestNativeGPGFixtureUsesRealGoAndOrdinaryReleaseOwner(t *testing.T) {
 	_, err := os.Stat(filepath.Join(root, "cmd/my-cli/main.go"))
 	require.NoError(t, err)
 
-	workflow := read("test/live/github/workflows/release-gpg.yml")
+	workflow := read("test/live/github-gpg/workflows/release-gpg.yml")
+
+	require.NoFileExists(t, filepath.Join(root, "test/live/github/workflows/release-gpg.yml"))
+	profileWorkflows, err := filepath.Glob(filepath.Join(root, "test/live/github-gpg/workflows/*.yml"))
+	require.NoError(t, err)
+	require.Equal(t, []string{filepath.Join(root, "test/live/github-gpg/workflows/release-gpg.yml")}, profileWorkflows)
+
 	jobs := workflow["jobs"].(map[string]any)
 	require.Len(t, jobs, 1)
 	job := jobs["release"].(map[string]any)
