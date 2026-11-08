@@ -29,7 +29,7 @@ func TestCampaignPublishedSnapshotRoutesToNativeTrial(t *testing.T) {
 				"consumer hello-maven-service "+campaignPublishedSnapshot+" job-image="+image+"\n")
 			writeFile(t, filepath.Join(dir, "demos/hello-maven-service/README.md"), "native fixture\n")
 
-			plan, err := PlanCampaignLane(dir, campaignForgejo, cases, campaignHead, CampaignRun{})
+			plan, err := PlanCampaignLane(reporoot.Path(t), dir, campaignForgejo, cases, campaignHead, CampaignRun{})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -66,7 +66,7 @@ func TestCampaignPublishedSnapshotRefusesWholePlan(t *testing.T) {
 				first+"consumer hello-maven-service "+campaignPublishedSnapshot+tail+"\n")
 			writeFile(t, filepath.Join(dir, "demos/hello-maven-service/README.md"), "native fixture\n")
 
-			plan, err := PlanCampaignLane(dir, campaignForgejo, cases, campaignHead, CampaignRun{})
+			plan, err := PlanCampaignLane(reporoot.Path(t), dir, campaignForgejo, cases, campaignHead, CampaignRun{})
 			if !errors.Is(err, errs.ErrValidation) || len(plan.Cases) != 0 {
 				t.Fatalf("invalid snapshot left executable cases: plan=%+v err=%v", plan, err)
 			}
@@ -101,7 +101,7 @@ func TestCampaignPublishedSnapshotSupportedRoadAndDiagnostics(t *testing.T) {
 			dir, cases := newCampaign(t, "CAMPAIGN_COMMIT="+campaignHead+"\n", "scenario TestFirst\n"+line+"\n")
 			writeFile(t, filepath.Join(dir, "demos", tc.project, "README.md"), "native fixture\n")
 
-			plan, err := PlanCampaignLane(dir, tc.provider, cases, campaignHead, CampaignRun{})
+			plan, err := PlanCampaignLane(reporoot.Path(t), dir, tc.provider, cases, campaignHead, CampaignRun{})
 			if !errors.Is(err, errs.ErrValidation) || len(plan.Cases) != 0 {
 				t.Fatalf("unsupported road/event admitted: plan=%+v err=%v", plan, err)
 			}
@@ -159,7 +159,7 @@ func TestCampaignPublishedSnapshotBuilderDeclarations(t *testing.T) {
 				"setting image-builder="+tc.declared+"\nconsumer hello-maven-service "+campaignPublishedSnapshot+" job-image="+snapshotJobImage+"\n")
 			writeFile(t, filepath.Join(dir, "demos/hello-maven-service/README.md"), "native fixture\n")
 
-			plan, err := PlanCampaignLane(dir, campaignForgejo, cases, campaignHead, run)
+			plan, err := PlanCampaignLane(reporoot.Path(t), dir, campaignForgejo, cases, campaignHead, run)
 			if tc.valid {
 				if err != nil || len(plan.Cases) != 1 {
 					t.Fatalf("matching builder refused: %+v %v", plan, err)
@@ -223,7 +223,7 @@ func TestCampaignPublishedSnapshotCheckedInProfile(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	plan, err := PlanCampaignLane(dir, campaignForgejo, cases, campaignHead, run)
+	plan, err := PlanCampaignLane(reporoot.Path(t), dir, campaignForgejo, cases, campaignHead, run)
 	if err != nil || len(plan.Cases) != 1 || plan.Cases[0].Args[0] != "test-live-forgejo-snapshot" {
 		t.Fatalf("checked-in snapshot profile: %+v %v", plan, err)
 	}

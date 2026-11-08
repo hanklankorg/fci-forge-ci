@@ -43,13 +43,14 @@ var subjectVisibility = map[string]string{
 
 // privilegedDirect are the live files that may ask for the privileged runner
 // directly, and why. Every other scenario resolves the run's builder through
-// ChooseImageBuilder, or buildahRunner, which refuses kaniko with a reason.
+// ChooseImageBuilder, or buildahRunner, which refuses kaniko with a reason,
+// and a scenario that runs a container itself takes the runner from
+// ContainerRunnerLabel, whichever the builder.
 var privilegedDirect = map[string]string{
 	livetestTree + "/imagebuilder.go":                               "ChooseImageBuilder, the shared builder selection",
 	livetestTree + "/conformance/gitlabrelease_test.go":             "the Go CLI fixture's checks are Buildah's own integration tests, its subject",
 	livetestTree + "/conformance/gitlabconsumerdevelopment_test.go": "the Buildah branch of its own GitLabKaniko selection",
 	livetestTree + "/conformance/layerconsumertrial_test.go":        "Maven Testcontainers need user namespaces to run containers, and the Buildah branch of the trial's CI_IMAGE_BUILDER",
-	livetestTree + "/conformance/mavenservicedevelopment_test.go":   "Podman service readiness needs user namespaces independently of the selected image builder",
 }
 
 // buildahNamed are the live files whose fixtures may name Buildah, and why.

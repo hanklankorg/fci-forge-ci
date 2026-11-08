@@ -14,10 +14,14 @@ import (
 	"github.com/diggsweden/forge-ci/internal/testutil/reporoot"
 )
 
-// lifecycleCampaignEnv is a campaign with the Java job image of a Forgejo
-// lifecycle and the archives of a GitLab one.
-const lifecycleCampaignEnv = "CAMPAIGN_COMMIT=" + campaignHead + "\nJOB_IMAGE_JAVA=" + snapshotJobImage + "\n" +
+// lifecycleCampaignEnv is a campaign with the Java and kaniko job images of a
+// Forgejo lifecycle and the archives of a GitLab one.
+const lifecycleCampaignEnv = "CAMPAIGN_COMMIT=" + campaignHead + "\nJOB_IMAGE_JAVA=" + snapshotJobImage + "\nKANIKO_JOB_IMAGE=" + lifecycleKanikoJobImage + "\n" +
 	"FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_JAVA=/c/java.tar\nFORGE_CI_LIVE_SIGNER_IMAGE_ARCHIVE=/c/signer.tar\nLINT_IMAGE_ARCHIVE_JAVA=/c/lint-java.tar\n"
+
+// lifecycleKanikoJobImage is the campaign's kaniko job image, labelled for
+// the consumer trial's layer repository, as the lifecycle's layer is.
+const lifecycleKanikoJobImage = "forgejo.compose.forgelab:8443/forgeci/forge-ci-live-kaniko-job@sha256:1111111111111111111111111111111111111111111111111111111111111111"
 
 // newLifecycleCampaign is newCampaign with the Maven service demo, whose
 // GitLab gate lints.
@@ -32,16 +36,20 @@ func newLifecycleCampaign(t *testing.T, cases string) (string, string) {
 }
 
 // planCheckedInLifecycle plans the shipped cases file of a provider's
-// lifecycle, with the run its declared settings describe: a public, Buildah
-// run without admin enforcement.
-func planCheckedInLifecycle(t *testing.T, provider, casesFile string) (string, CampaignPlan) {
+// lifecycle, with the run its declared settings describe: the visibility and
+// the image builder selected as the file's header says, without admin
+// enforcement.
+func planCheckedInLifecycle(t *testing.T, provider, casesFile, visibility, builder string) (string, CampaignPlan) {
 	t.Helper()
 
 	dir, cases := newLifecycleCampaign(t, string(reporoot.ReadFile(t, casesFile)))
 
 	run, err := CampaignRunSettings(provider, func(key string) string {
-		if key == consumerVisibilityEnv {
-			return "public"
+		switch key {
+		case consumerVisibilityEnv:
+			return visibility
+		case GitLabImageBuilderEnv, ForgejoImageBuilderEnv:
+			return builder
 		}
 
 		return ""
@@ -50,7 +58,7 @@ func planCheckedInLifecycle(t *testing.T, provider, casesFile string) (string, C
 		t.Fatal(err)
 	}
 
-	plan, err := PlanCampaignLane(dir, provider, cases, campaignHead, run)
+	plan, err := PlanCampaignLane(reporoot.Path(t), dir, provider, cases, campaignHead, run)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -58,34 +66,49 @@ func planCheckedInLifecycle(t *testing.T, provider, casesFile string) (string, C
 	return dir, plan
 }
 
+// The shipped Forgejo lifecycle file declares neither visibility nor
+// builder: the visibility is the run's selector, both by default, and the
+// builder each line's CI_IMAGE_BUILDER, Buildah or the campaign's kaniko job
+// image, labelled for the layer repository the lifecycle runs from, with the
+// Forgejo selector left unset.
 func TestCampaignLifecycle_RunsTheMavenServiceDemoOnForgejo(t *testing.T) {
 	t.Parallel()
 
-	dir, plan := planCheckedInLifecycle(t, campaignForgejo, "test/live/campaigns/lifecycle-forgejo.cases")
+	dir, plan := planCheckedInLifecycle(t, campaignForgejo, "test/live/campaigns/lifecycle-forgejo.cases", "both", "")
 
-	want := []string{
-		campaignConsumerRecipe, campaignForgejo, filepath.Join(dir, "demos/hello-maven-service"), TrialLifecycle,
-		"CI_JOB_IMAGE=" + snapshotJobImage, "CI_IMAGE_BUILDER=buildah", "RELEASE_PLATFORMS=linux/amd64",
+	recipe := []string{campaignConsumerRecipe, campaignForgejo, filepath.Join(dir, "demos/hello-maven-service"), TrialLifecycle, "CI_JOB_IMAGE=" + snapshotJobImage}
+
+	want := [][]string{
+		append(slices.Clone(recipe), "CI_IMAGE_BUILDER=buildah", "RELEASE_PLATFORMS=linux/amd64"),
+		append(slices.Clone(recipe), "CI_IMAGE_BUILDER=kaniko", "CI_IMAGE_BUILDER_JOB_IMAGE="+lifecycleKanikoJobImage, "RELEASE_PLATFORMS=linux/amd64"),
 	}
-	if len(plan.Cases) != 1 || !slices.Equal(plan.Cases[0].Args, want) {
-		t.Fatalf("lifecycle recipe %+v, want %v", plan.Cases, want)
+	if len(plan.Cases) != 2 || !slices.Equal(plan.Cases[0].Args, want[0]) || !slices.Equal(plan.Cases[1].Args, want[1]) {
+		t.Fatalf("lifecycle recipes %+v, want %v", plan.Cases, want)
 	}
 }
 
 // On GitLab the lifecycle takes a release's archives and settings: the
-// recipe takes the archives apart, as for a release.
+// recipe takes the archives apart, as for a release. The builder is the
+// lane's selector, so the one file plans under either builder, and the
+// visibility the run's.
 func TestCampaignLifecycle_RunsTheMavenServiceDemoOnGitLab(t *testing.T) {
 	t.Parallel()
 
-	dir, plan := planCheckedInLifecycle(t, campaignGitLab, "test/live/campaigns/lifecycle-gitlab.cases")
+	for _, builder := range []string{"", ImageBuilderKaniko} {
+		t.Run("builder="+builder, func(t *testing.T) {
+			t.Parallel()
 
-	want := []string{
-		campaignConsumerRecipe, campaignGitLab, filepath.Join(dir, "demos/hello-maven-service"), TrialLifecycle,
-		"job-archive=/c/java.tar", "build-archive=/c/java.tar", "signer-archive=/c/signer.tar", "lint-archive=/c/lint-java.tar",
-		"version=0.2.0", "version-bump=maven", "job-user=65532:65532",
-	}
-	if len(plan.Cases) != 1 || !slices.Equal(plan.Cases[0].Args, want) {
-		t.Fatalf("lifecycle recipe %+v, want %v", plan.Cases, want)
+			dir, plan := planCheckedInLifecycle(t, campaignGitLab, "test/live/campaigns/lifecycle-gitlab.cases", "both", builder)
+
+			want := []string{
+				campaignConsumerRecipe, campaignGitLab, filepath.Join(dir, "demos/hello-maven-service"), TrialLifecycle,
+				"job-archive=/c/java.tar", "build-archive=/c/java.tar", "signer-archive=/c/signer.tar", "lint-archive=/c/lint-java.tar",
+				"version=0.2.0", "version-bump=maven", "job-user=65532:65532",
+			}
+			if len(plan.Cases) != 1 || !slices.Equal(plan.Cases[0].Args, want) {
+				t.Fatalf("lifecycle recipe %+v, want %v", plan.Cases, want)
+			}
+		})
 	}
 }
 
@@ -102,7 +125,7 @@ func TestCampaignLifecycle_RefusesWhatItCannotRun(t *testing.T) {
 		"floating job image":               {campaignForgejo, "consumer hello-maven-service lifecycle CI_JOB_IMAGE=registry.invalid/java:latest", "CI_JOB_IMAGE=<digest reference>"},
 		"workflow":                         {campaignForgejo, "consumer hello-maven-service lifecycle CI_JOB_IMAGE=" + snapshotJobImage + " workflow=release.yml", "workflow="},
 		"interruption":                     {campaignForgejo, "consumer hello-maven-service lifecycle CI_JOB_IMAGE=" + snapshotJobImage + " interrupt-after=Build", "interrupt-after="},
-		"kaniko":                           {campaignForgejo, "consumer hello-maven-service lifecycle CI_JOB_IMAGE=" + snapshotJobImage + " CI_IMAGE_BUILDER=kaniko CI_IMAGE_BUILDER_JOB_IMAGE=" + snapshotJobImage, "Buildah for now"},
+		"kaniko without its job image":     {campaignForgejo, "consumer hello-maven-service lifecycle CI_JOB_IMAGE=" + snapshotJobImage + " CI_IMAGE_BUILDER=kaniko", "CI_IMAGE_BUILDER_JOB_IMAGE=<digest reference>"},
 		"gitlab demo without a route":      {campaignGitLab, "consumer hello-go-cli lifecycle" + gitlabArchives, "hello-maven-service demo only"},
 		"gitlab without the lint archive":  {campaignGitLab, "consumer hello-maven-service lifecycle job-archive=/a.tar build-archive=/b.tar signer-archive=/s.tar", "nanolinter flavor's archive"},
 		"gitlab without the signer":        {campaignGitLab, "consumer hello-maven-service lifecycle job-archive=/a.tar build-archive=/b.tar lint-archive=/l.tar", "signer-archive="},
@@ -114,7 +137,7 @@ func TestCampaignLifecycle_RefusesWhatItCannotRun(t *testing.T) {
 
 			dir, cases := newLifecycleCampaign(t, test.line+"\n")
 
-			plan, err := PlanCampaignLane(dir, test.provider, cases, campaignHead, CampaignRun{})
+			plan, err := PlanCampaignLane(reporoot.Path(t), dir, test.provider, cases, campaignHead, CampaignRun{})
 			if !errors.Is(err, errs.ErrValidation) || len(plan.Cases) != 0 || !strings.Contains(err.Error(), test.want) {
 				t.Fatalf("an unrunnable lifecycle: plan=%+v err=%v, want a validation error naming %q", plan, err, test.want)
 			}

@@ -56,10 +56,7 @@ func runForgejoMavenServiceCase(t *testing.T, root string, private bool) {
 	builder := livetest.ChooseImageBuilder(t, target)
 	// This end-to-end trial also starts the published service with Podman.
 	// Keep its existing container runner for both builders and readiness.
-	buildLabel := livetest.PrivilegedRunnerLabel(t, target)
-	if buildLabel == "" {
-		livetest.NotCoveredf(t, "service readiness runs the published image with Podman and needs the contract's runner.privileged_label independently of the image builder")
-	}
+	buildLabel := livetest.ContainerRunnerLabel(t, target, "service readiness runs the published image with Podman")
 
 	t.Logf("development image builder: %s; container/readiness runner: %q", builder.Builder, buildLabel)
 

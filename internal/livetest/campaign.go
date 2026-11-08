@@ -158,9 +158,11 @@ func ReadCampaignEnv(path string) (map[string]string, error) {
 
 // PlanCampaignLane plans the lane of provider over the cases file: every case
 // is parsed before any runs, so a typo costs no run. A campaign prepared for
-// another commit than head is refused. Declared settings must match the caller's
-// effective run facts, including per-case overrides; they never choose settings.
-func PlanCampaignLane(dir, provider, casesPath, head string, run CampaignRun) (CampaignPlan, error) {
+// another commit than head, the checkout at root, is refused. Declared
+// settings must match the caller's effective run facts, including per-case
+// overrides; they never choose settings, and an administrator setting is
+// declared only where an orchestrator of the provider at root consumes it.
+func PlanCampaignLane(root, dir, provider, casesPath, head string, run CampaignRun) (CampaignPlan, error) {
 	if !filepath.IsAbs(dir) {
 		return CampaignPlan{}, fmt.Errorf("the campaign directory must be absolute, got %q: %w", dir, errs.ErrValidation)
 	}
@@ -179,7 +181,7 @@ func PlanCampaignLane(dir, provider, casesPath, head string, run CampaignRun) (C
 			env[campaignCommitKey], head, errs.ErrValidation)
 	}
 
-	file, err := readCampaignCases(casesPath)
+	file, err := readLaneCases(root, provider, casesPath)
 	if err != nil {
 		return CampaignPlan{}, err
 	}
@@ -511,7 +513,7 @@ func CampaignRuntimeTargets(root string, lanes, flavors []string) ([]string, err
 			return nil, fmt.Errorf("want <forgejo|gitlab>=<cases file>, got %q: %w", lane, errs.ErrValidation)
 		}
 
-		file, err := readCampaignCases(cases)
+		file, err := readLaneCases(root, provider, cases)
 		if err != nil {
 			return nil, err
 		}

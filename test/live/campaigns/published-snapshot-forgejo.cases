@@ -12,6 +12,5 @@ setting image-builder=buildah
 setting admin-lint=false
 setting admin-vulnerabilities=false
 setting admin-application-tests=false
-setting admin-reproducible-builds=false
 
 consumer hello-maven-service published-unsigned-snapshot job-image=@JOB_IMAGE_JAVA

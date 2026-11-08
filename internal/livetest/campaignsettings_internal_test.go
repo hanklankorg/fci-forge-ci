@@ -6,9 +6,11 @@ package livetest
 import (
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/diggsweden/forge-ci/internal/domain/errs"
+	"github.com/diggsweden/forge-ci/internal/testutil/reporoot"
 )
 
 func TestCampaignDeclarationsRefuseTheWholeLaneOnMismatch(t *testing.T) {
@@ -23,7 +25,7 @@ func TestCampaignDeclarationsRefuseTheWholeLaneOnMismatch(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			plan, err := PlanCampaignLane(dir, "forgejo", path, campaignHead, CampaignRun{Settings: settings})
+			plan, err := PlanCampaignLane(reporoot.Path(t), dir, "forgejo", path, campaignHead, CampaignRun{Settings: settings})
 			if !errors.Is(err, errs.ErrValidation) || len(plan.Cases) != 0 || len(plan.Env) != 0 {
 				t.Fatalf("mismatched lane returned plan=%+v err=%v", plan, err)
 			}
@@ -32,7 +34,7 @@ func TestCampaignDeclarationsRefuseTheWholeLaneOnMismatch(t *testing.T) {
 
 	settings := map[string]string{"visibility": "private", "image-builder": "kaniko"}
 
-	plan, err := PlanCampaignLane(dir, "forgejo", path, campaignHead, CampaignRun{Settings: settings, BuilderSelector: "kaniko"})
+	plan, err := PlanCampaignLane(reporoot.Path(t), dir, "forgejo", path, campaignHead, CampaignRun{Settings: settings, BuilderSelector: "kaniko"})
 	if err != nil || len(plan.Cases) != 2 || plan.Cases[0].Text != "scenario TestOne" || plan.Cases[1].Text != "scenario TestTwo" {
 		t.Fatalf("matching declarations became cases or changed their order: plan=%+v err=%v", plan, err)
 	}
@@ -61,7 +63,7 @@ func TestCampaignDeclarationGrammarIsSharedWithPreparation(t *testing.T) {
 				t.Fatalf("preparation reader accepted declaration: %v", err)
 			}
 
-			if _, err := PlanCampaignLane(dir, "forgejo", path, campaignHead, CampaignRun{Settings: map[string]string{"visibility": "private"}}); !errors.Is(err, errs.ErrValidation) {
+			if _, err := PlanCampaignLane(reporoot.Path(t), dir, "forgejo", path, campaignHead, CampaignRun{Settings: map[string]string{"visibility": "private"}}); !errors.Is(err, errs.ErrValidation) {
 				t.Fatalf("lane admission accepted declaration: %v", err)
 			}
 		})
@@ -72,14 +74,49 @@ func TestCampaignDeclarationAdmissionIsNotTiedToIndividualSettings(t *testing.T)
 	t.Parallel()
 
 	dir, path := newCampaign(t, "CAMPAIGN_COMMIT="+campaignHead+"\n", "setting future-setting=value\nscenario TestOne\n")
-	if _, err := PlanCampaignLane(dir, "forgejo", path, campaignHead, CampaignRun{Settings: map[string]string{"future-setting": "value"}}); err != nil {
+	if _, err := PlanCampaignLane(reporoot.Path(t), dir, "forgejo", path, campaignHead, CampaignRun{Settings: map[string]string{"future-setting": "value"}}); err != nil {
 		t.Fatalf("a caller-supplied run setting required a new case-parser branch: %v", err)
 	}
 
-	if _, err := PlanCampaignLane(dir, "forgejo", path, campaignHead, CampaignRun{Settings: map[string]string{"visibility": "private"}}); !errors.Is(err, errs.ErrValidation) {
+	if _, err := PlanCampaignLane(reporoot.Path(t), dir, "forgejo", path, campaignHead, CampaignRun{Settings: map[string]string{"visibility": "private"}}); !errors.Is(err, errs.ErrValidation) {
 		t.Fatalf("unknown run setting was accepted: %v", err)
 	}
 }
+
+// An administrator setting is declared only where an orchestrator of the
+// lane's forge declares its input, read from this checkout: GitLab's
+// components take all four, Forgejo's workflows and actions no
+// enforce-reproducible-builds. Preparation and the lane refuse alike.
+func TestCampaignAdminDeclarationsNameConsumedInputsOnly(t *testing.T) {
+	t.Parallel()
+
+	root := reporoot.Path(t)
+	reproducible := map[string]string{"admin-reproducible-builds": "true"}
+
+	dir, path := newCampaign(t, "CAMPAIGN_COMMIT="+campaignHead+"\n", "setting admin-reproducible-builds=true\nscenario TestOne\n")
+	if _, err := PlanCampaignLane(root, dir, "gitlab", path, campaignHead, CampaignRun{Settings: reproducible}); err != nil {
+		t.Fatalf("GitLab's release component takes enforce-reproducible-builds: %v", err)
+	}
+
+	for name, err := range map[string]error{
+		"lane":        must(PlanCampaignLane(root, dir, "forgejo", path, campaignHead, CampaignRun{Settings: reproducible})),
+		"preparation": must(CampaignRuntimeTargets(root, []string{"forgejo=" + path}, nil)),
+	} {
+		if !errors.Is(err, errs.ErrValidation) || !strings.Contains(err.Error(), "enforce-reproducible-builds") || !strings.Contains(err.Error(), "forgejo") {
+			t.Errorf("%s: a Forgejo lane declaring reproducible builds: %v; want a refusal naming the input nothing consumes", name, err)
+		}
+	}
+
+	consumed := map[string]string{"admin-lint": "false", "admin-vulnerabilities": "false", "admin-application-tests": "false"}
+
+	dir, path = newCampaign(t, "CAMPAIGN_COMMIT="+campaignHead+"\n", "setting admin-lint=false\nsetting admin-vulnerabilities=false\nsetting admin-application-tests=false\nscenario TestOne\n")
+	if _, err := PlanCampaignLane(root, dir, "forgejo", path, campaignHead, CampaignRun{Settings: consumed}); err != nil {
+		t.Fatalf("Forgejo's workflows and actions take the other three inputs: %v", err)
+	}
+}
+
+// must keeps only the error of a two-valued call, for a table of refusals.
+func must[T any](_ T, err error) error { return err }
 
 func TestCampaignRunSettingsUseTheSameDefaultsAsTheScenarios(t *testing.T) {
 	t.Parallel()
@@ -144,7 +181,7 @@ func TestCampaignAdmissionChecksTheEffectiveBuilderOfEveryConsumer(t *testing.T)
 				t.Fatal(err)
 			}
 
-			plan, err := PlanCampaignLane(dir, "forgejo", path, campaignHead, run)
+			plan, err := PlanCampaignLane(reporoot.Path(t), dir, "forgejo", path, campaignHead, run)
 			if tc.refused {
 				if !errors.Is(err, errs.ErrValidation) || len(plan.Cases) != 0 || len(plan.Env) != 0 {
 					t.Fatalf("conflicting later case left executable work: plan=%+v err=%v", plan, err)

@@ -162,7 +162,7 @@ func TestCampaignLane_RunsThePlanInOrderAndRecordsEachCase(t *testing.T) {
 
 	// The preflight is asked from the repository about the caller's cases file.
 	if got := readLines(t, lane.goArgvFile); len(got) != 1 ||
-		got[0] != "run ./internal/livetest/preflight campaign-plan "+lane.dir+" forgejo "+filepath.Join(lane.workDir, "lane.cases") {
+		got[0] != "run ./internal/livetest/preflight campaign-plan "+reporoot.Path(t)+" "+lane.dir+" forgejo "+filepath.Join(lane.workDir, "lane.cases") {
 		t.Fatalf("go calls %q", got)
 	}
 

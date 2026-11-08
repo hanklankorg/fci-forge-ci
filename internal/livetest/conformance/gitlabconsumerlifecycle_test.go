@@ -128,15 +128,11 @@ func runGitLabConsumerLifecycle(t *testing.T, root string, private bool) {
 		t.Fatalf("the consumer has no %s, which a lifecycle's merge request is judged by", livetest.GitLabGateFile)
 	}
 
-	checksRunnerTags := []string{}
-
+	// A lifecycle's checks run on the ordinary runner, whichever builder the
+	// run selects. The one fixture whose checks run Buildah themselves is the
+	// release trial's subject, not a lifecycle's.
 	if opened.GitLabChecksNeedBuildah(t) {
-		label := livetest.PrivilegedRunnerLabel(t, target)
-		if label == "" {
-			livetest.NotCoveredf(t, "the consumer's checks run Buildah themselves and need runner.privileged_label")
-		}
-
-		checksRunnerTags = append(checksRunnerTags, label)
+		t.Fatal("the consumer's checks run Buildah themselves; a lifecycle's checks run on the ordinary runner, so run that fixture as a release trial")
 	}
 
 	layer := livetest.PushLayer(t, target, gitlabReleaseRepo(t, target, "lifecycle-engine", livetest.ReadLayerAnonymously))
@@ -194,7 +190,7 @@ func runGitLabConsumerLifecycle(t *testing.T, root string, private bool) {
 		project: project, publication: livetest.RepoSlug(target, publication), registry: registry,
 		images: images, keys: keys, gitURL: gitURL, hostKey: hostKey, requestPublic: requestPublic,
 		settings: settings, distro: true,
-		checks: []string{"bash .gitlab/check-release.sh"}, checksRunnerTags: checksRunnerTags,
+		checks: []string{"bash .gitlab/check-release.sh"}, checksRunnerTags: []string{},
 		build: []string{profile.build}, buildRunnerTags: builder.RunnerLabels,
 		releaseImages: profile.releaseImages, artifactsConfig: profile.artifactsConfig(), releasePlatforms: "linux/amd64",
 		imageBuilder: imageBuilder, builderJobImage: builderJobImage, export: profile.export,
@@ -295,7 +291,7 @@ func runGitLabConsumerLifecycle(t *testing.T, root string, private bool) {
 	released := requireReleaseGit(t, target, repo, keys, request, profile.requestTag, profile.finalTag)
 	verified := requireGitLabReleaseBundles(t, client, target, repo, child, run.SHA, keys, profile.finalTag, profile.releaseImages)
 	requireGitLabReleaseRunnerRouting(t, ctx, client, project, child,
-		gitLabReleaseRunnerRoles(builder.RunnerLabels, checksRunnerTags, imageBuilder, profile.releaseImages, len(profile.export) != 0))
+		gitLabReleaseRunnerRoles(builder.RunnerLabels, []string{}, imageBuilder, profile.releaseImages, len(profile.export) != 0))
 	requireGitLabPackageSignatures(t, target, repo, keys, profile.finalTag)
 	requireGitLabPublishedImages(t, client, target, repo, publication, child, keys)
 	t.Logf("lifecycle phase 4 release: %s requested at %s, release commit %s, pipeline %d, child %d, %d verified bundles", profile.finalTag, request, released, run.ID, child, verified)

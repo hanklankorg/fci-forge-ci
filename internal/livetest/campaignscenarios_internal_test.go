@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/diggsweden/forge-ci/internal/domain/errs"
+	"github.com/diggsweden/forge-ci/internal/testutil/reporoot"
 )
 
 // A release-only plan cannot stand in for a development snapshot, and the
@@ -31,7 +32,7 @@ func TestCampaignCannotRelabelPartialTrialsAsProductLifecycle(t *testing.T) {
 						t.Fatal(err)
 					}
 
-					plan, err := PlanCampaignLane(dir, provider, cases, campaignHead, CampaignRun{})
+					plan, err := PlanCampaignLane(reporoot.Path(t), dir, provider, cases, campaignHead, CampaignRun{})
 					if !errors.Is(err, errs.ErrValidation) || !strings.Contains(err.Error(), "consumer event") || len(plan.Cases) != 0 {
 						t.Fatalf("unsupported snapshot event left executable cases: plan=%+v err=%v", plan, err)
 					}
@@ -42,7 +43,7 @@ func TestCampaignCannotRelabelPartialTrialsAsProductLifecycle(t *testing.T) {
 
 	dir, cases := newCampaign(t, "CAMPAIGN_COMMIT="+campaignHead+"\n", "scenario TestFirst\n")
 
-	plan, err := PlanCampaignLane(dir, "github", cases, campaignHead, CampaignRun{})
+	plan, err := PlanCampaignLane(reporoot.Path(t), dir, "github", cases, campaignHead, CampaignRun{})
 	if !errors.Is(err, errs.ErrValidation) || len(plan.Cases) != 0 {
 		t.Fatalf("hosted GitHub entered the local campaign road: plan=%+v err=%v", plan, err)
 	}
@@ -65,7 +66,7 @@ func TestCampaignScenariosUseRecipesWithExplicitBoundedInputs(t *testing.T) {
 			consumer := t.TempDir()
 			dir, cases := newCampaign(t, "CAMPAIGN_COMMIT="+campaignHead+"\nNATIVE_CONSUMER="+consumer+"\nBUILD_PROBE_ARCHIVE=/probe.tar\n", "scenario "+tc.name+" "+tc.extra+"\n")
 
-			plan, err := PlanCampaignLane(dir, "gitlab", cases, campaignHead, CampaignRun{})
+			plan, err := PlanCampaignLane(reporoot.Path(t), dir, "gitlab", cases, campaignHead, CampaignRun{})
 			if err != nil || len(plan.Cases) != 1 || plan.Cases[0].Args[0] != tc.recipe {
 				t.Fatalf("scenario recipe plan=%+v err=%v", plan, err)
 			}
@@ -97,7 +98,7 @@ func TestCampaignScenarioInputsRefuseBeforeAnyCaseCanExecute(t *testing.T) {
 
 			dir, cases := newCampaign(t, "CAMPAIGN_COMMIT="+campaignHead+"\nNATIVE_CONSUMER="+consumer+"\n", "scenario TestFirst\n"+line+"\n")
 
-			plan, err := PlanCampaignLane(dir, "gitlab", cases, campaignHead, CampaignRun{})
+			plan, err := PlanCampaignLane(reporoot.Path(t), dir, "gitlab", cases, campaignHead, CampaignRun{})
 			if !errors.Is(err, errs.ErrValidation) || len(plan.Cases) != 0 {
 				t.Fatalf("invalid scenario left executable cases: plan=%+v err=%v", plan, err)
 			}
@@ -105,7 +106,7 @@ func TestCampaignScenarioInputsRefuseBeforeAnyCaseCanExecute(t *testing.T) {
 	}
 
 	dir, cases := newCampaign(t, "CAMPAIGN_COMMIT="+campaignHead+"\n", "scenario TestGitLabWorkflow_InterruptedJob\n")
-	if _, err := PlanCampaignLane(dir, "forgejo", cases, campaignHead, CampaignRun{}); !errors.Is(err, errs.ErrValidation) {
+	if _, err := PlanCampaignLane(reporoot.Path(t), dir, "forgejo", cases, campaignHead, CampaignRun{}); !errors.Is(err, errs.ErrValidation) {
 		t.Fatal("GitLab-only interruption accepted on another provider")
 	}
 
@@ -131,7 +132,7 @@ func TestCampaignBuildahCapabilityCannotRunUnderKanikoSelection(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		if plan, err := PlanCampaignLane(dir, "gitlab", cases, campaignHead, run); !errors.Is(err, errs.ErrValidation) || len(plan.Cases) != 0 {
+		if plan, err := PlanCampaignLane(reporoot.Path(t), dir, "gitlab", cases, campaignHead, run); !errors.Is(err, errs.ErrValidation) || len(plan.Cases) != 0 {
 			t.Fatalf("Buildah probe reached a Kaniko lane: plan=%+v err=%v", plan, err)
 		}
 	}

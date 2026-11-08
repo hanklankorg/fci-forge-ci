@@ -140,7 +140,13 @@ before building images. The checked-in private k3s lanes require private visibil
 and Kaniko; set the corresponding Forgejo or GitLab image-builder selector.
 The four administrator settings are independent and default to `false`. For these
 lanes the controller sets lint, vulnerabilities and application tests to `false`,
-explicitly enabling reproducible builds as their declarations require. Each controller variable accepts exactly
+and for the GitLab lane explicitly enables reproducible builds, as its declaration
+requires. An administrator setting is declared only where an orchestrator of the
+lane's forge declares its input, `enforce-<check>`, read from this checkout's
+`.forgejo/workflows` and `.forgejo/actions` or `templates/`: no Forgejo
+orchestrator takes `enforce-reproducible-builds`, so the Forgejo lanes declare
+none, and a declaration nothing on the lane consumes is refused at preparation
+and before the lane runs. Each controller variable accepts exactly
 `true` or `false`; invalid values refuse preflight. Checks still run when their
 findings are nonblocking.
 
@@ -236,8 +242,20 @@ consumer in one scratch repository, the `lifecycle` event:
 
 ```text
 consumer hello-maven-service lifecycle CI_JOB_IMAGE=@JOB_IMAGE_JAVA CI_IMAGE_BUILDER=buildah RELEASE_PLATFORMS=linux/amd64
+consumer hello-maven-service lifecycle CI_JOB_IMAGE=@JOB_IMAGE_JAVA CI_IMAGE_BUILDER=kaniko CI_IMAGE_BUILDER_JOB_IMAGE=@KANIKO_JOB_IMAGE RELEASE_PLATFORMS=linux/amd64
 consumer hello-maven-service lifecycle job-archive=@FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_JAVA build-archive=@FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_JAVA signer-archive=@FORGE_CI_LIVE_SIGNER_IMAGE_ARCHIVE lint-archive=@LINT_IMAGE_ARCHIVE_JAVA version=0.2.0 version-bump=maven job-user=65532:65532
 ```
+
+Neither file declares a visibility or a builder. The visibility is the run's
+selector: `FORGE_CI_LIVE_CONSUMER_VISIBILITY` unset or `both` runs each line
+public and private. The builder on GitLab is the lane's selector,
+`FORGE_CI_LIVE_GITLAB_IMAGE_BUILDER` (unset or `buildah`, or `kaniko`), under
+which the one GitLab line runs; on Forgejo it is the consumer's
+`CI_IMAGE_BUILDER` variable, so the Forgejo file carries one line per builder,
+and `FORGE_CI_LIVE_FORGEJO_IMAGE_BUILDER` stays unset (set, it refuses the other
+builder's line). On Forgejo both builders' image builds, and the service's
+readiness, run on the contract's container/readiness runner
+(`CI_RUNNER_LABEL_CONTAINER`); on GitLab kaniko builds on the ordinary runner.
 
 The same reader, `key=value` words and `@NAME` expansion as the other consumer
 events; only the event word is new. On Forgejo the phases, each ending the
@@ -264,12 +282,17 @@ lifecycle when it fails, with their acceptance owners unchanged:
 
 On Forgejo the event takes the release's settings but `workflow=`,
 `next-version=` and `interrupt-after=`; `CI_JOB_IMAGE`, pinned by digest, is
-also the Java image the snapshot builds the service with. It builds with
-Buildah for now: the campaign's kaniko job image is labelled for the consumer
-trial's layer repository, which a lifecycle's layer is not, so
-`CI_IMAGE_BUILDER=kaniko` is refused before anything is created. It needs what
-the published snapshot and a Forgejo release need: the contract's
-container/readiness runner, `FORGE_CI_LIVE_SIGNER_IMAGE`, ssh-keygen and gpg.
+also the Java image the snapshot builds the service with. It selects its
+builder as the other events do, with the consumer's `CI_IMAGE_BUILDER`, and
+runs in the consumer trial's layer repository (`fci-consumer-trial-layer`,
+beside its own `fci-consumer-lifecycle`): a run admits a kaniko job image only
+for the repository its source label names, and the campaign's is labelled for
+that one, so one prepared image serves every event; under kaniko,
+`CI_IMAGE_BUILDER_JOB_IMAGE` pinned by digest is required before anything is
+created, as the run admits it by digest and label in the development phase.
+It needs what the published snapshot and a Forgejo release need: the
+contract's container/readiness runner, whichever builder builds the image,
+`FORGE_CI_LIVE_SIGNER_IMAGE`, ssh-keygen and gpg.
 
 On GitLab (`TestGitLabLayer_ConsumerLifecycle`) the same five phases run in
 one project under one pinned policy file, whose includes serve the three

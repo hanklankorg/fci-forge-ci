@@ -157,6 +157,23 @@ func ChooseImageBuilder(tb TB, target Target) ImageBuilderChoice {
 	return ImageBuilderChoice{Builder: ImageBuilderBuildah, RunnerLabels: []string{label}}
 }
 
+// ContainerRunnerLabel is the label of the contract's runner that permits
+// user namespaces, for a scenario that runs a container itself with Podman,
+// such as a service's readiness, whichever builder the run selects builds
+// the image: running one needs the namespaces as rootless Buildah does. A
+// lab that names no such runner reports the scenario not covered, with why
+// the scenario runs a container.
+func ContainerRunnerLabel(tb TB, target Target, why string) string {
+	tb.Helper()
+
+	label := PrivilegedRunnerLabel(tb, target)
+	if label == "" {
+		NotCoveredf(tb, "%s, which needs the contract's runner.privileged_label, a runner that permits user namespaces, whichever builder builds the image", why)
+	}
+
+	return label
+}
+
 // JobImage is the builder's job image for the image builds of a layer served
 // from layer: for kaniko, the saved kaniko job image pushed to repo and
 // labelled with that layer, which admits it; for Buildah, none, since Buildah

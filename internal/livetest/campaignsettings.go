@@ -132,7 +132,7 @@ func CampaignRunSettings(provider string, getenv func(string) string) (CampaignR
 
 	settings := map[string]string{"visibility": visibility, "image-builder": builder}
 	for _, check := range enforcement.Checks {
-		settings["admin-"+string(check)] = strconv.FormatBool(admin[enforcement.Setting(check)])
+		settings[campaignAdminSetting(check)] = strconv.FormatBool(admin[enforcement.Setting(check)])
 	}
 
 	return CampaignRun{Settings: settings, BuilderSelector: selector}, nil
