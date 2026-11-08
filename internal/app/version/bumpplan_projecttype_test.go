@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -75,6 +76,26 @@ func TestBumpPlan_ProjectTypesRunOnlyTheirNativeTools(t *testing.T) {
 	assert.NotContains(t, sink.Single("file-pattern"), "backend")
 	assert.NotContains(t, sink.Single("file-pattern"), "cli")
 	assert.Contains(t, sink.Single("file-pattern"), "frontend/package.json")
+}
+
+// npm gives npm-shrinkwrap.json precedence over package-lock.json, and a
+// patch that leaves out the lockfile npm wrote is refused, so the npm
+// family's file pattern names the shrinkwrap file too.
+func TestBumpPlan_NPMFilePatternNamesTheShrinkwrapFile(t *testing.T) {
+	root := t.TempDir()
+	require.NoError(t, os.Mkdir(filepath.Join(root, "frontend"), 0o755))
+	writeFile(t, root, "frontend/package.json", "{\"name\":\"frontend\",\"version\":\"1.0.0\"}\n")
+	writeFile(t, root, "frontend/npm-shrinkwrap.json", "{\"name\":\"frontend\",\"version\":\"1.0.0\",\"lockfileVersion\":3}\n")
+	writeFile(t, root, "full.md", "# Changes\n")
+	t.Chdir(root)
+
+	sink := fakeoutputsink.New(t)
+	require.NoError(t, appversion.BumpPlan(t.Context(), appversion.BumpOps{Maven: &fakeMavenOps{}, NPM: &fakeNPMOps{}, Cargo: &fakeCargoOps{avail: true}}, sink, io.Discard, io.Discard, output.Annotator{}, appversion.BumpPlanInput{
+		PlanJSON: projectTypePlan(t), Version: "1.2.3", ChangelogFile: filepath.Join(root, "full.md"),
+		ProjectTypes: []projecttype.Type{projecttype.NPM},
+	}))
+
+	assert.Contains(t, strings.Fields(sink.Single("file-pattern")), "frontend/npm-shrinkwrap.json")
 }
 
 func TestBumpPlan_ProjectTypesRefuseAToolLessTypeAndAPatch(t *testing.T) {

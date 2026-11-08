@@ -953,7 +953,8 @@ commit carries them beside `CHANGELOG.md` and nothing else. Every job
 that checks the release commit out re-checks it with `forge-ci release
 validate-tag --prepare-plan-file`: the changelog, the copies and the planned
 version files, native ones a version substitution, Gradle and Xcode ones
-byte for byte the engine's text bump of the parent's, and nothing else. The
+byte for byte the engine's text bump of the parent's at the parent's
+mode, and nothing else. The
 build then finds the release version already declared.
 
 #### The merge-request gate under a policy

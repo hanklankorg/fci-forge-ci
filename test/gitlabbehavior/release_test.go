@@ -11,10 +11,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/diggsweden/forge-ci/internal/domain/projecttype"
+	"github.com/diggsweden/forge-ci/internal/domain/version"
 	"github.com/diggsweden/forge-ci/internal/testutil/reporoot"
 )
 
@@ -545,5 +548,78 @@ git() { printf 'git %s\n' "$*"; }; rc_bump_version java`,
 	patch, err := os.ReadFile(filepath.Join(dir, "_release-bump-java", "version-bump.patch"))
 	if err != nil || !strings.Contains(string(out), "--project-type maven") || !strings.HasSuffix(string(patch), "--dst-prefix=b/ -- :(glob)services/backend/**/pom.xml\n") {
 		t.Errorf("the version job diffed more than its family's files: %v\n%s\n%s", err, patch, out)
+	}
+}
+
+// npm gives npm-shrinkwrap.json precedence over package-lock.json, and the
+// release commit refuses a patch that leaves out the lockfile npm wrote. The
+// node family's job, with real Git and the engine's npm file pattern, hands
+// on a patch with the shrinkwrap file that the release verification accepts.
+func TestReleaseNodeVersionJobCarriesTheShrinkwrapFile(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	gitEnv := []string{"PATH=" + componentTools(t), "HOME=" + dir, "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=/dev/null"}
+	project := func(release string) {
+		for _, name := range []string{"package.json", "npm-shrinkwrap.json"} {
+			if err := os.WriteFile(filepath.Join(dir, "frontend", name), []byte(`{"name":"frontend","version":"`+release+`"}`+"\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	gitRun := func(args ...string) {
+		command := exec.CommandContext(t.Context(), "git", append([]string{"-c", "user.name=fixture", "-c", "user.email=fixture@example.invalid", "-c", "commit.gpgsign=false"}, args...)...)
+		command.Dir, command.Env = dir, gitEnv
+
+		if out, err := command.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+
+	for _, sub := range []string{"frontend", "_release-render"} {
+		if err := os.MkdirAll(filepath.Join(dir, sub), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if err := os.WriteFile(filepath.Join(dir, "_release-render", "CHANGELOG.md"), []byte("x\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	project("1.0.0")
+	gitRun("init", "-q", "-b", "main")
+	gitRun("add", "--", "frontend")
+	gitRun("commit", "-q", "-m", "initial")
+	project("1.2.3")
+
+	var pattern strings.Builder
+	for file := range strings.FieldsSeq(version.FilePattern(projecttype.NPM)) {
+		pattern.WriteString(" frontend/" + file)
+	}
+
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+
+	command := exec.CommandContext(ctx, componentBash(t), "--noprofile", "--norc", "-eu", "-c",
+		`source "$1"; rc_request_checkout() { :; }; rc_new_handoff() { mkdir -- "$1"; }
+rc_engine() { case "$*" in *bump-plan*) printf 'FILE_PATTERN=%s\n' "${FAKE_PATTERN# }" >"${CI_OUTPUT}" ;; esac; }; rc_bump_version node`,
+		"bump", filepath.Join(reporoot.Path(t), ".gitlab", "bin", "release.sh"))
+	command.Dir = dir
+	command.Env = append(slices.Clone(gitEnv), "CI_PROJECT_DIR="+dir, "RC_WORK="+dir, "RC_ARTIFACTS_CONFIG=", "RELEASE_VERSION=1.2.3", "RELEASE_POLICY=stable", "FAKE_PATTERN="+pattern.String())
+
+	if out, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("version job failed: %v\n%s", err, out)
+	}
+
+	patch, err := os.ReadFile(filepath.Join(dir, "_release-bump-node", "version-bump.patch"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	files, _ := version.BumpPatchFiles(projecttype.NPM)
+
+	result, err := version.VerifyBumpPatch(patch, files, "1.2.3")
+	if err != nil || !strings.Contains(string(patch), "b/frontend/npm-shrinkwrap.json") {
+		t.Fatalf("the node patch lost the shrinkwrap file or fails verification: %v %+v\n%s", err, result, patch)
 	}
 }

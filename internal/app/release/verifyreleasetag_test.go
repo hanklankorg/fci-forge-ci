@@ -51,6 +51,8 @@ type fakeTagGit struct {
 	diff                string
 	// files are the version files by commit then path, as FileAt reads them.
 	files map[string]map[string]string
+	// modes are the Git modes of files by commit then path; 100644 if unset.
+	modes map[string]map[string]string
 }
 
 type tagVerifyCall struct {
@@ -93,10 +95,15 @@ func (f fakeTagGit) PathsDiff(context.Context, string, string, []string) (string
 	return f.diff, nil
 }
 
-func (f fakeTagGit) FileAt(_ context.Context, commit, path string) (string, bool, error) {
+func (f fakeTagGit) FileAt(_ context.Context, commit, path string) (string, string, bool, error) {
 	body, exists := f.files[commit][path]
 
-	return body, exists, nil
+	mode := f.modes[commit][path]
+	if mode == "" {
+		mode = "100644"
+	}
+
+	return body, mode, exists, nil
 }
 
 // pomBumpDiff is the diff a verified Maven bump to 1.2.3 leaves in a POM.
@@ -590,6 +597,71 @@ func TestVerifyReleaseTag_ChangelogOnlyAdmitsEveryPlannedProject(t *testing.T) {
 			t.Parallel()
 
 			git := fakeTagGit{head: sha, tagCommit: sha, parents: []string{parent}, request: parent, changed: scenario.changed, diff: backend, files: scenario.files}
+			err := apprelease.VerifyReleaseTag(t.Context(), git, io.Discard, apprelease.VerifyReleaseTagInput{
+				ReleaseSHA: sha, Tag: "v1.2.3", ExpectedParent: parent, ChangelogOnly: true, PreparePlan: plan,
+			})
+
+			if scenario.want == nil {
+				require.NoError(t, err)
+			} else {
+				require.ErrorIs(t, err, scenario.want)
+			}
+		})
+	}
+}
+
+// validate-tag redoes an Android and an Xcode project's text bump on the
+// parent's bytes: the release must hold exactly those bytes at the parent's
+// mode. It knows only the default versions.xcconfig, so a bump written to
+// any other xcconfig is refused.
+func TestVerifyReleaseTag_ChangelogOnlyRedoesTheAndroidAndXcodeTextBumps(t *testing.T) {
+	t.Parallel()
+
+	parent := strings.Repeat("b", 40)
+	plan := &pipeline.ReleasePrepareStagePlan{Version: pipeline.ReleasePlanVersion, Stage: "prepare", Targets: pipeline.ReleasePrepareTargets{
+		VersionBump: pipeline.TargetPlan[pipeline.PlannedArtifact]{Runs: true, Items: []pipeline.PlannedArtifact{
+			{Name: "android", ProjectType: projecttype.GradleAndroid, WorkingDirectory: "apps/android"},
+			{Name: "ios", ProjectType: projecttype.XcodeIOS, WorkingDirectory: "apps/ios"},
+		}},
+	}}
+
+	const (
+		android  = "apps/android/gradle.properties"
+		xcconfig = "apps/ios/versions.xcconfig"
+		custom   = "apps/ios/Config/Release.xcconfig"
+	)
+
+	before := map[string]string{android: "versionName=1.2.2\nversionCode=7\n", xcconfig: "MARKETING_VERSION = 1.2.2\n", custom: "MARKETING_VERSION = 1.2.2\n"}
+	release := func(files map[string]string) map[string]map[string]string {
+		return map[string]map[string]string{parent: before, sha: files}
+	}
+
+	for _, scenario := range []struct {
+		name    string
+		changed []string
+		files   map[string]map[string]string
+		modes   map[string]map[string]string
+		want    error
+	}{
+		{name: "both bumps", changed: []string{"CHANGELOG.md", android, xcconfig},
+			files: release(map[string]string{android: "versionName=1.2.3\nversionCode=8\n", xcconfig: "MARKETING_VERSION = 1.2.3\n"})},
+		{name: "an xcconfig the bump creates", changed: []string{"CHANGELOG.md", xcconfig},
+			files: map[string]map[string]string{parent: {}, sha: {xcconfig: "MARKETING_VERSION = 1.2.3\n"}}},
+		{name: "an Android bump that keeps the version code", changed: []string{"CHANGELOG.md", android},
+			files: release(map[string]string{android: "versionName=1.2.3\nversionCode=7\n"}), want: errs.ErrValidation},
+		{name: "an Xcode bump with more than the version", changed: []string{"CHANGELOG.md", xcconfig},
+			files: release(map[string]string{xcconfig: "MARKETING_VERSION = 1.2.3\nCODE_SIGN_IDENTITY = evil\n"}), want: errs.ErrValidation},
+		{name: "a custom xcconfig", changed: []string{"CHANGELOG.md", custom},
+			files: release(map[string]string{custom: "MARKETING_VERSION = 1.2.3\n"}), want: errs.ErrValidation},
+		{name: "a bumped file made executable", changed: []string{"CHANGELOG.md", xcconfig},
+			files: release(map[string]string{xcconfig: "MARKETING_VERSION = 1.2.3\n"}), modes: map[string]map[string]string{sha: {xcconfig: "100755"}}, want: errs.ErrValidation},
+		{name: "a created file that is executable", changed: []string{"CHANGELOG.md", xcconfig},
+			files: map[string]map[string]string{parent: {}, sha: {xcconfig: "MARKETING_VERSION = 1.2.3\n"}}, modes: map[string]map[string]string{sha: {xcconfig: "100755"}}, want: errs.ErrValidation},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			t.Parallel()
+
+			git := fakeTagGit{head: sha, tagCommit: sha, parents: []string{parent}, request: parent, changed: scenario.changed, files: scenario.files, modes: scenario.modes}
 			err := apprelease.VerifyReleaseTag(t.Context(), git, io.Discard, apprelease.VerifyReleaseTagInput{
 				ReleaseSHA: sha, Tag: "v1.2.3", ExpectedParent: parent, ChangelogOnly: true, PreparePlan: plan,
 			})

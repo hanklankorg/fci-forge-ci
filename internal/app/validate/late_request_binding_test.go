@@ -66,8 +66,8 @@ func (g *lateRequestGit) PathsDiff(context.Context, string, string, []string) (s
 	return "", nil
 }
 
-func (g *lateRequestGit) FileAt(context.Context, string, string) (string, bool, error) {
-	return "", false, nil
+func (g *lateRequestGit) FileAt(context.Context, string, string) (string, string, bool, error) {
+	return "", "", false, nil
 }
 
 // Compose the actual native policy and source validators with inert Git and

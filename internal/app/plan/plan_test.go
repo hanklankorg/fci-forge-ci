@@ -379,7 +379,7 @@ func TestGetFilePattern_KnownProjectType(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	want := "CHANGELOG.md package.json package-lock.json"
+	want := "CHANGELOG.md package.json package-lock.json npm-shrinkwrap.json"
 	if got != want {
 		t.Errorf("got %q, want %q", got, want)
 	}
@@ -438,12 +438,12 @@ func TestGetFilePattern_JSONOutput(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	want := "CHANGELOG.md package.json package-lock.json"
+	want := "CHANGELOG.md package.json package-lock.json npm-shrinkwrap.json"
 	if got != want {
 		t.Errorf("got %q, want %q", got, want)
 	}
 
-	if strings.TrimSpace(out.String()) != `{"pattern":"CHANGELOG.md package.json package-lock.json"}` {
+	if strings.TrimSpace(out.String()) != `{"pattern":"CHANGELOG.md package.json package-lock.json npm-shrinkwrap.json"}` {
 		t.Errorf("out = %q", out.String())
 	}
 }

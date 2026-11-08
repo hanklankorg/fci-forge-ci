@@ -30,7 +30,10 @@ prepare-stage plan, it also admits that plan's version bump: each planned
 project's changelog and its native version files, checked as a version
 substitution to the tag's version, and a Gradle or Xcode project's version
 file holding exactly the bytes the engine's text bump writes over the
-parent's. Nothing outside the planned projects' files may change.
+parent's, at the parent's file mode (a plain file when the bump creates
+it). Only the default `versions.xcconfig` is admitted for Xcode, since
+the plan does not carry another. Nothing outside the planned projects'
+files may change.
 
 The check returns failure before emitting success; it has no private-key,
 signer or publication capability. Callers must run it before those capabilities,

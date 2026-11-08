@@ -33,16 +33,17 @@ func (r *Repo) ChangedPaths(ctx context.Context, before, after string) ([]string
 	return strings.Split(strings.TrimSuffix(output, "\x00"), "\x00"), nil
 }
 
-// FileAt returns the exact bytes of the regular file path in commit, and
-// false when the commit has no such path. A link or a tree there is refused.
-func (r *Repo) FileAt(ctx context.Context, commit, path string) (string, bool, error) {
+// FileAt returns the exact bytes and the Git mode (100644 or 100755) of the
+// regular file path in commit, and false when the commit has no such path. A
+// link or a tree there is refused.
+func (r *Repo) FileAt(ctx context.Context, commit, path string) (string, string, bool, error) {
 	entry, err := r.Output(ctx, "ls-tree", "-z", commit, "--", path)
 	if err != nil {
-		return "", false, err
+		return "", "", false, err
 	}
 
 	if entry == "" {
-		return "", false, nil
+		return "", "", false, nil
 	}
 
 	// <mode> SP <type> SP <object> TAB <path> NUL
@@ -50,13 +51,13 @@ func (r *Repo) FileAt(ctx context.Context, commit, path string) (string, bool, e
 	fields := strings.Fields(meta)
 
 	if name != path || len(fields) != 3 || fields[1] != "blob" || (fields[0] != "100644" && fields[0] != "100755") {
-		return "", false, fmt.Errorf("%s at %s is not one regular file: %w", path, commit, errs.ErrValidation)
+		return "", "", false, fmt.Errorf("%s at %s is not one regular file: %w", path, commit, errs.ErrValidation)
 	}
 
 	body, err := r.Output(ctx, "cat-file", "blob", fields[2])
 	if err != nil {
-		return "", false, err
+		return "", "", false, err
 	}
 
-	return body, true, nil
+	return body, fields[0], true, nil
 }

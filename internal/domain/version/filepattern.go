@@ -13,7 +13,7 @@ func FilePattern(pt projecttype.Type) string {
 	case projecttype.Maven:
 		return "CHANGELOG.md :(glob)**/pom.xml"
 	case projecttype.NPM:
-		return "CHANGELOG.md package.json package-lock.json"
+		return "CHANGELOG.md package.json package-lock.json npm-shrinkwrap.json"
 	case projecttype.Gradle, projecttype.GradleAndroid:
 		return "CHANGELOG.md gradle.properties build.gradle.kts settings.gradle.kts build.gradle settings.gradle"
 	case projecttype.XcodeIOS:

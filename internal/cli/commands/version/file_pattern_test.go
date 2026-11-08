@@ -19,7 +19,7 @@ func TestFilePatternCmd_EnvMode(t *testing.T) {
 		want            string
 	}{
 		{name: "explicit_pattern", projectType: "maven", explicitPattern: "pom.xml package.json", want: "pom.xml package.json"},
-		{name: "project_type_fallback", projectType: "npm", want: "CHANGELOG.md package.json package-lock.json"},
+		{name: "project_type_fallback", projectType: "npm", want: "CHANGELOG.md package.json package-lock.json npm-shrinkwrap.json"},
 	}
 	for _, testCase := range tests {
 		t.Run(testCase.name, func(t *testing.T) {

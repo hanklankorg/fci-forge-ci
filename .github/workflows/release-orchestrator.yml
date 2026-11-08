@@ -156,7 +156,7 @@ on:
         default: ""
         # Auto-detected patterns by project type:
         # - Maven: CHANGELOG.md pom.xml
-        # - NPM: CHANGELOG.md package.json package-lock.json
+        # - NPM: CHANGELOG.md package.json package-lock.json npm-shrinkwrap.json
         # - Gradle: CHANGELOG.md build.gradle settings.gradle
         # - Gradle Android: CHANGELOG.md build.gradle settings.gradle gradle.properties
         # - Xcode iOS: CHANGELOG.md project.pbxproj

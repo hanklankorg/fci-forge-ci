@@ -32,7 +32,9 @@ type tagVerifyGit interface {
 	CommitParents(ctx context.Context, commitSHA string) ([]string, error)
 	ChangedPaths(ctx context.Context, before, after string) ([]string, error)
 	PathsDiff(ctx context.Context, before, after string, paths []string) (string, error)
-	FileAt(ctx context.Context, commit, path string) (string, bool, error)
+	// FileAt returns a regular file's bytes, its Git mode and whether
+	// commit has the path.
+	FileAt(ctx context.Context, commit, path string) (string, string, bool, error)
 }
 
 // VerifyReleaseTagInput drives VerifyReleaseTag.
@@ -365,12 +367,12 @@ func plannedGradleVersionFile(item pipeline.PlannedArtifact) string {
 // engine's text bump writes over the parent's: a version file is build code,
 // so a name match alone admits nothing.
 func verifyTextBump(ctx context.Context, git tagVerifyGit, in VerifyReleaseTagInput, kind projecttype.Type, path, release string) error {
-	before, exists, err := git.FileAt(ctx, in.ExpectedParent, path)
+	before, beforeMode, exists, err := git.FileAt(ctx, in.ExpectedParent, path)
 	if err != nil {
 		return fmt.Errorf("verify-release-tag: read %s before the bump: %w", path, err)
 	}
 
-	after, written, err := git.FileAt(ctx, in.ReleaseSHA, path)
+	after, afterMode, written, err := git.FileAt(ctx, in.ReleaseSHA, path)
 	if err != nil {
 		return fmt.Errorf("verify-release-tag: read %s after the bump: %w", path, err)
 	}
@@ -380,7 +382,13 @@ func verifyTextBump(ctx context.Context, git tagVerifyGit, in VerifyReleaseTagIn
 		return fmt.Errorf("verify-release-tag: %s: %w", path, err)
 	}
 
-	if !written || !bump.Writes || after != bump.Body {
+	// The bump writes bytes, never the mode: a kept file keeps the parent's,
+	// and a file the bump creates is a plain one.
+	if !exists {
+		beforeMode = "100644"
+	}
+
+	if !written || !bump.Writes || after != bump.Body || afterMode != beforeMode {
 		return fmt.Errorf("verify-release-tag: %s holds more than the version bump to %s: %w", path, release, errs.ErrValidation)
 	}
 
