@@ -96,6 +96,7 @@ func TestReuseGitHubEngineOnlyReadsPreparedSessionEngine(t *testing.T) {
 	got.admin = nil
 	want := GitHubEngine{Owner: trial.org, Repository: "fc-forge-ci", Commit: commit, Namespace: "ghcr.io/example-org/fc-forge-ci",
 		Digests: map[string]string{"forge-ci-runtime-base": "sha256:" + strings.Repeat("e", 64), "forge-ci-runtime-go-1.27": "sha256:" + strings.Repeat("7", 64)}}
+
 	if !reflect.DeepEqual(got, want) || len(reads) != 10 {
 		t.Fatalf("reuse = %+v; reads = %v", got, reads)
 	}
@@ -544,6 +545,7 @@ func TestGitHubPrereleaseSeedIsAnEmptyCommitOutsideTheCheckout(t *testing.T) {
 	trial := &GitHubTrial{tb: t, org: "example-org", prefix: "fc-"}
 	root := t.TempDir()
 	trial.git(root, "init", "--quiet", "--object-format=sha1", "--initial-branch=main", ".")
+
 	require := func(ok bool, format string, args ...any) {
 		t.Helper()
 

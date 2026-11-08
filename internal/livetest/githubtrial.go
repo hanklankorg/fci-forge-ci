@@ -181,76 +181,6 @@ func (trial *GitHubTrial) EnsureEngine(root, platforms string) GitHubEngine {
 	return engine
 }
 
-// resolveEngineDigests asks the organization's packages what each runtime
-// image serves for the commit's tag, so fixtures render the digests every
-// workflow admits. The base and Go builder images must exist; a fixture that
-// names another image the engine did not publish is refused when it renders.
-func (trial *GitHubTrial) resolveEngineDigests(engine GitHubEngine) map[string]string {
-	trial.tb.Helper()
-
-	packages, err := engine.RuntimePackageNames()
-	if err != nil {
-		trial.tb.Fatalf("livetest: runtime package coordinates: %v", err)
-	}
-
-	digests := map[string]string{}
-
-	for _, name := range packages {
-		image := name[strings.LastIndex(name, "/")+1:]
-		if !strings.HasPrefix(image, "forge-ci-runtime") {
-			continue
-		}
-
-		if digest, ok := trial.packageDigest(name, engine.ImageTag()); ok {
-			digests[image] = digest
-		}
-	}
-
-	for _, image := range []string{"forge-ci-runtime-base", "forge-ci-runtime-go-1.27"} {
-		if digests[image] == "" {
-			trial.tb.Fatalf("livetest: %s/%s:%s has no published digest; every workflow admits only digest-pinned images", engine.Registry(), image, engine.ImageTag())
-		}
-	}
-
-	return digests
-}
-
-// packageDigest finds the version of a container package that carries tag
-// and returns its digest.
-func (trial *GitHubTrial) packageDigest(name, tag string) (string, bool) {
-	trial.tb.Helper()
-
-	options := &github.PackageListOptions{State: github.Ptr("active"), ListOptions: github.ListOptions{PerPage: 100}}
-
-	for {
-		versions, response, err := trial.api.Organizations.PackageGetAllVersions(trial.tb.Context(), trial.org, "container", name, options)
-		if response != nil && response.StatusCode == http.StatusNotFound {
-			return "", false
-		}
-
-		if err != nil {
-			trial.tb.Fatalf("livetest: list versions of package %s: %v", name, err)
-		}
-
-		for _, version := range versions {
-			var metadata github.PackageMetadata
-			if json.Unmarshal(version.Metadata, &metadata) != nil || metadata.Container == nil {
-				continue
-			}
-
-			if slices.Contains(metadata.Container.Tags, tag) && pinnedImage.MatchString("x@"+version.GetName()) {
-				return version.GetName(), true
-			}
-		}
-
-		if response.NextPage == 0 {
-			return "", false
-		}
-
-		options.Page = response.NextPage
-	}
-}
-
 // ReuseEngine reads an engine prepared by EnsureEngine in this same hosted
 // session. The caller must prepare all required image platforms before starting
 // parallel consumers and keep the engine frozen until they all finish. Unlike
@@ -1296,6 +1226,76 @@ func (trial *GitHubTrial) CheckImage(repo, image, final string, engine GitHubEng
 	return ""
 }
 
+// resolveEngineDigests asks the organization's packages what each runtime
+// image serves for the commit's tag, so fixtures render the digests every
+// workflow admits. The base and Go builder images must exist; a fixture that
+// names another image the engine did not publish is refused when it renders.
+func (trial *GitHubTrial) resolveEngineDigests(engine GitHubEngine) map[string]string {
+	trial.tb.Helper()
+
+	packages, err := engine.RuntimePackageNames()
+	if err != nil {
+		trial.tb.Fatalf("livetest: runtime package coordinates: %v", err)
+	}
+
+	digests := map[string]string{}
+
+	for _, name := range packages {
+		image := name[strings.LastIndex(name, "/")+1:]
+		if !strings.HasPrefix(image, "forge-ci-runtime") {
+			continue
+		}
+
+		if digest, ok := trial.packageDigest(name, engine.ImageTag()); ok {
+			digests[image] = digest
+		}
+	}
+
+	for _, image := range []string{"forge-ci-runtime-base", "forge-ci-runtime-go-1.27"} {
+		if digests[image] == "" {
+			trial.tb.Fatalf("livetest: %s/%s:%s has no published digest; every workflow admits only digest-pinned images", engine.Registry(), image, engine.ImageTag())
+		}
+	}
+
+	return digests
+}
+
+// packageDigest finds the version of a container package that carries tag
+// and returns its digest.
+func (trial *GitHubTrial) packageDigest(name, tag string) (string, bool) {
+	trial.tb.Helper()
+
+	options := &github.PackageListOptions{State: new("active"), PerPage: 100}
+
+	for {
+		versions, response, err := trial.api.Organizations.PackageGetAllVersions(trial.tb.Context(), trial.org, "container", name, options)
+		if response != nil && response.StatusCode == http.StatusNotFound {
+			return "", false
+		}
+
+		if err != nil {
+			trial.tb.Fatalf("livetest: list versions of package %s: %v", name, err)
+		}
+
+		for _, version := range versions {
+			var metadata github.PackageMetadata
+			if json.Unmarshal(version.Metadata, &metadata) != nil || metadata.Container == nil {
+				continue
+			}
+
+			if slices.Contains(metadata.Container.Tags, tag) && pinnedImage.MatchString("x@"+version.GetName()) {
+				return version.GetName(), true
+			}
+		}
+
+		if response.NextPage == 0 {
+			return "", false
+		}
+
+		options.Page = response.NextPage
+	}
+}
+
 // Retain before ReportRun returns to the verdict and disposable cleanup. Reuse
 // the snapshot destination, bounds and redactor rather than a second archive.
 func (trial *GitHubTrial) failureEvidence(ctx context.Context, repo string, run *github.WorkflowRun, job *github.WorkflowJob, location string) string {
@@ -1555,7 +1555,7 @@ func (trial *GitHubTrial) seedCommit(root string) string {
 		trial.tb.Fatalf("livetest: seed index directory: %v", err)
 	}
 
-	defer os.RemoveAll(dir)
+	defer func() { _ = os.RemoveAll(dir) }()
 
 	index := filepath.Join(dir, "index")
 	tree := strings.TrimSpace(trial.run(root, append(trial.gitEnv(), "GIT_INDEX_FILE="+index), "git", "-C", root, "write-tree"))

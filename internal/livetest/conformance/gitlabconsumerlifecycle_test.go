@@ -406,7 +406,7 @@ func requireGitLabPipelineIDs(t *testing.T, ctx context.Context, client *gitlaba
 func requireGitLabLifecyclePipelines(t *testing.T, ctx context.Context, client *gitlabapi.Client, project, released string, lifecycle []int64, skippedRefs ...string) {
 	t.Helper()
 
-	pipelines, _, err := client.Pipelines.ListProjectPipelines(project, &gitlabapi.ListProjectPipelinesOptions{ListOptions: gitlabapi.ListOptions{PerPage: 100}}, gitlabapi.WithContext(ctx))
+	pipelines, _, err := client.Pipelines.ListProjectPipelines(project, &gitlabapi.ListProjectPipelinesOptions{PerPage: 100}, gitlabapi.WithContext(ctx))
 	if err != nil {
 		t.Fatal(err)
 	}
