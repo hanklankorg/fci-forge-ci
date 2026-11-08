@@ -223,6 +223,8 @@ jobs:
         id: canonical-bootstrap
         if: ${{ inputs['require-canonical-bootstrap'] }}
         uses: ./_forge_ci_bootstrap/.github/actions/consume-canonical-cli
+        with:
+          tool-profile: runtime # The job container is the approved image.
       # Defense-in-depth: refuse PR-context triggers. This job handles release
       # token, GPG, Maven Central, and secret-presence metadata and must never
       # run with PR-HEAD code. forge-ci is pre-baked.

@@ -1,14 +1,21 @@
 <!-- SPDX-FileCopyrightText: 2026 Digg - Agency for Digital Government -->
 <!-- SPDX-License-Identifier: CC0-1.0 -->
 
-# Opt-in canonical CLI consumption in existing release prerequisites
+# Canonical CLI consumption in the release route
 
-Base: `4943724be6b9ac5088a517c35cd87b40b5665b27`. This is a bootstrap ordering
-patch, **not an executable classified-release leaf or production activation**.
-`require-canonical-bootstrap` defaults to false. Existing native commands,
-defaults and secret channels are retained. The intentional job-specific read
-permission changes below also apply to the native branch: Actions permissions
-are static, not conditional on the opt-in boolean.
+The release orchestrator delivers one canonical CLI per run, built from the
+full engine commit it is given, and every plain-runner job of the release
+route runs that CLI: plan, prerequisites, version preparation, tagging, GPG
+signing, release publication and the summary. No host job of the route
+downloads or builds a binary of its own. Container jobs of the route run the
+CLI baked into their administrator-pinned image digest; the container
+callees (`validate-release-prerequisites.yml`, `generate-changelog.yml`) also
+consume the canonical CLI on the classified route, which the orchestrator
+selects for them through their `require-canonical-bootstrap` input. The
+orchestrator's `forge-ci-binary-ref`, `runtime-image` and
+`canonical-builder-image` inputs are required exact IDs, admitted by the first
+job before any image starts. Sections below that describe the delivery
+mechanics are unchanged; the opt-in they once gated is now the route's shape.
 
 ## Original delivery provenance and local verification
 
@@ -29,10 +36,12 @@ persisted credentials, LFS or submodules. Only then does the workflow invoke
 `./_forge_ci_bootstrap/.github/actions/consume-canonical-cli`: this is code from
 that **separate, freshly pinned ENGINE checkout**, not a local consumer action.
 Consumer checkout has not occurred yet.
-Canonical metadata is step-scoped until the opt-in gate validates it; only the
-validated nonsecret fields are then exported for subsequent bootstrap steps.
-The native job environment, like its command bodies and secret mappings, stays
-unchanged when opt-in is false.
+Canonical metadata is step-scoped until the receiver gate validates it; only
+the validated nonsecret fields are then exported for subsequent bootstrap
+steps. Each receiver also states, as a literal in its admitted YAML, which
+[tool profile](trusted-runtime-tools.md) the delivered CLI resolves helper
+programs from: `runtime` inside the approved image, `host` on a hosted runner,
+and `host-toolchain` only for the key-free version-file preparation.
 
 The composite contains the fixed native download action and one shared script;
 four workflows do not maintain competing transport/verifier implementations.
@@ -57,8 +66,8 @@ remain caller prerequisites. The hostile-SDK PATH tests do not prove isolation
 from arbitrary loader variables, exported startup state or a compromised runner.
 Bad metadata, missing delivery, wrong hash or unavailable helper exposes neither
 launcher nor local completion output and has no installer/latest/PATH fallback.
-The two legacy source-install steps in prepare run only when opt-in is false.
-Always-run CLI cleanup/summary steps require local verification when opted in.
+The legacy source-install steps are gone from the release route. Always-run
+CLI cleanup and summary steps require the job's own local verification.
 
 ## Actual covered jobs and permission caps
 
@@ -73,7 +82,9 @@ write permission, OIDC permission or secret mapping is expanded.
 | release-orchestrator | execute-prepare-stage call | Existing actions read/contents write/packages read unchanged; forward original delivery fields |
 | validate-release-prerequisites | validate | Add actions read; contents read and private step channels unchanged |
 | generate-changelog | generate-changelog | Explicit contents read/actions read replaces inherited contents read |
-| release-prepare-stage | prepare-version-files, version-bump | Existing actions read retained; both bootstrap before consumer checkout |
+| release-prepare-stage | prepare-version-files, version-bump | Existing actions read retained; both consume the canonical CLI before consumer checkout, with the `host-toolchain` and `host` profiles |
+| release-create-github | sign-release-gpg, create-release | Host receivers with the `host` profile; the cosign-backed signer runs in the admitted `runtime-image` digest without consuming |
+| release-orchestrator | create-release call | Forwards the original delivery fields and the admitted base digest |
 | release-prepare-stage | summarize-prepare-stage | Add actions read; independently bootstrap before reporting CLI |
 | release-prepare-stage | generate-full-changelog, generate-minimal-changelog calls | Add actions read to propagate callee cap |
 | release-create-github | generate-changelog call | Permission-only actions read cap propagation |
@@ -86,14 +97,16 @@ required read cap, even with opt-in off. The metadata operation is read-only;
 some existing job tokens (notably native version-bump) already have other
 permissions. This patch does not claim those tokens themselves are read-only.
 
-The top-level opt-in uses existing protected `forge-ci-binary-ref` (must be a full
-commit) and runtime inputs (must be qualified digests), not a new tuple model.
-For Cargo prerequisites an explicit Rust image may differ; otherwise opt-in uses
-the explicit base runtime, never a resolver's mutable Rust tag. Plain preparation
-runs on the existing trusted hosted runner, not a newly claimed container. Role
-tool availability/qualification remains an administrator prerequisite. No image
-must embed this CLI or share its version: delivered canonical bytes are checked
-independently. An old Java SDK qualification does not qualify every other tool.
+The route uses the protected `forge-ci-binary-ref` (a full commit) and the
+`runtime-image`/`canonical-builder-image` inputs (qualified digests), not a new
+tuple model. For Cargo prerequisites an explicit Rust image may differ; otherwise
+the classified route uses the explicit base runtime, never a resolver's mutable
+Rust tag. Plain preparation runs on the existing trusted hosted runner, not a
+newly claimed container. Role tool availability/qualification remains an
+administrator prerequisite; the `host-toolchain` profile's product tools are an
+explicitly unqualified premise, see [tool profiles](trusted-runtime-tools.md).
+No image must embed this CLI or share its version: delivered canonical bytes are
+checked independently. An old Java SDK qualification does not qualify every other tool.
 
 ## Dependencies, limitations and review scope
 
@@ -117,8 +130,8 @@ execution. Bootstrap after a consumer producer must happen on a fresh runner.
 This patch does not wire a classified producer/signer/publisher, change native
 packaging roles, or certify every downstream native release workflow. The merged
 transitive-preparation gates, exact-ID transfers and original outputs are retained.
-The two default-false options remain independent; canonical bootstrap does not
-silently enable or waive current-attempt preparation. P/Q request authorization,
+Current-attempt preparation remains an independent option; canonical bootstrap
+does not silently enable or waive it. P/Q request authorization,
 policy execution, manifest admission and
 purpose-specific private role checks remain their existing owners' obligations.
 No new production refs, hashes, approvals, credentials, provider runs or live
@@ -139,8 +152,8 @@ SDK PATH is not selected and later launcher calls repeat hash verification.
 The ordinary workflow input-contract guard, full workflow guards, Actionlint and
 consumer tests use actual source without skips, dependency overrides or overlays.
 The native comparison is pinned to the actual base above, not the old d7 source.
-All four combinations of current-attempt/canonical opt-in are tested with inert
-gate effects, including independently stale preparation and canonical producers.
+All four combinations of the current-attempt and canonical gates are tested with
+inert gate effects, including independently stale preparation and canonical producers.
 Docs/sync checks, focused races, ShellCheck/shfmt, configured actual-base delta Go
 lint and tracked/untracked diff checks are separate bounded evidence. No canonical
 build is needed here: no Go CLI source, embedded docs or build recipe changes.

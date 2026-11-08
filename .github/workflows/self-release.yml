@@ -247,8 +247,15 @@ jobs:
     timeout-minutes: 15
     permissions:
       contents: read
+    outputs:
+      # The release route admits its control-plane and canonical builder
+      # images only as digests; these are what the registry serves for this
+      # commit's tags, read once here and pinned for the whole release.
+      base-digest: ${{ steps.images.outputs.base-digest }}
+      go-digest: ${{ steps.images.outputs.go-digest }}
     steps:
       - name: Poll for this commit's runtime images
+        id: images
         env:
           NAMESPACE: ${{ needs.resolve-branch.outputs.image-namespace }}
           IMAGE_TAG: ${{ needs.resolve-branch.outputs.image-tag }}
@@ -268,6 +275,12 @@ jobs:
             done
             if [ "$missing" -eq 0 ]; then
               printf 'All runtime images are available for %s\n' "$IMAGE_TAG"
+              for role in base go; do
+                image="${NAMESPACE}/forge-ci-runtime-${role/go/go-1.27}:${IMAGE_TAG}"
+                digest="$(docker buildx imagetools inspect "$image" --format '{{.Manifest.Digest}}')"
+                [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] || { printf '::error::%s has no admissible digest: %s\n' "$image" "$digest" >&2; exit 1; }
+                printf '%s-digest=%s\n' "$role" "$digest" >>"$GITHUB_OUTPUT"
+              done
               exit 0
             fi
             printf 'Waiting for runtime images (%ds / %ds)...\n' "$elapsed" "$timeout"
@@ -297,7 +310,8 @@ jobs:
       RELEASE_GPG_PUBLIC_KEY: ${{ secrets.RELEASE_GPG_PUBLIC_KEY }}
     with:
       branch: ${{ needs.resolve-branch.outputs.branch }}
-      runtime-image: ${{ needs.resolve-branch.outputs.image-namespace }}/forge-ci-runtime-base:${{ needs.resolve-branch.outputs.image-tag }}
+      runtime-image: ${{ needs.resolve-branch.outputs.image-namespace }}/forge-ci-runtime-base@${{ needs.wait-for-images.outputs.base-digest }}
+      canonical-builder-image: ${{ needs.resolve-branch.outputs.image-namespace }}/forge-ci-runtime-go-1.27@${{ needs.wait-for-images.outputs.go-digest }}
       runtime-image-full: ${{ needs.resolve-branch.outputs.image-namespace }}/forge-ci-runtime:${{ needs.resolve-branch.outputs.image-tag }}
       runtime-image-java: ${{ needs.resolve-branch.outputs.image-namespace }}/forge-ci-runtime-java-25:${{ needs.resolve-branch.outputs.image-tag }}
       runtime-image-node: ${{ needs.resolve-branch.outputs.image-namespace }}/forge-ci-runtime-node-24:${{ needs.resolve-branch.outputs.image-tag }}

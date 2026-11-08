@@ -33,7 +33,7 @@ func TestRequiredWorkflowRequestSourceFailsBeforeAnyDownstreamEffect(t *testing.
 	t.Parallel()
 
 	for file, jobs := range map[string][]string{
-		"release-create-github.yml": {"sign-release", "create-release"},
+		"release-create-github.yml": {"sign-release-gpg", "sign-release", "create-release"},
 		"release-orchestrator.yml":  {"parse-config", "validate-release-tag"},
 	} {
 		workflow := lateWorkflow(t, file)
@@ -136,17 +136,25 @@ func TestNativePrivateBoundariesRequireOriginalRequest(t *testing.T) {
 	require.True(t, upstream)
 
 	jobs := lateWorkflow(t, "release-create-github.yml")
-	for _, job := range []string{"sign-release", "create-release"} {
+	// The host jobs run the canonical CLI consumed before any consumer
+	// metadata; the container signer runs the CLI baked into the admitted
+	// image and consumes nothing.
+	for _, job := range []string{"sign-release-gpg", "sign-release", "create-release"} {
 		steps := jobs[job].Steps
-		installed, boundary := false, -1
+		host := job != "sign-release"
+		consumed, boundary := false, -1
 
 		for index, step := range steps {
-			if strings.Contains(step.Run, "install-forge-ci.sh") {
-				installed = true
+			require.NotContains(t, step.Run, "install-forge-ci.sh", "no host installer on the release route")
+
+			if step.Uses == "./_forge_ci_bootstrap/.github/actions/consume-canonical-cli" {
+				require.True(t, host, "a job container runs its baked CLI; it does not consume the canonical one")
+
+				consumed = true
 			}
 
 			if strings.Contains(step.Run, "forge-ci platform checkout") {
-				require.True(t, installed, "bootstrap must precede consumer metadata")
+				require.Equal(t, host, consumed, "a host job bootstraps before consumer metadata")
 				require.Contains(t, step.Run, "--sparse .forge-ci --fetch-all-refs")
 				require.Equal(t, "${{ github.token }}", step.Env["GITHUB_TOKEN"])
 			}
@@ -173,7 +181,7 @@ func TestNativePrivateBoundariesRequireOriginalRequest(t *testing.T) {
 				}
 			}
 
-			if step.Name == "Import GPG key" || step.Name == "Create GitHub Release" {
+			if step.Name == "Import GPG key" || step.Name == "Bind Cosign signing key to trusted public key" || step.Name == "Create GitHub Release" {
 				require.Equal(t, index-1, boundary, "late authority check must immediately precede the first private operation")
 			}
 
@@ -195,7 +203,7 @@ func TestLateBoundaryRefusalsHaveNoPrivateEffects(t *testing.T) {
 	t.Parallel()
 	jobs := lateWorkflow(t, "release-create-github.yml")
 
-	for _, job := range []string{"sign-release", "create-release"} {
+	for _, job := range []string{"sign-release-gpg", "sign-release", "create-release"} {
 		var script string
 
 		for _, step := range jobs[job].Steps {

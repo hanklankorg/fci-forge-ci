@@ -117,6 +117,7 @@ if [[ "$mode" == admit ]]; then
   [[ ${#entries[@]} == 0 ]] || fail 'download destination is not empty'
   exit 0
 fi
+[[ "${TOOL_PROFILE:-}" =~ ^[a-z][a-z-]*$ ]] || fail 'tool profile literal required for the verified probe'
 binary=$DELIVERY_DIRECTORY/forge-ci-linux-amd64
 [[ ${#entries[@]} == 1 && "${entries[0]}" == "$binary" && -f "$binary" && ! -L "$binary" ]] || fail 'delivery requires exactly one canonical regular amd64 file, no sidecars'
 [[ "$(stat -c %s -- "$binary")" -gt 0 && "$(stat -c %s -- "$binary")" -le 134217728 ]] || fail 'delivery exceeds canonical binary bounds'
@@ -125,4 +126,4 @@ binary=$DELIVERY_DIRECTORY/forge-ci-linux-amd64
 /bin/bash "$ENGINE_CHECKOUT/scripts/ci/engine-binary.sh" verify amd64 "$binary"
 chmod 0755 -- "$binary"
 exec /bin/bash "$ENGINE_CHECKOUT/scripts/ci/trusted-bootstrap.sh" \
-  "$ENGINE_CHECKOUT" "$ENGINE_ORIGIN" "$ENGINE_COMMIT" "$binary" -- --version
+  "$ENGINE_CHECKOUT" "$ENGINE_ORIGIN" "$ENGINE_COMMIT" "$binary" "$TOOL_PROFILE" -- --version

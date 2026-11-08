@@ -13,9 +13,10 @@ fail() {
   printf 'trusted-bootstrap: %s\n' "$1" >&2
   exit 69
 }
-[[ $# -ge 6 && "$5" == -- ]] || fail 'expected CHECKOUT HTTPS_ORIGIN FULL_COMMIT ABSOLUTE_BINARY -- CLI_ARGUMENT...'
-checkout=$1 origin=$2 commit=$3 binary=$4
-shift 5
+[[ $# -ge 7 && "$6" == -- ]] || fail 'expected CHECKOUT HTTPS_ORIGIN FULL_COMMIT ABSOLUTE_BINARY TOOL_PROFILE -- CLI_ARGUMENT...'
+checkout=$1 origin=$2 commit=$3 binary=$4 profile=$5
+shift 6
+[[ "$profile" =~ ^[a-z][a-z-]*$ ]] || fail 'tool profile must be one literal profile name'
 [[ "$commit" =~ ^([0-9a-f]{40}|[0-9a-f]{64})$ ]] || fail 'engine commit must be full and lowercase'
 [[ "$origin" =~ ^https://[^/?#@[:space:]]+/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] || fail 'engine origin must be an explicit HTTPS repository URL'
 [[ "$checkout" == /* && "$binary" == /* ]] || fail 'checkout and binary paths must be absolute'
@@ -59,5 +60,6 @@ FORGE_CI_BIN=$binary
 verify_forge_ci || exit $?
 unset FORGE_CI_BIN
 # Admit tool placement only AFTER the original absolute CLI's hash verification.
+# The admitted helper owns the finite profile set and refuses an unknown name.
 # Never discover forge-ci on the image's PATH (which may contain an older SDK).
-exec /bin/bash -p "$checkout/scripts/ci/trusted-runtime-tools.sh" "$HELPERS_ENGINE_VERIFIED" "$@"
+exec /bin/bash -p "$checkout/scripts/ci/trusted-runtime-tools.sh" "$profile" "$HELPERS_ENGINE_VERIFIED" "$@"

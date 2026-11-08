@@ -382,6 +382,12 @@ Creates GitHub releases with assets.
 
 Usually called by `release-orchestrator.yml`, but can also be used directly by advanced consumers that want lower-level release composition.
 
+Direct callers must supply the canonical delivery context of the same run
+(`canonical-*` inputs from a `canonical-cli-bootstrap.yml` call, with
+`forge-ci-binary-ref` as the full engine commit and `runtime-image` as the
+admitted base image digest): the GPG signer and the publisher run on plain
+runners with that CLI, while `sigstore`/`kms` signing runs in the
+`runtime-image` container and SBOM assembly in `runtime-image-full`.
 Direct callers must supply `authorized-source-sha` from the original trusted
 request event (Q), independently of the immutable prepared `checkout-ref` (P).
 Set `request-is-release: true` only for an explicitly planned no-bump release

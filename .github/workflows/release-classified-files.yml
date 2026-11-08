@@ -121,6 +121,8 @@ jobs:
         name: Verify canonical CLI before any consumer checkout or CLI
         id: canonical-bootstrap
         uses: ./_forge_ci_bootstrap/.github/actions/consume-canonical-cli
+        with:
+          tool-profile: runtime # The job container is the approved image.
       - &event
         name: Validate event context before privileged operations
         run: forge-ci validate event-context
@@ -209,7 +211,7 @@ jobs:
           /usr/bin/env -i HOME="$RUNNER_TEMP/classified-product-home" \
             SOURCE_DATE_EPOCH="$SOURCE_DATE_EPOCH" RELEASE_SHA="$PREPARED_SHA" TAG_NAME="$TAG" \
             FORGE_CI_CLASSIFIED_OUTPUT="$RUNNER_TEMP/classified-product" \
-            /bin/bash -p "$RUNNER_TEMP/forge-ci-approved-engine/scripts/ci/trusted-runtime-tools.sh" "$script"
+            /bin/bash -p "$RUNNER_TEMP/forge-ci-approved-engine/scripts/ci/trusted-runtime-tools.sh" runtime "$script"
       - name: Admit exact unsigned producer workspace and record digest
         id: handoff
         shell: /bin/bash --noprofile --norc -peuo pipefail {0}

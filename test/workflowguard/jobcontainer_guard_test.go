@@ -35,7 +35,9 @@ import (
 // short and stay written down.
 func declaredWritingContainerJobs() map[string]string {
 	return map[string]string{
+		"promote-stage.yml/promote":                  "packages: write",
 		"publish-snapshot-npm.yml/build-and-publish": "packages: write",
+		"release-create-github.yml/sign-release":     "id-token: write",
 		"version-bump.yml/bump-version":              "contents: write",
 	}
 }

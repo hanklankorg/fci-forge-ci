@@ -8,6 +8,9 @@ set -euo pipefail
 export PATH=/usr/bin:/bin
 [[ $# == 1 && ("$1" == prepare || "$1" == admit || "$1" == receive) ]]
 [[ "${CANONICAL_PRODUCER_RESULT:-}" == success ]]
+# The admitted workflow states the tool profile as a literal; the helper owns
+# the finite set and refuses an unknown name at the first verified probe.
+[[ "${TOOL_PROFILE:-}" =~ ^[a-z][a-z-]*$ ]]
 export ENGINE_CHECKOUT=${RUNNER_TEMP:?}/forge-ci-approved-engine
 if [[ "$1" == prepare ]]; then
   [[ ! -e "$ENGINE_CHECKOUT" && ! -L "$ENGINE_CHECKOUT" ]]
@@ -24,10 +27,11 @@ fi
 directory=$RUNNER_TEMP/forge-ci-canonical-bin
 [[ ! -e "$directory" && ! -L "$directory" ]]
 mkdir -m0700 -- "$directory"
-printf '#!/bin/bash -p\nexec /bin/bash -p %q %q %q %q %q -- "$@"\n' \
+printf '#!/bin/bash -p\nexec /bin/bash -p %q %q %q %q %q %q -- "$@"\n' \
   "$ENGINE_CHECKOUT/scripts/ci/trusted-bootstrap.sh" "$ENGINE_CHECKOUT" \
   "${ENGINE_ORIGIN:?}" "${ENGINE_COMMIT:?}" \
-  "$RUNNER_TEMP/forge-ci-canonical-${GITHUB_RUN_ID:?}-${GITHUB_RUN_ATTEMPT:?}/forge-ci-linux-amd64" >"$directory/forge-ci"
+  "$RUNNER_TEMP/forge-ci-canonical-${GITHUB_RUN_ID:?}-${GITHUB_RUN_ATTEMPT:?}/forge-ci-linux-amd64" \
+  "$TOOL_PROFILE" >"$directory/forge-ci"
 chmod 0700 -- "$directory/forge-ci"
 printf '%s\n' "$directory" >>"${GITHUB_PATH:?}"
 printf 'verified=true\n' >>"${GITHUB_OUTPUT:?}"

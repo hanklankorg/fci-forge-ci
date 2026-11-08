@@ -127,7 +127,7 @@ func newCanonicalFixture(t *testing.T) *canonicalFixture {
 		"PRODUCER_RUN_ID": "100", "PRODUCER_RUN_ATTEMPT": "2", "PRODUCER_ENGINE_REPOSITORY": "admin/engine", "PRODUCER_ENGINE_COMMIT": commit,
 		"ARTIFACT_METADATA": fixture.metadata, "PROCESS_MARKER": fixture.marker, "HELPER_MARKER": fixture.helperMarker, "FORGE_CI_BIN": filepath.Join(hostile, "forge-ci"),
 		"FORGE_CI_PLAN": "/consumer/plan", "FORGE_CI_PATH": hostile, "FORGE_CI_BINARY_REF": "older-sdk", "SIGNER_STRICT": "0",
-		"GITHUB_OUTPUT": filepath.Join(fixture.root, "outputs"),
+		"GITHUB_OUTPUT": filepath.Join(fixture.root, "outputs"), "TOOL_PROFILE": "runtime",
 	}
 	fixture.writeMetadata(t, nil)
 

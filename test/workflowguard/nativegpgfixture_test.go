@@ -53,7 +53,7 @@ func TestNativeGPGFixtureUsesRealGoAndOrdinaryReleaseOwner(t *testing.T) {
 	jobs := workflow["jobs"].(map[string]any)
 	require.Len(t, jobs, 1)
 	job := jobs["release"].(map[string]any)
-	require.Equal(t, "diggsweden/forge-ci/.github/workflows/release-orchestrator.yml@v0.90.0", job["uses"])
+	require.Equal(t, "diggsweden/forge-ci/.github/workflows/release-orchestrator.yml@84180b5ac07af63d33917bec306e7f838aa8e366", job["uses"])
 	require.NotContains(t, job, "steps")
 	inputs := job["with"].(map[string]any)
 	require.Equal(t, ".forge-ci/artifacts-gpg.yml", inputs["artifacts-config"])

@@ -204,7 +204,7 @@ func TestTrustedBootstrap(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			cmd := exec.CommandContext(t.Context(), "/bin/bash", "--noprofile", "--norc", helper, engine, origin, commit, binary, "--", "--version")
+			cmd := exec.CommandContext(t.Context(), "/bin/bash", "--noprofile", "--norc", helper, engine, origin, commit, binary, "runtime", "--", "--version")
 			cmd.Env = []string{"PATH=" + hostile, "HOME=" + root, "PROCESS_MARKER=" + marker, "ADMIN_INPUT=retained", "FORGE_CI_BIN=" + filepath.Join(hostile, "forge-ci"), "FORGE_CI_PATH=" + hostile, "FORGE_CI_BINARY_REF=old-sdk", "FORGE_CI_PLAN=/consumer/plan.json", "HELPERS_ENGINE_VERIFIED=" + binary, "SIGNER_STRICT=0", "GIT_DIR=/consumer/git", "GIT_WORK_TREE=/consumer", "GIT_CONFIG_COUNT=1", "GIT_CONFIG_KEY_0=remote.origin.url", "GIT_CONFIG_VALUE_0=https://hostile.invalid/engine", "TEST_IMAGE_ROOT=" + filepath.Join(root, "image"), "TOOL_MARKER=" + filepath.Join(root, "tools"), "CARGO_HOME=/consumer/cache", "RUSTUP_HOME=/consumer/toolchain", "TRUSTED_TOOL_PATH=" + hostile}
 
 			out, runErr := cmd.CombinedOutput()
@@ -260,7 +260,7 @@ func TestTrustedBootstrapOrdering(t *testing.T) {
 		`source "$checkout/.engine/bin/lib-forge-ci.sh"`,
 		`SIGNER_STRICT=1`,
 		`verify_forge_ci || exit $?`,
-		`exec /bin/bash -p "$checkout/scripts/ci/trusted-runtime-tools.sh" "$HELPERS_ENGINE_VERIFIED" "$@"`,
+		`exec /bin/bash -p "$checkout/scripts/ci/trusted-runtime-tools.sh" "$profile" "$HELPERS_ENGINE_VERIFIED" "$@"`,
 	} {
 		position := strings.Index(string(body), step)
 		if position <= previous {

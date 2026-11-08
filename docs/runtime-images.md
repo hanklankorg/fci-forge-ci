@@ -388,37 +388,48 @@ the install. Source installation is used only for non-release refs or when
 
 ## Advanced Pinning Recipe
 
-After the required images have been published, use runtime overrides for digest
-pinning, mirrors or branch testing. This is an input-override fragment for an
+After the required images have been published, pin a release caller. The
+release orchestrator requires three of its inputs as exact IDs and admits them
+in its first job, before any image starts: `forge-ci-binary-ref` is the full
+engine commit the run builds its canonical CLI from, and `runtime-image` and
+`canonical-builder-image` are `@sha256:` digests (a tag is refused). The other
+`runtime-image*` lanes may be tags or digests. This is an input fragment for an
 existing release caller; retain its [permissions and secret bindings](reference.md):
 
-Treat the workflow revision, runtime image digests, plain-runner CLI ref and
+Treat the workflow revision, runtime image digests, engine commit and
 artifacts schema as one reviewed selection. A newer workflow does not update a
 binary baked into an older image. Obtain the schema from that same selected
 source revision, as described in [the schema guide](artifacts-reference.md#json-schema).
-The version labels below illustrate the selection; replace them with verified
+The placeholders below illustrate the selection; replace them with verified
 coordinates for the revision you intend to run.
 
 ```yaml
 # .github/workflows/release.yml in a consumer repo
 jobs:
   release:
-    uses: diggsweden/forge-ci/.github/workflows/release-orchestrator.yml@v0.90.0
+    uses: diggsweden/forge-ci/.github/workflows/release-orchestrator.yml@<full-commit> # vX.Y.Z
     with:
       branch: main
       artifacts-config: .forge-ci/artifacts.yml
-      # Optional: override every runtime image family used by the orchestrator.
-      # Omit overrides to use the defaults declared by the pinned workflow.
-      runtime-image: ghcr.io/diggsweden/forge-ci-runtime-base:v0.90.0
-      runtime-image-full: ghcr.io/diggsweden/forge-ci-runtime:v0.90.0
-      runtime-image-java: ghcr.io/diggsweden/forge-ci-runtime-java-25:v0.90.0
-      runtime-image-node: ghcr.io/diggsweden/forge-ci-runtime-node-24:v0.90.0
-      runtime-image-rust: ghcr.io/diggsweden/forge-ci-runtime-rust-stable:v0.90.0
-      runtime-image-go: ghcr.io/diggsweden/forge-ci-runtime-go-1.27:v0.90.0
-      runtime-image-android: ghcr.io/diggsweden/forge-ci-runtime-android-35:v0.90.0
-      forge-ci-binary-ref: v0.90.0
-      # Renovate-friendly: bump the @v0.90.0, :v0.90.0, and binary ref in lockstep.
+      # The same full commit the workflow ref names: required.
+      forge-ci-binary-ref: <full-commit>
+      # Admitted by digest before any job runs: required.
+      runtime-image: ghcr.io/diggsweden/forge-ci-runtime-base@sha256:<digest>
+      canonical-builder-image: ghcr.io/diggsweden/forge-ci-runtime-go-1.27@sha256:<digest>
+      # Optional lanes; omitted, the release resolves the same version's tags.
+      runtime-image-full: ghcr.io/diggsweden/forge-ci-runtime:vX.Y.Z
+      runtime-image-java: ghcr.io/diggsweden/forge-ci-runtime-java-25:vX.Y.Z
+      runtime-image-node: ghcr.io/diggsweden/forge-ci-runtime-node-24:vX.Y.Z
+      runtime-image-rust: ghcr.io/diggsweden/forge-ci-runtime-rust-stable:vX.Y.Z
+      runtime-image-go: ghcr.io/diggsweden/forge-ci-runtime-go-1.27:vX.Y.Z
+      runtime-image-android: ghcr.io/diggsweden/forge-ci-runtime-android-35:vX.Y.Z
 ```
+
+Read a published tag's digest with the registry client you have, for example
+`docker buildx imagetools inspect ghcr.io/diggsweden/forge-ci-runtime-base:vX.Y.Z --format '{{.Manifest.Digest}}'`,
+and the tag's commit with `git rev-parse vX.Y.Z^{commit}` in a forge-ci
+checkout. Self Release pins the same way: it reads this commit's image digests
+once the images exist and passes `github.sha` as the engine commit.
 
 For direct workflow calls that take one `runtime-image:` input, choose the
 matching family from the [roster](#image-roster). For example, a Java job uses:
@@ -501,14 +512,19 @@ jobs:
       runtime-image-android: ghcr.io/diggsweden/forge-ci-runtime-android-35:sha-abcdef0
 ```
 
-The plain-runner jobs (container publish and macOS workflows) do not use the
-runtime image. They install the binary selected by `forge-ci-binary-ref`, so
-that value must point at the same forge-ci commit as the workflow and runtime
-images being tested. Branch/full commit refs use a detached Git checkout and
-`go install ./cmd/forge-ci`, without a version-suffixed module query. Both
-40-character SHA-1 and 64-character SHA-256 commit IDs are accepted. Host jobs
-bind the build to their bootstrap checkout; PR and snapshot orchestrators
-resolve source branches once. Commit IDs avoid source-ref drift across runs.
+The release route's plain-runner jobs (version preparation, GPG signing and
+release publication) run the canonical CLI the run builds from
+`forge-ci-binary-ref`, which must be that full commit, in the
+`canonical-builder-image` digest. The remaining plain-runner jobs (container
+publish, the PR and snapshot orchestrators' host jobs and the macOS workflows)
+do not use the runtime image. They install the binary selected by
+`forge-ci-binary-ref`, so that value must point at the same forge-ci commit as
+the workflow and runtime images being tested. Branch/full commit refs use a
+detached Git checkout and `go install ./cmd/forge-ci`, without a
+version-suffixed module query. Both 40-character SHA-1 and 64-character
+SHA-256 commit IDs are accepted. Host jobs bind the build to their bootstrap
+checkout; PR and snapshot orchestrators resolve source branches once. Commit
+IDs avoid source-ref drift across runs.
 The corresponding image labels
 can still be rewritten by a rerun; a digest is the content pin.
 

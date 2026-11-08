@@ -142,6 +142,8 @@ jobs:
         id: canonical-bootstrap
         if: ${{ inputs['require-canonical-bootstrap'] }}
         uses: ./_forge_ci_bootstrap/.github/actions/consume-canonical-cli
+        with:
+          tool-profile: runtime # The job container is the approved image.
       - name: Checkout Repository
         env:
           GITHUB_TOKEN: ${{ github.token }}

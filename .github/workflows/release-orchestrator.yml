@@ -56,11 +56,6 @@ on:
       classified-release-notes-path: {type: string, default: ""}
       classified-package-gpg-fingerprint: {type: string, default: ""}
       classified-cosign-transparency: {type: string, default: "none"}
-      require-canonical-bootstrap:
-        description: "Opt into canonical CLI consumption for plan/prerequisite/prepare/tag/summary only; protected full engine ref and qualified digest runtime required. Not classified release activation."
-        type: boolean
-        required: false
-        default: false
       go-test-selections-json:
         description: "Administrator-owned artifact-name to native Go test selection mapping. Set only in a protected administrator entry point, not consumer artifacts or dispatch inputs."
         type: string
@@ -161,14 +156,12 @@ on:
         # - Gradle Android: CHANGELOG.md build.gradle settings.gradle gradle.properties
         # - Xcode iOS: CHANGELOG.md project.pbxproj
       forge-ci-binary-ref:
-        description: "forge-ci ref/version passed downstream; empty resolves the current stable release tag once"
-        required: false
-        default: ""
+        description: "Full approved engine commit (40 hex). The canonical CLI every hosted and container control-plane job runs is built from exactly this commit; publish lanes still pin their own callees to it."
+        required: true
         type: string
       runtime-image:
-        description: "forge-ci base runtime image for control-plane jobs. Empty uses the resolved forge-ci version."
-        required: false
-        default: ""
+        description: "Administrator-pinned forge-ci base runtime image@sha256 digest for control-plane and canonical receive jobs. Tags are refused by canonical admission."
+        required: true
         type: string
       runtime-image-full:
         description: "forge-ci full runtime image for SBOM/security-capable release jobs. Empty uses the resolved forge-ci version."
@@ -176,9 +169,8 @@ on:
         default: ""
         type: string
       canonical-builder-image:
-        description: "Administrator-approved Go-qualified image@sha256 digest for canonical CLI build only. Required for protected/classified routes; no fallback to policy or product runtimes."
-        required: false
-        default: ""
+        description: "Administrator-pinned Go-qualified image@sha256 digest for the canonical CLI build only. No fallback to policy or product runtimes."
+        required: true
         type: string
       runtime-image-java:
         description: "forge-ci Java runtime image for Maven/Gradle jobs. Empty uses the resolved forge-ci version."
@@ -391,7 +383,6 @@ jobs:
   # ===== Stage 0: Configuration And Policy =====
   canonical-cli:
     needs: [resolve-bootstrap]
-    if: ${{ inputs['require-canonical-bootstrap'] || inputs['release-file-mode'] == 'classified-files' }}
     permissions:
       contents: read
       actions: read
@@ -405,11 +396,11 @@ jobs:
       receive-runtime-image: ${{ inputs['runtime-image'] }}
   parse-config:
     needs: [resolve-bootstrap, canonical-cli]
-    if: ${{ !failure() && !cancelled() && ((!inputs['require-canonical-bootstrap'] && inputs['release-file-mode'] != 'classified-files') || needs.canonical-cli.result == 'success') }}
+    if: ${{ !failure() && !cancelled() && needs.canonical-cli.result == 'success' }}
     name: "Check: plan"
     runs-on: ubuntu-26.04
     container:
-      image: ${{ inputs['runtime-image'] || needs.resolve-bootstrap.outputs['runtime-image'] }}
+      image: ${{ inputs['runtime-image'] }}
     permissions:
       contents: read
       actions: read # Canonical metadata/download; intentional read-only increase.
@@ -452,7 +443,6 @@ jobs:
           case "$RELEASE_FILE_MODE" in native|classified-files) ;; *) exit 1 ;; esac
       - &canonical-context
         name: Require original canonical success and approved identity
-        if: ${{ inputs['require-canonical-bootstrap'] || inputs['release-file-mode'] == 'classified-files' }}
         shell: /bin/bash --noprofile --norc -peuo pipefail {0}
         env:
           ENGINE_REPOSITORY: ${{ needs.resolve-bootstrap.outputs.forge-ci-repository }}
@@ -479,7 +469,6 @@ jobs:
           done
       - &canonical-checkout
         name: Checkout only the approved engine before consumer or private steps
-        if: ${{ inputs['require-canonical-bootstrap'] || inputs['release-file-mode'] == 'classified-files' }}
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           repository: ${{ env.ENGINE_REPOSITORY }}
@@ -491,8 +480,9 @@ jobs:
       - &canonical-consume
         name: Consume canonical CLI from the independently pinned engine checkout
         id: canonical-bootstrap
-        if: ${{ inputs['require-canonical-bootstrap'] || inputs['release-file-mode'] == 'classified-files' }}
         uses: ./_forge_ci_bootstrap/.github/actions/consume-canonical-cli
+        with:
+          tool-profile: runtime # The job container is the approved image.
       - name: Validate release workflow provider
         run: forge-ci validate release-provider
       # Defense-in-depth gate at the top of the release pipeline:
@@ -561,7 +551,7 @@ jobs:
   validate-prerequisites:
     name: "Check: release request"
     needs: [resolve-bootstrap, parse-config, canonical-cli]
-    if: ${{ !failure() && !cancelled() && needs.parse-config.result == 'success' && ((!inputs['require-canonical-bootstrap'] && inputs['release-file-mode'] == 'native') || needs.canonical-cli.result == 'success') && (inputs['release-file-mode'] != 'classified-files' || (needs.parse-config.outputs.binding-run-id == github.run_id && needs.parse-config.outputs.binding-run-attempt == github.run_attempt)) }}
+    if: ${{ !failure() && !cancelled() && needs.parse-config.result == 'success' && needs.canonical-cli.result == 'success' && (inputs['release-file-mode'] != 'classified-files' || (needs.parse-config.outputs.binding-run-id == github.run_id && needs.parse-config.outputs.binding-run-attempt == github.run_attempt)) }}
     permissions:
       contents: read
       actions: read # Propagate receiver read cap through workflow_call.
@@ -576,7 +566,7 @@ jobs:
       CODE_SCANNING_TOKEN: ${{ secrets.CODE_SCANNING_TOKEN }}
     uses: ./.github/workflows/validate-release-prerequisites.yml
     with:
-      require-canonical-bootstrap: ${{ inputs['require-canonical-bootstrap'] || inputs['release-file-mode'] == 'classified-files' }}
+      require-canonical-bootstrap: ${{ inputs['release-file-mode'] == 'classified-files' }}
       canonical-artifact-id: ${{ needs.canonical-cli.outputs.artifact-id }}
       canonical-artifact-name: ${{ needs.canonical-cli.outputs.artifact-name }}
       canonical-producer-run-id: ${{ needs.canonical-cli.outputs.producer-run-id }}
@@ -600,7 +590,7 @@ jobs:
       authorized-source-sha: ${{ github.sha }}
       # Cargo prerequisite validation checks Cargo.lock and `cargo --version`,
       # so use the Rust runtime whenever Cargo artifacts (either mode) are present.
-      runtime-image: ${{ (fromJson(needs.parse-config.outputs['publish-stage-plan-json']).targets.cargo_container_first.runs || fromJson(needs.parse-config.outputs['build-stage-plan-json']).targets.cargo.runs) && (inputs['runtime-image-rust'] || ((inputs['require-canonical-bootstrap'] || inputs['release-file-mode'] == 'classified-files') && inputs['runtime-image']) || needs.resolve-bootstrap.outputs['runtime-image-rust']) || (inputs['runtime-image'] || needs.resolve-bootstrap.outputs['runtime-image']) }}
+      runtime-image: ${{ (fromJson(needs.parse-config.outputs['publish-stage-plan-json']).targets.cargo_container_first.runs || fromJson(needs.parse-config.outputs['build-stage-plan-json']).targets.cargo.runs) && (inputs['runtime-image-rust'] || (inputs['release-file-mode'] == 'classified-files' && inputs['runtime-image']) || needs.resolve-bootstrap.outputs['runtime-image-rust']) || inputs['runtime-image'] }}
   # ===== Stage 2: Release Preparation =====
   # Release preparation now lives below this control-plane stage call.
   execute-prepare-stage:
@@ -619,7 +609,7 @@ jobs:
     uses: ./.github/workflows/release-prepare-stage.yml
     with:
       require-current-attempt: ${{ inputs['release-file-mode'] == 'classified-files' }}
-      require-canonical-bootstrap: ${{ inputs['require-canonical-bootstrap'] || inputs['release-file-mode'] == 'classified-files' }}
+      require-canonical-bootstrap: ${{ inputs['release-file-mode'] == 'classified-files' }}
       canonical-artifact-id: ${{ needs.canonical-cli.outputs.artifact-id }}
       canonical-artifact-name: ${{ needs.canonical-cli.outputs.artifact-name }}
       canonical-producer-run-id: ${{ needs.canonical-cli.outputs.producer-run-id }}
@@ -638,14 +628,14 @@ jobs:
       git-signing-method: ${{ fromJson(needs.parse-config.outputs.config-plan-json).git_signing.method }}
       bot-name: ${{ inputs['bot-name'] }}
       bot-email: ${{ inputs['bot-email'] }}
-      runtime-image: ${{ inputs['runtime-image'] || needs.resolve-bootstrap.outputs['runtime-image'] }}
+      runtime-image: ${{ inputs['runtime-image'] }}
   validate-release-tag:
     name: "Prepare: check the release tag"
     needs: [resolve-bootstrap, parse-config, execute-prepare-stage, canonical-cli]
     if: ${{ !failure() && !cancelled() }}
     runs-on: ubuntu-26.04
     container:
-      image: ${{ inputs['runtime-image'] || needs.resolve-bootstrap.outputs['runtime-image'] }}
+      image: ${{ inputs['runtime-image'] }}
     permissions:
       contents: read
       actions: read
@@ -752,7 +742,7 @@ jobs:
       source-date-epoch: ${{ needs.execute-prepare-stage.outputs.source-date-epoch }}
       build-stage-plan-json: ${{ needs.parse-config.outputs.build-stage-plan-json }}
       forge-ci-binary-ref: ${{ needs.parse-config.outputs.forge-ci-binary-ref }}
-      runtime-image: ${{ inputs['runtime-image'] || needs.resolve-bootstrap.outputs['runtime-image'] }}
+      runtime-image: ${{ inputs['runtime-image'] }}
       runtime-image-java: ${{ inputs['runtime-image-java'] || needs.resolve-bootstrap.outputs['runtime-image-java'] }}
       runtime-image-node: ${{ inputs['runtime-image-node'] || needs.resolve-bootstrap.outputs['runtime-image-node'] }}
       runtime-image-go: ${{ inputs['runtime-image-go'] || needs.resolve-bootstrap.outputs['runtime-image-go'] }}
@@ -798,7 +788,7 @@ jobs:
       source-date-epoch: ${{ needs.execute-prepare-stage.outputs.source-date-epoch }}
       publish-stage-plan-json: ${{ needs.parse-config.outputs.publish-stage-plan-json }}
       forge-ci-binary-ref: ${{ needs.parse-config.outputs.forge-ci-binary-ref }}
-      runtime-image: ${{ inputs['runtime-image'] || needs.resolve-bootstrap.outputs['runtime-image'] }}
+      runtime-image: ${{ inputs['runtime-image'] }}
       runtime-image-java: ${{ inputs['runtime-image-java'] || needs.resolve-bootstrap.outputs['runtime-image-java'] }}
       runtime-image-rust: ${{ inputs['runtime-image-rust'] || needs.resolve-bootstrap.outputs['runtime-image-rust'] }}
       runtime-image-go: ${{ inputs['runtime-image-go'] || needs.resolve-bootstrap.outputs['runtime-image-go'] }}
@@ -831,8 +821,8 @@ jobs:
     uses: ./.github/workflows/promote-stage.yml
     with:
       stage: dev
+      runtime-image: ${{ inputs['runtime-image'] }}
       release-tag: ${{ needs.parse-config.outputs.release-tag }}
-      forge-ci-binary-ref: ${{ needs.parse-config.outputs.forge-ci-binary-ref }}
   promote-staging:
     name: "Publish: images to staging"
     needs: [parse-config, execute-publish-stage, promote-dev]
@@ -844,9 +834,9 @@ jobs:
     uses: ./.github/workflows/promote-stage.yml
     with:
       stage: staging
+      runtime-image: ${{ inputs['runtime-image'] }}
       environment: ${{ inputs['promote-staging-environment'] }}
       release-tag: ${{ needs.parse-config.outputs.release-tag }}
-      forge-ci-binary-ref: ${{ needs.parse-config.outputs.forge-ci-binary-ref }}
   promote-release:
     name: "Publish: images to release"
     needs: [parse-config, execute-publish-stage, promote-staging]
@@ -858,9 +848,9 @@ jobs:
     uses: ./.github/workflows/promote-stage.yml
     with:
       stage: release
+      runtime-image: ${{ inputs['runtime-image'] }}
       environment: ${{ inputs['promote-release-environment'] }}
       release-tag: ${{ needs.parse-config.outputs.release-tag }}
-      forge-ci-binary-ref: ${{ needs.parse-config.outputs.forge-ci-binary-ref }}
       # Optional digital-sovereignty target — empty inputs keep release on the
       # build registry (same-registry tag-move, no cosign/dest login).
       stage-repo: ${{ inputs['promote-release-repo'] }}
@@ -872,9 +862,9 @@ jobs:
   # Release creation stays top-level because it is the public end of the pipeline.
   create-release:
     name: "Publish: release"
-    needs: [resolve-bootstrap, parse-config, execute-prepare-stage, validate-release-tag, execute-publish-stage]
+    needs: [resolve-bootstrap, canonical-cli, parse-config, execute-prepare-stage, validate-release-tag, execute-publish-stage]
     # Run even if previous jobs were skipped but at least one succeeded
-    if: ${{ inputs['release-file-mode'] == 'native' && fromJson(needs.parse-config.outputs['release-plan-json']).policy.create_release }}
+    if: ${{ inputs['release-file-mode'] == 'native' && needs.canonical-cli.result == 'success' && fromJson(needs.parse-config.outputs['release-plan-json']).policy.create_release }}
     permissions:
       actions: read
       contents: read
@@ -889,6 +879,13 @@ jobs:
       RELEASE_GPG_PUBLIC_KEY: ${{ secrets.RELEASE_GPG_PUBLIC_KEY }}
     uses: ./.github/workflows/release-create-github.yml
     with:
+      canonical-artifact-id: ${{ needs.canonical-cli.outputs.artifact-id }}
+      canonical-artifact-name: ${{ needs.canonical-cli.outputs.artifact-name }}
+      canonical-producer-run-id: ${{ needs.canonical-cli.outputs.producer-run-id }}
+      canonical-producer-run-attempt: ${{ needs.canonical-cli.outputs.producer-run-attempt }}
+      canonical-producer-engine-repository: ${{ needs.canonical-cli.outputs.engine-repository }}
+      canonical-producer-engine-commit: ${{ needs.canonical-cli.outputs.engine-commit }}
+      canonical-producer-result: ${{ needs.canonical-cli.result }}
       authorized-source-sha: ${{ github.sha }}
       request-is-release: ${{ !fromJson(needs.parse-config.outputs['prepare-stage-plan-json']).targets.version_bump.runs }}
       require-allowlisted-signer: ${{ fromJson(needs.parse-config.outputs['release-plan-json']).policy.require_allowlisted_signer }}
@@ -903,7 +900,8 @@ jobs:
       artifact-transfer-plan-json: ${{ needs.parse-config.outputs.artifact-transfer-plan-json }}
       changelog-config: ${{ inputs['changelog.config'] }}
       make-latest: ${{ fromJson(needs.parse-config.outputs['release-plan-json']).policy.make_latest }}
-      runtime-image: ${{ inputs['runtime-image-full'] || needs.resolve-bootstrap.outputs['runtime-image-full'] }}
+      runtime-image: ${{ inputs['runtime-image'] }}
+      runtime-image-full: ${{ inputs['runtime-image-full'] || needs.resolve-bootstrap.outputs['runtime-image-full'] }}
       cosign-public-key: ${{ inputs['cosign-public-key'] }}
       cosign-public-key-sha256: ${{ inputs['cosign-public-key-sha256'] }}
       release-asset-retention: ${{ inputs['release-asset-retention'] }}
@@ -926,7 +924,7 @@ jobs:
     if: always() && needs.resolve-bootstrap.result == 'success'
     runs-on: ubuntu-26.04
     container:
-      image: ${{ inputs['runtime-image'] || needs.resolve-bootstrap.outputs['runtime-image'] }}
+      image: ${{ inputs['runtime-image'] }}
     permissions:
       contents: read
       packages: read

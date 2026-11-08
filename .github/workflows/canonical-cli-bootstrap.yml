@@ -158,7 +158,7 @@ jobs:
         run: |
           set -euo pipefail
           unset GH_DEBUG
-          /bin/bash -p "$ENGINE_CHECKOUT/scripts/ci/trusted-runtime-tools.sh" gh api --hostname "${GH_HOST#https://}" \
+          /bin/bash -p "$ENGINE_CHECKOUT/scripts/ci/trusted-runtime-tools.sh" runtime gh api --hostname "${GH_HOST#https://}" \
             "repos/$GITHUB_REPOSITORY/actions/artifacts/$PRODUCER_ARTIFACT_ID" >"$RUNNER_TEMP/forge-ci-canonical-metadata.json"
       - name: Admit exact artifact metadata before download
         shell: bash
@@ -172,6 +172,8 @@ jobs:
       - name: Bound inventory, verify bytes, then execute only the trusted canonical CLI
         id: bootstrap
         shell: bash
+        env:
+          TOOL_PROFILE: runtime # This receiver runs inside the approved image.
         run: /bin/bash "$ENGINE_CHECKOUT/scripts/ci/canonical-cli-delivery.sh" receive
       - name: Expose original artifact ID only after successful bootstrap
         id: verified

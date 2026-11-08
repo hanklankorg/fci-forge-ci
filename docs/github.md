@@ -104,9 +104,10 @@ By hand:
    runs `nanolinter verify`, which discovers root `nanolinter.toml`, then
    `development/nanolinter.toml`, then uses defaults. It requires at least the `required-lints`
    floor, default `secrets,sast`.
-3. **Pin the references.** Replace the examples' `v0.90.0` with the release
-   you install: `uses: ...@vX.Y.Z`, `forge-ci-binary-ref` and any
-   `runtime-image*` override move together; see
+3. **Pin the references.** Replace the examples' `v0.90.0` pins with the
+   release you install: the `uses: ...@<commit>` ref, `forge-ci-binary-ref`
+   (the same full commit), the `runtime-image` and `canonical-builder-image`
+   digests and any other `runtime-image*` override move together; see
    [Advanced Pinning Recipe](runtime-images.md#advanced-pinning-recipe).
 4. **Set the [secrets](#secrets-and-tokens)** your release plan selects
    (`forge-ci setup secrets` lists them), and
@@ -166,8 +167,9 @@ carries a description. The orchestrator inputs most callers set:
 | `release-asset-retention` | release | How many of the newest releases keep every file; older ones keep their checksums and signatures. Empty, the default, deletes nothing. See [Old releases' files](#old-releases-files). |
 | `promote-staging-environment`, `promote-release-environment`, `promote-release-*` | release | The GitHub Environments that gate the promotion ladder, and an optional separate release registry. |
 | `enforce-lint`, `enforce-vulnerabilities`, `enforce-application-tests`, `enforce-reproducible-builds` | PR, release, snapshot | [Check enforcement](admin-policy.md), default `false`, forwarded to every gate. Checks run and report findings; explicit `true` makes recognized findings block. Organisation-mandated values belong in its ruleset-required workflow. No workflow reads them from `vars` or the environment. |
-| `forge-ci-binary-ref` | all | The CLI release plain-runner jobs install. |
-| `runtime-image*` | all | The runtime image of each toolchain family. |
+| `forge-ci-binary-ref` | all | PR and snapshot: the CLI release plain-runner jobs install. Release: the full engine commit (required) the canonical CLI is built from in the run, for every plain-runner job. |
+| `runtime-image*` | all | The runtime image of each toolchain family. Release: `runtime-image` is required and admitted only as an `@sha256:` digest; it is the control-plane, release-notes and cosign signing container. |
+| `canonical-builder-image` | release | Required: the Go runtime image digest the canonical CLI is built in. |
 
 Configuration of what is built, published and signed lives in
 `.forge-ci/artifacts.yml`, not in inputs; see the
@@ -238,21 +240,32 @@ names.
 Containerized jobs run in the runtime images, which carry the `forge-ci`
 binary and the toolchain of one family (base, full, Java, Node, Rust, Go,
 Android). Each orchestrator has one `runtime-image*` override per family, and
-each build, publish and changelog workflow one `runtime-image`. An empty
-`forge-ci-binary-ref` resolves the current published stable release to its concrete
-tag once, such as `v0.93.0`. Empty runtime-image overrides select the same tag,
-under `FORGE_CI_IMAGE_NAMESPACE` or the serving repository's owner on `ghcr.io`.
-No workflow names a fixed image.
+each build, publish and changelog workflow one `runtime-image`. In the PR and
+snapshot orchestrators an empty `forge-ci-binary-ref` resolves the current
+published stable release to its concrete tag once, such as `v0.93.0`, and empty
+runtime-image overrides select the same tag, under `FORGE_CI_IMAGE_NAMESPACE`
+or the serving repository's owner on `ghcr.io`. No workflow names a fixed image.
 Explicit binary refs and image overrides take precedence; source commits use
 the corresponding `sha-<short>` runtime references. No `latest` image tag is used.
 [Runtime Images](runtime-images.md) has the roster, which workflow uses
 which image, tag and pinning conventions, and mirroring. Android images are
 linux/amd64 only.
 
-Plain-runner jobs, the container build and the macOS jobs, install the
-binary named by `forge-ci-binary-ref`. A release tag installs the archive
-verified against `checksums.txt` and its Sigstore bundle; a branch or commit
-ref builds from source. [CLI binary channels](runtime-images.md#cli-binary-channels)
+The release orchestrator pins instead of resolving: `forge-ci-binary-ref` is
+the full engine commit, and `runtime-image` and `canonical-builder-image` are
+`@sha256:` digests, all required. Its first job admits them, builds the CLI
+from that commit in the builder image and hands the exact artifact to every
+plain-runner job of the route, which runs it with the hosted runner's
+root-owned system tools ([canonical CLI delivery](../scripts/ci/canonical-cli-delivery.md),
+[tool profiles](trusted-runtime-tools.md)). Nothing on the release route
+downloads a binary onto a host. Lane images (`runtime-image-full`,
+`-java`, `-node`, `-go`, `-rust`, `-android`) may still be tags; they hold no
+key and no write authority.
+
+The PR and snapshot plain-runner jobs, the container build and the macOS jobs
+install the binary named by `forge-ci-binary-ref`. A release tag installs the
+archive verified against `checksums.txt` and its Sigstore bundle; a branch or
+commit ref builds from source. [CLI binary channels](runtime-images.md#cli-binary-channels)
 and [Installing `forge-ci`](providers.md#installing-forge-ci) describe both.
 Keep the workflow ref, `forge-ci-binary-ref` and the runtime images on one
 version.
@@ -483,13 +496,15 @@ Release artifacts are signed with one method, `sign.method` in
 | `kms` | A KMS key reference (AWS, GCP, Azure, Vault/OpenBao, PKCS#11) | `.bundle` sidecars; the token exchange with the KMS is the caller's. See the [OpenBao example](../examples/signing/openbao-kms/). |
 | `kms` with `key: env://COSIGN_KEY` | A Cosign key pair: the private key in `RELEASE_COSIGN_PRIVATE_KEY`, its passphrase in `RELEASE_COSIGN_PASSPHRASE` | `.bundle` sidecars, verified against the public key. The GitLab and Forgejo layers sign the same way. See the [example](../examples/signing/cosign-key/). |
 
-Signing and publishing run in separate plain-runner jobs with the same
-forge-ci binary pinned by the orchestrator. The runtime image only assembles
-the files. GitHub-hosted runners have swap on, and
-`release sign` refuses to load a long-lived key while it is
-([swap policy](verification.md#swap-policy)), so the signing job turns swap off
-first. A self-hosted runner needs swap off, or passwordless `sudo` for the
-job to do it.
+Signing and publishing are separate jobs. `gpg` signs on a plain runner with
+the canonical CLI delivered for the run: GitHub-hosted runners have swap on,
+and `release sign` refuses to load a long-lived key while it is
+([swap policy](verification.md#swap-policy)), so that job turns swap off
+first; a self-hosted runner needs swap off, or passwordless `sudo` for the job
+to do it. `sigstore` and `kms` sign inside the admitted `runtime-image`
+digest, whose baked cosign does the work; no installer runs. The full runtime
+image only assembles the files, and publication runs on a plain runner with
+the same canonical CLI.
 
 The publisher verifies the signer's checkpoint digest and the prepared tag,
 then publishes those exact bytes without signing credentials or OIDC access.
@@ -584,7 +599,8 @@ maintainer side.
 | Findings missing from Code Scanning | No `CODE_SCANNING_TOKEN` passed, or `upload-sarif: false`. The gate itself still ran. |
 | A build succeeds but nothing is published | See [Configuration troubleshooting](artifacts-reference.md#configuration-troubleshooting). |
 | A release failed after the final tag was pushed | Re-run forward; see [Failed Release Recovery](failed-release-recovery.md). |
-| Plain-runner job cannot install the CLI | `forge-ci-binary-ref` names a release that does not exist yet, or a source ref the module restriction blocks; see [Branch Testing](runtime-images.md#branch-testing). |
+| Plain-runner job cannot install the CLI | PR and snapshot: `forge-ci-binary-ref` names a release that does not exist yet, or a source ref the module restriction blocks; see [Branch Testing](runtime-images.md#branch-testing). |
+| Release stops in `canonical-cli` | `forge-ci-binary-ref` is not a full 40-hex commit, or `runtime-image` / `canonical-builder-image` is a tag rather than an `@sha256:` digest; see [Advanced Pinning Recipe](runtime-images.md#advanced-pinning-recipe). |
 
 `forge-ci doctor` in a job prints the detected forge, its capabilities and what
 to do where it degrades.

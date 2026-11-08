@@ -29,51 +29,65 @@ func TestGitHubUnsignedAssemblyAdmissionBeforeSigningMaterial(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	job := workflow.Jobs["sign-release"]
-	positions := map[string]int{}
-
+	// Two signers: the GPG one on the host, with the canonical CLI consumed
+	// first, and the cosign-backed one in the admitted image, whose PR-context
+	// refusal is its first CLI use. Each admits the unsigned assembly before
+	// any signing material.
 	var admission githubReleaseStep
 
-	for i, step := range job.Steps {
-		positions[step.Name] = i
-		if step.Name == "Validate unsigned release assembly" {
-			admission = step
-		}
-	}
-
-	if admission.Run != "forge-ci release validate-assembly" || admission.If != "" || admission.ContinueOnError != nil && admission.ContinueOnError != false {
-		t.Fatalf("missing or bypassable admission: %+v", admission)
-	}
-
-	for _, pair := range [][2]string{
-		{"Install forge-ci binary", "Download assembled release files"},
-		{"Download assembled release files", admission.Name},
-		{admission.Name, "Import GPG key"},
-		{admission.Name, "Bind Cosign signing key to trusted public key"},
-		{admission.Name, "Sign artifacts"},
+	for job, bootstrap := range map[string]string{
+		"sign-release-gpg": "Consume canonical CLI from the independently pinned engine checkout",
+		"sign-release":     "Refuse PR-context trigger (signing material in scope)",
 	} {
-		before, okBefore := positions[pair[0]]
+		steps := workflow.Jobs[job]
+		positions := map[string]int{}
 
-		after, okAfter := positions[pair[1]]
-		if !okBefore || !okAfter || before >= after {
-			t.Fatalf("admission ordering violated: %v", pair)
-		}
-	}
-
-	checkSecretFree := func(env map[string]string) {
-		t.Helper()
-
-		for _, value := range env {
-			if strings.Contains(value, "secrets.") {
-				t.Fatal("signing secrets available before assembly admission")
+		for i, step := range steps.Steps {
+			positions[step.Name] = i
+			if step.Name == "Validate unsigned release assembly" {
+				admission = step
 			}
 		}
-	}
-	checkSecretFree(workflow.Env)
-	checkSecretFree(job.Env)
 
-	for _, step := range job.Steps[:positions[admission.Name]+1] {
-		checkSecretFree(step.Env)
+		if admission.Run != "forge-ci release validate-assembly" || admission.If != "" || admission.ContinueOnError != nil && admission.ContinueOnError != false {
+			t.Fatalf("%s: missing or bypassable admission: %+v", job, admission)
+		}
+
+		pairs := [][2]string{
+			{bootstrap, "Download assembled release files"},
+			{"Download assembled release files", admission.Name},
+			{admission.Name, "Sign artifacts"},
+		}
+		if job == "sign-release-gpg" {
+			pairs = append(pairs, [2]string{admission.Name, "Import GPG key"})
+		} else {
+			pairs = append(pairs, [2]string{admission.Name, "Bind Cosign signing key to trusted public key"})
+		}
+
+		for _, pair := range pairs {
+			before, okBefore := positions[pair[0]]
+
+			after, okAfter := positions[pair[1]]
+			if !okBefore || !okAfter || before >= after {
+				t.Fatalf("%s: admission ordering violated: %v", job, pair)
+			}
+		}
+
+		checkSecretFree := func(env map[string]string) {
+			t.Helper()
+
+			for _, value := range env {
+				if strings.Contains(value, "secrets.") {
+					t.Fatalf("%s: signing secrets available before assembly admission", job)
+				}
+			}
+		}
+		checkSecretFree(workflow.Env)
+		checkSecretFree(steps.Env)
+
+		for _, step := range steps.Steps[:positions[admission.Name]+1] {
+			checkSecretFree(step.Env)
+		}
 	}
 
 	engine := forgeCIEngine(t)

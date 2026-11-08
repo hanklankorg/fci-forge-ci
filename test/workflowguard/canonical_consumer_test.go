@@ -60,7 +60,7 @@ func TestCanonicalConsumerActionOrder(t *testing.T) {
 	require.Len(t, steps, 5)
 	require.Contains(t, steps[0].Run, " prepare")
 	require.Contains(t, steps[1].Run, "gh api")
-	require.Equal(t, map[string]string{"GH_TOKEN": "${{ github.token }}"}, steps[1].Env)
+	require.Equal(t, map[string]string{"GH_TOKEN": "${{ github.token }}", "TOOL_PROFILE": "${{ inputs.tool-profile }}"}, steps[1].Env)
 	require.Contains(t, steps[2].Run, " admit")
 	require.Equal(t, "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c", steps[3].Uses)
 	require.Equal(t, "${{ env.PRODUCER_ARTIFACT_ID }}", steps[3].With["artifact-ids"])
@@ -105,11 +105,16 @@ func readCanonicalConsumerWorkflow(t *testing.T, file string) canonicalConsumerW
 func TestCanonicalConsumerWorkflowGraph(t *testing.T) {
 	t.Parallel()
 
+	// Container callees keep the opt-in: their image carries a CLI, and the
+	// classified route is what requires the canonical one there.
+	optIn := map[string]bool{"validate-release-prerequisites.yml": true, "generate-changelog.yml": true}
+
 	for file, jobs := range map[string][]string{
 		"release-orchestrator.yml":           {"parse-config", "validate-release-tag", "release-summary"},
 		"validate-release-prerequisites.yml": {"validate"},
 		"release-prepare-stage.yml":          {"prepare-version-files", "version-bump", "summarize-prepare-stage"},
 		"generate-changelog.yml":             {"generate-changelog"},
+		"release-create-github.yml":          {"sign-release-gpg", "create-release"},
 	} {
 		workflow := readCanonicalConsumerWorkflow(t, file)
 		for _, name := range jobs {
@@ -130,6 +135,14 @@ func TestCanonicalConsumerWorkflowGraph(t *testing.T) {
 
 				require.Equal(t, "Admit protected release route before consumer checkout", job.Steps[1].Name)
 				require.NotContains(t, job.Steps[1].Run, "forge-ci")
+			}
+
+			if file == "release-create-github.yml" {
+				offset = 2
+
+				require.Equal(t, "Require original immutable request source", job.Steps[0].Name)
+				require.Empty(t, job.Steps[0].Uses)
+				require.Equal(t, "Harden GitHub runner", job.Steps[1].Name)
 			}
 
 			if file == "release-prepare-stage.yml" && name != "summarize-prepare-stage" {
@@ -159,7 +172,12 @@ func TestCanonicalConsumerWorkflowGraph(t *testing.T) {
 			require.Equal(t, "canonical-bootstrap", receive.ID)
 
 			for _, step := range job.Steps[offset : offset+3] {
-				require.Contains(t, step.If, "inputs['require-canonical-bootstrap']")
+				if optIn[file] {
+					require.Equal(t, "${{ inputs['require-canonical-bootstrap'] }}", step.If)
+				} else {
+					require.Empty(t, step.If, "%s/%s consumes the canonical CLI unconditionally", file, name)
+				}
+
 				require.NotContains(t, step.Run, "forge-ci ")
 
 				for _, value := range step.Env {
@@ -176,9 +194,8 @@ func TestCanonicalConsumerWorkflowGraph(t *testing.T) {
 					require.Contains(t, step.If, "steps.canonical-bootstrap.outputs.verified == 'true'")
 				}
 
-				if step.Name == "Install forge-ci binary" || step.Name == "Checkout forge-ci bootstrap installers" {
-					require.Equal(t, "${{ !inputs['require-canonical-bootstrap'] }}", step.If)
-				}
+				require.NotEqual(t, "Install forge-ci binary", step.Name, "no host installer beside a canonical receiver")
+				require.NotContains(t, step.Run, "install-forge-ci.sh")
 			}
 		}
 	}
@@ -186,109 +203,14 @@ func TestCanonicalConsumerWorkflowGraph(t *testing.T) {
 	root := readCanonicalConsumerWorkflow(t, "release-orchestrator.yml")
 	require.Equal(t, "${{ needs.canonical-cli.outputs.artifact-id }}", root.Jobs["parse-config"].Steps[2].Env["PRODUCER_ARTIFACT_ID"])
 
-	for _, caller := range []string{"validate-prerequisites", "execute-prepare-stage"} {
+	for _, caller := range []string{"validate-prerequisites", "execute-prepare-stage", "create-release"} {
 		require.Contains(t, root.Jobs[caller].Needs, "canonical-cli")
 		require.Equal(t, "${{ needs.canonical-cli.result }}", root.Jobs[caller].With["canonical-producer-result"])
 	}
-}
 
-func TestCanonicalConsumerNativeCommandsSecretsAndReadCaps(t *testing.T) {
-	t.Parallel()
-
-	allowed := map[string][]string{
-		"release-orchestrator.yml":           {"parse-config", "validate-prerequisites", "validate-release-tag", "release-summary"},
-		"validate-release-prerequisites.yml": {"validate"}, "generate-changelog.yml": {"generate-changelog"},
-		"release-prepare-stage.yml": {"generate-full-changelog", "generate-minimal-changelog", "summarize-prepare-stage"},
-		"release-create-github.yml": {"generate-changelog"}, "version-bump.yml": {"generate-full-changelog", "generate-minimal-changelog"},
-	}
-	for file, readJobs := range allowed {
-		current := readCanonicalConsumerWorkflow(t, file)
-		cmd := exec.CommandContext(t.Context(), "git", "show", "f539911ee63fbe5709e7d477863fc833722d8cbf:.github/workflows/"+file)
-		cmd.Dir = reporoot.Path(t)
-		body, err := cmd.Output()
-		require.NoError(t, err)
-
-		var original canonicalConsumerWorkflow
-		require.NoError(t, yaml.Unmarshal(body, &original))
-		require.Equal(t, original.Permissions, current.Permissions, "no workflow-global expansion")
-		require.Equal(t, original.On.Call.Secrets, current.On.Call.Secrets)
-
-		for key, value := range original.On.Call.Inputs {
-			require.Equal(t, value, current.On.Call.Inputs[key], file+key)
-		}
-
-		for name, before := range original.Jobs {
-			after := current.Jobs[name]
-			require.Equal(t, before.Env, after.Env, "native job environment is unchanged")
-
-			if file == "release-orchestrator.yml" && before.If != after.If {
-				assertClassifiedRootCondition(t, name, before.If, after.If)
-			} else {
-				require.Equal(t, before.If, after.If, file+name)
-			}
-
-			require.Equal(t, before.Secrets, after.Secrets, file+name)
-
-			oldPermissions, newPermissions := before.Permissions, after.Permissions
-			if len(oldPermissions) == 0 {
-				oldPermissions = original.Permissions
-			}
-
-			if len(newPermissions) == 0 {
-				newPermissions = current.Permissions
-			}
-
-			for key, value := range newPermissions {
-				if key == "actions" && value == "read" && oldPermissions[key] != "read" {
-					require.Contains(t, readJobs, name)
-
-					continue
-				}
-
-				require.Equal(t, oldPermissions[key], value, file+name+key)
-			}
-
-			for key, value := range oldPermissions {
-				require.Equal(t, value, newPermissions[key])
-			}
-
-			for _, step := range before.Steps {
-				found := false
-
-				for _, candidate := range after.Steps {
-					if candidate.Name == step.Name {
-						if candidate.If != step.If {
-							switch {
-							case file == "release-orchestrator.yml" && strings.Contains(step.If, "inputs['require-canonical-bootstrap']"):
-								require.Equal(t, "${{ inputs['require-canonical-bootstrap'] || inputs['release-file-mode'] == 'classified-files' }}", candidate.If)
-							case step.Name == "Install forge-ci binary" || step.Name == "Checkout forge-ci bootstrap installers":
-								require.Empty(t, step.If)
-								require.Equal(t, "${{ !inputs['require-canonical-bootstrap'] }}", candidate.If)
-							default:
-								require.Contains(t, step.If, "always()")
-								require.Contains(t, candidate.If, "!inputs['require-canonical-bootstrap'] || steps.canonical-bootstrap.outputs.verified == 'true'")
-							}
-						}
-
-						require.Equal(t, step.Run, candidate.Run)
-
-						if file == "release-orchestrator.yml" && step.Name == "Generate Release Summary" {
-							require.Equal(t, "${{ inputs['release-file-mode'] == 'classified-files' && needs.classified-release.result || needs.create-release.result }}", candidate.Env["CREATE_RELEASE_RESULT"])
-							candidate.Env["CREATE_RELEASE_RESULT"] = step.Env["CREATE_RELEASE_RESULT"]
-						}
-
-						require.Equal(t, step.Env, candidate.Env)
-						require.Equal(t, step.With, candidate.With)
-
-						found = true
-
-						break
-					}
-				}
-
-				require.True(t, found, file+name+step.Name)
-			}
-		}
+	for _, input := range []string{"runtime-image", "canonical-builder-image", "forge-ci-binary-ref"} {
+		spec, _ := root.On.Call.Inputs[input].(map[string]any)
+		require.Equal(t, true, spec["required"], "%s is an administrator pin the route admits, not a resolved default", input)
 	}
 }
 

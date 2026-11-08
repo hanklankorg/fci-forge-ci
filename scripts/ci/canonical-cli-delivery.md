@@ -32,11 +32,13 @@ proves the host ran the image honestly. The fixed hosted runner/native Actions
 service is trusted. Both effective selections are digest-validated in the
 container-free admission job before either image can start.
 
-The release orchestrator requires `canonical-builder-image` explicitly for
-every protected/classified route, including Go: product type is not known at
-this preflight boundary. It forwards this to the canonical workflow's existing
+The release orchestrator requires `canonical-builder-image` explicitly on
+every route, including Go: product type is not known at this preflight
+boundary. It forwards this to the canonical workflow's existing
 `runtime-image`, and forwards the policy `runtime-image` separately to the
-receiver. Native routes without canonical bootstrap retain their defaults.
+receiver; both are required digests, and `forge-ci-binary-ref` is the
+required full engine commit. There is no native route without canonical
+bootstrap: every plain-runner job of the release route runs the delivered CLI.
 A Go consumer may explicitly select the same qualified image for both roles.
 A Cargo consumer may use a Rust-only policy/producer runtime and a separate
 Go builder; it must not silently reuse the Rust image to compile the CLI.
