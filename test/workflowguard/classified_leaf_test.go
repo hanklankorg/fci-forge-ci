@@ -251,3 +251,35 @@ printf '%s\n' "$*" >>"$RUNNER_TEMP/calls"
 		})
 	}
 }
+
+// The producer path guard is the first command of the key-free producer
+// step. The consumers' convention is `.forge-ci/<script>`, so a leading dot
+// is a legal first character; traversal and absolute paths stay refused.
+func TestClassifiedProducerPathGuard(t *testing.T) {
+	t.Parallel()
+	guard := strings.SplitN(classifiedLeafStep(t, "producer", "Run administrator-selected").Run, "\n", 2)[0]
+	require.Contains(t, guard, `"$PRODUCER_PATH" =~`)
+
+	for path, admitted := range map[string]bool{
+		".forge-ci/produce-classified-files.sh": true,
+		"forge-ci/produce.sh":                   true,
+		"produce":                               true,
+		"./produce.sh":                          false,
+		"../produce.sh":                         false,
+		"a/./b.sh":                              false,
+		"a/../b.sh":                             false,
+		"/usr/bin/env":                          false,
+		"-flag":                                 false,
+		"a b.sh":                                false,
+		"":                                      false,
+	} {
+		cmd := exec.CommandContext(t.Context(), testBash(t), "-peu", "-o", "pipefail", "-c", guard)
+		cmd.Env = []string{"PATH=/usr/bin:/bin", "PRODUCER_PATH=" + path}
+		err := cmd.Run()
+		if admitted {
+			require.NoError(t, err, path)
+		} else {
+			require.Error(t, err, path)
+		}
+	}
+}
