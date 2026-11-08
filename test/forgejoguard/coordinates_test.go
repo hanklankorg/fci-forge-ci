@@ -5,6 +5,7 @@
 package forgejoguard
 
 import (
+	"encoding/json"
 	"io/fs"
 	"os"
 	"os/exec"
@@ -324,13 +325,10 @@ func assertCoordinateConsumerJob(t *testing.T, relative string, contract coordin
 	// A builder job runs the job image the coordinates job validated, and
 	// holds no secret: it runs the caller's Containerfile.
 	if contract.builder {
-		want := builderJobImage
 		if relative == ".forgejo/workflows/snapshot-images.yml" && name == "produce" {
-			want = "${{ (matrix.artifact.project_type == 'go' && needs.coordinates.outputs.artifact_job_image_go) || ((matrix.artifact.project_type == 'maven' || matrix.artifact.project_type == 'gradle') && needs.coordinates.outputs.artifact_job_image_java) || (matrix.artifact.project_type == 'npm' && needs.coordinates.outputs.artifact_job_image_node) || (matrix.artifact.project_type == 'cargo' && needs.coordinates.outputs.artifact_job_image_rust) || '' }}"
-		}
-
-		if image := target.containerImage(); image != want {
-			t.Errorf("%s: job %s runs container %q, want the validated %q", relative, name, image, want)
+			assertSnapshotProducerImageLookup(t, target.containerImage())
+		} else if image := target.containerImage(); image != builderJobImage {
+			t.Errorf("%s: job %s runs container %q, want the validated %q", relative, name, image, builderJobImage)
 		}
 
 		if anyString(target.node, secretsWord.MatchString) {
@@ -380,6 +378,40 @@ func assertCoordinateConsumerJob(t *testing.T, relative string, contract coordin
 	}
 
 	return consumer, true
+}
+
+// This is a structural scheduling contract, not a Forgejo interpreter test.
+// Runtime expression compatibility must also be checked against the runner.
+func assertSnapshotProducerImageLookup(t *testing.T, expression string) {
+	t.Helper()
+
+	const (
+		prefix = "${{ format('{0}', needs.coordinates.outputs[fromJSON('"
+		suffix = "')[matrix.artifact.project_type]]) }}"
+	)
+
+	if !strings.HasPrefix(expression, prefix) || !strings.HasSuffix(expression, suffix) {
+		t.Fatalf("producer image must directly look up a validated coordinate and format its string value: %s", expression)
+	}
+
+	var keys map[string]string
+	if err := json.Unmarshal([]byte(strings.TrimSuffix(strings.TrimPrefix(expression, prefix), suffix)), &keys); err != nil {
+		t.Fatalf("producer image coordinate lookup: %v", err)
+	}
+
+	want := map[string]string{
+		"go": "artifact_job_image_go", "maven": "artifact_job_image_java", "gradle": "artifact_job_image_java",
+		"npm": "artifact_job_image_node", "cargo": "artifact_job_image_rust",
+	}
+	if len(keys) != len(want) {
+		t.Fatalf("producer image lookup has %d entries, want %d", len(keys), len(want))
+	}
+
+	for projectType, coordinate := range want {
+		if keys[projectType] != coordinate {
+			t.Errorf("producer %s image coordinate = %q, want %q", projectType, keys[projectType], coordinate)
+		}
+	}
 }
 
 // Every helper checkout fetches the validated full repository URL, and falls
