@@ -199,7 +199,7 @@ jobs:
         env:
           PRODUCER_PATH: ${{ inputs['producer-path'] }}
         run: |
-          [[ "$PRODUCER_PATH" =~ ^[A-Za-z0-9_][A-Za-z0-9_./-]*$ && "/$PRODUCER_PATH/" != *"/../"* && "/$PRODUCER_PATH/" != *"/./"* ]]
+          [[ "$PRODUCER_PATH" =~ ^[A-Za-z0-9_.][A-Za-z0-9_./-]*$ && "/$PRODUCER_PATH/" != *"/../"* && "/$PRODUCER_PATH/" != *"/./"* ]]
           source_root="$RUNNER_TEMP/classified-source"
           script=$(realpath -e -- "$source_root/$PRODUCER_PATH")
           [[ "$script" == "$source_root/"* && -f "$script" && -x "$script" ]]

@@ -77,7 +77,9 @@ consumers; it is not replaced with an ad-hoc YAML projection.
 
 ## Product-owned unsigned contract
 
-`classified-producer-path` selects an executable in prepared checkout P. It runs
+`classified-producer-path` selects an executable in prepared checkout P by a
+relative path such as `.forge-ci/produce-classified-files.sh`; absolute paths
+and `.`/`..` segments are refused before anything runs. It runs
 with a cleared environment, the [fixed approved runtime tool profile](trusted-runtime-tools.md), private temporary HOME,
 prepared SHA/tag/epoch and `FORGE_CI_CLASSIFIED_OUTPUT`. It receives no private
 keys, publication token, checkout token or artifact upload runtime variables.
