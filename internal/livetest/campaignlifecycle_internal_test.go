@@ -210,37 +210,38 @@ func TestCampaignLifecycle_RunsTheServiceDemosOnGitLab(t *testing.T) {
 	}
 }
 
-// A selector reruns one matrix cell from the shipped lifecycle files, and the
-// run's visibility narrows it to one run: each of these selections plans
-// exactly one case under one visibility. They are the commands the matrix
-// cells repeat with (docs/live-campaigns.md, Rerun one cell).
+// A selector reruns one matrix cell from the shipped lifecycle files, in the
+// overlay's axis words, from a run of both visibilities: each of these
+// selections plans exactly one case and exports the one visibility it runs.
+// They are the held reruns' commands (docs/live-campaigns.md, Rerun one
+// cell).
 func TestCampaignLifecycle_SelectsOneCell(t *testing.T) {
 	t.Parallel()
 
 	for name, test := range map[string]struct {
-		provider, file, visibility, selector string
+		provider, file, selector, visibility string
 		want                                 func(dir string) []string
 	}{
-		"gitlab maven service": {campaignGitLab, "lifecycle-gitlab.cases", visibilityPublic, "hello-maven-service/lifecycle", func(dir string) []string {
+		"gitlab maven service, public": {campaignGitLab, "lifecycle-gitlab.cases", "hello-maven-service/lifecycle/visibility=public", visibilityPublic, func(dir string) []string {
 			return []string{
 				campaignConsumerRecipe, campaignGitLab, filepath.Join(dir, "demos/hello-maven-service"), TrialLifecycle,
 				"job-archive=/c/java.tar", "build-archive=/c/java.tar", "signer-archive=/c/signer.tar", "lint-archive=/c/lint-java.tar",
 				"version=0.2.0", "version-bump=maven", "job-user=65532:65532",
 			}
 		}},
-		"forgejo cargo container-first": {campaignForgejo, "lifecycle-forgejo.cases", visibilityPublic, "hello-cargo-container/lifecycle", func(dir string) []string {
+		"forgejo cargo container-first, buildah, public": {campaignForgejo, "lifecycle-forgejo.cases", "hello-cargo-container/lifecycle/image-builder=buildah/visibility=public", visibilityPublic, func(dir string) []string {
 			return []string{
 				campaignConsumerRecipe, campaignForgejo, filepath.Join(dir, "demos/hello-cargo-container"), TrialLifecycle,
 				"CI_JOB_IMAGE=" + lifecycleRustJobImage, "CI_IMAGE_BUILDER=buildah", "RELEASE_PLATFORMS=linux/amd64",
 			}
 		}},
-		"forgejo kaniko": {campaignForgejo, "lifecycle-forgejo.cases", visibilityPublic, "hello-maven-service/lifecycle/CI_IMAGE_BUILDER=kaniko", func(dir string) []string {
+		"forgejo maven service, kaniko, public": {campaignForgejo, "lifecycle-forgejo.cases", "hello-maven-service/lifecycle/image-builder=kaniko/visibility=public", visibilityPublic, func(dir string) []string {
 			return []string{
 				campaignConsumerRecipe, campaignForgejo, filepath.Join(dir, "demos/hello-maven-service"), TrialLifecycle,
 				"CI_JOB_IMAGE=" + snapshotJobImage, "CI_IMAGE_BUILDER=kaniko", "CI_IMAGE_BUILDER_JOB_IMAGE=" + lifecycleKanikoJobImage, "RELEASE_PLATFORMS=linux/amd64",
 			}
 		}},
-		"forgejo private": {campaignForgejo, "lifecycle-forgejo.cases", visibilityPrivate, "hello-maven-service/lifecycle/CI_IMAGE_BUILDER=buildah", func(dir string) []string {
+		"forgejo maven service, buildah, private": {campaignForgejo, "lifecycle-forgejo.cases", "hello-maven-service/lifecycle/image-builder=buildah/visibility=private", visibilityPrivate, func(dir string) []string {
 			return []string{
 				campaignConsumerRecipe, campaignForgejo, filepath.Join(dir, "demos/hello-maven-service"), TrialLifecycle,
 				"CI_JOB_IMAGE=" + snapshotJobImage, "CI_IMAGE_BUILDER=buildah", "RELEASE_PLATFORMS=linux/amd64",
@@ -250,29 +251,34 @@ func TestCampaignLifecycle_SelectsOneCell(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			dir, plan := planCheckedInLifecycle(t, test.provider, "test/live/campaigns/"+test.file, test.visibility, "", test.selector)
+			dir, plan := planCheckedInLifecycle(t, test.provider, "test/live/campaigns/"+test.file, "", "", test.selector)
 			if len(plan.Cases) != 1 || !slices.Equal(plan.Cases[0].Args, test.want(dir)) {
 				t.Fatalf("selection %q: %+v, want the one case %v", test.selector, plan.Cases, test.want(dir))
 			}
 
-			if visibilities, err := parseConsumerVisibilities(test.visibility); err != nil || len(visibilities) != 1 {
-				t.Fatalf("visibility %q runs %v, %v; want one run", test.visibility, visibilities, err)
+			if exported := plan.Env[len(plan.Env)-1]; exported != consumerVisibilityEnv+"="+test.visibility {
+				t.Fatalf("selection %q exports %q last, want the one visibility %s", test.selector, exported, test.visibility)
 			}
 		})
 	}
 }
 
-// A selector that names no case is refused, so a typo never runs nothing in
-// silence; the other cases are still planned before the selection.
+// A selector that names no case, an axis value outside the overlay's, or
+// two visibilities is refused, so a typo never runs nothing in silence; the
+// other cases are still planned before the selection.
 func TestCampaignLane_RefusesASelectorThatMatchesNoCase(t *testing.T) {
 	t.Parallel()
 
-	for _, selector := range []string{"hello-maven-service/release", "hello-maven-service/lifecycle/CI_IMAGE_BUILDER=docker", "hello-mavn", "TestNoSuchScenario"} {
+	for _, selectors := range [][]string{
+		{"hello-maven-service/release"}, {"hello-mavn"}, {"TestNoSuchScenario"},
+		{"hello-cargo-container/lifecycle/image-builder=kaniko"}, {"hello-maven-service/lifecycle/image-builder=docker"},
+		{"hello-maven-service/lifecycle/visibility=both"}, {"hello-maven-service/lifecycle/visibility=public", "hello-cargo-container/lifecycle/visibility=private"},
+	} {
 		dir, cases := newLifecycleCampaign(t, string(reporoot.ReadFile(t, "test/live/campaigns/lifecycle-forgejo.cases")))
 
-		run := CampaignRun{Settings: map[string]string{"visibility": "both", "image-builder": ImageBuilderBuildah}, Select: []string{selector}}
-		if _, err := PlanCampaignLane(reporoot.Path(t), dir, campaignForgejo, cases, campaignHead, run); !errors.Is(err, errs.ErrValidation) || !strings.Contains(err.Error(), "matches no case") {
-			t.Fatalf("selector %q: %v, want a refusal", selector, err)
+		run := CampaignRun{Settings: map[string]string{"visibility": "both", "image-builder": ImageBuilderBuildah}, Select: selectors}
+		if plan, err := PlanCampaignLane(reporoot.Path(t), dir, campaignForgejo, cases, campaignHead, run); !errors.Is(err, errs.ErrValidation) || len(plan.Cases) != 0 {
+			t.Fatalf("selectors %q: %+v %v, want a refusal", selectors, plan, err)
 		}
 	}
 }

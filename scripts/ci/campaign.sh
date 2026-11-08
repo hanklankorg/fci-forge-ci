@@ -25,7 +25,7 @@
 # plan clears the caller's image variables first. Each case appends a line to <dir>/<provider>.results; the
 # lane fails when a case did. Neither file is ever sourced. Selectors narrow
 # the lane to the cases they name, after every case is planned:
-# <demo>[/<event>[/<KEY=value>]] or <TestName> (campaign.go). On github the
+# <demo>[/<event>][/<setting>=<value>...] or <TestName> (campaign.go). On github the
 # lane is one cell: the demo's event on hosted GitHub from a one-commit
 # checkout of the built-in demo, run inside Forge Lab's hosted session with
 # `just test-live-consumer github` settings (org=<id> and the rest).

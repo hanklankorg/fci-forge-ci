@@ -27,7 +27,7 @@
 # amd64 runners only for now. A selector reruns one line, for example:
 #
 #   just campaign-lane <dir> forgejo test/live/campaigns/lifecycle-forgejo.cases
-#   just campaign-lane <dir> forgejo test/live/campaigns/lifecycle-forgejo.cases hello-maven-service/lifecycle/CI_IMAGE_BUILDER=kaniko
+#   just campaign-lane <dir> forgejo test/live/campaigns/lifecycle-forgejo.cases hello-maven-service/lifecycle/image-builder=kaniko/visibility=public
 
 consumer hello-maven-service lifecycle CI_JOB_IMAGE=@JOB_IMAGE_JAVA CI_IMAGE_BUILDER=buildah RELEASE_PLATFORMS=linux/amd64
 consumer hello-maven-service lifecycle CI_JOB_IMAGE=@JOB_IMAGE_JAVA CI_IMAGE_BUILDER=kaniko CI_IMAGE_BUILDER_JOB_IMAGE=@KANIKO_JOB_IMAGE RELEASE_PLATFORMS=linux/amd64

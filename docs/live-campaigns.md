@@ -187,17 +187,18 @@ exit status and the `verdict.json` to read, as above.
 ### Rerun one cell
 
 A selector after the cases file reruns the matrix cell it names and nothing
-more: `<demo>[/<event>[/<KEY=value>]]`, the consumer cases of the demo, of
-that event and with that word on their line, or `<TestName>`, a scenario
-case. Every case is still planned first, so the whole file's typos are
-caught, and a selector that names no case is refused. The run's own
-selectors narrow the rest as for a whole lane:
+more: `<demo>[/<event>][/<setting>=<value>...]`, the consumer cases of the
+demo and event whose run has those axis values, in the words of the testing
+overlay (`test/live/campaigns/evidence.txt`): `image-builder=buildah|kaniko`,
+the case's own builder, `admin-<check>=true|false`, the lane's input, and
+`visibility=public|private`, which narrows a run of both visibilities to
+that one and exports it to the case. `<TestName>` is a scenario case. Every
+case is still planned first, so the whole file's typos are caught, and a
+selector that names no case, or selectors of two visibilities, are refused:
 
 ```bash
-FORGE_CI_LIVE_CONSUMER_VISIBILITY=public \
-  just campaign-lane ~/campaigns/lc gitlab test/live/campaigns/lifecycle-gitlab.cases hello-maven-service/lifecycle
-FORGE_CI_LIVE_CONSUMER_VISIBILITY=private \
-  just campaign-lane ~/campaigns/lc forgejo test/live/campaigns/lifecycle-forgejo.cases hello-maven-service/lifecycle/CI_IMAGE_BUILDER=buildah
+just campaign-lane ~/campaigns/lc gitlab test/live/campaigns/lifecycle-gitlab.cases hello-maven-service/lifecycle/visibility=public
+just campaign-lane ~/campaigns/lc forgejo test/live/campaigns/lifecycle-forgejo.cases hello-maven-service/lifecycle/image-builder=buildah/visibility=private
 ```
 
 A hosted GitHub cell is the demo's fixture workflow for the event, run by

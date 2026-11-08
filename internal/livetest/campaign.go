@@ -192,6 +192,7 @@ func PlanCampaignLane(root, dir, provider, casesPath, head string, run CampaignR
 	}
 
 	plan := campaignLaneEnvironment(provider, env, run)
+	caseFacts := make([]map[string]string, 0, len(file.cases))
 
 	for _, line := range file.cases {
 		args, caseErr := campaignCaseArgs(dir, provider, env, line.words)
@@ -209,77 +210,110 @@ func PlanCampaignLane(root, dir, provider, casesPath, head string, run CampaignR
 		}
 
 		plan.Cases = append(plan.Cases, CampaignCase{Text: line.text, Args: args})
+		caseFacts = append(caseFacts, facts)
 	}
 
-	plan.Cases, err = selectCampaignCases(file.cases, plan.Cases, run.Select)
-	if err != nil {
-		return CampaignPlan{}, fmt.Errorf("%s: %w", casesPath, err)
+	return selectCampaignCases(plan, file.cases, caseFacts, run)
+}
+
+// selectCampaignCases keeps the planned cases the run's selectors name,
+// after every case was planned, so a typo in a case a selector leaves out
+// still costs no run. A selector is <demo>[/<event>][/<setting>=<value>...],
+// a consumer case of the demo and event whose run has those axis values, in
+// the overlay's words (matrixAxisValues): image-builder= the case's own
+// builder, admin-<check>= the lane's input, and visibility= one visibility
+// of a run of both, which the lane then runs alone. <TestName> is a
+// scenario case. A selector that matches no case, or selectors of two
+// visibilities, are refused; no selector keeps every case.
+func selectCampaignCases(plan CampaignPlan, lines []campaignLine, facts []map[string]string, run CampaignRun) (CampaignPlan, error) {
+	if len(run.Select) == 0 {
+		return plan, nil
+	}
+
+	cases, visibility := []CampaignCase{}, ""
+
+	for _, selector := range run.Select {
+		axes, err := campaignSelectorAxes(selector)
+		if err != nil {
+			return CampaignPlan{}, err
+		}
+
+		if narrowed := axes[settingVisibility]; narrowed != "" {
+			if visibility != "" && visibility != narrowed {
+				return CampaignPlan{}, fmt.Errorf("the selectors name two visibilities; a lane runs one: %w", errs.ErrValidation)
+			}
+
+			visibility = narrowed
+		}
+
+		matched := false
+
+		for index, line := range lines {
+			if campaignCaseSelected(line.words, selector, axes, facts[index]) {
+				matched = true
+
+				if !slices.ContainsFunc(cases, func(planned CampaignCase) bool { return planned.Text == plan.Cases[index].Text }) {
+					cases = append(cases, plan.Cases[index])
+				}
+			}
+		}
+
+		if !matched {
+			return CampaignPlan{}, fmt.Errorf("the selector %q matches no case; want <demo>[/<event>][/<setting>=<value>...] or <TestName>: %w", selector, errs.ErrValidation)
+		}
+	}
+
+	plan.Cases = cases
+	if visibility != "" {
+		plan.Env = append(plan.Env, consumerVisibilityEnv+"="+visibility)
 	}
 
 	return plan, nil
 }
 
-// selectCampaignCases keeps the planned cases a selector names, after every
-// case was planned, so a typo in a case the selector leaves out still costs
-// no run. A selector is <demo>[/<event>[/<KEY=value>]], matching a consumer
-// case of the demo, its event and one word of the case, or <TestName>,
-// matching a scenario case. A selector that matches no case is refused; no
-// selector keeps every case.
-func selectCampaignCases(lines []campaignLine, cases []CampaignCase, selectors []string) ([]CampaignCase, error) {
-	if len(selectors) == 0 {
-		return cases, nil
-	}
+// campaignSelectorAxes reads a selector's setting=value words, each an axis
+// value the overlay knows, given once.
+func campaignSelectorAxes(selector string) (map[string]string, error) {
+	axes := map[string]string{}
 
-	kept := make([]CampaignCase, 0, len(cases))
-	matched := make([]bool, len(selectors))
-
-	for index, line := range lines {
-		selected := false
-
-		for number, selector := range selectors {
-			if campaignCaseSelected(line.words, selector) {
-				selected, matched[number] = true, true
-			}
+	for _, word := range strings.Split(selector, "/")[1:] {
+		setting, value, isAxis := strings.Cut(word, "=")
+		if !isAxis {
+			continue
 		}
 
-		if selected {
-			kept = append(kept, cases[index])
+		if values := matrixAxisValues[setting]; !slices.Contains(values, value) || value == visibilityBoth || axes[setting] != "" {
+			return nil, fmt.Errorf("the selector %q: %s takes one of %s, given once: %w", selector, setting, strings.Join(slices.DeleteFunc(slices.Clone(values), func(v string) bool { return v == visibilityBoth }), ", "), errs.ErrValidation)
 		}
+
+		axes[setting] = value
 	}
 
-	for number, selector := range selectors {
-		if !matched[number] {
-			return nil, fmt.Errorf("the selector %q matches no case; want <demo>[/<event>[/<KEY=value>]] or <TestName>: %w", selector, errs.ErrValidation)
-		}
-	}
-
-	return kept, nil
+	return axes, nil
 }
 
-// campaignCaseSelected reports whether the selector names the case. The word
-// is the rest of the selector after the second slash, since a value such as
-// RELEASE_PLATFORMS=linux/amd64 has slashes of its own.
-func campaignCaseSelected(words []string, selector string) bool {
-	parts := strings.SplitN(selector, "/", campaignSelectorParts)
+// campaignCaseSelected reports whether the selector names the case: its demo,
+// its event if given, and the axis values the case runs with, a run of both
+// visibilities having each.
+func campaignCaseSelected(words []string, selector string, axes, facts map[string]string) bool {
+	parts := strings.Split(selector, "/")
 
 	if words[0] == settingScenario {
 		return len(parts) == 1 && len(words) > 1 && words[1] == parts[0]
 	}
 
-	switch {
-	case len(words) < 3 || words[1] != parts[0]:
+	if len(words) < 3 || words[1] != parts[0] || (len(parts) > 1 && !strings.Contains(parts[1], "=") && words[2] != parts[1]) {
 		return false
-	case len(parts) == 1:
-		return true
-	case words[2] != parts[1]:
-		return false
-	default:
-		return len(parts) == 2 || slices.Contains(words[3:], parts[2])
 	}
-}
 
-// campaignSelectorParts are a selector's demo, event and case word.
-const campaignSelectorParts = 3
+	for setting, value := range axes {
+		if had := facts[setting]; had != value && (setting != settingVisibility || had != visibilityBoth) {
+			return false
+		}
+	}
+
+	return true
+}
 
 // caseConsumer opens a case line that runs a shipped demo through an event.
 const caseConsumer = "consumer"
