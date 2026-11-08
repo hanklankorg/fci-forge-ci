@@ -58,7 +58,7 @@ func NewMavenApplicationConsumerFixture(tb TB, source Consumer, recipe, image st
 
 		text := string(body)
 		if strings.HasSuffix(file, "/release.yml") {
-			text = regexp.MustCompile(`(?m)^(      image: |      version-bump-image: ).*$`).ReplaceAllString(text, "${1}"+image)
+			text = regexp.MustCompile(`(?m)^(      image: |      runtime-image-java: ).*$`).ReplaceAllString(text, "${1}"+image)
 			text = strings.ReplaceAll(text, "ARTIFACT_NAME: hello-maven", "ARTIFACT_NAME: "+artifact)
 			// An application may own build.finalName (for example an unversioned
 			// Spring Boot JAR). Keep its POM intact and require one built JAR,
@@ -248,7 +248,7 @@ func mavenLibraryWorkflow(text, file, artifact string, config MavenLibraryFixtur
 	}
 
 	if strings.HasSuffix(file, "/release.yml") {
-		text = regexp.MustCompile(`(?m)^(      image: |      version-bump-image: ).*$`).ReplaceAllString(text, "${1}"+config.JavaImage)
+		text = regexp.MustCompile(`(?m)^(      image: |      runtime-image-java: ).*$`).ReplaceAllString(text, "${1}"+config.JavaImage)
 		text = strings.ReplaceAll(text, "ARTIFACT_NAME: hello-maven", "ARTIFACT_NAME: "+artifact)
 
 		old := `          cp -- "target/${ARTIFACT_NAME}-${RELEASE_TAG#v}.jar" dist/`

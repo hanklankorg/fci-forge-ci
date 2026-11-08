@@ -155,7 +155,7 @@ func checkFilled(t *testing.T, forge provider.ForgeAPI, mirror, example string) 
 			}
 
 			if !strings.HasPrefix(p.Token, "FIXME") && !slices.Contains([]string{
-				"PIN_MAVEN_IMAGE_DIGEST", "my-cli", "my-service", "my-app",
+				"PIN_MAVEN_IMAGE_DIGEST", "PIN_RUST_IMAGE_DIGEST", "my-cli", "my-service", "my-app",
 				"com.example.myapp", "com.example.myapp.demo",
 			}, p.Token) {
 				t.Errorf("%s:%d still holds %s", file, p.Line, p.Token)

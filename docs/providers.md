@@ -331,7 +331,7 @@ lacks.
 | Image build, scan, ledger | `publish-container.yml` | native `release` image jobs; consumer `build` commands produce the release files | `release-images.yml` |
 | Release preparation, signed tag | `release-prepare-stage.yml` | `release` component | `prepare-release.yml` |
 | Release branch | `branch` input, required | `release-branch` input, the project's default branch by default | `release-branch` input, `main` by default |
-| Version bump in project files | `version-bump.yml` | `release` version-bump input: key-free preparation, text verification, signed commit with the changelog | `prepare-release.yml` version-bump input: key-free preparation, text verification, signed commit with the changelog |
+| Version bump in project files | `version-bump.yml` | `release` component, planned from `artifacts.yml`: key-free version job a family, text verification, signed commit with the changelog | `prepare-release.yml`, planned from `artifacts.yml`: key-free version job a family, text verification, signed commit with the changelog |
 | Signing and publication | keyless, GPG, KMS or Cosign key (`env://COSIGN_KEY`) | `release` component, separately privileged jobs, Cosign key | `sign-and-publish-release.yml`, separately privileged jobs, Cosign key |
 | Public transparency log | `sign.transparency`, `public` by default (keyless signing needs the log; `none` only with a key) | `transparency-log` input, `none` by default | `transparency-log` input, `none` by default |
 | Image promotion | `:dev` → `:staging` → release, gated by Environments | final tags in a separate publication project | final tags (`promote` job) |

@@ -22,7 +22,7 @@ func TestForgejoNativeGraphAndSDKPin(t *testing.T) {
 	}
 
 	text := strings.ReplaceAll(string(body), "ENGINE_SHA", strings.Repeat("a", 40))
-	text = strings.ReplaceAll(text, "VERSION_BUMP", "cargo")
+	text = strings.ReplaceAll(text, "ARTIFACTS_CONFIG", ".gitlab/generic-cli-artifacts.yml")
 	text = strings.ReplaceAll(text, "BUMP_IMAGE", "${{ vars.CI_JOB_IMAGE }}")
 
 	text = strings.ReplaceAll(text, "IS_GO", "false")

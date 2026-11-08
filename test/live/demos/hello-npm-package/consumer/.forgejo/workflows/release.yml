@@ -40,8 +40,9 @@ jobs:
       release-git-host-key-fingerprint: ${{ vars.RELEASE_GIT_HOST_KEY_FINGERPRINT }}
       verify-release-request-signature: 'true'
       release-request-allowed-signers: .forgejo/release-allowed-signers
-      # No version bump: a release requests the version package.json declares
-      # (version=0.1.0).
+      # The plan of artifacts.yml bumps package.json and its lockfile in the
+      # job image, which carries Node and npm.
+      runtime-image-node: ${{ vars.CI_JOB_IMAGE }}
       sign-distro-packages: 'false'
       publish-container-images: 'false'
     secrets:

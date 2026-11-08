@@ -27,6 +27,7 @@ func New() *cli.Command {
 			validateTestSelectionsCmd(),
 			releaseCmd(),
 			releaseExportsCmd(),
+			releaseVersionsCmd(),
 			snapshotReleaseCmd(),
 			prCmd(),
 			gitlabBuildPipelineCmd(),

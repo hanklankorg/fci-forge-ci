@@ -13,8 +13,9 @@ Simple Maven application with container build.
 - **Forgejo**: [`forgejo/pullrequest.yml`](forgejo/pullrequest.yml) and
   [`forgejo/release.yml`](forgejo/release.yml), a `build-maven` jar release of
   a project at the repository root. The signed release commit carries the
-  POMs' release version: `prepare-release.yml` bumps them in a key-free job
-  (`version-bump: maven`) and verifies the bump before committing it, and
+  POMs' release version: `prepare-release.yml` bumps the projects
+  `artifacts.yml` declares in a key-free job (in `runtime-image-java`) and
+  verifies the bump before committing it, and
   `build-maven` checks the version it builds. An image
   is added to the build job as in the
   [Go service example](../go-service/forgejo/release.yml). See the

@@ -274,7 +274,7 @@ func gitlabConsumerProfileOf(t *testing.T, consumerRoot string, settings livetes
 		profile.requestTag, profile.finalTag = "release-request/v"+settings.Version, "v"+settings.Version
 	}
 
-	bumps, err := livetest.GitLabPlannedVersionBumps(consumerRoot, profile.artifactsConfig())
+	bumps, err := livetest.PlannedVersionBumps(consumerRoot, profile.artifactsConfig())
 	if err != nil {
 		t.Fatal(err)
 	}

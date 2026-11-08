@@ -43,8 +43,9 @@ Operator: prepare a new clean checkout with the normal four arguments plus
 test-live-consumer forgejo /absolute/prepared-checkout release version=0.8.6
 CI_AUTH_IMAGE=<reviewed-digest-pinned-restricted-job-image>
 CI_JOB_IMAGE=<reviewed-digest-pinned-native-Rust-job-image>`.
-Exact filter: `^TestForgejoLayer_ConsumerTrial$`. Cargo bump is configured by
-the overlay; Go uses no version bump and can request `version=0.0.1`.
+Exact filter: `^TestForgejoLayer_ConsumerTrial$`. For Cargo the overlay stages
+`.gitlab/generic-cli-artifacts.yml`, whose release plan bumps the root crate in
+`CI_JOB_IMAGE`; Go declares no bump and can request `version=0.0.1`.
 The SDK supplies current layer/binary/signer bindings and ephemeral request
 trust; placeholder pins in the recipe are replaced, never operator digests.
 

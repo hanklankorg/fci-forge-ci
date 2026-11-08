@@ -12,6 +12,7 @@ import (
 	"github.com/diggsweden/forge-ci/internal/domain/config"
 	domaincontainer "github.com/diggsweden/forge-ci/internal/domain/container"
 	"github.com/diggsweden/forge-ci/internal/domain/errs"
+	"github.com/diggsweden/forge-ci/internal/domain/projecttype"
 	domainrelease "github.com/diggsweden/forge-ci/internal/domain/release"
 	"github.com/diggsweden/forge-ci/internal/listval"
 	"github.com/diggsweden/forge-ci/internal/pathsafe"
@@ -347,11 +348,49 @@ func VersionBumpRuns(rendersChangelog, skipBump bool) bool {
 	return rendersChangelog && !skipBump
 }
 
+// VersionFamily is a toolchain family whose native version tool prepares a
+// share of a release's version bump in a key-free job of its own, in the
+// family's runtime image, and the project type that tool bumps.
+type VersionFamily struct {
+	Family      string           `json:"family"`
+	ProjectType projecttype.Type `json:"project-type"`
+}
+
+// versionFamilies are the families with a native version tool, in the order
+// every forge lists them. The other types' version files are text, which the
+// release commit's job writes itself.
+var versionFamilies = []VersionFamily{
+	{Family: "java", ProjectType: projecttype.Maven},
+	{Family: "node", ProjectType: projecttype.NPM},
+	{Family: "rust", ProjectType: projecttype.Cargo},
+}
+
+// VersionFamilies are the families whose native version tools the planned
+// bump runs, each once, in family order; none when the plan bumps nothing.
+func (p ReleasePrepareStagePlan) VersionFamilies() []VersionFamily {
+	if !p.Targets.VersionBump.Runs {
+		return nil
+	}
+
+	var out []VersionFamily
+
+	for _, family := range versionFamilies {
+		if slices.ContainsFunc(p.Targets.VersionBump.Items, func(item PlannedArtifact) bool {
+			return item.ProjectType == family.ProjectType
+		}) {
+			out = append(out, family)
+		}
+	}
+
+	return out
+}
+
 // NewPolicyReleaseStagePlans returns the prepare and build stage plans of a
 // declaration for a release whose policy, not artifacts.yml, decides signing
-// and publication: the GitLab release component's. The stages are the ones
-// NewReleasePlan derives from the same declaration. The GitLab release
-// renders its changelog with either renderer and has no skip, so it bumps.
+// and publication: the GitLab release component's and Forgejo's
+// prepare-release.yml. The stages are the ones NewReleasePlan derives from the
+// same declaration. Both releases render their changelog with either renderer
+// and have no skip, so they bump.
 func NewPolicyReleaseStagePlans(configPlan ConfigPlan) (ReleasePrepareStagePlan, ReleaseBuildStagePlan, error) {
 	if err := ValidateConfigPlan(configPlan); err != nil {
 		return ReleasePrepareStagePlan{}, ReleaseBuildStagePlan{}, err

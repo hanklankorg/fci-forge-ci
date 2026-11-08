@@ -7,6 +7,7 @@ package forgejoguard
 import (
 	"encoding/json"
 	"io/fs"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -32,7 +33,6 @@ const (
 	exampleRepository   = exampleServer + "/owner/delivery.git"
 	exampleSigner       = "forge.example/owner/signer@sha256:9a51d9f761cd269cadb2066710c9d2dd293f4e1020e229ff4f47ee1e6bce6234"
 	validatedRepository = "${{ needs.coordinates.outputs.helpers_repository }}"
-	versionBumpImage    = "${{ needs.coordinates.outputs.version_bump_image }}"
 	builderJobImage     = "${{ needs.coordinates.outputs.builder_job_image }}"
 	helperFallback      = `origin '+refs/heads/*:refs/remotes/origin/*' '+refs/tags/*:refs/tags/*'`
 	helperRemote        = `remote add origin "${FORGE_CI_REPOSITORY_URL:?}"`
@@ -49,7 +49,7 @@ const (
 // variables instead.
 func coordinateWorkflows() map[string]coordinateContract {
 	return map[string]coordinateContract{
-		".forgejo/workflows/prepare-release.yml":               {"forge-ci-sha", 3, false},
+		".forgejo/workflows/prepare-release.yml":               {"forge-ci-sha", 4, false},
 		".forgejo/workflows/sign-and-publish-release.yml":      {"forge-ci-sha", 4, false},
 		".forgejo/workflows/sign-container-images.yml":         {"forge-ci-sha", 1, false},
 		".forgejo/workflows/promote-base-container-images.yml": {"forge-ci-sha", 1, false},
@@ -68,7 +68,7 @@ type coordinateContract struct {
 
 var (
 	// rawCoordinateInput is an unvalidated coordinate, in any spelling.
-	rawCoordinateInput = regexp.MustCompile(`inputs\s*(\.|\[\s*['"])(forge-ci-repository|signer-image)\b`)
+	rawCoordinateInput = regexp.MustCompile(`inputs\s*(\.|\[\s*['"])(forge-ci-repository|signer-image|runtime-image-[a-z]+)\b`)
 	secretsWord        = regexp.MustCompile(`(?i)(^|[^A-Za-z0-9_])secrets([^A-Za-z0-9_]|$)`)
 	fetchMain          = regexp.MustCompile(`fetch .* origin main(\s|$)`)
 	signerPin          = regexp.MustCompile(`@sha256:[0-9a-f]{64}`)
@@ -359,15 +359,13 @@ func assertCoordinateConsumerJob(t *testing.T, relative string, contract coordin
 	}
 
 	// The one container job that is not a signer: prepare-release's version
-	// bump, in the project's own validated build image, which therefore may
-	// not even name a secret.
-	if image := target.containerImage(); image == versionBumpImage {
-		if relative != ".forgejo/workflows/prepare-release.yml" || name != "version-bump" {
-			t.Errorf("%s: job %s runs the version-bump image", relative, name)
-		}
+	// jobs, each in its family's validated runtime image, which run the
+	// project's version tool and therefore may not even name a secret.
+	if relative == ".forgejo/workflows/prepare-release.yml" && name == "version" {
+		assertVersionImageLookup(t, target.containerImage())
 
 		if anyString(target.node, secretsWord.MatchString) {
-			t.Errorf("%s: the version-bump job mentions secrets", relative)
+			t.Errorf("%s: the version job mentions secrets", relative)
 		}
 
 		return consumer, false
@@ -378,6 +376,31 @@ func assertCoordinateConsumerJob(t *testing.T, relative string, contract coordin
 	}
 
 	return consumer, true
+}
+
+// A version job's container is its family's validated runtime image, looked
+// up by the matrix row's family as the snapshot producers look theirs up.
+func assertVersionImageLookup(t *testing.T, expression string) {
+	t.Helper()
+
+	const (
+		prefix = "${{ format('{0}', needs.coordinates.outputs[fromJSON('"
+		suffix = "')[matrix.version.family]]) }}"
+	)
+
+	if !strings.HasPrefix(expression, prefix) || !strings.HasSuffix(expression, suffix) {
+		t.Fatalf("version image must directly look up a validated coordinate and format its string value: %s", expression)
+	}
+
+	var keys map[string]string
+	if err := json.Unmarshal([]byte(strings.TrimSuffix(strings.TrimPrefix(expression, prefix), suffix)), &keys); err != nil {
+		t.Fatalf("version image coordinate lookup: %v", err)
+	}
+
+	want := map[string]string{"java": "runtime_image_java", "node": "runtime_image_node", "rust": "runtime_image_rust"}
+	if !maps.Equal(keys, want) {
+		t.Errorf("version image lookup = %v, want %v", keys, want)
+	}
 }
 
 // This is a structural scheduling contract, not a Forgejo interpreter test.

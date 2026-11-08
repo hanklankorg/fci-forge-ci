@@ -10,7 +10,6 @@ import (
 
 	"github.com/diggsweden/forge-ci/internal/domain/errs"
 	"github.com/diggsweden/forge-ci/internal/domain/pipeline"
-	"github.com/diggsweden/forge-ci/internal/domain/projecttype"
 )
 
 // ReleaseFamilies are the GitLab release child's plan-driven jobs. The child
@@ -31,15 +30,6 @@ type ReleaseFamilies struct {
 // releaseFamilyOrder is the order families are listed and their jobs named.
 var releaseFamilyOrder = []string{familyJava, familyNode, familyGo, familyRust, familyAndroid}
 
-// nativeBumpFamilies maps the project types with a native version tool to
-// the family whose runtime image carries it. The other types' version files
-// are written as text by the engine in the release commit's job.
-var nativeBumpFamilies = map[projecttype.Type]string{
-	projecttype.Maven: familyJava,
-	projecttype.NPM:   familyNode,
-	projecttype.Cargo: familyRust,
-}
-
 // PlanReleaseFamilies selects the release child's families from the plan and
 // refuses a target no GitLab runner builds. The jobs that run them need the
 // families' images (RequireImages); a job that only checks which ran does
@@ -51,12 +41,9 @@ func PlanReleaseFamilies(prepare pipeline.ReleasePrepareStagePlan, build pipelin
 
 	version, buildSet := map[string]bool{}, map[string]bool{}
 
-	if prepare.Targets.VersionBump.Runs {
-		for _, item := range prepare.Targets.VersionBump.Items {
-			if family, native := nativeBumpFamilies[item.ProjectType]; native {
-				version[family] = true
-			}
-		}
+	// The plan names the families whose native tools prepare its bump.
+	for _, family := range prepare.VersionFamilies() {
+		version[family.Family] = true
 	}
 
 	for _, target := range buildFamilies(build.Targets, RuntimeImages{}, "") {

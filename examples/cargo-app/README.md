@@ -17,7 +17,10 @@ each container manifest.
   [GitLab guide](../../docs/gitlab.md#getting-started).
 - **Forgejo**: [`forgejo/pullrequest.yml`](forgejo/pullrequest.yml) and
   [`forgejo/release.yml`](forgejo/release.yml), a `build-cargo` binary release
-  of a crate at the repository root. An image is added to the build job as in
+  of a crate at the repository root. The signed release commit carries the
+  version of each crate `artifacts.yml` declares: `prepare-release.yml` bumps
+  them in a key-free job in `runtime-image-rust`, so declare the crates this
+  release builds. An image is added to the build job as in
   the [Go service example](../go-service/forgejo/release.yml). See the
   [Forgejo guide](../../docs/forgejo.md#getting-started).
 

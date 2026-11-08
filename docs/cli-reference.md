@@ -3188,6 +3188,43 @@ admit native export jobs or print whether an architecture is selected
 | `--image-plan` | optional release image plan file | string | `""` | n/a |
 | `--selected-arch` | print true/false for this native architecture instead of admitting export jobs | string | `""` | n/a |
 
+### `forge-ci plan release-versions`
+
+plan a release's version bump and its per-family version jobs from artifacts.yml
+
+```
+Plans the release's version bump from the declaration, as
+   'plan gitlab-release-pipeline' does, and writes what the release's version
+   jobs read:
+
+   --matrix-output        the version jobs as one-line JSON for strategy.matrix:
+                          one {"family", "project-type"} row per toolchain
+                          family whose projects the plan bumps with their
+                          native tool, [] for none. A planned family needs
+                          its --runtime-image-<family>.
+   --families-output      the same families' names, one a line, for the job
+                          that joins their patches.
+   --prepare-plan-output  the prepare-stage plan JSON, for 'version bump-plan'.
+
+   Without --file and without .forge-ci/artifacts.yml the release has no
+   planned bump; a file named by --file must exist.
+
+EXAMPLE:
+   forge-ci plan release-versions \
+     --runtime-image-java "registry.example.com/team/forge-ci-runtime-java-25@sha256:<digest>" \
+     --matrix-output versions.json
+```
+
+| Flag | Description | Type | Default | Env vars |
+|------|-------------|------|---------|----------|
+| `--file` | artifacts.yml of the release (default: .forge-ci/artifacts.yml, which may be absent) | string | `""` | n/a |
+| `--runtime-image-java` | runtime image of the java family, whose Maven projects it bumps | string | `""` | n/a |
+| `--runtime-image-node` | runtime image of the node family, whose npm projects it bumps | string | `""` | n/a |
+| `--runtime-image-rust` | runtime image of the rust family, whose Cargo projects it bumps | string | `""` | n/a |
+| `--matrix-output` | file to write the version jobs' matrix JSON to | string | `""` | n/a |
+| `--families-output` | file to write the planned version families to, one a line | string | `""` | n/a |
+| `--prepare-plan-output` | file to write the prepare-stage plan JSON to | string | `""` | n/a |
+
 ### `forge-ci plan snapshot-release`
 
 compose typed snapshot-release and stage plan contracts

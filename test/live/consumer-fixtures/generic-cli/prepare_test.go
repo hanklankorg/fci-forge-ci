@@ -211,7 +211,7 @@ func TestPrepareMaterializesPrivateSnapshot(t *testing.T) {
 					t.Fatal(err)
 				}
 
-				if strings.Contains(string(workflow), "ENGINE_SHA") || strings.Contains(string(workflow), "BUMP_IMAGE") || strings.Contains(string(workflow), "IS_GO") {
+				if strings.Contains(string(workflow), "ENGINE_SHA") || strings.Contains(string(workflow), "BUMP_IMAGE") || strings.Contains(string(workflow), "ARTIFACTS_CONFIG") || strings.Contains(string(workflow), "IS_GO") {
 					t.Fatal("unrendered transport inputs")
 				}
 

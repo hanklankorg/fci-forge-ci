@@ -284,7 +284,8 @@ func npmStableReleaseWorkflow(workflow string, pin ConsumerPin, image string) (s
 	workflow = workflow[:start] + workflow[end:]
 	workflow = workflow[:buildStart] + npmApplicationBuildSteps + workflow[buildEnd:]
 	workflow = strings.NewReplacer("@IMAGE@", image, "publish-container-images: 'true'", "publish-container-images: 'false'", "needs: [build, release-images]", "needs: [build]", "prepare, build, release-images, handoff", "prepare, build, handoff", "          IMAGES_RESULT: ${{ needs.release-images.result }}\n", "", `--job "Images=${IMAGES_RESULT}" `, "", "          forge-ci artifact download --name release-images --dir dist\n", "", "      release-images-path: dist/release-images.json\n", "").Replace(workflow)
-	workflow = strings.Replace(workflow, "      # The default request already matches package.json; select version-bump", "      version-bump: npm\n      version-bump-image: "+image+"\n      # The default request already matches package.json; select version-bump", 1)
+	// The plan's npm bump runs in the image the fixture builds with.
+	workflow = strings.Replace(workflow, "      runtime-image-node: ${{ vars.CI_JOB_IMAGE }}\n", "      runtime-image-node: "+image+"\n", 1)
 	workflow = strings.Replace(workflow, "    env:\n      ARTIFACT_NAME:", "    container:\n      image: "+image+"\n    env:\n      ARTIFACT_NAME:", 1)
 	workflow += strings.NewReplacer("@ACTIONS@", pin.Actions, "@PIN@", pin.Commit, "@IMAGE@", image).Replace(npmApplicationStableConsumers)
 
