@@ -39,13 +39,21 @@ Matrices 1 and 2 are generated from one source by `just gen-testing-matrices`
 planner and the campaign admission read them, the cases files' lines and
 settings, and the live marks of `test/live/campaigns/evidence.txt`, a
 hand-kept overlay keyed by forge, demo and flow, since whether a run proved
-something is a judgement; `go run ./internal/livetest/preflight
+something is a judgement. A mark names its evidence root and may carry the
+axis values its run had (`visibility=`, `image-builder=`, `admin-<check>=`),
+copied from that root: matrix 2 shows a mark only on the values it names and
+the line (📝) on the others, matrix 1 the best mark of the flow. A lane's
+undeclared setting is the run's selector, so its lines cover every value of
+it, and a Forgejo line's builder is its own `CI_IMAGE_BUILDER`. `just
+campaign-lane` reruns one cell with a selector in the same words
+(docs/live-campaigns.md, Rerun one cell). `go run ./internal/livetest/preflight
 testing-evidence ~/.local/state/forge-ci/live-runs <hosted-runs>` drafts it
 for review from the recorded verdicts and from a root of hosted GitHub trial
 records, each trial line of a controller or batch script read with its own
-exit receipt and finish time. A refusal carries the planner's or the
+exit receipt and finish time, a lifecycle run with the axis values its
+verdict header records. A refusal carries the planner's or the
 admission's reason. Matrix 1b is hand-kept. `test/syncguard` fails when the
-committed tables are stale. No campaign lane runs on hosted GitHub. There a
+committed tables are stale. No cases file runs on hosted GitHub. There a
 line is the fixture workflow a demo ships under `test/live/github/workflows`
 for the event the hosted trial settings name, and the lifecycle has one when
 the demo ships all three and the hosted settings accept the lifecycle.
@@ -67,15 +75,15 @@ the planned artifacts; "container-first" builds from the declared container.
 | hello-android (gradle-android · no container · no image) | ⬚ / 📝 / 📝 | — | — | — / — / — | ⛔ / ⛔ / ⛔ |
 | hello-cargo-container (rust · container-first · one image) | ✅ (2026-11-02) / ✅ (2026-11-02) / ✅ (2026-11-04) | — | ◐ (fixture consumer proven, run 520; the demo's own lifecycle line awaits a live run) / 📝 lifecycle / admitted | ✅ (2026-11-02) / ✅ (2026-11-02) / 📝 | 📝 / 📝 / ⬚ (admitted, no line) |
 | hello-cargo-workspace (rust · container-first · 2 images) | ✅ (2026-11-02) / ✅ (2026-11-02) / ✅ (2026-11-04) | — | ⛔ / ⛔ / ⛔ | ✅ (2026-11-02) / ✅ (2026-11-02) / ✅ (2026-11-04) | ⛔ / ⛔ / ⛔ |
-| hello-go-cli (go · no container · no image) | ✅ (2026-11-02) / ✅ (2026-11-02) / ✅ (2026-11-04) | — | — | ✅ (2026-11-02) / — / ✅ (GPG, hosted (matrix 1b, C)) | ⛔ / ⛔ / ⛔ |
+| hello-go-cli (go · no container · no image) | ✅ (2026-11-02) / ✅ (2026-11-02) / ✅ (2026-11-04) | — | — | ✅ (2026-11-02) / — / ✅ (GPG, hosted, run 42490898439 on a copy of the demo, E c-hosted-retry-6b89-20261108T143500Z (matrix 1b, C)) | ⛔ / ⛔ / ⛔ |
 | hello-go-service (go · extraction image · one image) | ✅ (2026-11-02) / ✅ (2026-11-02) / ✅ (2026-11-04) | ⛔ / ⛔ / ⛔ | ⛔ / ⛔ / ⛔ | ✅ (2026-11-02) / — / 📝 | ⛔ / ⛔ / ⛔ |
-| hello-gradle (java · no container · no image) | ⬚ / ✅ (2026-11-02) / 📝 | — | — | — / — / ✅ (2026-11-04) | ⛔ / ⛔ / ⛔ |
+| hello-gradle (java · no container · no image) | ⬚ / ✅ (2026-11-02) / 📝 | — | — | — / — / ◐ (2026-11-04, L github-gradle-c3b23772: passed, 0 Cosign bundles verified (5 GPG signatures)) | ⛔ / ⛔ / ⛔ |
 | hello-ios (xcode-ios · no container · no image) | ⬚ / ⬚ / 📝 | — | — | — / — / — | ⛔ / ⛔ / ⛔ |
 | hello-maven (java · no container · no image) | ✅ (2026-11-02) / ✅ (2026-11-02) / ✅ (2026-11-04) | — | — | ✅ (2026-11-02) / ✅ (2026-11-02) / ✅ (2026-11-04) | ⛔ / ⛔ / ⛔ |
-| hello-maven-service (java · artifact-first · one image) | ✅ (2026-11-02) / ✅ (2026-11-02) / ✅ (2026-11-04) | ✅ (A run 517, the retired published snapshot) / ✅ (lifecycle phase 3, 22ddcfd9) / 📝 lifecycle | — | ✅ (2026-11-02) / ✅ (2026-11-02) / 📝 | ✅ (3c178f94) / ◐ (phases 1–3 22ddcfd9, run 4 ec2380ef queued) / 📝 |
+| hello-maven-service (java · artifact-first · one image) | ✅ (2026-11-02) / ✅ (2026-11-02) / ✅ (2026-11-04) | ✅ (A run 517, the retired published snapshot) / ✅ (lifecycle phase 3, E gitlab-lifecycle-campaign-22ddcfd9) / 📝 lifecycle | — | ✅ (2026-11-02) / ✅ (2026-11-02) / 📝 | ✅ (E forgejo-lifecycle-campaign-3c178f94) / ◐ (phases 1–4 run 4, E gitlab-lifecycle-campaign-ec2380ef; phase 5 oracle fixed 4651b638, run 5 failed phase 1 (E gitlab-lifecycle-campaign-4651b638)) / 📝 |
 | hello-monorepo (java, node · artifact-first · nested artifacts (monorepo)) | ⬚ / ✅ (2026-11-02) / ⬚ | ⛔ / ⛔ / ⛔ | — | — / — / — | ⛔ / ⛔ / ⛔ |
 | hello-npm-package (node · no container · no image) | ✅ (2026-11-02) / ✅ (2026-11-02) / ✅ (2026-11-04) | — | — | ✅ (2026-11-02) / ✅ (2026-11-02) / ✅ (2026-11-04) | ⛔ / ⛔ / ⛔ |
-| hello-npm-service (node · artifact-first · one image) | ✅ (2026-11-02) / ✅ (2026-11-02) / ✅ (2026-11-04) | admitted / admitted / admitted | — | ✅ (2026-11-02) / ✅ (2026-11-02) / 📝 | ⬚ (admitted, no line) / ⬚ (admitted, no line) / ⬚ (admitted, no line) |
+| hello-npm-service (node · artifact-first · one image) | ✅ (2026-11-02) / ✅ (2026-11-02) / ✅ (2026-11-04) | 📝 lifecycle / 📝 lifecycle / admitted | — | ✅ (2026-11-02) / ✅ (2026-11-02) / 📝 | 📝 / 📝 / ⬚ (admitted, no line) |
 
 Refused snapshots and lifecycles, with the planner's or the admission's reason:
 
@@ -115,31 +123,31 @@ marks are the owner's judgements of the evidence roots in `testing-parity.md`.
 |---|---|---|---|---|
 | ecosystem | go | ⛔ hello-go-cli | ⛔ hello-go-cli | ⛔ hello-go-cli |
 |  | gradle-android | ⛔ hello-android | ⛔ hello-android | ⛔ hello-android |
-|  | java | ✅ hello-maven-service (3c178f94) | ◐ hello-maven-service (phases 1–3 22ddcfd9, run 4 ec2380ef queued) | 📝 hello-maven-service |
-|  | node | ⬚ hello-npm-service (admitted, no line) | ⬚ hello-npm-service (admitted, no line) | ⬚ hello-npm-service (admitted, no line) |
+|  | java | ✅ hello-maven-service (E forgejo-lifecycle-campaign-3c178f94) | ◐ hello-maven-service (phases 1–4 run 4, E gitlab-lifecycle-campaign-ec2380ef; phase 5 oracle fixed 4651b638, run 5 failed phase 1 (E gitlab-lifecycle-campaign-4651b638)) | 📝 hello-maven-service |
+|  | node | 📝 hello-npm-service | 📝 hello-npm-service | ⬚ hello-npm-service (admitted, no line) |
 |  | rust | 📝 hello-cargo-container | 📝 hello-cargo-container | ⬚ hello-cargo-container (admitted, no line) |
 |  | xcode-ios | ⛔ hello-ios | ⛔ hello-ios | ⛔ hello-ios |
-| route | artifact-first | ✅ hello-maven-service (3c178f94) | ◐ hello-maven-service (phases 1–3 22ddcfd9, run 4 ec2380ef queued) | 📝 hello-maven-service |
+| route | artifact-first | ✅ hello-maven-service (E forgejo-lifecycle-campaign-3c178f94) | ◐ hello-maven-service (phases 1–4 run 4, E gitlab-lifecycle-campaign-ec2380ef; phase 5 oracle fixed 4651b638, run 5 failed phase 1 (E gitlab-lifecycle-campaign-4651b638)) | 📝 hello-maven-service |
 |  | container-first | 📝 hello-cargo-container | 📝 hello-cargo-container | ⬚ hello-cargo-container (admitted, no line) |
 |  | extraction image | ⛔ hello-go-service | ⛔ hello-go-service | ⛔ hello-go-service |
 |  | no container | ⛔ hello-android | ⛔ hello-android | ⛔ hello-android |
 | images | 2 images | ⛔ hello-cargo-workspace | ⛔ hello-cargo-workspace | ⛔ hello-cargo-workspace |
 |  | nested artifacts (monorepo) | ⛔ hello-monorepo | ⛔ hello-monorepo | ⛔ hello-monorepo |
 |  | no image | ⛔ hello-android | ⛔ hello-android | ⛔ hello-android |
-|  | one image | ✅ hello-maven-service (3c178f94) | ◐ hello-maven-service (phases 1–3 22ddcfd9, run 4 ec2380ef queued) | 📝 hello-maven-service |
+|  | one image | ✅ hello-maven-service (E forgejo-lifecycle-campaign-3c178f94) | ◐ hello-maven-service (phases 1–4 run 4, E gitlab-lifecycle-campaign-ec2380ef; phase 5 oracle fixed 4651b638, run 5 failed phase 1 (E gitlab-lifecycle-campaign-4651b638)) | 📝 hello-maven-service |
 | signing | GPG declaration | ⛔ hello-go-cli | ⛔ hello-go-cli | ⛔ hello-go-cli |
 |  | default | 📝 hello-cargo-container | 📝 hello-cargo-container | ⬚ hello-cargo-container (admitted, no line) |
-|  | sigstore | ✅ hello-maven-service (3c178f94) | ◐ hello-maven-service (phases 1–3 22ddcfd9, run 4 ec2380ef queued) | 📝 hello-maven-service |
-| image builder | buildah | ⬚ no lane | ⬚ no lane | ⬚ no lane |
-|  | kaniko | ⬚ no lane | ⬚ no lane | ⬚ no lane |
-| visibility | public | ⬚ no lane | ⬚ no lane | ⬚ no lane |
-|  | private | ⬚ no lane | ⬚ no lane | ⬚ no lane |
-| enforcement | admin lint | ⬚ no lane | ⬚ no lane | ⬚ no lane |
-|  | admin vulnerabilities | ⬚ no lane | ⬚ no lane | ⬚ no lane |
-|  | admin application-tests | ⬚ no lane | ⬚ no lane | ⬚ no lane |
-|  | admin reproducible-builds | ⬚ no lane | ⬚ no lane | ⬚ no lane |
-|  | none enforced | ✅ lifecycle-forgejo (3c178f94) | ◐ lifecycle-gitlab (phases 1–3 22ddcfd9, run 4 ec2380ef queued) | ⬚ no lane |
-| architecture | amd64 | ✅ hello-maven-service (3c178f94) | ◐ hello-maven-service (phases 1–3 22ddcfd9, run 4 ec2380ef queued) | 📝 hello-maven-service |
+|  | sigstore | ✅ hello-maven-service (E forgejo-lifecycle-campaign-3c178f94) | ◐ hello-maven-service (phases 1–4 run 4, E gitlab-lifecycle-campaign-ec2380ef; phase 5 oracle fixed 4651b638, run 5 failed phase 1 (E gitlab-lifecycle-campaign-4651b638)) | 📝 hello-maven-service |
+| image builder | buildah | ✅ lifecycle-forgejo (E forgejo-lifecycle-campaign-3c178f94) | ◐ lifecycle-gitlab (phases 1–4 run 4, E gitlab-lifecycle-campaign-ec2380ef; phase 5 oracle fixed 4651b638, run 5 failed phase 1 (E gitlab-lifecycle-campaign-4651b638)) | ⬚ no lane |
+|  | kaniko | 📝 lifecycle-forgejo | 📝 lifecycle-gitlab | ⬚ no lane |
+| visibility | public | ✅ lifecycle-forgejo (E forgejo-lifecycle-campaign-3c178f94) | ◐ lifecycle-gitlab (phases 1–4 run 4, E gitlab-lifecycle-campaign-ec2380ef; phase 5 oracle fixed 4651b638, run 5 failed phase 1 (E gitlab-lifecycle-campaign-4651b638)) | 📝 hello-maven-service |
+|  | private | 📝 lifecycle-forgejo | 📝 lifecycle-gitlab | 📝 hello-maven-service |
+| enforcement | admin lint | 📝 lifecycle-forgejo | 📝 lifecycle-gitlab | ⬚ no lane |
+|  | admin vulnerabilities | 📝 lifecycle-forgejo | 📝 lifecycle-gitlab | ⬚ no lane |
+|  | admin application-tests | 📝 lifecycle-forgejo | 📝 lifecycle-gitlab | ⬚ no lane |
+|  | admin reproducible-builds | 📝 lifecycle-forgejo | 📝 lifecycle-gitlab | ⬚ no lane |
+|  | none enforced | ✅ lifecycle-forgejo (E forgejo-lifecycle-campaign-3c178f94) | ◐ lifecycle-gitlab (phases 1–4 run 4, E gitlab-lifecycle-campaign-ec2380ef; phase 5 oracle fixed 4651b638, run 5 failed phase 1 (E gitlab-lifecycle-campaign-4651b638)) | ⬚ no lane |
+| architecture | amd64 | ✅ hello-maven-service (E forgejo-lifecycle-campaign-3c178f94) | ◐ hello-maven-service (phases 1–4 run 4, E gitlab-lifecycle-campaign-ec2380ef; phase 5 oracle fixed 4651b638, run 5 failed phase 1 (E gitlab-lifecycle-campaign-4651b638)) | 📝 hello-maven-service |
 |  | arm64 | — D-5 | — D-5 | — D-5 |
 
 Kept scenario lines, by lane:
@@ -152,14 +160,14 @@ Kept scenario lines, by lane:
 | harness-inputs-gitlab | `TestGitLabRelease_RejectsPreseededProvenance` | 📝 |
 | harness-inputs-gitlab | `TestGitLabRelease_ConsumerInterruptedRecovery` | 📝 |
 | interruption-manual-gitlab | `TestGitLabWorkflow_InterruptedJob` | 📝 |
-| k3s-private-gitlab | `TestGitLabRelease_MinimalSignedArtifacts` | ✅ (2026-11-07) |
+| k3s-private-gitlab | `TestGitLabRelease_MinimalSignedArtifacts` | ✅ (2026-11-07, V 20261107T062007Z) |
 | k3s-private-gitlab | `TestGitLabCheck_ChecksOutPrivateConsumerWithJobToken` | 📝 |
 | k3s-private-gitlab | `TestGitLabCheck_ChecksOutTheConsumerPipelineCommit` | 📝 |
-| k3s-private-gitlab | `TestGitLabPolicy_ConsumerCannotReplaceTheSigningPipeline` | 📝 |
-| k3s-private-gitlab | `TestGitLabPolicy_JobTokenCannotWriteThePublicationRegistry` | 📝 |
-| k3s-private-gitlab | `TestGitLabRelease_MinimalBranchProtection` | ✅ (2026-11-07) |
-| k3s-private-gitlab | `TestGitLabRelease_ResourceGroupSpansTheChild` | 📝 |
-| k3s-private-gitlab | `TestGitLabRelease_PromotionRetryAfterRegistryWrite` | 📝 |
+| k3s-private-gitlab | `TestGitLabPolicy_ConsumerCannotReplaceTheSigningPipeline` | ✅ (2026-11-02, V 20261102T130536Z) |
+| k3s-private-gitlab | `TestGitLabPolicy_JobTokenCannotWriteThePublicationRegistry` | ✅ (2026-11-02, V 20261102T130642Z) |
+| k3s-private-gitlab | `TestGitLabRelease_MinimalBranchProtection` | ✅ (2026-11-02, V 20261102T130732Z) |
+| k3s-private-gitlab | `TestGitLabRelease_ResourceGroupSpansTheChild` | ✅ (2026-11-02, V 20261102T130753Z) |
+| k3s-private-gitlab | `TestGitLabRelease_PromotionRetryAfterRegistryWrite` | ✅ (2026-11-02, V 20261102T130918Z) |
 | k3s-private-gitlab | `TestGitLabBootstrap_PublishesAndDownloadsTheRecordedBinary` | 📝 |
 
 <!-- /generated:e2e-variants -->

@@ -27,9 +27,12 @@ type campaignCases struct {
 
 // CampaignRun keeps effective public facts separate from the optional selector.
 // An unset selector is not an explicit Buildah requirement on consumer cases.
+// Select narrows the lane to the cases a selector names (selectCampaignCases);
+// none runs every case.
 type CampaignRun struct {
 	Settings        map[string]string
 	BuilderSelector string
+	Select          []string
 }
 
 // Setting declarations precede all cases, are literal data, and describe the

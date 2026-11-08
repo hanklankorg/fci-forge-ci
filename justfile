@@ -1371,14 +1371,29 @@ campaign-prepare forge_lab dir +lanes:
 # in order, past failures, each appending a line to <dir>/<provider>.results.
 # Fails when a case failed. Refused unless HEAD is the campaign's commit. A
 # relative cases file is the caller's; test/live/campaigns holds examples.
+# Selectors rerun one matrix cell: only the cases they name run, after every
+# case is planned. A selector is <demo>[/<event>][/<setting>=<value>...], a
+# consumer case of the demo and event with those axis values in the testing
+# overlay's words: image-builder=buildah|kaniko, the case's own builder,
+# admin-<check>=true|false, the lane's input, and visibility=public|private,
+# which narrows a run of both to that one. <TestName> is a scenario case.
 #
 #   just campaign-lane ~/campaigns/k3s forgejo test/live/campaigns/k3s-private-forgejo.cases
-[arg('dir', help='Absolute campaign directory from just campaign-prepare')]
-[arg('cases', help='Cases file: consumer <demo> <pull-request|release> [key=value ...] or scenario <TestName>, one a line')]
-[arg('provider', help='forgejo or gitlab; scopes the lane and its lock')]
+#   just campaign-lane ~/campaigns/k3s forgejo test/live/campaigns/lifecycle-forgejo.cases hello-maven-service/lifecycle/image-builder=kaniko/visibility=public
+#
+# On github the lane is one cell, the demo's event on hosted GitHub through
+# the demo's fixture workflows, from a one-commit checkout of the built-in
+# demo, with `just test-live-consumer github` settings. It runs inside Forge
+# Lab's `just github run ... -- just --justfile <this> campaign-lane ...`:
+#
+#   just campaign-lane ~/campaigns/hosted github hello-maven-service/lifecycle org=<id>
+[arg('dir', help='Absolute campaign directory from just campaign-prepare; on github, where github.results is written')]
+[arg('cases', help='Cases file: consumer <demo> <event> [key=value ...] or scenario <TestName>, one a line; on github <demo>/<event>')]
+[arg('provider', help='forgejo, gitlab or github; scopes the lane and its lock')]
+[arg('select', help='<demo>[/<event>][/<setting>=<value>...] or <TestName> per cell to rerun; on github, test-live-consumer settings')]
 [doc('Live; run a campaign lane; network, destructive')]
 [group('campaign')]
-campaign-lane dir provider cases:
+campaign-lane dir provider cases *select:
     @cd {{ quote(invocation_directory()) }} && exec bash {{ quote(justfile_directory() / "scripts" / "ci" / "campaign.sh") }} lane "$@"
 
 # ==================================================================================== #

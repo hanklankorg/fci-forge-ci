@@ -7,13 +7,14 @@
 # development snapshot the policy's snapshot-images component takes on the
 # merged main, then a signed release request from it. The development route
 # is a service snapshot of the demo's one container from the declaration its
-# release builds its images from, so the lane runs the Maven service,
-# artifact-first with its runtime image, and the Cargo container,
-# container-first; a demo whose declaration the snapshot cannot build, or
+# release builds its images from, so the lane runs the Maven and npm
+# services, artifact-first with their runtime images, and the Cargo
+# container, container-first; a demo whose declaration the snapshot cannot
+# build, or
 # that ships no GitLab release build, is refused (docs/live-campaigns.md,
 # Lifecycle). The images are the GitLab release's: the ecosystem's runtime
 # image as job and build image (the build image is also the image the
-# snapshot builds the Maven producer with), the signer image, the selected
+# snapshot builds the producer with), the signer image, the selected
 # builder's job image for the snapshot's and the release's image builds, and
 # the ecosystem's lint image for the gate. The builder is the lane's,
 # FORGE_CI_LIVE_GITLAB_IMAGE_BUILDER: unset or buildah, the Buildah job image
@@ -21,15 +22,15 @@
 # job image of FORGE_CI_LIVE_KANIKO_JOB_IMAGE_ARCHIVE, labelled for the
 # project the lifecycle serves the layer from as it is pushed. The visibility
 # is the run's: FORGE_CI_LIVE_CONSUMER_VISIBILITY unset or both runs each line
-# public and private. Prepare with gitlab=<this file>,
-# job-image=java:<reviewed local image> and job-image=rust:<reviewed local
-# image>. amd64 runners only for now.
+# public and private. So are the administrator inputs:
+# FORGE_CI_LIVE_ADMIN_<CHECK>=true enforces a check, unset enforces none.
+# Prepare with gitlab=<this file> and job-image=<flavor>:<reviewed local
+# image> for java, javascript-typescript and rust. amd64 runners only for
+# now. A selector reruns one line, for example:
 #
 #   just campaign-lane <dir> gitlab test/live/campaigns/lifecycle-gitlab.cases
-setting admin-lint=false
-setting admin-vulnerabilities=false
-setting admin-application-tests=false
-setting admin-reproducible-builds=false
+#   just campaign-lane <dir> gitlab test/live/campaigns/lifecycle-gitlab.cases hello-maven-service/lifecycle/image-builder=buildah/visibility=public
 
 consumer hello-maven-service lifecycle job-archive=@FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_JAVA build-archive=@FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_JAVA signer-archive=@FORGE_CI_LIVE_SIGNER_IMAGE_ARCHIVE lint-archive=@LINT_IMAGE_ARCHIVE_JAVA version=0.2.0 version-bump=maven job-user=65532:65532
 consumer hello-cargo-container lifecycle job-archive=@FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_RUST build-archive=@FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_RUST signer-archive=@FORGE_CI_LIVE_SIGNER_IMAGE_ARCHIVE lint-archive=@LINT_IMAGE_ARCHIVE_RUST version=0.2.0 version-bump=cargo job-user=65532:65532
+consumer hello-npm-service lifecycle job-archive=@FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_NODE build-archive=@FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_NODE signer-archive=@FORGE_CI_LIVE_SIGNER_IMAGE_ARCHIVE lint-archive=@LINT_IMAGE_ARCHIVE_JAVASCRIPT_TYPESCRIPT version=0.2.0 version-bump=npm job-user=65532:65532

@@ -109,9 +109,8 @@ export FORGE_CI_LIVE_FORGEJO_IMAGE_BUILDER=kaniko
 export FORGE_CI_LIVE_ADMIN_LINT=false
 export FORGE_CI_LIVE_ADMIN_VULNERABILITIES=false
 export FORGE_CI_LIVE_ADMIN_APPLICATION_TESTS=false
-export FORGE_CI_LIVE_ADMIN_REPRODUCIBLE_BUILDS=true
 just campaign-lane ~/campaigns/k3s forgejo test/live/campaigns/k3s-private-forgejo.cases &
-FORGE_CI_LIVE_GITLAB_IMAGE_BUILDER=kaniko \
+FORGE_CI_LIVE_GITLAB_IMAGE_BUILDER=kaniko FORGE_CI_LIVE_ADMIN_REPRODUCIBLE_BUILDS=true \
   just campaign-lane ~/campaigns/k3s gitlab test/live/campaigns/k3s-private-gitlab.cases &
 wait
 ```
@@ -141,12 +140,14 @@ and Kaniko; set the corresponding Forgejo or GitLab image-builder selector.
 The four administrator settings are independent and default to `false`. For these
 lanes the controller sets lint, vulnerabilities and application tests to `false`,
 and for the GitLab lane explicitly enables reproducible builds, as its declaration
-requires. An administrator setting is declared only where an orchestrator of the
-lane's forge declares its input, `enforce-<check>`, read from this checkout's
-`.forgejo/workflows` and `.forgejo/actions` or `templates/`: no Forgejo
-orchestrator takes `enforce-reproducible-builds`, so the Forgejo lanes declare
-none, and a declaration nothing on the lane consumes is refused at preparation
-and before the lane runs. Each controller variable accepts exactly
+requires. An administrator setting is declared, or enforced by the run, only
+where an orchestrator of the lane's forge declares its input,
+`enforce-<check>`, read from this checkout's `.forgejo/workflows` and
+`.forgejo/actions` or `templates/`: no Forgejo orchestrator takes
+`enforce-reproducible-builds`, so the Forgejo lanes declare none. A
+declaration nothing on the lane consumes is refused at preparation and before
+the lane runs, and so is a run that enforces such a check, which its record
+would otherwise claim. Each controller variable accepts exactly
 `true` or `false`; invalid values refuse preflight. Checks still run when their
 findings are nonblocking.
 
@@ -184,6 +185,37 @@ gate lints without `lint-archive=`. The lane then runs past failures and fails w
 `<dir>/<provider>.results`, one tab-separated line a case: interval, case,
 exit status and the `verdict.json` to read, as above.
 
+### Rerun one cell
+
+A selector after the cases file reruns the matrix cell it names and nothing
+more: `<demo>[/<event>][/<setting>=<value>...]`, the consumer cases of the
+demo and event whose run has those axis values, in the words of the testing
+overlay (`test/live/campaigns/evidence.txt`): `image-builder=buildah|kaniko`,
+the case's own builder, `admin-<check>=true|false`, the lane's input, and
+`visibility=public|private`, which narrows a run of both visibilities to
+that one and exports it to the case. `<TestName>` is a scenario case. Every
+case is still planned first, so the whole file's typos are caught, and a
+selector that names no case, a word other than the event without `=`, or
+selectors of two visibilities, are refused. A selected case that runs with
+another value, such as a visibility or GitLab builder the run inherits from
+the caller, is refused naming that value:
+
+```bash
+just campaign-lane ~/campaigns/lc gitlab test/live/campaigns/lifecycle-gitlab.cases hello-maven-service/lifecycle/image-builder=buildah/visibility=public
+just campaign-lane ~/campaigns/lc forgejo test/live/campaigns/lifecycle-forgejo.cases hello-maven-service/lifecycle/image-builder=buildah/visibility=private
+```
+
+A hosted GitHub cell is the demo's fixture workflow for the event, run by
+the same recipe with `github` and `<demo>/<event>` in place of the cases
+file, from a one-commit checkout of the built-in demo, inside Forge Lab's
+hosted session; the settings are `just test-live-consumer github`'s, and
+the line goes to `<dir>/github.results`:
+
+```bash
+just campaign-lane ~/campaigns/hosted github hello-maven-service/lifecycle org=<id>
+just campaign-lane ~/campaigns/hosted github hello-go-cli/release org=<id> fixtures=test/live/github-gpg/workflows workflow=release-gpg.yml
+```
+
 ### Lifecycle
 
 `test/live/campaigns/lifecycle-forgejo.cases` and
@@ -195,15 +227,19 @@ a development route on the provider:
 consumer hello-maven-service lifecycle CI_JOB_IMAGE=@JOB_IMAGE_JAVA CI_IMAGE_BUILDER=buildah RELEASE_PLATFORMS=linux/amd64
 consumer hello-maven-service lifecycle CI_JOB_IMAGE=@JOB_IMAGE_JAVA CI_IMAGE_BUILDER=kaniko CI_IMAGE_BUILDER_JOB_IMAGE=@KANIKO_JOB_IMAGE RELEASE_PLATFORMS=linux/amd64
 consumer hello-cargo-container lifecycle CI_JOB_IMAGE=@JOB_IMAGE_RUST CI_IMAGE_BUILDER=buildah RELEASE_PLATFORMS=linux/amd64
+consumer hello-npm-service lifecycle CI_JOB_IMAGE=@JOB_IMAGE_JAVASCRIPT_TYPESCRIPT CI_IMAGE_BUILDER=buildah RELEASE_PLATFORMS=linux/amd64
 consumer hello-maven-service lifecycle job-archive=@FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_JAVA build-archive=@FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_JAVA signer-archive=@FORGE_CI_LIVE_SIGNER_IMAGE_ARCHIVE lint-archive=@LINT_IMAGE_ARCHIVE_JAVA version=0.2.0 version-bump=maven job-user=65532:65532
 consumer hello-cargo-container lifecycle job-archive=@FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_RUST build-archive=@FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_RUST signer-archive=@FORGE_CI_LIVE_SIGNER_IMAGE_ARCHIVE lint-archive=@LINT_IMAGE_ARCHIVE_RUST version=0.2.0 version-bump=cargo job-user=65532:65532
+consumer hello-npm-service lifecycle job-archive=@FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_NODE build-archive=@FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_NODE signer-archive=@FORGE_CI_LIVE_SIGNER_IMAGE_ARCHIVE lint-archive=@LINT_IMAGE_ARCHIVE_JAVASCRIPT_TYPESCRIPT version=0.2.0 version-bump=npm job-user=65532:65532
 ```
 
-Neither file declares a visibility or a builder. The visibility is the run's
-selector: `FORGE_CI_LIVE_CONSUMER_VISIBILITY` unset or `both` runs each line
-public and private. The builder on GitLab is the lane's selector,
-`FORGE_CI_LIVE_GITLAB_IMAGE_BUILDER` (unset or `buildah`, or `kaniko`), under
-which the one GitLab line runs; on Forgejo it is the consumer's
+Neither file declares a visibility, a builder or an administrator setting.
+The visibility is the run's selector: `FORGE_CI_LIVE_CONSUMER_VISIBILITY`
+unset or `both` runs each line public and private. So are the
+administrator inputs: `FORGE_CI_LIVE_ADMIN_<CHECK>=true` enforces that check
+on every line, unset enforces none, and the run header records them. The
+builder on GitLab is the lane's selector, `FORGE_CI_LIVE_GITLAB_IMAGE_BUILDER`
+(unset or `buildah`, or `kaniko`), under which every GitLab line runs; on Forgejo it is the consumer's
 `CI_IMAGE_BUILDER` variable, so the Forgejo file carries one line per builder,
 and `FORGE_CI_LIVE_FORGEJO_IMAGE_BUILDER` stays unset (set, it refuses the other
 builder's line). On Forgejo both builders' image builds, and the service's
@@ -341,7 +377,7 @@ behind it:
 |---|---|---|---|
 | hello-maven-service | lifecycle | lifecycle | artifact-first Maven application and its runtime image |
 | hello-cargo-container | lifecycle | lifecycle | container-first from `release-images.yml`, no producer |
-| hello-npm-service | admitted, no line | admitted, no line | `artifacts.yml` is a service snapshot's (one npm producer) and the demo ships its GitLab release build, so the planner admits the lifecycle on both forges; the lane lines follow the snapshot-npm-layout merge, which makes the npm snapshot's layout match the release's on every forge, and wait for a live run |
+| hello-npm-service | lifecycle | lifecycle | artifact-first: `artifacts.yml` is a service snapshot's (one npm producer), with the snapshot-npm-layout merge's layout, and the demo ships its GitLab release build |
 | hello-cargo-workspace | — | — | two runtime images; the trial judges one container |
 | hello-go-service | — | — | extraction, which the planner refuses; no GitLab release build either |
 | hello-go-cli, hello-maven, hello-npm-package | — | — | no container, so no snapshot; hello-maven's library development route publishes a SNAPSHOT package, another shape |

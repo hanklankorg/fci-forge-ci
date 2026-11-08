@@ -21,14 +21,15 @@
 # job-image=<flavor>:<reviewed local image> per flavour named here;
 # CI_JOB_IMAGE is the nanolinter image of the demo's toolchain flavour, which
 # the demo's lint and build jobs run in and the snapshot builds the demo's
-# producers in (none for the container-first Cargo service). amd64 runners
-# only for now.
+# producers in (none for the container-first Cargo service). The
+# administrator inputs are the run's as well: FORGE_CI_LIVE_ADMIN_<CHECK>=true
+# enforces lint, vulnerabilities or application-tests, unset enforces none.
+# amd64 runners only for now. A selector reruns one line, for example:
 #
 #   just campaign-lane <dir> forgejo test/live/campaigns/lifecycle-forgejo.cases
-setting admin-lint=false
-setting admin-vulnerabilities=false
-setting admin-application-tests=false
+#   just campaign-lane <dir> forgejo test/live/campaigns/lifecycle-forgejo.cases hello-maven-service/lifecycle/image-builder=kaniko/visibility=public
 
 consumer hello-maven-service lifecycle CI_JOB_IMAGE=@JOB_IMAGE_JAVA CI_IMAGE_BUILDER=buildah RELEASE_PLATFORMS=linux/amd64
 consumer hello-maven-service lifecycle CI_JOB_IMAGE=@JOB_IMAGE_JAVA CI_IMAGE_BUILDER=kaniko CI_IMAGE_BUILDER_JOB_IMAGE=@KANIKO_JOB_IMAGE RELEASE_PLATFORMS=linux/amd64
 consumer hello-cargo-container lifecycle CI_JOB_IMAGE=@JOB_IMAGE_RUST CI_IMAGE_BUILDER=buildah RELEASE_PLATFORMS=linux/amd64
+consumer hello-npm-service lifecycle CI_JOB_IMAGE=@JOB_IMAGE_JAVASCRIPT_TYPESCRIPT CI_IMAGE_BUILDER=buildah RELEASE_PLATFORMS=linux/amd64

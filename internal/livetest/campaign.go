@@ -191,7 +191,12 @@ func PlanCampaignLane(root, dir, provider, casesPath, head string, run CampaignR
 		return CampaignPlan{}, fmt.Errorf("%s: %w", casesPath, err)
 	}
 
+	if err := refuseUnconsumedAdmin(root, provider, enforcedAdminSettings(run.Settings)); err != nil {
+		return CampaignPlan{}, fmt.Errorf("%s: the run: %w", casesPath, err)
+	}
+
 	plan := campaignLaneEnvironment(provider, env, run)
+	caseFacts := make([]map[string]string, 0, len(file.cases))
 
 	for _, line := range file.cases {
 		args, caseErr := campaignCaseArgs(dir, provider, env, line.words)
@@ -209,9 +214,151 @@ func PlanCampaignLane(root, dir, provider, casesPath, head string, run CampaignR
 		}
 
 		plan.Cases = append(plan.Cases, CampaignCase{Text: line.text, Args: args})
+		caseFacts = append(caseFacts, facts)
+	}
+
+	return selectCampaignCases(plan, file.cases, caseFacts, run)
+}
+
+// selectCampaignCases keeps the planned cases the run's selectors name,
+// after every case was planned, so a typo in a case a selector leaves out
+// still costs no run. A selector is <demo>[/<event>][/<setting>=<value>...],
+// a consumer case of the demo and event whose run has those axis values, in
+// the overlay's words (matrixAxisValues): image-builder= the case's own
+// builder, admin-<check>= the lane's input, and visibility= one visibility
+// of a run of both, which the lane then runs alone. <TestName> is a
+// scenario case. A selector that matches no case, one whose case runs with
+// another value than it names, or selectors of two visibilities, are
+// refused; no selector keeps every case.
+func selectCampaignCases(plan CampaignPlan, lines []campaignLine, facts []map[string]string, run CampaignRun) (CampaignPlan, error) {
+	if len(run.Select) == 0 {
+		return plan, nil
+	}
+
+	cases, visibility := []CampaignCase{}, ""
+
+	for _, text := range run.Select {
+		selector, err := parseCampaignSelector(text)
+		if err != nil {
+			return CampaignPlan{}, err
+		}
+
+		if narrowed := selector.axes[settingVisibility]; narrowed != "" {
+			if visibility != "" && visibility != narrowed {
+				return CampaignPlan{}, fmt.Errorf("the selectors name two visibilities; a lane runs one: %w", errs.ErrValidation)
+			}
+
+			visibility = narrowed
+		}
+
+		matched, conflict := selector.match(lines, facts, run.Settings)
+
+		switch {
+		case len(matched) == 0 && conflict != "":
+			return CampaignPlan{}, fmt.Errorf("the selector %q names a case that runs with %s; select that value, or change the caller's selector where the run inherits it: %w", text, conflict, errs.ErrValidation)
+		case len(matched) == 0:
+			return CampaignPlan{}, fmt.Errorf("the selector %q matches no case; want <demo>[/<event>][/<setting>=<value>...] or <TestName>: %w", text, errs.ErrValidation)
+		}
+
+		for _, index := range matched {
+			if !slices.ContainsFunc(cases, func(planned CampaignCase) bool { return planned.Text == plan.Cases[index].Text }) {
+				cases = append(cases, plan.Cases[index])
+			}
+		}
+	}
+
+	plan.Cases = cases
+	if visibility != "" {
+		plan.Env = append(plan.Env, consumerVisibilityEnv+"="+visibility)
 	}
 
 	return plan, nil
+}
+
+// campaignSelector is a parsed selector: the demo or scenario it names, the
+// event, and the axis values.
+type campaignSelector struct {
+	name, event string
+	axes        map[string]string
+}
+
+// match returns the indexes of the lines the selector picks and, when a
+// named line runs with another value, that setting=value, preferring one
+// the run inherits.
+func (selector campaignSelector) match(lines []campaignLine, facts []map[string]string, run map[string]string) ([]int, string) {
+	matched, conflict := []int{}, ""
+
+	for index, line := range lines {
+		if !selector.names(line.words) {
+			continue
+		}
+
+		if mismatch, inherited := selector.mismatch(facts[index], run); mismatch != "" {
+			if inherited || conflict == "" {
+				conflict = mismatch
+			}
+
+			continue
+		}
+
+		matched = append(matched, index)
+	}
+
+	return matched, conflict
+}
+
+// parseCampaignSelector reads <name>[/<event>][/<setting>=<value>...]: a
+// word without = is the event, and only right after the name; every other
+// word is an axis value the overlay knows, given once.
+func parseCampaignSelector(text string) (campaignSelector, error) {
+	words := strings.Split(text, "/")
+	selector := campaignSelector{name: words[0], axes: map[string]string{}}
+
+	for index, word := range words[1:] {
+		setting, value, isAxis := strings.Cut(word, "=")
+
+		switch {
+		case !isAxis && index == 0 && word != "":
+			selector.event = word
+
+			continue
+		case !isAxis:
+			return campaignSelector{}, fmt.Errorf("the selector %q: %q is not <setting>=<value>; only the word after the name is an event: %w", text, word, errs.ErrValidation)
+		}
+
+		values := slices.DeleteFunc(slices.Clone(matrixAxisValues[setting]), func(v string) bool { return v == visibilityBoth })
+		if !slices.Contains(values, value) || selector.axes[setting] != "" {
+			return campaignSelector{}, fmt.Errorf("the selector %q: %s takes one of %s, given once: %w", text, setting, strings.Join(values, ", "), errs.ErrValidation)
+		}
+
+		selector.axes[setting] = value
+	}
+
+	return selector, nil
+}
+
+// names reports whether the selector names the case line, its demo and its
+// event if given, or its scenario.
+func (selector campaignSelector) names(words []string) bool {
+	if words[0] == settingScenario {
+		return selector.event == "" && len(selector.axes) == 0 && len(words) > 1 && words[1] == selector.name
+	}
+
+	return len(words) >= 3 && words[1] == selector.name && (selector.event == "" || words[2] == selector.event)
+}
+
+// mismatch names the first axis value the case's run has other than the
+// selector's, as setting=value, or nothing when the run has them all, and
+// whether the case has it from the run, the caller's selector, rather than
+// from its own line, as a Forgejo line's builder.
+func (selector campaignSelector) mismatch(facts, run map[string]string) (string, bool) {
+	for _, setting := range slices.Sorted(maps.Keys(selector.axes)) {
+		if had := facts[setting]; !axisValueCovers(setting, had, selector.axes[setting]) {
+			return setting + "=" + had, had == run[setting]
+		}
+	}
+
+	return "", false
 }
 
 // caseConsumer opens a case line that runs a shipped demo through an event.

@@ -33,10 +33,10 @@ func TestReadMatrixEvidenceRefusesMalformedLines(t *testing.T) {
 }
 
 // The matrices are read from the tree, so the shipped tree decides them: the
-// Maven service is the one demo with a lifecycle on both forges, the Cargo
-// container has a GitLab line, the npm service is admitted on GitLab without
-// a line, a GitHub line is the fixture workflow a demo ships, and a refusal
-// carries the planner's or the admission's reason.
+// service demos have lifecycle lines on both lab forges, the npm service is
+// admitted on GitHub without a fixture for its development build, a GitHub
+// line is the fixture workflow a demo ships, and a refusal carries the
+// planner's or the admission's reason.
 func TestRenderTestingMatricesReadsTheShippedTree(t *testing.T) {
 	t.Parallel()
 
@@ -49,7 +49,7 @@ func TestRenderTestingMatricesReadsTheShippedTree(t *testing.T) {
 		"| hello-maven-service (java · artifact-first · one image) |",
 		"| hello-cargo-container (rust · container-first · one image) |",
 		"| hello-npm-service (node · artifact-first · one image) |",
-		"| admitted / admitted / admitted |",
+		"| 📝 lifecycle / 📝 lifecycle / admitted |",
 		"| hello-ios (xcode-ios · no container · no image) | ⬚ / ⬚ / 📝 |",
 		"- hello-monorepo, github: the demo has no root Containerfile",
 		"| hello-go-cli (go · no container · no image) |",
@@ -131,8 +131,100 @@ gitlab hello-maven release ✅ 2026-11-02
 func TestReadMatricesRefusesAnUnknownSubject(t *testing.T) {
 	t.Parallel()
 
-	data := matrices{demos: []matrixDemo{{name: "hello-maven"}}, evidence: matrixEvidence{"github/hello-mavn/release": {mark: "✅"}}}
+	data := matrices{demos: []matrixDemo{{name: "hello-maven"}}, evidence: matrixEvidence{"github/hello-mavn/release": {{mark: "✅"}}}}
 	if err := data.knownSubjects(); err == nil || !strings.Contains(err.Error(), "hello-mavn is no shipped demo") {
 		t.Fatalf("unknown subject: %v, want a refusal naming it", err)
+	}
+}
+
+// A mark qualified with its run's axis values shows on those values alone;
+// an unqualified mark leaves a run-selected axis at the line, since nothing
+// says which value proved it. A Forgejo line's builder is its own, and an
+// undeclared visibility covers both.
+func TestLaneValueCellShowsAMarkOnTheValuesItsRunHad(t *testing.T) {
+	t.Parallel()
+
+	lane := matrixLane{file: "lc-forgejo", provider: campaignForgejo, settings: map[string]string{}, consumers: map[string][][]string{
+		"qualified":   {strings.Fields("consumer qualified lifecycle CI_IMAGE_BUILDER=buildah"), strings.Fields("consumer qualified lifecycle CI_IMAGE_BUILDER=kaniko")},
+		"unqualified": {strings.Fields("consumer unqualified lifecycle")},
+	}}
+	evidence := matrixEvidence{
+		"forgejo/qualified/lifecycle":   {{mark: "✅", note: "root", axes: map[string]string{settingVisibility: visibilityPublic, settingImageBuilder: ImageBuilderBuildah}}},
+		"forgejo/unqualified/lifecycle": {{mark: "✅", note: "root", axes: map[string]string{}}},
+	}
+
+	for name, test := range map[string]struct {
+		demo, setting, value, want string
+	}{
+		"qualified, its builder":       {"qualified", settingImageBuilder, ImageBuilderBuildah, "✅ lc-forgejo (root)"},
+		"qualified, the other builder": {"qualified", settingImageBuilder, ImageBuilderKaniko, "📝 lc-forgejo"},
+		"qualified, its visibility":    {"qualified", settingVisibility, visibilityPublic, "✅ lc-forgejo (root)"},
+		"qualified, another":           {"qualified", settingVisibility, visibilityPrivate, "📝 lc-forgejo"},
+		"qualified, no admin value":    {"qualified", "admin-lint", "false", "📝 lc-forgejo"},
+		"unqualified, visibility":      {"unqualified", settingVisibility, visibilityPrivate, "📝 lc-forgejo"},
+		"unqualified, default builder": {"unqualified", settingImageBuilder, ImageBuilderBuildah, "📝 lc-forgejo"},
+		"unqualified, no kaniko line":  {"unqualified", settingImageBuilder, ImageBuilderKaniko, "⬚ no lane"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			data := matrices{demos: []matrixDemo{{name: test.demo, admission: map[string]error{}}}, lanes: []matrixLane{lane}, evidence: evidence}
+			if got := data.laneValueCell(campaignForgejo, test.setting, test.value); got != test.want {
+				t.Fatalf("cell %q, want %q", got, test.want)
+			}
+		})
+	}
+}
+
+// The axis words lead the note; a flow is marked once per set of them, and
+// a qualifier outside its values is refused.
+func TestReadMatrixEvidenceReadsAxisQualifiers(t *testing.T) {
+	t.Parallel()
+
+	path := writeFile(t, filepath.Join(t.TempDir(), "evidence.txt"), "forgejo d lifecycle ✅ visibility=public image-builder=kaniko root a\n"+
+		"forgejo d lifecycle ◐ visibility=public image-builder=buildah root b\n")
+
+	evidence, err := readMatrixEvidence(path)
+	if err != nil || len(evidence["forgejo/d/lifecycle"]) != 2 || evidence["forgejo/d/lifecycle"][0].note != "root a" ||
+		evidence["forgejo/d/lifecycle"][0].axes[settingImageBuilder] != ImageBuilderKaniko {
+		t.Fatalf("qualified marks %+v %v", evidence, err)
+	}
+
+	for _, body := range []string{"forgejo d lifecycle ✅ image-builder=docker\n", "forgejo d lifecycle ✅ visibility=public visibility=private\n",
+		"forgejo d lifecycle ✅ visibility=public\nforgejo d lifecycle ◐ visibility=public\n"} {
+		if _, err := readMatrixEvidence(writeFile(t, filepath.Join(t.TempDir(), "evidence.txt"), body)); err == nil {
+			t.Errorf("%q was read, want a refusal", body)
+		}
+	}
+}
+
+// A lifecycle run is seeded for the axis values its verdict header records,
+// so runs of two builders are two lines, each qualified as the overlay reads
+// it; an axis the header lacks is left out.
+func TestSeedTestingEvidenceQualifiesLifecycleRuns(t *testing.T) {
+	t.Parallel()
+
+	live := t.TempDir()
+	verdict := func(run, settings, extra string) {
+		writeFile(t, filepath.Join(live, run, "verdict.json"), `{"verdict":"passed","run":{"provider":"forgejo","started_at":"2026-11-08T10:00:00Z",`+
+			`"scenario":"^TestForgejoLayer_ConsumerLifecycle$","inputs":{"forge_ci_live_consumer":"/c/demos/hello-maven-service/consumer",`+
+			`"forge_ci_live_consumer_event":"lifecycle","forge_ci_live_consumer_settings":"`+settings+`"`+extra+`}}}`)
+	}
+	verdict("a", `CI_IMAGE_BUILDER=kaniko`, `,"forge_ci_live_consumer_visibility":"private","forge_ci_live_admin_lint":"false"`)
+	verdict("b", `CI_JOB_IMAGE=x`, ``)
+
+	seed, err := SeedTestingEvidence(live, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if want := `forgejo hello-maven-service lifecycle ✅ visibility=both image-builder=buildah 2026-11-08
+forgejo hello-maven-service lifecycle ✅ visibility=private image-builder=kaniko admin-lint=false 2026-11-08
+`; seed != want {
+		t.Fatalf("seed:\n%s\nwant:\n%s", seed, want)
+	}
+
+	if _, err := readMatrixEvidence(writeFile(t, filepath.Join(t.TempDir(), "evidence.txt"), seed)); err != nil {
+		t.Fatalf("the overlay does not read its own seed: %v", err)
 	}
 }

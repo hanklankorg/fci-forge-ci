@@ -381,3 +381,15 @@ func operatorCampaignRun(t *testing.T, provider string, environment map[string]s
 
 	return run
 }
+
+// A scenario selector names the scenario case by its test name alone.
+func TestPlanCampaignLane_SelectsAScenario(t *testing.T) {
+	t.Parallel()
+
+	dir, cases := newCampaign(t, "CAMPAIGN_COMMIT="+campaignHead+"\n", "scenario TestA\nscenario TestB\n")
+
+	plan, err := PlanCampaignLane(reporoot.Path(t), dir, "forgejo", cases, campaignHead, CampaignRun{Select: []string{"TestB"}})
+	if err != nil || len(plan.Cases) != 1 || !slices.Equal(plan.Cases[0].Args, []string{"test-live", "^TestB$"}) {
+		t.Fatalf("scenario selection: %+v %v, want test-live ^TestB$ alone", plan.Cases, err)
+	}
+}
