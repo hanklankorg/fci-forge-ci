@@ -1774,7 +1774,7 @@ or pass `platform checkout --object-format sha256` to avoid metadata discovery.
 just test-live-consumer gitlab /absolute/clean-consumer pull-request job-archive=/absolute/job-image.tar [lint-archive=/absolute/lint-image.tar]
 ```
 
-This command and its `release` event run both public and private
+This command and its `release` and `lifecycle` events run both public and private
 consumer cases by default. `FORGE_CI_LIVE_CONSUMER_VISIBILITY=public|private` narrows a
 development rerun; unset or `both` runs the pair. Each repository is created with
 the selected visibility, verified before
@@ -1849,6 +1849,14 @@ just test-live-consumer gitlab /absolute/clean-consumer release \
 just test-live-consumer gitlab /absolute/maven-consumer release \
   job-archive=/absolute/check-image.tar build-archive=/absolute/build-image.tar \
   signer-archive=/absolute/signer-image.tar version=0.2.0 version-bump=maven
+
+# Maven service demo: the lifecycle, merge request to merge to development
+# snapshot to release (TestGitLabLayer_ConsumerLifecycle; docs/live-campaigns.md,
+# Lifecycle). The build image is also the Java image the snapshot builds with.
+just test-live-consumer gitlab /absolute/hello-maven-service/consumer lifecycle \
+  job-archive=/absolute/java-image.tar build-archive=/absolute/java-image.tar \
+  signer-archive=/absolute/signer-image.tar lint-archive=/absolute/lint-java.tar \
+  version=0.2.0 version-bump=maven job-user=65532:65532
 ```
 
 The image archives are settings, as for `just demo gitlab`: `job-archive=`

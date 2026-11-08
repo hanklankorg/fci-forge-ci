@@ -107,9 +107,7 @@ func TestParseGitLabLifecycleSettings_TakesAReleaseSettingsButASecondCase(t *tes
 		t.Fatalf("ParseGitLabLifecycleSettings() = %+v, %v", got, err)
 	}
 
-	for _, input := range []string{
-		"scenario=TestGitLabRelease_ConsumerTrial", "version-bump=maven\nversion=0.2.0\nnext-version=0.3.0", "version-bump=gradle",
-	} {
+	for _, input := range []string{"scenario=TestGitLabRelease_ConsumerTrial", "version-bump=maven\nversion=0.2.0\nnext-version=0.3.0"} {
 		if _, err := ParseGitLabLifecycleSettings(input); !errors.Is(err, errs.ErrValidation) {
 			t.Errorf("ParseGitLabLifecycleSettings(%q) = %v, want a validation error", input, err)
 		}

@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/diggsweden/forge-ci/internal/domain/errs"
+	"github.com/diggsweden/forge-ci/internal/testutil/reporoot"
 )
 
 // lifecycleCampaignEnv is a campaign with the Java job image of a Forgejo
@@ -30,19 +31,41 @@ func newLifecycleCampaign(t *testing.T, cases string) (string, string) {
 	return dir, casesPath
 }
 
-func TestCampaignLifecycle_RunsTheMavenServiceDemoOnForgejo(t *testing.T) {
-	t.Parallel()
+// planCheckedInLifecycle plans the shipped cases file of a provider's
+// lifecycle, with the run its declared settings describe: a public, Buildah
+// run without admin enforcement.
+func planCheckedInLifecycle(t *testing.T, provider, casesFile string) (string, CampaignPlan) {
+	t.Helper()
 
-	dir, cases := newLifecycleCampaign(t, "consumer hello-maven-service lifecycle CI_JOB_IMAGE=@JOB_IMAGE_JAVA CI_IMAGE_BUILDER=buildah RELEASE_PLATFORMS=linux/amd64 version=0.2.0\n")
+	dir, cases := newLifecycleCampaign(t, string(reporoot.ReadFile(t, casesFile)))
 
-	plan, err := PlanCampaignLane(dir, campaignForgejo, cases, campaignHead, CampaignRun{})
+	run, err := CampaignRunSettings(provider, func(key string) string {
+		if key == consumerVisibilityEnv {
+			return "public"
+		}
+
+		return ""
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
 
+	plan, err := PlanCampaignLane(dir, provider, cases, campaignHead, run)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	return dir, plan
+}
+
+func TestCampaignLifecycle_RunsTheMavenServiceDemoOnForgejo(t *testing.T) {
+	t.Parallel()
+
+	dir, plan := planCheckedInLifecycle(t, campaignForgejo, "test/live/campaigns/lifecycle-forgejo.cases")
+
 	want := []string{
 		campaignConsumerRecipe, campaignForgejo, filepath.Join(dir, "demos/hello-maven-service"), TrialLifecycle,
-		"CI_JOB_IMAGE=" + snapshotJobImage, "CI_IMAGE_BUILDER=buildah", "RELEASE_PLATFORMS=linux/amd64", "version=0.2.0",
+		"CI_JOB_IMAGE=" + snapshotJobImage, "CI_IMAGE_BUILDER=buildah", "RELEASE_PLATFORMS=linux/amd64",
 	}
 	if len(plan.Cases) != 1 || !slices.Equal(plan.Cases[0].Args, want) {
 		t.Fatalf("lifecycle recipe %+v, want %v", plan.Cases, want)
@@ -54,13 +77,7 @@ func TestCampaignLifecycle_RunsTheMavenServiceDemoOnForgejo(t *testing.T) {
 func TestCampaignLifecycle_RunsTheMavenServiceDemoOnGitLab(t *testing.T) {
 	t.Parallel()
 
-	dir, cases := newLifecycleCampaign(t, "consumer hello-maven-service lifecycle job-archive=@FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_JAVA build-archive=@FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_JAVA "+
-		"signer-archive=@FORGE_CI_LIVE_SIGNER_IMAGE_ARCHIVE lint-archive=@LINT_IMAGE_ARCHIVE_JAVA version=0.2.0 version-bump=maven job-user=65532:65532\n")
-
-	plan, err := PlanCampaignLane(dir, campaignGitLab, cases, campaignHead, CampaignRun{})
-	if err != nil {
-		t.Fatal(err)
-	}
+	dir, plan := planCheckedInLifecycle(t, campaignGitLab, "test/live/campaigns/lifecycle-gitlab.cases")
 
 	want := []string{
 		campaignConsumerRecipe, campaignGitLab, filepath.Join(dir, "demos/hello-maven-service"), TrialLifecycle,

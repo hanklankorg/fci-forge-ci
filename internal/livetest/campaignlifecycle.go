@@ -27,7 +27,7 @@ func campaignSupportsLifecycle(provider, project string) bool {
 // ParseGitLabLifecycleSettings in the GitLab admission.
 func campaignAdmitLifecycle(provider, project string) error {
 	if !campaignSupportsLifecycle(provider, project) {
-		return fmt.Errorf("%s runs the %s demo only, whose service development is the lifecycle's development phase: %w", TrialLifecycle, campaignLifecycleDemo, errs.ErrValidation)
+		return fmt.Errorf("%s runs the %s demo only, whose development route is the lifecycle's development phase: %w", TrialLifecycle, campaignLifecycleDemo, errs.ErrValidation)
 	}
 
 	return nil

@@ -28,7 +28,9 @@ var gitLabMergePending = []string{"checking", "unchecked", "preparing", "ci_stil
 // mergeable first, which a project that requires a passing pipeline does only
 // once the head pipeline has passed, merges once, and reads the merged
 // request back. An uncertain outcome of the merge is never replayed; a
-// request whose status is a refusal is reported, not waited for.
+// request whose status is a refusal is reported, not waited for. It takes
+// the caller's client, the one the scenario reads the project with, so a
+// test can hand it a server of its own.
 func MergeGitLabMergeRequest(ctx context.Context, client *gitlabapi.Client, project string, iid int64, head string) (*gitlabapi.MergeRequest, error) {
 	if err := waitGitLabMergeable(ctx, client, project, iid, head); err != nil {
 		return nil, err
