@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -88,7 +89,9 @@ func TestServiceDevelopmentPreservesSource(t *testing.T) {
 					With    map[string]string `yaml:"with"`
 					Secrets map[string]string `yaml:"secrets"`
 					Steps   []struct {
-						Run string `yaml:"run"`
+						Name string            `yaml:"name"`
+						Env  map[string]string `yaml:"env"`
+						Run  string            `yaml:"run"`
 					} `yaml:"steps"`
 				} `yaml:"jobs"`
 			}
@@ -142,7 +145,18 @@ func TestServiceDevelopmentPreservesSource(t *testing.T) {
 			}
 
 			readiness := shellJobs.Jobs["readiness"].Steps
-			requireAuthenticatedReadinessPull(t, readiness[len(readiness)-1].Run)
+			stepNames := []string{}
+			stepEnv := map[string]map[string]string{}
+			stepRun := map[string]string{}
+
+			for _, step := range readiness {
+				if step.Name != "" {
+					stepNames = append(stepNames, step.Name)
+					stepEnv[step.Name], stepRun[step.Name] = step.Env, step.Run
+				}
+			}
+
+			requireReadinessIsolatesTheCredential(t, stepNames, stepEnv, stepRun)
 
 			decl, err := githubWorkflow(t.Context(), fixture, ServiceSnapshotDeclarationFile)
 			if err != nil {
@@ -190,18 +204,46 @@ func TestServiceDevelopmentPreservesSource(t *testing.T) {
 }
 
 // A private consumer's snapshot image need not be anonymously readable, so the
-// readiness job logs in to pull it, and the credential is gone before the
-// service under test starts.
-func requireAuthenticatedReadinessPull(t *testing.T, script string) {
+// readiness job pulls it with the development credential in a step of its own
+// that drops the job-local auth file; the operator's fixture and the service
+// under test run in later steps that hold no secret.
+func requireReadinessIsolatesTheCredential(t *testing.T, names []string, env map[string]map[string]string, run map[string]string) {
 	t.Helper()
 
-	login := strings.Index(script, `forge-ci container login --registry "${ref%@*}"`)
-	pull := strings.Index(script, `podman pull --authfile "$auth" "$ref"`)
-	drop := strings.LastIndex(script, `rm -f -- "$auth"`)
-	start := strings.Index(script, "podman run ")
+	const (
+		pullStep    = "Pull the immutable published digest"
+		fixtureStep = "Produce the nonsecret runtime fixture at the selected source"
+		startStep   = "Start the pulled digest and probe its readiness"
+	)
 
-	if login < 0 || pull < login || drop < pull || start < drop || !strings.Contains(script[login:pull], "unset REGISTRY_PASSWORD") {
-		t.Fatalf("readiness must pull with a job-local credential and drop it before the service starts:\n%s", script)
+	want := []string{"Prepare isolated runtime tools", pullStep, fixtureStep, startStep}
+	if !slices.Equal(names, want) {
+		t.Fatalf("readiness steps %q, want %q", names, want)
+	}
+
+	pull := run[pullStep]
+	login := strings.Index(pull, `forge-ci container login --registry "${ref%@*}"`)
+	pulled := strings.Index(pull, `podman pull --authfile "$auth" "$ref"`)
+	drop := strings.LastIndex(pull, `rm -f -- "$auth"`)
+
+	if login < 0 || pulled < login || drop < pulled || !strings.Contains(pull[login:pulled], "unset REGISTRY_PASSWORD") || strings.Contains(pull, "podman run ") {
+		t.Fatalf("the pull step must log in to a job-local auth file, pull, and drop it, starting nothing:\n%s", pull)
+	}
+
+	if env[pullStep]["REGISTRY_PASSWORD"] != "${{ secrets.DEVELOPMENT_REGISTRY_TOKEN }}" {
+		t.Fatal("the pull step must take the development credential")
+	}
+
+	for _, step := range []string{fixtureStep, startStep} {
+		for name, value := range env[step] {
+			if strings.Contains(value, "secrets.") {
+				t.Fatalf("%s holds the secret %s", step, name)
+			}
+		}
+	}
+
+	if !strings.Contains(run[fixtureStep], "bash .forge-ci/service-fixture.sh") || !strings.Contains(run[startStep], "podman run -d --pull=never ") {
+		t.Fatal("the fixture and the service start moved out of their steps")
 	}
 }
 

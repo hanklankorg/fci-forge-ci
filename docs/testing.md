@@ -1595,7 +1595,7 @@ proves that a deployed service works.
 
 ##### Java service development
 
-Setting `FORGE_CI_LIVE_MAVEN_APPLICATION_IMAGE` selects the service case of
+Setting `FORGE_CI_LIVE_SERVICE_JOB_IMAGE` selects the service case of
 `TestForgejoLayer_ConsumerDevelopment`: an unsigned snapshot trial of a
 declared service, public or private, on the existing private-index staging,
 scratch-resource cleanup and shared snapshot workflow, through the harness's
@@ -1609,7 +1609,7 @@ stable release or PR linting.
 | --- | --- |
 | `FORGE_CI_LIVE_CONSUMER` | Absolute path to a clean checkout at the desired source revision |
 | `FORGE_CI_LIVE_CONSUMER_VISIBILITY` | `public`, `private` or `both` (default) |
-| `FORGE_CI_LIVE_MAVEN_APPLICATION_IMAGE` | Trusted Maven/JDK **25** job image, full registry reference pinned with `@sha256:…` |
+| `FORGE_CI_LIVE_SERVICE_JOB_IMAGE` | Trusted toolchain job image of the declaration's producer family (a Maven/JDK **25** image for the Maven service), full registry reference pinned with `@sha256:…`; unused by a container-first service |
 | `FORGE_CI_LIVE_SERVICE_BRANCH` | Logical scratch source branch, e.g. `feature/service-trial`, different from `main` |
 | `FORGE_CI_LIVE_SERVICE_READINESS_URL` | Project-owned readiness endpoint, e.g. `http://127.0.0.1:8080/actuator/health/readiness` |
 | `FORGE_CI_LIVE_SERVICE_FIXTURE` | Optional absolute regular CI script path; never production credentials |

@@ -171,18 +171,18 @@ func TestCampaignLifecycle_RefusesWhatItCannotRun(t *testing.T) {
 	for name, test := range map[string]struct {
 		provider, line, want string
 	}{
-		"demo without a container":         {campaignForgejo, "consumer hello-go-cli lifecycle CI_JOB_IMAGE=" + snapshotJobImage, "no root Containerfile"},
-		"no job image":                     {campaignForgejo, "consumer hello-maven-service lifecycle RELEASE_PLATFORMS=linux/amd64", "CI_JOB_IMAGE=<digest reference>"},
-		"floating job image":               {campaignForgejo, "consumer hello-maven-service lifecycle CI_JOB_IMAGE=registry.invalid/java:latest", "CI_JOB_IMAGE=<digest reference>"},
-		"workflow":                         {campaignForgejo, "consumer hello-maven-service lifecycle CI_JOB_IMAGE=" + snapshotJobImage + " workflow=release.yml", "workflow="},
-		"interruption":                     {campaignForgejo, "consumer hello-maven-service lifecycle CI_JOB_IMAGE=" + snapshotJobImage + " interrupt-after=Build", "interrupt-after="},
-		"kaniko":                           {campaignForgejo, "consumer hello-maven-service lifecycle CI_JOB_IMAGE=" + snapshotJobImage + " CI_IMAGE_BUILDER=kaniko CI_IMAGE_BUILDER_JOB_IMAGE=" + snapshotJobImage, "Buildah for now"},
-		"gitlab demo without a container":  {campaignGitLab, "consumer hello-go-cli lifecycle" + gitlabArchives, "no root Containerfile"},
-		"gitlab demo without a release":    {campaignGitLab, "consumer hello-npm-service lifecycle job-archive=@FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_NODE build-archive=@FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_NODE signer-archive=@FORGE_CI_LIVE_SIGNER_IMAGE_ARCHIVE lint-archive=@LINT_IMAGE_ARCHIVE_JAVASCRIPT_TYPESCRIPT version-bump=npm", "no .gitlab/build-release.sh"},
-		"gitlab without the lint archive":  {campaignGitLab, "consumer hello-maven-service lifecycle job-archive=/a.tar build-archive=/b.tar signer-archive=/s.tar", "nanolinter flavor's archive"},
-		"gitlab without the signer":        {campaignGitLab, "consumer hello-maven-service lifecycle job-archive=/a.tar build-archive=/b.tar lint-archive=/l.tar", "signer-archive="},
-		"gitlab second case":               {campaignGitLab, "consumer hello-maven-service lifecycle" + gitlabArchives + " scenario=TestGitLabRelease_ConsumerTrial", "no scenario="},
-		"gitlab second release":            {campaignGitLab, "consumer hello-maven-service lifecycle" + gitlabArchives + " version=0.2.0 version-bump=maven next-version=0.3.0", "no scenario= or next-version="},
+		"demo without a container":        {campaignForgejo, "consumer hello-go-cli lifecycle CI_JOB_IMAGE=" + snapshotJobImage, "no root Containerfile"},
+		"no job image":                    {campaignForgejo, "consumer hello-maven-service lifecycle RELEASE_PLATFORMS=linux/amd64", "CI_JOB_IMAGE=<digest reference>"},
+		"floating job image":              {campaignForgejo, "consumer hello-maven-service lifecycle CI_JOB_IMAGE=registry.invalid/java:latest", "CI_JOB_IMAGE=<digest reference>"},
+		"workflow":                        {campaignForgejo, "consumer hello-maven-service lifecycle CI_JOB_IMAGE=" + snapshotJobImage + " workflow=release.yml", "workflow="},
+		"interruption":                    {campaignForgejo, "consumer hello-maven-service lifecycle CI_JOB_IMAGE=" + snapshotJobImage + " interrupt-after=Build", "interrupt-after="},
+		"kaniko":                          {campaignForgejo, "consumer hello-maven-service lifecycle CI_JOB_IMAGE=" + snapshotJobImage + " CI_IMAGE_BUILDER=kaniko CI_IMAGE_BUILDER_JOB_IMAGE=" + snapshotJobImage, "Buildah for now"},
+		"gitlab demo without a container": {campaignGitLab, "consumer hello-go-cli lifecycle" + gitlabArchives, "no root Containerfile"},
+		"gitlab demo without a release":   {campaignGitLab, "consumer hello-npm-service lifecycle job-archive=@FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_NODE build-archive=@FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_NODE signer-archive=@FORGE_CI_LIVE_SIGNER_IMAGE_ARCHIVE lint-archive=@LINT_IMAGE_ARCHIVE_JAVASCRIPT_TYPESCRIPT version-bump=npm", "no .gitlab/build-release.sh"},
+		"gitlab without the lint archive": {campaignGitLab, "consumer hello-maven-service lifecycle job-archive=/a.tar build-archive=/b.tar signer-archive=/s.tar", "nanolinter flavor's archive"},
+		"gitlab without the signer":       {campaignGitLab, "consumer hello-maven-service lifecycle job-archive=/a.tar build-archive=/b.tar lint-archive=/l.tar", "signer-archive="},
+		"gitlab second case":              {campaignGitLab, "consumer hello-maven-service lifecycle" + gitlabArchives + " scenario=TestGitLabRelease_ConsumerTrial", "no scenario="},
+		"gitlab second release":           {campaignGitLab, "consumer hello-maven-service lifecycle" + gitlabArchives + " version=0.2.0 version-bump=maven next-version=0.3.0", "no scenario= or next-version="},
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()

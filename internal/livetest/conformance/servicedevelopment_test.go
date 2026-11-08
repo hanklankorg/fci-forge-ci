@@ -70,7 +70,7 @@ func runForgejoServiceCase(t *testing.T, root string, private bool) {
 	}
 
 	config := livetest.ServiceDevelopmentConfig{
-		RecipeDirectory: root, Declaration: declaration, JobImage: os.Getenv("FORGE_CI_LIVE_MAVEN_APPLICATION_IMAGE"),
+		RecipeDirectory: root, Declaration: declaration, JobImage: os.Getenv("FORGE_CI_LIVE_SERVICE_JOB_IMAGE"),
 		Branch: os.Getenv("FORGE_CI_LIVE_SERVICE_BRANCH"), ReadinessURL: os.Getenv("FORGE_CI_LIVE_SERVICE_READINESS_URL"),
 		Fixture: os.Getenv("FORGE_CI_LIVE_SERVICE_FIXTURE"),
 	}

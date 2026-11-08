@@ -261,7 +261,7 @@ func TestCampaignPublishedSnapshotRecipeOverridesTrialSelectors(t *testing.T) {
 	command.Env = append(os.Environ(),
 		"FORGE_CI_LIVE_CONSUMER=/stale", "FORGE_CI_LIVE_CONSUMER_EVENT=release",
 		"FORGE_CI_LIVE_CONSUMER_SETTINGS=workflow=release.yml\nCI_IMAGE_BUILDER=kaniko",
-		"FORGE_CI_LIVE_MAVEN_APPLICATION_IMAGE=stale", "FORGE_CI_LIVE_SERVICE_BRANCH=main",
+		"FORGE_CI_LIVE_SERVICE_JOB_IMAGE=stale", "FORGE_CI_LIVE_SERVICE_BRANCH=main",
 		"FORGE_CI_LIVE_SERVICE_READINESS_URL=http://outside.invalid/", "FORGE_CI_LIVE_SERVICE_FIXTURE=/stale",
 		"FORGE_CI_LIVE_DEMO=keep-me", "FORGE_CI_LIVE_SIGNING_KEY_DIR=/stale",
 		"FORGE_CI_LIVE_SNAPSHOT_JOB_IMAGE=stale", "FORGE_CI_LIVE_SNAPSHOT_DEPENDENCY_TOKEN_FILE=/stale",
@@ -283,7 +283,7 @@ func TestCampaignPublishedSnapshotRecipeOverridesTrialSelectors(t *testing.T) {
 
 const snapshotRecipeCapture = `#!/usr/bin/env bash
 set -euo pipefail
-printf '%s\n' "$@" "$FORGE_CI_LIVE_CONSUMER" "$FORGE_CI_LIVE_MAVEN_APPLICATION_IMAGE" \
+printf '%s\n' "$@" "$FORGE_CI_LIVE_CONSUMER" "$FORGE_CI_LIVE_SERVICE_JOB_IMAGE" \
   "$FORGE_CI_LIVE_PROVIDER" "$FORGE_CI_LIVE_CONSUMER_EVENT" "$FORGE_CI_LIVE_CONSUMER_SETTINGS" \
   "$FORGE_CI_LIVE_SERVICE_BRANCH" "$FORGE_CI_LIVE_SERVICE_READINESS_URL" \
   "$FORGE_CI_LIVE_SERVICE_FIXTURE" "$FORGE_CI_LIVE_DEMO" "$FORGE_CI_LIVE_SIGNING_KEY_DIR" \
