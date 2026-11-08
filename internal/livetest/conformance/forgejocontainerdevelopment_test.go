@@ -142,12 +142,8 @@ func TestForgejoLayer_ContainerDevelopment(t *testing.T) {
 			scenario := layerScenario{target: target, repo: repo, layer: layer, label: label}
 			scenario.logJobs(t, jobs)
 
-			if run.Status != jobSuccess || run.Event != "push" || run.TriggerEvent != "push" || run.WorkflowID != workflow {
-				t.Fatalf("want successful native development push, got %+v", run)
-			}
-
-			if runs := livetest.WorkflowRuns(t, target, repo); len(runs) != 1 || runs[0].ID != run.ID {
-				t.Fatalf("want only the development run, got %+v", runs)
+			if err := livetest.ValidateDevelopmentPush(run, livetest.WorkflowRuns(t, target, repo), workflow); err != nil {
+				t.Fatal(err)
 			}
 
 			// The one job builds the image, so it runs on the container runner.
@@ -168,11 +164,13 @@ func TestForgejoLayer_ContainerDevelopment(t *testing.T) {
 			}
 
 			artifacts := livetest.RunArtifacts(t, target, repo, run.ID)
-			if len(artifacts) != 1 || artifacts[0].Name != "fc-cargo-dev-"+head || artifacts[0].Expired || artifacts[0].SizeInBytes <= 0 || artifacts[0].SizeInBytes > 32<<10 {
-				t.Fatalf("want one bounded exact-source development artifact, got %+v", artifacts)
+
+			artifact, err := livetest.SelectDevelopmentArtifact(artifacts, "fc-cargo-dev-"+head, 32<<10)
+			if err != nil {
+				t.Fatal(err)
 			}
 
-			tree, err := livetest.ZIPTree(livetest.ArtifactZIP(t, target, repo, artifacts[0].ID), 4096)
+			tree, err := livetest.ZIPTree(livetest.ArtifactZIP(t, target, repo, artifact.ID), 4096)
 			if err != nil {
 				t.Fatal(err)
 			}
