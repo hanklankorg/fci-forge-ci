@@ -1,3 +1,5 @@
+#!/usr/bin/env just --justfile
+
 # SPDX-FileCopyrightText: 2026 Digg - Agency for Digital Government
 #
 # SPDX-License-Identifier: CC0-1.0
@@ -17,6 +19,7 @@
 # Builds/tests write caches and may fetch modules; integration may run containers
 # and download images. For inspection only, use just --show RECIPE.
 
+# Run every recipe line under bash with pipefail; just's default `sh -cu` has none.
 set shell := ["bash", "-euo", "pipefail", "-c"]
 set positional-arguments
 set lazy
@@ -41,10 +44,8 @@ commit := `git rev-parse HEAD 2>/dev/null || echo none`
 build_date := `date -u +'%Y-%m-%dT%H:%M:%SZ'`
 
 # Color codes used by default, _require-tool and clean-build messages.
-CYAN_BOLD := "\\033[1;36m"
-GREEN := "\\033[1;32m"
-BLUE := "\\033[1;34m"
-MAGENTA := "\\033[1;35m"
+CYAN := "\\033[1;36m"
+GREEN := "\\033[0;32m"
 RED := "\\033[1;31m"
 NC := "\\033[0m"
 
@@ -54,8 +55,19 @@ NC := "\\033[0m"
 
 [private]
 default:
-    @printf '{{ CYAN_BOLD }} Forge CI recipes{{ NC }}\n\n Quick start: {{ GREEN }}mise trust{{ NC }} · {{ MAGENTA }}just install-dev-tools{{ NC }} · {{ BLUE }}just verify-fix{{ NC }}\n ▪ main job of its group\n\n'
+    @printf ' {{ CYAN }}Forge CI recipes{{ NC }}\n\n Quick start: {{ GREEN }}mise trust · just install-dev-tools · just verify{{ NC }}\n Apply fixes: just verify-fix\n Argument help: just --usage <recipe>\n ▪ main job of its group\n\n'
     @"{{ just_executable() }}" --justfile "{{ justfile() }}" --list --unsorted --list-heading ''
+
+[arg('recipe', help='Recipe name; omit to list recipes. Prints help without running the selected job.')]
+[doc('Show recipe argument help')]
+[group('help')]
+help recipe="":
+    #!/usr/bin/env bash
+    if [[ -n "$1" ]]; then
+        {{ quote(just_executable()) }} --justfile {{ quote(justfile()) }} --usage="$1"
+    else
+        {{ quote(just_executable()) }} --justfile {{ quote(justfile()) }} --list --unsorted
+    fi
 
 # ==================================================================================== #
 # SETUP - Toolchain
@@ -73,28 +85,6 @@ install-dev-tools: (_job "install-dev-tools" "tools=.mise.toml; scope=user insta
 [group('setup')]
 doctor: (_require-tool "nanolinter" nanolinter_hint)
     @nanolinter doctor
-
-# ==================================================================================== #
-# GIT HOOK - Local pre-commit gating
-# ==================================================================================== #
-
-# The hook runs `nanolinter verify --staged-with-stash`.
-[doc('▪ Install the nanolinter pre-commit hook')]
-[group('hook')]
-hook-install: (_require-tool "nanolinter" nanolinter_hint)
-    @nanolinter hook install
-
-# Covers both the local and the global hook.
-[doc('Show whether the pre-commit hook is installed')]
-[group('hook')]
-hook-status: (_require-tool "nanolinter" nanolinter_hint)
-    @nanolinter hook status
-
-# Refuses when the installed hook is not nanolinter's.
-[doc('Remove the nanolinter pre-commit hook')]
-[group('hook')]
-hook-uninstall: (_require-tool "nanolinter" nanolinter_hint)
-    @nanolinter hook remove
 
 # ==================================================================================== #
 # DEVELOPMENT - Composite gates
@@ -505,13 +495,6 @@ lint-fix *args: (_require-tool "nanolinter" nanolinter_hint)
     @"{{ just_executable() }}" --justfile "{{ justfile() }}" --fmt
     @nanolinter fix "$@"
 
-# Use before commits when the diff is noisy from edits across many files.
-[doc('Format Go and tidy go.mod')]
-[group('lint-fix')]
-tidy:
-    @go fmt ./...
-    @go mod tidy
-
 # ==================================================================================== #
 # SECURITY - Scans
 # ==================================================================================== #
@@ -701,6 +684,11 @@ release-snapshot: (_job "release-snapshot" "steps=validate + unsigned GoReleaser
 #
 # Use `upgrade-list` first to see what's available before bumping anything.
 
+# Run go mod tidy
+[group('dependencies')]
+tidy:
+    @go mod tidy
+
 # Go dependencies plus mise tool pins.
 [confirm("Upgrade Go dependencies and mise tool pins?")]
 [doc('▪ Upgrade dependencies and tools; network')]
@@ -782,6 +770,28 @@ clean-build:
 clean-caches:
     @go clean -cache -modcache -testcache -fuzzcache
     @command -v golangci-lint >/dev/null 2>&1 && golangci-lint cache clean || true
+
+# ==================================================================================== #
+# GIT HOOK - Local pre-commit gating
+# ==================================================================================== #
+
+# The hook runs `nanolinter verify --staged-with-stash`.
+[doc('▪ Install the nanolinter pre-commit hook')]
+[group('hook')]
+hook-install: (_require-tool "nanolinter" nanolinter_hint)
+    @nanolinter hook install
+
+# Covers both the local and the global hook.
+[doc('Show whether the pre-commit hook is installed')]
+[group('hook')]
+hook-status: (_require-tool "nanolinter" nanolinter_hint)
+    @nanolinter hook status
+
+# Refuses when the installed hook is not nanolinter's.
+[doc('Remove the nanolinter pre-commit hook')]
+[group('hook')]
+hook-uninstall: (_require-tool "nanolinter" nanolinter_hint)
+    @nanolinter hook remove
 
 # ==================================================================================== #
 # LIVE - Live-forge conformance tier
@@ -1340,19 +1350,6 @@ _job name details:
     #!/usr/bin/env bash
     printf '== Job: %s | host=%s/%s\n   %s\n' "$1" "$(uname -s)" "$(uname -m)" "$2" >&2
 
-[arg('recipe', help='Recipe name; omit to list recipes. Prints help without running the selected job.')]
-[doc('Show recipe argument help')]
-[group('help')]
-help recipe="":
-    #!/usr/bin/env bash
-    if [[ -n "$1" ]]; then
-        {{ quote(just_executable()) }} --justfile {{ quote(justfile()) }} --usage="$1"
-    else
-        {{ quote(just_executable()) }} --justfile {{ quote(justfile()) }} --list --unsorted
-    fi
-
-# Fail fast with an actionable hint when a required external tool is missing.
-# Use as a recipe prerequisite: `release-snapshot: (_require-tool "goreleaser" "Install: …")`.
 # Runs `go test ARGS`, then lists the tests that reported missing evidence
 # ("not proven"), followed by HINT when it is not empty. Keeps go test's status.
 [private]
@@ -1372,6 +1369,8 @@ _go-test-not-proven hint *args:
     fi
     exit "$status"
 
+# Fail fast with an actionable hint when a required external tool is missing.
+# Use as a recipe prerequisite: `release-snapshot: (_require-tool "goreleaser" "Install: …")`.
 _require-tool tool hint="":
     #!/usr/bin/env bash
     if command -v "$1" >/dev/null 2>&1; then
