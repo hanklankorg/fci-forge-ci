@@ -42,7 +42,8 @@ complete executable-config denylist. Unrelated worktree changes are not inspecte
 ## Integration dependency (not provided here)
 
 Before calling this helper, the protected graph must provide the canonical
-linux/amd64 delivery binary of the approved engine checkout. Existing
+Linux delivery binary of the approved engine checkout for the host's
+architecture (amd64 or arm64; the helper refuses any other). Existing
 `build-cli.yml` produces `engine-cli/forge-ci-linux-amd64` using
 `scripts/ci/engine-binary.sh build` and `verify`. Alternatively a separate
 key-free job can run those same commands with the approved, pinned Go toolchain
@@ -74,7 +75,7 @@ Required leaf order (caller-owned orchestration, deliberately not added here):
    checkout. Set its executable mode using trusted runner tools.
 3. Invoke `/bin/bash /ADMIN_PINNED_COPY/scripts/ci/trusted-bootstrap.sh
    /ABSOLUTE_ENGINE_CHECKOUT https://APPROVED_HOST/OWNER/ENGINE FULL_COMMIT
-   /ABSOLUTE_DELIVERY/forge-ci-linux-amd64 -- --version` as separate shell argv.
+   /ABSOLUTE_DELIVERY/forge-ci-linux-<arch> -- --version` as separate shell argv.
    These are placeholders, not published production coordinates.
 4. Only after success may later stages checkout consumer data or enter private
    environments. Use the same helper for later CLI invocations with explicit

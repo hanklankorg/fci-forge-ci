@@ -26,7 +26,10 @@ done
 : "${ARTIFACT_METADATA:=$RUNNER_TEMP/forge-ci-canonical-metadata.json}"
 [[ "${ENGINE_CHECKOUT:-}" == /* && -d "$ENGINE_CHECKOUT" && "$(realpath -e -- "$ENGINE_CHECKOUT")" == "$ENGINE_CHECKOUT" ]] || fail 'canonical engine checkout path required'
 [[ "${DELIVERY_DIRECTORY:-}" == /* && "${RUNNER_TEMP:-}" == /* && "$DELIVERY_DIRECTORY" == "$RUNNER_TEMP/forge-ci-canonical-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" ]] || fail 'unexpected delivery directory'
-artifact_name=forge-ci-canonical-linux-amd64-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-$ENGINE_COMMIT
+artifact_name=forge-ci-canonical-linux-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-$ENGINE_COMMIT
+# One delivery carries the engine's two recorded Linux builds; a receiver
+# runs the file of its own architecture and admits every delivered byte.
+architectures=(amd64 arm64)
 
 # Fresh authenticated checkout/local object storage and protected no-writer
 # runner are prerequisites, not facts authenticated by these local assertions.
@@ -37,7 +40,7 @@ engine_git() {
 [[ "$(engine_git rev-parse --show-toplevel)" == "$ENGINE_CHECKOUT" && "$(engine_git rev-parse --verify HEAD)" == "$ENGINE_COMMIT" ]] || fail 'wrong engine checkout'
 origin=$(engine_git config --local --no-includes --get remote.origin.url) || fail 'missing engine origin'
 [[ "${origin%.git}" == "$ENGINE_ORIGIN" ]] || fail 'wrong engine origin'
-files=(scripts/ci/engine-binary.sh .engine/bin/forge-ci-linux-amd64.sha256 scripts/ci/trusted-runtime-tools.sh)
+files=(scripts/ci/engine-binary.sh .engine/bin/forge-ci-linux-amd64.sha256 .engine/bin/forge-ci-linux-arm64.sha256 scripts/ci/trusted-runtime-tools.sh)
 if [[ "$mode" == build ]]; then
   files+=(go.mod go.sum)
 else
@@ -67,7 +70,7 @@ if [[ "$mode" == build ]]; then
     GOENV=off GOWORK=off GOTOOLCHAIN=local GOFLAGS= CGO_ENABLED=0
     GOPROXY=https://proxy.golang.org GOSUMDB=sum.golang.org
     "GOMODCACHE=$GOMODCACHE" "GOCACHE=$GOCACHE" "TMPDIR=$module_work/tmp"
-    GOMAXPROCS=2 GOOS=linux GOARCH=amd64)
+    GOMAXPROCS=2 GOOS=linux)
   pinned=go$(sed -n 's/^go \([0-9][0-9.]*\)$/\1/p' "$ENGINE_CHECKOUT/go.mod")
   [[ "$("${module_env[@]}" "$GO" env GOVERSION)" == "$pinned" ]] || fail 'wrong preparation toolchain'
   # With Go >=1.17, the no-argument command selects the main module's
@@ -80,8 +83,10 @@ if [[ "$mode" == build ]]; then
     [[ "$(engine_git hash-object --no-filters -- "$ENGINE_CHECKOUT/$relative")" == "$(engine_git rev-parse "$ENGINE_COMMIT:$relative")" ]] || fail "module preparation changed $relative"
   done
   mkdir -m0700 -- "$DELIVERY_DIRECTORY"
-  /bin/bash "$ENGINE_CHECKOUT/scripts/ci/engine-binary.sh" build amd64 "$DELIVERY_DIRECTORY/forge-ci-linux-amd64"
-  /bin/bash "$ENGINE_CHECKOUT/scripts/ci/engine-binary.sh" verify amd64 "$DELIVERY_DIRECTORY/forge-ci-linux-amd64"
+  for arch in "${architectures[@]}"; do
+    /bin/bash "$ENGINE_CHECKOUT/scripts/ci/engine-binary.sh" build "$arch" "$DELIVERY_DIRECTORY/forge-ci-linux-$arch"
+    /bin/bash "$ENGINE_CHECKOUT/scripts/ci/engine-binary.sh" verify "$arch" "$DELIVERY_DIRECTORY/forge-ci-linux-$arch"
+  done
   # Capture ORIGINAL producer identity here, never in a later wrapper job.
   {
     printf 'artifact-name=%s\nrun-id=%s\nrun-attempt=%s\n' "$artifact_name" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT"
@@ -118,12 +123,22 @@ if [[ "$mode" == admit ]]; then
   exit 0
 fi
 [[ "${TOOL_PROFILE:-}" =~ ^[a-z][a-z-]*$ ]] || fail 'tool profile literal required for the verified probe'
-binary=$DELIVERY_DIRECTORY/forge-ci-linux-amd64
-[[ ${#entries[@]} == 1 && "${entries[0]}" == "$binary" && -f "$binary" && ! -L "$binary" ]] || fail 'delivery requires exactly one canonical regular amd64 file, no sidecars'
-[[ "$(stat -c %s -- "$binary")" -gt 0 && "$(stat -c %s -- "$binary")" -le 134217728 ]] || fail 'delivery exceeds canonical binary bounds'
-# No helper/CLI process before canonical hash admission. Native Actions may
-# restore mode 0644; set executable only after this first byte verification.
-/bin/bash "$ENGINE_CHECKOUT/scripts/ci/engine-binary.sh" verify amd64 "$binary"
+case "$(uname -s)/$(uname -m)" in
+Linux/x86_64) host_arch=amd64 ;;
+Linux/aarch64) host_arch=arm64 ;;
+*) fail 'the canonical CLI runs natively on linux/amd64 or linux/arm64 only' ;;
+esac
+[[ ${#entries[@]} -eq ${#architectures[@]} ]] || fail 'delivery requires exactly one canonical regular file per Linux architecture, no sidecars'
+for arch in "${architectures[@]}"; do
+  binary=$DELIVERY_DIRECTORY/forge-ci-linux-$arch
+  [[ -f "$binary" && ! -L "$binary" ]] || fail "delivery is missing the regular linux/$arch file"
+  [[ "$(stat -c %s -- "$binary")" -gt 0 && "$(stat -c %s -- "$binary")" -le 134217728 ]] || fail 'delivery exceeds canonical binary bounds'
+  # No helper/CLI process before canonical hash admission of every file.
+  /bin/bash "$ENGINE_CHECKOUT/scripts/ci/engine-binary.sh" verify "$arch" "$binary"
+done
+binary=$DELIVERY_DIRECTORY/forge-ci-linux-$host_arch
+# Native Actions may restore mode 0644; set executable only after the byte
+# verification above, and only on the file this host runs.
 chmod 0755 -- "$binary"
 exec /bin/bash "$ENGINE_CHECKOUT/scripts/ci/trusted-bootstrap.sh" \
   "$ENGINE_CHECKOUT" "$ENGINE_ORIGIN" "$ENGINE_COMMIT" "$binary" "$TOOL_PROFILE" -- --version

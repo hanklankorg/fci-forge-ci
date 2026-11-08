@@ -140,13 +140,15 @@ func TestCanonicalVerifiedArtifactFailureOutputs(t *testing.T) {
 					record += record
 				}
 
-				canonicalWrite(t, filepath.Join(fixture.engine, ".engine/bin/forge-ci-linux-amd64.sha256"), record, 0o600)
+				for _, arch := range []string{"amd64", "arm64"} {
+					canonicalWrite(t, filepath.Join(fixture.engine, ".engine/bin/forge-ci-linux-"+arch+".sha256"), record, 0o600)
+				}
 				// Fixture-only reapproval, never a production/owner commit.
-				canonicalGit(t, fixture.engine, "-c", "core.fsmonitor=false", "-c", "filter.marker.clean=/bin/cat", "add", ".engine/bin/forge-ci-linux-amd64.sha256")
+				canonicalGit(t, fixture.engine, "-c", "core.fsmonitor=false", "-c", "filter.marker.clean=/bin/cat", "add", ".engine/bin")
 				canonicalGit(t, fixture.engine, "-c", "core.fsmonitor=false", "-c", "filter.marker.clean=/bin/cat", "-c", "user.name=Offline", "-c", "user.email=offline@example.invalid", "-c", "commit.gpgsign=false", "commit", "-qm", "inert failure fixture")
 				commit := canonicalGit(t, fixture.engine, "rev-parse", "HEAD")
 				fixture.env["ENGINE_COMMIT"], fixture.env["PRODUCER_ENGINE_COMMIT"] = commit, commit
-				fixture.env["PRODUCER_ARTIFACT_NAME"] = "forge-ci-canonical-linux-amd64-100-2-" + commit
+				fixture.env["PRODUCER_ARTIFACT_NAME"] = "forge-ci-canonical-linux-100-2-" + commit
 				fixture.writeMetadata(t, nil)
 			}
 
@@ -165,7 +167,7 @@ func TestCanonicalVerifiedArtifactFailureOutputs(t *testing.T) {
 			archivePayload := filepath.Join(fixture.root, "inert-download-payload")
 			canonicalWrite(t, archivePayload, payload, 0o600)
 
-			download := `cp "$INERT_DOWNLOAD_PAYLOAD" "$DELIVERY_DIRECTORY/forge-ci-linux-amd64"`
+			download := `cp "$INERT_DOWNLOAD_PAYLOAD" "$DELIVERY_DIRECTORY/forge-ci-linux-amd64" && cp "$INERT_DOWNLOAD_PAYLOAD" "$DELIVERY_DIRECTORY/forge-ci-linux-arm64"`
 			if scenario == "download-failure" {
 				download = "false"
 			}

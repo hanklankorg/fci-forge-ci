@@ -24,13 +24,19 @@ fi
 # The original binary has passed metadata, inventory, raw hash and bootstrap.
 # Each subsequent invocation repeats the existing strict absolute-file verifier.
 # Keep the engine/launcher outside consumer checkout, which may replace workspace.
+# Delivery admitted the file of this host's architecture; the launcher names it.
+case "$(uname -m)" in
+x86_64) arch=amd64 ;;
+aarch64) arch=arm64 ;;
+*) exit 69 ;;
+esac
 directory=$RUNNER_TEMP/forge-ci-canonical-bin
 [[ ! -e "$directory" && ! -L "$directory" ]]
 mkdir -m0700 -- "$directory"
 printf '#!/bin/bash -p\nexec /bin/bash -p %q %q %q %q %q %q -- "$@"\n' \
   "$ENGINE_CHECKOUT/scripts/ci/trusted-bootstrap.sh" "$ENGINE_CHECKOUT" \
   "${ENGINE_ORIGIN:?}" "${ENGINE_COMMIT:?}" \
-  "$RUNNER_TEMP/forge-ci-canonical-${GITHUB_RUN_ID:?}-${GITHUB_RUN_ATTEMPT:?}/forge-ci-linux-amd64" \
+  "$RUNNER_TEMP/forge-ci-canonical-${GITHUB_RUN_ID:?}-${GITHUB_RUN_ATTEMPT:?}/forge-ci-linux-$arch" \
   "$TOOL_PROFILE" >"$directory/forge-ci"
 chmod 0700 -- "$directory/forge-ci"
 printf '%s\n' "$directory" >>"${GITHUB_PATH:?}"

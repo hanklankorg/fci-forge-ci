@@ -33,7 +33,7 @@ func TestTrustedRuntimeToolOwners(t *testing.T) {
 	bootstrap := string(reporoot.ReadFile(t, "scripts/ci/trusted-bootstrap.sh"))
 	require.Less(t, strings.Index(bootstrap, "verify_forge_ci || exit $?"), strings.Index(bootstrap, "exec /bin/bash -p"))
 	require.Contains(t, bootstrap, `"$checkout/scripts/ci/trusted-runtime-tools.sh" "$profile" "$HELPERS_ENGINE_VERIFIED" "$@"`)
-	require.Contains(t, bootstrap, ".engine/bin/forge-ci-linux-amd64.sha256 scripts/ci/trusted-runtime-tools.sh; do")
+	require.Contains(t, bootstrap, ".engine/bin/forge-ci-linux-amd64.sha256 .engine/bin/forge-ci-linux-arm64.sha256 scripts/ci/trusted-runtime-tools.sh; do")
 
 	consumer := string(reporoot.ReadFile(t, "scripts/ci/canonical-consumer.sh"))
 	require.Contains(t, consumer, `[[ "${TOOL_PROFILE:-}" =~ ^[a-z][a-z-]*$ ]]`)

@@ -1,7 +1,7 @@
 <!-- SPDX-FileCopyrightText: 2026 Digg - Agency for Digital Government -->
 <!-- SPDX-License-Identifier: CC0-1.0 -->
 
-# Protected canonical CLI delivery (initial linux/amd64 unit)
+# Protected canonical CLI delivery (Linux amd64 and arm64)
 
 `canonical-cli-bootstrap.yml` is a reusable key-free producer/receiver unit,
 not a public release route or integration with the HOLD workflow. It reuses
@@ -86,14 +86,16 @@ The native artifact service uses its own job-scoped authenticated transport.
    main module's explicit requirements, including indirect package providers.
    It does not broaden selection to unrelated graph modules with `download all`
    or repair the selected locks. The post-download immutability gate is unchanged.
-   The existing `engine-binary.sh build amd64` recipe uses that prepared cache
-   for the
-   pinned-toolchain/offline-module build, then its existing `verify` checks the
-   result against **that checkout's** `.engine/bin` record. No CLI runs yet.
+   The existing `engine-binary.sh build <arch>` recipe uses that prepared cache
+   for the pinned-toolchain/offline-module build of each recorded Linux
+   architecture (amd64 natively, arm64 cross-compiled on the same builder),
+   then its existing `verify` checks each result against **that checkout's**
+   `.engine/bin` record. No CLI runs yet.
 3. The original build step records native `github.run_id`/`run_attempt` and
    actual locally checked approved engine identity. Its artifact name is
-   `forge-ci-canonical-linux-amd64-RUN-ATTEMPT-FULL_ENGINE_COMMIT`. The fixed
-   upload step uploads exactly one canonical file with overwrite disabled.
+   `forge-ci-canonical-linux-RUN-ATTEMPT-FULL_ENGINE_COMMIT`. The fixed upload
+   step uploads the delivery directory, exactly the two canonical files, with
+   overwrite disabled.
    Its original artifact ID is forwarded directly through the job output.
 4. `canonical-receive`, a separate job with `needs: canonical-build`, checks out
    the approved engine again. It compares ORIGINAL producer run/attempt and
@@ -110,11 +112,14 @@ The native artifact service uses its own job-scoped authenticated transport.
    `merge-multiple: true` gives the single ID's content directly in the fresh
    directory; it does not authorize multiple IDs (admission requires one integer).
 7. After native extraction, metadata/context are checked again, the inventory
-   must be exactly `forge-ci-linux-amd64`, a non-symlink regular file, and the
-   extracted file must be nonempty and at most 128 MiB. No sidecars, nested
-   payloads or wildcard executables are accepted. The original engine hash
-   verifier checks bytes BEFORE calling the bootstrap helper. Only then is
-   executable mode restored (native artifacts do not preserve it).
+   must be exactly `forge-ci-linux-amd64` and `forge-ci-linux-arm64`, both
+   non-symlink regular files, each nonempty and at most 128 MiB. No sidecars,
+   nested payloads or wildcard executables are accepted. The original engine
+   hash verifier checks the bytes of BOTH files BEFORE calling the bootstrap
+   helper; the receiver then selects the file of its own `uname -m` (x86_64
+   or aarch64, refusing anything else) and restores executable mode on that
+   file only (native artifacts do not preserve it). The arm64 path is the same
+   code with the other record; it has no live run on an arm64 runner yet.
 8. The queued helper repeats origin/full-commit/committed-verifier/checksum
    checks and strict binary verification, then executes that absolute file
    with the fixed inert `--version` command. No hostile SDK/PATH probe occurs.

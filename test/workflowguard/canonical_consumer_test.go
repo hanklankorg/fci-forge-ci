@@ -300,7 +300,7 @@ func canonicalConsumerContextEnv(dir string) map[string]string {
 		"GITHUB_RUN_ID": "123", "GITHUB_RUN_ATTEMPT": "2", "GITHUB_SERVER_URL": "https://approved.invalid",
 		"ENGINE_ORIGIN": "https://approved.invalid/approved/engine", "GITHUB_ENV": filepath.Join(dir, "environment"),
 		"CANONICAL_PRODUCER_RESULT": "success", "PRODUCER_RUN_ID": "123", "PRODUCER_RUN_ATTEMPT": "2",
-		"PRODUCER_ARTIFACT_ID": "456", "PRODUCER_ARTIFACT_NAME": "forge-ci-canonical-linux-amd64-123-2-" + commit,
+		"PRODUCER_ARTIFACT_ID": "456", "PRODUCER_ARTIFACT_NAME": "forge-ci-canonical-linux-123-2-" + commit,
 		"ENGINE_REPOSITORY": "approved/engine", "PRODUCER_ENGINE_REPOSITORY": "approved/engine",
 		"ENGINE_COMMIT": commit, "PRODUCER_ENGINE_COMMIT": commit,
 		"RUNTIME_IMAGE": "registry.invalid/tools@sha256:" + strings.Repeat("c", 64),

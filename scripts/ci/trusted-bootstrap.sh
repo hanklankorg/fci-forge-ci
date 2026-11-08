@@ -20,7 +20,10 @@ shift 6
 [[ "$commit" =~ ^([0-9a-f]{40}|[0-9a-f]{64})$ ]] || fail 'engine commit must be full and lowercase'
 [[ "$origin" =~ ^https://[^/?#@[:space:]]+/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] || fail 'engine origin must be an explicit HTTPS repository URL'
 [[ "$checkout" == /* && "$binary" == /* ]] || fail 'checkout and binary paths must be absolute'
-[[ "$(uname -s)" == Linux && "$(uname -m)" == x86_64 ]] || fail 'only native linux/amd64 is supported'
+case "$(uname -s)/$(uname -m)" in
+Linux/x86_64 | Linux/aarch64) ;;
+*) fail 'only native linux/amd64 and linux/arm64 are supported' ;;
+esac
 [[ -d "$checkout" && ! -L "$checkout" && "$(realpath -e -- "$checkout")" == "$checkout" ]] || fail 'engine checkout must be a canonical non-symlink directory'
 [[ -f "$binary" && ! -L "$binary" && -x "$binary" && "$(realpath -e -- "$binary")" == "$binary" ]] || fail 'delivery binary must be an available executable regular non-symlink file'
 
@@ -41,7 +44,7 @@ actual_origin=$(engine_git config --local --no-includes --get remote.origin.url)
 # Whole-checkout cleanliness is the fresh trusted checkout caller's obligation;
 # do not use status/diff here (fsmonitor, filters and submodules can run code).
 # No selected-checkout shell is sourced until identity AND contents pass.
-for relative in .engine/bin/lib-forge-ci.sh .engine/bin/forge-ci-linux-amd64.sha256 scripts/ci/trusted-runtime-tools.sh; do
+for relative in .engine/bin/lib-forge-ci.sh .engine/bin/forge-ci-linux-amd64.sha256 .engine/bin/forge-ci-linux-arm64.sha256 scripts/ci/trusted-runtime-tools.sh; do
   file=$checkout/$relative
   [[ -f "$file" && ! -L "$file" && "$(realpath -e -- "$file")" == "$file" ]] || fail "unsafe engine file: $relative"
   mode=$(engine_git ls-tree "$commit" -- "$relative")

@@ -23,7 +23,7 @@ func TestTrustedBootstrap(t *testing.T) {
 		t.Skip("trusted leaf bootstrap intentionally requires native linux/amd64")
 	}
 
-	for _, scenario := range []string{"verified-new-file", "wrong-origin", "wrong-commit", "short-commit", "wrong-hash", "missing", "symlink", "symlink-parent", "nonexec", "directory", "dirty-helper", "hidden-helper-edit", "hidden-record-edit", "missing-record", "fsmonitor-verified", "fsmonitor-wrong-hash", "clean-filter-helper", "clean-filter-record", "unrelated-dirty", "dirty-tools", "hidden-tools", "missing-tools", "linked-tools"} {
+	for _, scenario := range []string{"verified-new-file", "wrong-origin", "wrong-commit", "short-commit", "wrong-hash", "missing", "symlink", "symlink-parent", "nonexec", "directory", "dirty-helper", "hidden-helper-edit", "hidden-record-edit", "missing-record", "fsmonitor-verified", "fsmonitor-wrong-hash", "clean-filter-helper", "clean-filter-record", "unrelated-dirty", "dirty-tools", "hidden-tools", "missing-tools", "linked-tools", "missing-other-record"} {
 		t.Run(scenario, func(t *testing.T) {
 			root := t.TempDir()
 			engine := filepath.Join(root, "engine")
@@ -80,6 +80,10 @@ func TestTrustedBootstrap(t *testing.T) {
 
 			record := filepath.Join(engine, ".engine", "bin", "forge-ci-linux-amd64.sha256")
 			write(record, fmt.Sprintf("%x  bin/forge-ci\n", sha256.Sum256([]byte(body))), 0o600)
+			// The other architecture's record is consumed by the loop too: a
+			// checkout missing it is not the approved engine.
+			otherRecord := filepath.Join(engine, ".engine", "bin", "forge-ci-linux-arm64.sha256")
+			write(otherRecord, fmt.Sprintf("%x  bin/forge-ci\n", sha256.Sum256([]byte(body))), 0o600)
 
 			git := func(args ...string) string {
 				t.Helper()
@@ -179,6 +183,10 @@ func TestTrustedBootstrap(t *testing.T) {
 				write(record, strings.Repeat("0", 64)+"  bin/forge-ci\n", 0o600)
 			case "missing-record":
 				if err := os.Remove(record); err != nil {
+					t.Fatal(err)
+				}
+			case "missing-other-record":
+				if err := os.Remove(otherRecord); err != nil {
 					t.Fatal(err)
 				}
 			case "clean-filter-helper", "clean-filter-record":
