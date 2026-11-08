@@ -18,8 +18,8 @@ import (
 )
 
 type canonicalFixture struct {
-	env                                                                  map[string]string
-	root, engine, binary, metadata, marker, helperMarker, gitMarker, cli string
+	env                                                                         map[string]string
+	root, engine, binary, other, metadata, marker, helperMarker, gitMarker, cli string
 }
 
 func canonicalWrite(t *testing.T, path, body string, mode os.FileMode) {
@@ -90,7 +90,11 @@ func newCanonicalFixture(t *testing.T) *canonicalFixture {
 		canonicalWrite(t, filepath.Join(fixture.engine, relative), string(body), 0o600)
 	}
 
-	canonicalWrite(t, filepath.Join(fixture.engine, ".engine/bin/forge-ci-linux-amd64.sha256"), fmt.Sprintf("%x  bin/forge-ci\n", sha256.Sum256([]byte(fixture.cli))), 0o600)
+	// The fixture records the same inert payload for both architectures; the
+	// production tree records two builds. The inventory rule is the same.
+	for _, arch := range []string{"amd64", "arm64"} {
+		canonicalWrite(t, filepath.Join(fixture.engine, ".engine/bin/forge-ci-linux-"+arch+".sha256"), fmt.Sprintf("%x  bin/forge-ci\n", sha256.Sum256([]byte(fixture.cli))), 0o600)
+	}
 	canonicalWrite(t, filepath.Join(fixture.engine, "go.mod"), "module example.invalid/inert\n\ngo 1.26.4\n", 0o600)
 	canonicalWrite(t, filepath.Join(fixture.engine, "go.sum"), "", 0o600)
 	canonicalGit(t, fixture.engine, "init", "-q")
@@ -107,6 +111,7 @@ func newCanonicalFixture(t *testing.T) *canonicalFixture {
 	canonicalWrite(t, filepath.Join(fixture.engine, ".gitattributes"), ".engine/bin/* filter=marker\nscripts/ci/* filter=marker\n", 0o600)
 	delivery := filepath.Join(fixture.root, "forge-ci-canonical-100-2")
 	fixture.binary = filepath.Join(delivery, "forge-ci-linux-amd64")
+	fixture.other = filepath.Join(delivery, "forge-ci-linux-arm64")
 	fixture.metadata = filepath.Join(fixture.root, "forge-ci-canonical-metadata.json")
 
 	hostile := filepath.Join(fixture.root, "hostile")
@@ -123,11 +128,11 @@ func newCanonicalFixture(t *testing.T) *canonicalFixture {
 		"ENGINE_ORIGIN": "https://github.invalid/admin/engine", "GITHUB_SERVER_URL": "https://github.invalid",
 		"RUNTIME_IMAGE": "registry.invalid/approved@sha256:" + strings.Repeat("a", 64), "GITHUB_RUN_ID": "100", "GITHUB_RUN_ATTEMPT": "2",
 		"GITHUB_REPOSITORY_ID": "200", "GITHUB_SHA": strings.Repeat("b", 40), "RUNNER_TEMP": fixture.root, "DELIVERY_DIRECTORY": delivery,
-		"PRODUCER_ARTIFACT_ID": "300", "PRODUCER_ARTIFACT_NAME": "forge-ci-canonical-linux-amd64-100-2-" + commit,
+		"PRODUCER_ARTIFACT_ID": "300", "PRODUCER_ARTIFACT_NAME": "forge-ci-canonical-linux-100-2-" + commit,
 		"PRODUCER_RUN_ID": "100", "PRODUCER_RUN_ATTEMPT": "2", "PRODUCER_ENGINE_REPOSITORY": "admin/engine", "PRODUCER_ENGINE_COMMIT": commit,
 		"ARTIFACT_METADATA": fixture.metadata, "PROCESS_MARKER": fixture.marker, "HELPER_MARKER": fixture.helperMarker, "FORGE_CI_BIN": filepath.Join(hostile, "forge-ci"),
 		"FORGE_CI_PLAN": "/consumer/plan", "FORGE_CI_PATH": hostile, "FORGE_CI_BINARY_REF": "older-sdk", "SIGNER_STRICT": "0",
-		"GITHUB_OUTPUT": filepath.Join(fixture.root, "outputs"),
+		"GITHUB_OUTPUT": filepath.Join(fixture.root, "outputs"), "TOOL_PROFILE": "runtime",
 	}
 	fixture.writeMetadata(t, nil)
 
@@ -173,7 +178,7 @@ func (fixture *canonicalFixture) run(t *testing.T, mode string) ([]byte, error) 
 }
 
 func TestCanonicalDeliveryReceiver(t *testing.T) {
-	for _, scenario := range []string{"verified", "foreign-id", "foreign-run", "foreign-repository", "foreign-source", "stale-attempt", "wrong-producer-ref", "wrong-checkout", "wrong-origin", "wrong-hash", "missing", "symlink", "sidecar", "nested", "oversized-zip", "oversized-file", "modified-helper", "existing-destination"} {
+	for _, scenario := range []string{"verified", "foreign-id", "foreign-run", "foreign-repository", "foreign-source", "stale-attempt", "wrong-producer-ref", "wrong-checkout", "wrong-origin", "wrong-hash", "missing", "symlink", "sidecar", "nested", "missing-other-arch", "wrong-other-hash", "oversized-zip", "oversized-file", "modified-helper", "existing-destination"} {
 		t.Run(scenario, func(t *testing.T) {
 			fixture := newCanonicalFixture(t)
 			if out, err := fixture.run(t, "prepare"); err != nil {
@@ -185,6 +190,7 @@ func TestCanonicalDeliveryReceiver(t *testing.T) {
 			}
 
 			canonicalWrite(t, fixture.binary, fixture.cli, 0o600) // native action restores mode 0644/0600
+			canonicalWrite(t, fixture.other, fixture.cli, 0o600)
 
 			mode := "receive"
 
@@ -219,6 +225,13 @@ func TestCanonicalDeliveryReceiver(t *testing.T) {
 				if err := os.Symlink("/bin/false", fixture.binary); err != nil {
 					t.Fatal(err)
 				}
+			case "missing-other-arch":
+				if err := os.Remove(fixture.other); err != nil {
+					t.Fatal(err)
+				}
+			case "wrong-other-hash":
+				// The file this host never runs is still admitted byte for byte.
+				canonicalWrite(t, fixture.other, "#!/bin/bash\nprintf bad >>\"$PROCESS_MARKER\"\n", 0o600)
 			case "sidecar":
 				canonicalWrite(t, filepath.Join(filepath.Dir(fixture.binary), "sidecar"), "extra", 0o600)
 			case "nested":

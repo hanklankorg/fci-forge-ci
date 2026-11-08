@@ -43,3 +43,4 @@ jobs:
       # The trial names a mirror of the Rust flavour here.
       nanolinter-image: codefloe.com/itiquette/nanolinter:rust@sha256:0000000000000000000000000000000000000000000000000000000000000000
       runtime-image: ghcr.io/diggsweden/forge-ci-runtime-base:v0.90.0
+      canonical-builder-image: ghcr.io/diggsweden/forge-ci-runtime-go-1.27:v0.90.0

@@ -18,6 +18,8 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/diggsweden/forge-ci/internal/adapters/kaniko"
+	appcontainer "github.com/diggsweden/forge-ci/internal/app/container"
 	"github.com/diggsweden/forge-ci/internal/domain/errs"
 	"github.com/diggsweden/forge-ci/internal/domain/imageledger"
 	"github.com/diggsweden/forge-ci/internal/domain/pipeline"
@@ -64,8 +66,8 @@ func TestResolvedImagePlanBuildJobNames(t *testing.T) {
 // cannot distinguish reuse from a reproducible Kaniko build.
 func imagePlanCacheEvidence(log, ref string, hit bool) (string, error) {
 	const (
-		reuse   = "Architecture cache reused by digest: "
-		execute = "kaniko replaces this container's root filesystem with the image's; the layout, the context and /kaniko are kept."
+		reuse   = appcontainer.CacheReusePrefix
+		execute = kaniko.ExecutionNotice
 	)
 
 	reused := strings.Count(log, reuse)
@@ -75,7 +77,7 @@ func imagePlanCacheEvidence(log, ref string, hit bool) (string, error) {
 		return reuse + ref, nil
 	}
 
-	if !hit && reused == 0 && built == 1 && strings.Contains(log, " builds when its layout is exported\n") {
+	if !hit && reused == 0 && built == 1 && strings.Contains(log, kaniko.LayoutBuildNoticeSuffix+"\n") {
 		return execute, nil
 	}
 
@@ -138,8 +140,8 @@ func imagePlanReview(tree map[string][]byte, repository string) (map[string]imag
 
 func TestResolvedImagePlanCacheEvidence(t *testing.T) {
 	ref := "registry.example/base@sha256:" + strings.Repeat("a", 64)
-	hit := "Architecture cache reused by digest: " + ref + "\n"
-	build := "kaniko: local builds when its layout is exported\nkaniko replaces this container's root filesystem with the image's; the layout, the context and /kaniko are kept.\n"
+	hit := appcontainer.CacheReusePrefix + ref + "\n"
+	build := "kaniko: local" + kaniko.LayoutBuildNoticeSuffix + "\n" + kaniko.ExecutionNotice + "\n"
 
 	for _, tc := range []struct {
 		name, log  string

@@ -84,10 +84,16 @@ See [Workflow Guide](workflows.md) for orchestrator documentation and [Artifacts
 **A) Use the orchestrator as-is:**
 
 ```yaml
-uses: diggsweden/forge-ci/.github/workflows/release-orchestrator.yml@v0.90.0
+uses: diggsweden/forge-ci/.github/workflows/release-orchestrator.yml@84180b5ac07af63d33917bec306e7f838aa8e366 # v0.90.0
 with:
   branch: main
-  forge-ci-binary-ref: v0.90.0
+  # The full commit the workflow ref above names; every plain-runner job
+  # runs the CLI built in this run from exactly this commit.
+  forge-ci-binary-ref: 84180b5ac07af63d33917bec306e7f838aa8e366 # v0.90.0
+  # Pinned by digest and admitted before any job runs; replace FIXME with
+  # the digests of the release you call (runtime-images.md).
+  runtime-image: ghcr.io/diggsweden/forge-ci-runtime-base@sha256:0000000000000000000000000000000000000000000000000000000000000000 # FIXME v0.90.0 digest
+  canonical-builder-image: ghcr.io/diggsweden/forge-ci-runtime-go-1.27@sha256:0000000000000000000000000000000000000000000000000000000000000000 # FIXME v0.90.0 digest
   artifacts-config: .forge-ci/artifacts.yml
   release-publisher: github-cli
 ```
@@ -97,26 +103,30 @@ with:
 ```yaml
 jobs:
   build-npm:
-    uses: diggsweden/forge-ci/.github/workflows/build-npm.yml@v0.90.0
+    uses: diggsweden/forge-ci/.github/workflows/build-npm.yml@84180b5ac07af63d33917bec306e7f838aa8e366 # v0.90.0
     with:
+      forge-ci-binary-ref: 84180b5ac07af63d33917bec306e7f838aa8e366 # v0.90.0
+      runtime-image: ghcr.io/diggsweden/forge-ci-runtime-node-24@sha256:0000000000000000000000000000000000000000000000000000000000000000 # FIXME v0.90.0 digest
       working-directory: .
 
   publish-github:
     needs: build-npm
-    uses: diggsweden/forge-ci/.github/workflows/publish-maven-github.yml@v0.90.0
+    uses: diggsweden/forge-ci/.github/workflows/publish-maven-github.yml@84180b5ac07af63d33917bec306e7f838aa8e366 # v0.90.0
     permissions:
       actions: read
       contents: read
       packages: write
     with:
+      forge-ci-binary-ref: 84180b5ac07af63d33917bec306e7f838aa8e366 # v0.90.0
       branch: main
       package-type: npm
       npm-tag: release-{version}
       artifact-source: npm-build-artifacts
+      runtime-image: ghcr.io/diggsweden/forge-ci-runtime-node-24@sha256:<digest>
 
   build-container:
     needs: build-npm
-    uses: diggsweden/forge-ci/.github/workflows/publish-container.yml@v0.90.0
+    uses: diggsweden/forge-ci/.github/workflows/publish-container.yml@84180b5ac07af63d33917bec306e7f838aa8e366 # v0.90.0
     permissions:
       contents: read
       packages: write
@@ -128,7 +138,12 @@ jobs:
       CODE_SCANNING_TOKEN: ${{ secrets.CODE_SCANNING_TOKEN }}
     with:
       branch: main
-      forge-ci-binary-ref: v0.90.0
+      # The canonical CLI of this run: a full engine commit, the admitted
+      # image digests and the canonical-* outputs of a canonical-cli-bootstrap.yml
+      # job in the same run (see publish-container.yml below).
+      forge-ci-binary-ref: <full-engine-commit>
+      runtime-image: ghcr.io/diggsweden/forge-ci-runtime-base@sha256:<digest>
+      runtime-image-full: ghcr.io/diggsweden/forge-ci-runtime@sha256:<digest>
       container-file: Containerfile
       artifact-types: npm
 ```
@@ -178,8 +193,10 @@ consumer's own workflow.
 #### `build-maven.yml`
 Builds Maven projects (apps or libraries).
 ```yaml
-uses: diggsweden/forge-ci/.github/workflows/build-maven.yml@v0.90.0
+uses: diggsweden/forge-ci/.github/workflows/build-maven.yml@84180b5ac07af63d33917bec306e7f838aa8e366 # v0.90.0
 with:
+  forge-ci-binary-ref: 84180b5ac07af63d33917bec306e7f838aa8e366 # v0.90.0
+  runtime-image: ghcr.io/diggsweden/forge-ci-runtime-java-25@sha256:0000000000000000000000000000000000000000000000000000000000000000 # FIXME v0.90.0 digest
   build-type: app           # "app" or "lib"
   working-directory: "."    # Path to pom.xml
 ```
@@ -192,8 +209,10 @@ project POM/profile owns attached source and Javadoc artifacts.
 #### `build-npm.yml`
 Builds NPM projects.
 ```yaml
-uses: diggsweden/forge-ci/.github/workflows/build-npm.yml@v0.90.0
+uses: diggsweden/forge-ci/.github/workflows/build-npm.yml@84180b5ac07af63d33917bec306e7f838aa8e366 # v0.90.0
 with:
+  forge-ci-binary-ref: 84180b5ac07af63d33917bec306e7f838aa8e366 # v0.90.0
+  runtime-image: ghcr.io/diggsweden/forge-ci-runtime-node-24@sha256:0000000000000000000000000000000000000000000000000000000000000000 # FIXME v0.90.0 digest
   working-directory: "."    # Path to package.json
 ```
 
@@ -201,8 +220,10 @@ with:
 Builds artifact-first Go binaries, generates a native CycloneDX Build SBOM with
 `cyclonedx-gomod`, and uploads `dist/<goos>-<goarch>/<binary>-<goos>-<goarch>`.
 ```yaml
-uses: diggsweden/forge-ci/.github/workflows/build-go.yml@v0.90.0
+uses: diggsweden/forge-ci/.github/workflows/build-go.yml@84180b5ac07af63d33917bec306e7f838aa8e366 # v0.90.0
 with:
+  forge-ci-binary-ref: 84180b5ac07af63d33917bec306e7f838aa8e366 # v0.90.0
+  runtime-image: ghcr.io/diggsweden/forge-ci-runtime-go-1.27@sha256:0000000000000000000000000000000000000000000000000000000000000000 # FIXME v0.90.0 digest
   working-directory: "."
   main-package: ./cmd/my-cli
   binary-name: my-cli
@@ -214,8 +235,10 @@ Generates the native CycloneDX Build SBOM for container-first Go projects with
 `cyclonedx-gomod`. It does not compile; the project's Containerfile owns
 `go build`.
 ```yaml
-uses: diggsweden/forge-ci/.github/workflows/sbom-go.yml@v0.90.0
+uses: diggsweden/forge-ci/.github/workflows/sbom-go.yml@84180b5ac07af63d33917bec306e7f838aa8e366 # v0.90.0
 with:
+  forge-ci-binary-ref: 84180b5ac07af63d33917bec306e7f838aa8e366 # v0.90.0
+  runtime-image: ghcr.io/diggsweden/forge-ci-runtime-go-1.27@sha256:0000000000000000000000000000000000000000000000000000000000000000 # FIXME v0.90.0 digest
   working-directory: "."
 ```
 
@@ -226,8 +249,10 @@ cross-compiles per platform into `dist/<goos>-<goarch>/<binary>-<goos>-<goarch>`
 `cargo-cyclonedx`. Used for Cargo artifacts with `config.build-mode:
 artifact-first`. Container-first cargo continues to use `sbom-cargo.yml`.
 ```yaml
-uses: diggsweden/forge-ci/.github/workflows/build-cargo.yml@v0.90.0
+uses: diggsweden/forge-ci/.github/workflows/build-cargo.yml@84180b5ac07af63d33917bec306e7f838aa8e366 # v0.90.0
 with:
+  forge-ci-binary-ref: 84180b5ac07af63d33917bec306e7f838aa8e366 # v0.90.0
+  runtime-image: ghcr.io/diggsweden/forge-ci-runtime-rust-stable@sha256:0000000000000000000000000000000000000000000000000000000000000000 # FIXME v0.90.0 digest
   working-directory: "."
   binary-name: my-cli
   platforms: linux/amd64,linux/arm64
@@ -238,16 +263,20 @@ Generates the lockfile-derived CycloneDX Build SBOM for container-first Rust
 projects with `cargo-cyclonedx`. It does not compile; the project's
 Containerfile owns `cargo build`.
 ```yaml
-uses: diggsweden/forge-ci/.github/workflows/sbom-cargo.yml@v0.90.0
+uses: diggsweden/forge-ci/.github/workflows/sbom-cargo.yml@84180b5ac07af63d33917bec306e7f838aa8e366 # v0.90.0
 with:
+  forge-ci-binary-ref: 84180b5ac07af63d33917bec306e7f838aa8e366 # v0.90.0
+  runtime-image: ghcr.io/diggsweden/forge-ci-runtime-rust-stable@sha256:0000000000000000000000000000000000000000000000000000000000000000 # FIXME v0.90.0 digest
   working-directory: "."
 ```
 
 #### `build-gradle-app.yml`
 Builds Gradle JVM projects (libraries, applications, plugins) and uploads their JARs. Android is out of scope; use `build-gradle-android.yml` for APKs/AABs with flavors and Google Play publishing.
 ```yaml
-uses: diggsweden/forge-ci/.github/workflows/build-gradle-app.yml@v0.90.0
+uses: diggsweden/forge-ci/.github/workflows/build-gradle-app.yml@84180b5ac07af63d33917bec306e7f838aa8e366 # v0.90.0
 with:
+  forge-ci-binary-ref: 84180b5ac07af63d33917bec306e7f838aa8e366 # v0.90.0
+  runtime-image: ghcr.io/diggsweden/forge-ci-runtime-java-25@sha256:0000000000000000000000000000000000000000000000000000000000000000 # FIXME v0.90.0 digest
   working-directory: "."       # Path to build.gradle
   gradle-tasks: "build"        # Gradle tasks to run
   skip-tests: false            # Legacy input; true is refused
@@ -257,8 +286,10 @@ with:
 #### `build-gradle-android.yml`
 Builds Android applications with multiple product flavors and build types. Sole Android path: sets up the Android SDK, handles keystore decoding for signing, and produces split APK/AAB artifacts with Google Play-friendly naming.
 ```yaml
-uses: diggsweden/forge-ci/.github/workflows/build-gradle-android.yml@v0.90.0
+uses: diggsweden/forge-ci/.github/workflows/build-gradle-android.yml@84180b5ac07af63d33917bec306e7f838aa8e366 # v0.90.0
 with:
+  forge-ci-binary-ref: 84180b5ac07af63d33917bec306e7f838aa8e366 # v0.90.0
+  runtime-image: ghcr.io/diggsweden/forge-ci-runtime-android-35@sha256:0000000000000000000000000000000000000000000000000000000000000000 # FIXME v0.90.0 digest
   build-module: "app"             # Gradle module
   product-flavor: "demo"          # Product flavor (demo, prod, etc.)
   build-types: "debug,release"    # Build types to create
@@ -288,8 +319,8 @@ Direct-call input defaults are maintained here rather than in each example:
 | `skip-tests` | No | `false` | Legacy compatibility input; `true` is refused. Tests run under administrator-owned enforcement; inspect native reports for actual execution. |
 | `enforce-application-tests` | No | `false` | Administrator setting; see [check enforcement](admin-policy.md) |
 | `enable-build-sbom` | No | `true` | Run Build SBOM generation |
-| `runtime-image` | No | `""` | Empty selects the Android runtime image of the resolved forge-ci version |
-| `forge-ci-binary-ref` | No | `""` | forge-ci revision whose runtime image is selected; empty resolves the current stable release |
+| `runtime-image` | Yes | | The Android runtime image, by digest (`image@sha256:<64 hex>`) |
+| `forge-ci-binary-ref` | Yes | | The full engine commit (40 hex) the workflow ref names |
 
 APK outputs are found under `app/build/outputs/apk/**/debug/*.apk` and
 `app/build/outputs/apk/**/release/*.apk`; AABs are under
@@ -312,12 +343,15 @@ Publishes Maven libraries, npm packages, and exported Gradle JVM/Android publica
 to GitHub Packages. npm requires an explicit `npm-tag`; Gradle requires
 `version` and its separate publication artifact. See [Gradle publishing](gradle-publishing.md).
 ```yaml
-uses: diggsweden/forge-ci/.github/workflows/publish-maven-github.yml@v0.90.0
+uses: diggsweden/forge-ci/.github/workflows/publish-maven-github.yml@84180b5ac07af63d33917bec306e7f838aa8e366 # v0.90.0
 with:
+  forge-ci-binary-ref: 84180b5ac07af63d33917bec306e7f838aa8e366 # v0.90.0
   branch: main
   package-type: maven          # maven, npm, or gradle
   artifact-source: maven-build-artifacts  # Name of workflow artifact
   working-directory: "."
+  # The job container: the Java image for maven/gradle, the Node image for npm.
+  runtime-image: ghcr.io/diggsweden/forge-ci-runtime-java-25@sha256:<digest>
 ```
 
 #### `publish-maven-central.yml`
@@ -332,6 +366,8 @@ jobs do not import release signing keys or require signed release-request tags.
 ```yaml
 uses: diggsweden/forge-ci/.github/workflows/publish-maven-central.yml@<reviewed-ref>
 with:
+  forge-ci-binary-ref: <reviewed-ref>
+  runtime-image: ghcr.io/diggsweden/forge-ci-runtime-java-25@sha256:0000000000000000000000000000000000000000000000000000000000000000 # FIXME v0.90.0 digest
   branch: <full-prepared-release-sha>
   artifact-source: maven-build-artifacts  # Name of workflow artifact
   working-directory: "."
@@ -342,11 +378,28 @@ with:
 
 #### `publish-container.yml`
 Production container builds with full security features. Supports multiple registries.
+The key-holding jobs (early key check, layout publication, manifest signing and
+attestation) run in `runtime-image`, the per-platform SBOM evidence in
+`runtime-image-full`; the Buildah build legs are host jobs that receive the
+canonical CLI of the run. A direct caller therefore runs
+`canonical-cli-bootstrap.yml` first and forwards its outputs as the
+`canonical-*` inputs, with `forge-ci-binary-ref` as the full engine commit and
+`runtime-image` as the admitted base image digest, exactly as
+`release-publish-stage.yml` does.
 ```yaml
-uses: diggsweden/forge-ci/.github/workflows/publish-container.yml@v0.90.0
+uses: diggsweden/forge-ci/.github/workflows/publish-container.yml@84180b5ac07af63d33917bec306e7f838aa8e366 # v0.90.0
 with:
   branch: main
-  forge-ci-binary-ref: v0.90.0
+  forge-ci-binary-ref: <full-engine-commit>
+  runtime-image: ghcr.io/diggsweden/forge-ci-runtime-base@sha256:<digest>
+  runtime-image-full: ghcr.io/diggsweden/forge-ci-runtime@sha256:<digest>
+  canonical-artifact-id: ${{ needs.canonical-cli.outputs.artifact-id }}
+  canonical-artifact-name: ${{ needs.canonical-cli.outputs.artifact-name }}
+  canonical-producer-run-id: ${{ needs.canonical-cli.outputs.producer-run-id }}
+  canonical-producer-run-attempt: ${{ needs.canonical-cli.outputs.producer-run-attempt }}
+  canonical-producer-engine-repository: ${{ needs.canonical-cli.outputs.engine-repository }}
+  canonical-producer-engine-commit: ${{ needs.canonical-cli.outputs.engine-commit }}
+  canonical-producer-result: ${{ needs.canonical-cli.result }}
   container-file: "Containerfile"
   context: "."
   artifact-types: maven
@@ -361,8 +414,10 @@ with:
 #### `version-bump.yml`
 Handles version bumping and updates version files.
 ```yaml
-uses: diggsweden/forge-ci/.github/workflows/version-bump.yml@v0.90.0
+uses: diggsweden/forge-ci/.github/workflows/version-bump.yml@84180b5ac07af63d33917bec306e7f838aa8e366 # v0.90.0
 with:
+  forge-ci-binary-ref: 84180b5ac07af63d33917bec306e7f838aa8e366 # v0.90.0
+  runtime-image: ghcr.io/diggsweden/forge-ci-runtime-base@sha256:0000000000000000000000000000000000000000000000000000000000000000 # FIXME v0.90.0 digest
   project-type: maven      # Determines version file (pom.xml vs package.json)
   branch: main             # Base branch for comparison
   working-directory: "."   # Path to project root
@@ -371,8 +426,10 @@ with:
 #### `generate-changelog.yml`
 Generates changelog from git commits.
 ```yaml
-uses: diggsweden/forge-ci/.github/workflows/generate-changelog.yml@v0.90.0
+uses: diggsweden/forge-ci/.github/workflows/generate-changelog.yml@84180b5ac07af63d33917bec306e7f838aa8e366 # v0.90.0
 with:
+  forge-ci-binary-ref: 84180b5ac07af63d33917bec306e7f838aa8e366 # v0.90.0
+  runtime-image: ghcr.io/diggsweden/forge-ci-runtime-base@sha256:0000000000000000000000000000000000000000000000000000000000000000 # FIXME v0.90.0 digest
   branch: main             # Base branch for changelog comparison
   changelog-config: ""     # Optional: custom git-cliff config
 ```
@@ -382,6 +439,12 @@ Creates GitHub releases with assets.
 
 Usually called by `release-orchestrator.yml`, but can also be used directly by advanced consumers that want lower-level release composition.
 
+Direct callers must supply the canonical delivery context of the same run
+(`canonical-*` inputs from a `canonical-cli-bootstrap.yml` call, with
+`forge-ci-binary-ref` as the full engine commit and `runtime-image` as the
+admitted base image digest): the GPG signer and the publisher run on plain
+runners with that CLI, while `sigstore`/`kms` signing runs in the
+`runtime-image` container and SBOM assembly in `runtime-image-full`.
 Direct callers must supply `authorized-source-sha` from the original trusted
 request event (Q), independently of the immutable prepared `checkout-ref` (P).
 Set `request-is-release: true` only for an explicitly planned no-bump release
@@ -413,8 +476,11 @@ Usually called by `release-orchestrator.yml`, but can also be used directly by a
 Orchestrates all quality checks for pull requests. Composes a control-plane interface, delegates to the quality stage, and produces a top-level summary.
 
 ```yaml
-uses: diggsweden/forge-ci/.github/workflows/pullrequest-orchestrator.yml@v0.90.0
+uses: diggsweden/forge-ci/.github/workflows/pullrequest-orchestrator.yml@84180b5ac07af63d33917bec306e7f838aa8e366 # v0.90.0
 with:
+  forge-ci-binary-ref: 84180b5ac07af63d33917bec306e7f838aa8e366 # the full commit the uses: ref names; every job runs the CLI built from it
+  runtime-image: ghcr.io/diggsweden/forge-ci-runtime-base@sha256:0000000000000000000000000000000000000000000000000000000000000000 # FIXME v0.90.0 digest: control-plane and summary jobs
+  canonical-builder-image: ghcr.io/diggsweden/forge-ci-runtime-go-1.27@sha256:0000000000000000000000000000000000000000000000000000000000000000 # FIXME v0.90.0 digest: builds the canonical CLI
   project-type: maven              # Required: maven, npm, gradle, gradle-android, xcode-ios, cargo, or go
   base-branch: ""                  # Optional: auto-detects PR target
   lint-engine: nanolinter          # General lint engine: nanolinter (default) | megalinter | none — mutually exclusive
@@ -423,7 +489,6 @@ with:
   megalinter-image: ""             # Required for megalinter; see the digest-pinned example below
   linters.swiftformat: false       # Swift format for iOS/macOS (separate macOS job, orthogonal to the engine)
   linters.swiftlint: false         # SwiftLint for iOS/macOS
-  forge-ci-binary-ref: v0.90.0   # Match the pinned workflow release
 ```
 
 **Behavior:** The orchestrator remains the supported entrypoint. Internally it delegates to the quality stage, which writes a normalized manifest consumed by the top-level PR summary. See [Stage Result Contract](workflows.md#stage-result-contract) for the internal schema.
@@ -453,10 +518,20 @@ inside the nanolinter flavour image (which bakes nanolinter and its check
 toolchain, so no `just`/`justfile` is required). Fast, node-less. Security findings
 upload to GitHub Code Scanning as SARIF.
 ```yaml
-uses: diggsweden/forge-ci/.github/workflows/lint-nanolinter.yml@v0.90.0
+uses: diggsweden/forge-ci/.github/workflows/lint-nanolinter.yml@84180b5ac07af63d33917bec306e7f838aa8e366 # v0.90.0
 with:
   nanolinter-image: ghcr.io/itiquette/nanolinter:java@sha256:PIN_DIGEST
+  forge-ci-binary-ref: 84180b5ac07af63d33917bec306e7f838aa8e366
+  runtime-image: ghcr.io/diggsweden/forge-ci-runtime-base@sha256:0000000000000000000000000000000000000000000000000000000000000000 # FIXME v0.90.0 digest
+  canonical-artifact-id: ${{ needs.canonical-cli.outputs.artifact-id }}
+  # ... the other six canonical-* inputs, as in the publish-container example
 ```
+
+A direct call is a canonical receiver like `publish-container.yml`: a
+`canonical-cli` job in your workflow builds the CLI of the run from the engine
+commit (`canonical-cli-bootstrap.yml`), and the lint job receives it before
+the checkout. The [GHCR example in publishing.md](publishing.md#github-container-registry-ghcrio)
+shows the `canonical-cli` job and the seven `canonical-*` inputs it feeds.
 
 **Flavour image.** The configured repository is `ghcr.io/itiquette/nanolinter`.
 The GHCR migration must be published and verified before activating these
@@ -524,9 +599,13 @@ For a direct call, replace `REVIEWED_SHA256` below with the reviewed image
 digest's 64 lowercase hexadecimal characters:
 
 ```yaml
-uses: diggsweden/forge-ci/.github/workflows/lint-megalinter.yml@v0.90.0
+uses: diggsweden/forge-ci/.github/workflows/lint-megalinter.yml@84180b5ac07af63d33917bec306e7f838aa8e366 # v0.90.0
 with:
   megalinter-image: oxsecurity/megalinter@sha256:REVIEWED_SHA256
+  forge-ci-binary-ref: 84180b5ac07af63d33917bec306e7f838aa8e366
+  runtime-image: ghcr.io/diggsweden/forge-ci-runtime-base@sha256:0000000000000000000000000000000000000000000000000000000000000000 # FIXME v0.90.0 digest
+  canonical-artifact-id: ${{ needs.canonical-cli.outputs.artifact-id }}
+  # ... the other six canonical-* inputs; the job is a canonical receiver like lint-nanolinter.yml
 ```
 
 ### Security Workflows
@@ -552,7 +631,11 @@ Generates an OpenSSF security scorecard for the repository. Invoke it explicitly
 from your caller workflow and define `on.schedule` there for scheduled analysis.
 
 ```yaml
-uses: diggsweden/forge-ci/.github/workflows/security-openssf-scorecard.yml@v0.90.0
+uses: diggsweden/forge-ci/.github/workflows/security-openssf-scorecard.yml@84180b5ac07af63d33917bec306e7f838aa8e366 # v0.90.0
+with:
+  forge-ci-binary-ref: 84180b5ac07af63d33917bec306e7f838aa8e366 # v0.90.0
+  # The SARIF upload job runs in this image with its baked forge-ci.
+  runtime-image: ghcr.io/diggsweden/forge-ci-runtime-base@sha256:0000000000000000000000000000000000000000000000000000000000000000 # FIXME v0.90.0 digest
 ```
 
 ---

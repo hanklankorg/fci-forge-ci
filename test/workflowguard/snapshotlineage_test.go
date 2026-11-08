@@ -218,7 +218,7 @@ func TestSnapshotLineageProofsFailClosedOnNamespaceMatrixAndNeedsChanges(t *test
 		{"valid", "", ""},
 		{"other namespace", "name: ${{ inputs['artifact-name'] }}-inputs", "name: ${{ inputs['other-name'] }}-inputs"},
 		{"missing build barrier", "needs: [plan, build]", "needs: [plan]"},
-		{"missing context dependency", "needs: [plan, prepare-context]", "needs: [plan]"},
+		{"missing context dependency", "needs: [resolve-bootstrap, plan, prepare-context]", "needs: [resolve-bootstrap, plan]"},
 		{"missing producer barrier", "needs: [plan, build-artifacts]", "needs: [plan]"},
 		{"other context namespace", "name: ${{ inputs['artifact-name'] }}-context", "name: ${{ inputs['other-name'] }}-context"},
 		{"other producer namespace", "name: ${{ inputs['artifact-name'] }}-dependency-${{ matrix.artifact.name }}", "name: ${{ inputs['other-name'] }}-dependency-${{ matrix.artifact.name }}"},

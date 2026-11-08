@@ -15,7 +15,8 @@ Forgejo delivery layers.
 | Product environment prefix | `FORGE_CI_*` |
 | Engine binary under test | `FORGE_CI_TEST_BINARY` |
 | Workflow input prefix | `forge-ci-*` |
-| Installer | `install-forge-ci.sh` |
+| Linux engine delivery | `canonical-cli-bootstrap.yml` and `consume-canonical-cli` |
+| macOS engine build | `build-darwin-cli` |
 | Layer setup action | `setup-forge-ci` |
 | Layer binary checksums | `.engine/bin/forge-ci-linux-amd64.sha256`, `.engine/bin/forge-ci-linux-arm64.sha256` |
 | Package and image prefix | `forge-ci` |

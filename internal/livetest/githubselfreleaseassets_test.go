@@ -71,7 +71,7 @@ func TestGitHubSelfRelease_BinaryAssets(t *testing.T) {
 	const tag, request = "v0.0.1", "release-request/v0.0.1"
 	trial.git(source, "-c", "tag.gpgsign=false", "tag", "--force", tag, commit)
 	trial.git(source, "-c", "tag.gpgsign=false", "tag", "--force", request, commit)
-	t.Cleanup(func() { settleBootstrapRuns(t, trial, repo, commit, "release-binary.yml", "workflow_dispatch") })
+	t.Cleanup(func() { settleOwnedRuns(t, trial, repo, commit, "release-binary.yml", "workflow_dispatch") })
 	trial.push(source, trial.remote(repo), "HEAD:refs/heads/main", "refs/tags/"+tag, "refs/tags/"+request)
 	trial.waitWorkflows(repo, workflows)
 

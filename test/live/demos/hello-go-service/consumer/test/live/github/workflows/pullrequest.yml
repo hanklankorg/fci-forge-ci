@@ -19,7 +19,7 @@ concurrency:
 
 jobs:
   pr-checks:
-    uses: diggsweden/forge-ci/.github/workflows/pullrequest-orchestrator.yml@v0.90.0
+    uses: diggsweden/forge-ci/.github/workflows/pullrequest-orchestrator.yml@84180b5ac07af63d33917bec306e7f838aa8e366 # v0.90.0
     secrets:
       # Optional: uploads lint security findings (SARIF) to Code Scanning.
       CODE_SCANNING_TOKEN: ${{ secrets.CODE_SCANNING_TOKEN }}
@@ -27,14 +27,17 @@ jobs:
       actions: read
       contents: read
     with:
-      forge-ci-binary-ref: v0.90.0
+      # The full commit the uses: ref above names; every job of the route runs
+      # the CLI built in this run from exactly this commit.
+      forge-ci-binary-ref: 84180b5ac07af63d33917bec306e7f838aa8e366 # v0.90.0
       project-type: go
       # The lint image, pinned by digest: the plan job refuses a tag.
       nanolinter-image: codefloe.com/itiquette/nanolinter:go@sha256:0000000000000000000000000000000000000000000000000000000000000000
       lint-engine: nanolinter
-      # The runtime images of the release you call, pinned with it; left
-      # out, the release resolves the same ones.
-      runtime-image: ghcr.io/diggsweden/forge-ci-runtime-base:v0.90.0
+      # Pinned by digest and admitted before any job runs; replace FIXME with
+      # the digests of the release you call (docs/runtime-images.md).
+      runtime-image: ghcr.io/diggsweden/forge-ci-runtime-base@sha256:0000000000000000000000000000000000000000000000000000000000000000 # FIXME v0.90.0 digest
+      canonical-builder-image: ghcr.io/diggsweden/forge-ci-runtime-go-1.27@sha256:0000000000000000000000000000000000000000000000000000000000000000 # FIXME v0.90.0 digest
 
   # Your tests. The orchestrator above never runs them; require this job and
   # pr-checks as status checks. Add govulncheck or your own policy here.

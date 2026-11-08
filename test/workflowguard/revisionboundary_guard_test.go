@@ -14,42 +14,39 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-func TestReusableWorkflowsDoNotPinNestedForgeCIAction(t *testing.T) {
+// The host installer (scripts/bootstrap/install-forge-ci.sh and the
+// install-forge-ci action) is retired: Linux jobs receive the canonical CLI
+// of the run or run the engine baked into an admitted image, and macOS jobs
+// build it from the engine checkout. Nothing a consumer reads, copies or
+// runs may name the deleted path again.
+func TestNothingNamesTheRetiredHostInstaller(t *testing.T) {
 	t.Parallel()
 
-	workflowsDir := filepath.Join(reporoot.Path(t), ".github", "workflows")
+	root := reporoot.Path(t)
+	for _, dir := range []string{".github", ".forgejo", ".forge-ci", ".gitlab", ".gitlab-ci.yml", "containers", "development", "docs", "examples", "scripts", "templates", "test/live", "internal/livetest", "cmd", "justfile", "README.md"} {
+		err := filepath.WalkDir(filepath.Join(root, dir), func(path string, entry os.DirEntry, err error) error {
+			if err != nil || entry.IsDir() {
+				return err
+			}
 
-	entries, err := os.ReadDir(workflowsDir)
-	if err != nil {
-		t.Fatal(err)
-	}
+			body, err := os.ReadFile(path)
+			if err != nil {
+				return err
+			}
 
-	for _, entry := range entries {
-		if entry.IsDir() || filepath.Ext(entry.Name()) != ".yml" {
-			continue
-		}
+			if strings.Contains(string(body), "install-forge-ci") {
+				t.Errorf("%s names the retired host installer", path)
+			}
 
-		body, err := os.ReadFile(filepath.Join(workflowsDir, entry.Name()))
+			return nil
+		})
 		if err != nil {
 			t.Fatal(err)
 		}
+	}
 
-		text := string(body)
-		if strings.Contains(text, "diggsweden/forge-ci/.github/actions/install-forge-ci@") {
-			t.Errorf("%s pins the nested installer action; sparse-checkout scripts/bootstrap at forge-ci-binary-ref instead", entry.Name())
-		}
-
-		if strings.Contains(text, ".github-shared/scripts/bootstrap/install-forge-ci.sh") {
-			for _, want := range []string{
-				"repository: ${{ needs.resolve-bootstrap.outputs.forge-ci-repository }}",
-				"ref: ${{ inputs['forge-ci-binary-ref'] }}",
-				"sparse-checkout: scripts/bootstrap",
-			} {
-				if !strings.Contains(text, want) {
-					t.Errorf("%s installs forge-ci without the shared repository/ref boundary %q", entry.Name(), want)
-				}
-			}
-		}
+	if _, err := os.Stat(filepath.Join(root, "scripts", "bootstrap", "install-forge-ci.sh")); !os.IsNotExist(err) {
+		t.Fatal("the host installer is deleted, not kept beside the canonical path")
 	}
 }
 

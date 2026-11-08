@@ -973,10 +973,14 @@ containers:
 - **Direct caller equivalent** (when invoking `publish-container.yml` directly, bypassing the orchestrator):
 
   ```yaml
-  uses: diggsweden/forge-ci/.github/workflows/publish-container.yml@v0.90.0
+  uses: diggsweden/forge-ci/.github/workflows/publish-container.yml@84180b5ac07af63d33917bec306e7f838aa8e366 # v0.90.0
   with:
+    runtime-image: ghcr.io/diggsweden/forge-ci-runtime-base@sha256:0000000000000000000000000000000000000000000000000000000000000000 # FIXME v0.90.0 digest
+    runtime-image-full: ghcr.io/diggsweden/forge-ci-runtime@sha256:0000000000000000000000000000000000000000000000000000000000000000 # FIXME v0.90.0 digest
     branch: main
-    forge-ci-binary-ref: v0.90.0
+    # plus runtime-image, runtime-image-full and the canonical-* inputs of a
+    # canonical-cli-bootstrap.yml job in the same run; see publishing.md
+    forge-ci-binary-ref: <full-engine-commit>
     artifact-types: cargo
     build-args: |
       RUST_VERSION=1.94
@@ -1045,8 +1049,9 @@ containers:
   ```yaml
   jobs:
     release:
-      uses: diggsweden/forge-ci/.github/workflows/release-orchestrator.yml@v0.90.0
+      uses: diggsweden/forge-ci/.github/workflows/release-orchestrator.yml@84180b5ac07af63d33917bec306e7f838aa8e366 # v0.90.0
       with:
+        # Engine commit and image digests: see the Advanced Pinning Recipe.
         branch: main
       secrets:
         # ... your usual secret forwards ...
@@ -1130,10 +1135,16 @@ artifacts:
 ```yaml
 jobs:
   release:
-    uses: diggsweden/forge-ci/.github/workflows/release-orchestrator.yml@v0.90.0
+    uses: diggsweden/forge-ci/.github/workflows/release-orchestrator.yml@84180b5ac07af63d33917bec306e7f838aa8e366 # v0.90.0
     with:
       branch: main
-      forge-ci-binary-ref: v0.90.0
+      # The full commit the workflow ref above names; every plain-runner job
+      # runs the CLI built in this run from exactly this commit.
+      forge-ci-binary-ref: 84180b5ac07af63d33917bec306e7f838aa8e366 # v0.90.0
+      # Pinned by digest and admitted before any job runs; replace FIXME with
+      # the digests of the release you call (runtime-images.md).
+      runtime-image: ghcr.io/diggsweden/forge-ci-runtime-base@sha256:0000000000000000000000000000000000000000000000000000000000000000 # FIXME v0.90.0 digest
+      canonical-builder-image: ghcr.io/diggsweden/forge-ci-runtime-go-1.27@sha256:0000000000000000000000000000000000000000000000000000000000000000 # FIXME v0.90.0 digest
       artifacts-config: .forge-ci/artifacts.yml
       release-publisher: github-cli
 ```
@@ -1435,7 +1446,7 @@ permissions:
 
 jobs:
   release:
-    uses: diggsweden/forge-ci/.github/workflows/release-orchestrator.yml@v0.90.0
+    uses: diggsweden/forge-ci/.github/workflows/release-orchestrator.yml@84180b5ac07af63d33917bec306e7f838aa8e366 # v0.90.0
     permissions:
       contents: write
       packages: write
@@ -1451,7 +1462,13 @@ jobs:
       RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
     with:
       branch: main
-      forge-ci-binary-ref: v0.90.0
+      # The full commit the workflow ref above names; every plain-runner job
+      # runs the CLI built in this run from exactly this commit.
+      forge-ci-binary-ref: 84180b5ac07af63d33917bec306e7f838aa8e366 # v0.90.0
+      # Pinned by digest and admitted before any job runs; replace FIXME with
+      # the digests of the release you call (runtime-images.md).
+      runtime-image: ghcr.io/diggsweden/forge-ci-runtime-base@sha256:0000000000000000000000000000000000000000000000000000000000000000 # FIXME v0.90.0 digest
+      canonical-builder-image: ghcr.io/diggsweden/forge-ci-runtime-go-1.27@sha256:0000000000000000000000000000000000000000000000000000000000000000 # FIXME v0.90.0 digest
       artifacts-config: .forge-ci/artifacts.yml
       changelog-creator: git-cliff
       release-publisher: github-cli

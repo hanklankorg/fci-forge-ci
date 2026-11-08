@@ -59,7 +59,7 @@ The PR orchestrator produces typed JSON payloads that drive the quality stage:
 |-------|--------|---------|
 | `context.project_type` | `inputs.project-type` | Project ecosystem (`maven`, `npm`, `gradle`, `gradle-android`, `xcode-ios`, `cargo`, or `go`) |
 | `context.base_branch` | `inputs.base-branch` or PR target | Base branch for commit linting |
-| `context.forge_ci_binary_ref` | `inputs.forge-ci-binary-ref` | `forge-ci` binary revision used by plain-runner jobs |
+| `context.forge_ci_binary_ref` | `inputs.forge-ci-binary-ref` | Full engine commit the run's canonical `forge-ci` CLI is built from for plain-runner jobs |
 | `policy.nanolinter_image` | `inputs.nanolinter-image` | Image the nanolinter job runs in, pinned by digest (`ghcr.io/itiquette/nanolinter:<flavour>@sha256:<digest>`); `plan pr` refuses a tag with lint engine nanolinter. See [lint images](components.md#lint-nanolinteryml-default). |
 
 **`quality-stage-plan-json`**: quality check target plan:
@@ -332,9 +332,10 @@ This avoids normalized-branch collisions; package version conventions are unchan
 Architecture staging tags may append `-amd64` or `-arm64` to that final image tag.
 
 Native `linux/amd64` and `linux/arm64` builds stage OCI layouts without registry
-publication credentials. Publication waits for **all** planned builds, verifies
-the complete platform set, then scans the exported OCI layouts using
-`scan-severity`. There is no consumer switch to skip this scan;
+publication credentials. Each exported layout is scanned in the full runtime
+image, with `scan-severity`, before publication, which waits for **all**
+planned builds and scans and verifies the complete platform set. There is no
+consumer switch to skip this scan;
 administrator policy controls whether recognized findings block, while
 operational and identity errors remain blocking.
 `enable-analyzed-container-sbom` independently selects image

@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"slices"
 	"strings"
@@ -48,7 +49,22 @@ func TestReuseGitHubEngineOnlyReadsPreparedSessionEngine(t *testing.T) {
 			}
 
 			body = map[string]any{"workflow_runs": []map[string]string{{"status": "completed", "conclusion": "success"}}}
+		case "/orgs/example-org/packages/container/fc-forge-ci/forge-ci-runtime-base/versions", "/orgs/example-org/packages/container/fc-forge-ci/forge-ci-runtime-go-1.27/versions":
+			// The digests the release route admits, read from the packages the
+			// engine build published for the commit's tag; an older build's
+			// version carries another tag.
+			image := strings.TrimSuffix(strings.TrimPrefix(request.URL.Path, "/orgs/example-org/packages/container/fc-forge-ci/"), "/versions")
+			body = []map[string]any{
+				{"name": "sha256:" + strings.Repeat("d", 64), "metadata": map[string]any{"package_type": "container", "container": map[string]any{"tags": []string{"sha-0000000"}}}},
+				{"name": "sha256:" + strings.Repeat(string(image[len(image)-1]), 64), "metadata": map[string]any{"package_type": "container", "container": map[string]any{"tags": []string{"sha-" + commit[:7]}}}},
+			}
 		default:
+			if strings.HasPrefix(request.URL.Path, "/orgs/example-org/packages/container/") {
+				response.WriteHeader(http.StatusNotFound) // A lane image the test organization did not publish.
+
+				return
+			}
+
 			t.Errorf("unexpected engine request: %s", request.URL)
 			response.WriteHeader(http.StatusNotFound)
 
@@ -78,7 +94,9 @@ func TestReuseGitHubEngineOnlyReadsPreparedSessionEngine(t *testing.T) {
 	}
 
 	got.admin = nil
-	if got != (GitHubEngine{Owner: trial.org, Repository: "fc-forge-ci", Commit: commit, Namespace: "ghcr.io/example-org/fc-forge-ci"}) || len(reads) != 3 {
+	want := GitHubEngine{Owner: trial.org, Repository: "fc-forge-ci", Commit: commit, Namespace: "ghcr.io/example-org/fc-forge-ci",
+		Digests: map[string]string{"forge-ci-runtime-base": "sha256:" + strings.Repeat("e", 64), "forge-ci-runtime-go-1.27": "sha256:" + strings.Repeat("7", 64)}}
+	if !reflect.DeepEqual(got, want) || len(reads) != 10 {
 		t.Fatalf("reuse = %+v; reads = %v", got, reads)
 	}
 }
@@ -515,4 +533,42 @@ func TestUnsignedSubjectsListsEveryAssetWithoutAVerifiedSignature(t *testing.T) 
 	if !slices.Equal(got, want) {
 		t.Errorf("unsignedSubjects = %v, want %v", got, want)
 	}
+}
+
+// A new engine repository is empty, and GitHub refuses a release there, so
+// the rolling pre-release tag is first pushed at a seed commit: one of the
+// empty tree, written without moving the checkout's refs or index.
+func TestGitHubPrereleaseSeedIsAnEmptyCommitOutsideTheCheckout(t *testing.T) {
+	t.Parallel()
+
+	trial := &GitHubTrial{tb: t, org: "example-org", prefix: "fc-"}
+	root := t.TempDir()
+	trial.git(root, "init", "--quiet", "--object-format=sha1", "--initial-branch=main", ".")
+	require := func(ok bool, format string, args ...any) {
+		t.Helper()
+
+		if !ok {
+			t.Fatalf(format, args...)
+		}
+	}
+
+	if err := os.WriteFile(filepath.Join(root, "engine.txt"), []byte("engine\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	trial.git(root, "add", "engine.txt")
+	trial.git(root, "-c", "user.name=Trial", "-c", "user.email=trial@example.invalid", "commit", "--quiet", "-m", "engine")
+	head := strings.TrimSpace(trial.git(root, "rev-parse", "HEAD"))
+	staged := trial.git(root, "ls-files", "--stage")
+
+	seed := trial.seedCommit(root)
+
+	require(regexp.MustCompile(`^[0-9a-f]{40}$`).MatchString(seed), "seed = %q", seed)
+	require(strings.TrimSpace(trial.git(root, "rev-parse", seed+"^{tree}")) == "4b825dc642cb6eb9a060e54bf8d69288fbee4904",
+		"the seed commit carries files")
+	require(strings.TrimSpace(trial.git(root, "rev-list", "--count", seed)) == "1", "the seed commit has a parent")
+	require(strings.TrimSpace(trial.git(root, "rev-parse", "HEAD")) == head, "seeding moved HEAD")
+	require(trial.git(root, "ls-files", "--stage") == staged, "seeding changed the index")
+	require(strings.TrimSpace(trial.git(root, "for-each-ref")) == strings.TrimSpace(trial.git(root, "for-each-ref", "refs/heads/main")),
+		"seeding created a ref")
 }

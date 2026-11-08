@@ -123,9 +123,11 @@ func TestSelfPullRequestUsesThePublishedRollingImageTag(t *testing.T) {
 		string(reporoot.ReadFile(t, ".github/workflows/self-runtime-container.yml")))
 	require.Len(t, published, 2, "self-runtime-container.yml publishes no rolling vX.Y.Z-pre tag")
 
-	consumed := regexp.MustCompile(`forge-ci-runtime-base:(v[0-9]+\.[0-9]+\.[0-9]+-pre)\b`).FindAllStringSubmatch(
+	// The route admits digests only, so Self Pull Request resolves the rolling
+	// tag's base and Go builder images to the digests the registry serves.
+	consumed := regexp.MustCompile(`forge-ci-runtime-[a-z0-9.-]+:(v[0-9]+\.[0-9]+\.[0-9]+-pre)\b`).FindAllStringSubmatch(
 		string(reporoot.ReadFile(t, ".github/workflows/self-pullrequest.yml")), -1)
-	require.NotEmpty(t, consumed, "self-pullrequest.yml consumes no rolling runtime image")
+	require.Len(t, consumed, 2, "self-pullrequest.yml resolves the rolling base and Go builder images")
 
 	for _, match := range consumed {
 		require.Equal(t, published[1], match[1], "Self Pull Request must use the rolling tag Self Runtime Container publishes")
@@ -169,20 +171,16 @@ func TestRuntimeImageTagGuardFindsPins(t *testing.T) {
 		"a :verify tag outside the allowlisted file must be flagged")
 }
 
-// binaryRefInput is the workflow input that names the forge-ci revision a
-// plain-runner job installs and whose runtime images the container jobs run in.
+// binaryRefInput is the workflow input that names the full engine commit a
+// workflow belongs to: canonical delivery builds the CLI from it, and the
+// macOS lanes build it from a checkout of it.
 const binaryRefInput = "forge-ci-binary-ref"
 
-// TestReleaseRevisionIsOneModeledVersion keeps one graph on one revision. A
-// job on a container runner gets the CLI baked into the runtime image; a job
-// on a plain runner installs it from forge-ci-binary-ref. Both come from the
-// bootstrap resolver, so every binary-ref default must be empty: a hard-coded
-// one would run the plain-runner jobs on another revision than the images the
-// resolver selected, showing up as behaviour differences between jobs rather
-// than as an error.
-//
-// Digest-pinned runtime defaults are refused for the same reason: a digest
-// carries no version, so nothing could tie it to the resolved revision.
+// TestReleaseRevisionIsOneModeledVersion keeps one graph on one revision.
+// forge-ci-binary-ref is the full engine commit the caller's workflow ref
+// names, required everywhere and admitted by the resolver; a default would
+// name a revision the caller did not ask for. A runtime image default is
+// refused too: the caller passes the digest of the release it calls.
 //
 // The self graph builds and consumes the CLI of the release being cut before
 // that release exists, through one rolling pre-release tag; every literal of
@@ -203,14 +201,8 @@ func TestReleaseRevisionIsOneModeledVersion(t *testing.T) {
 	}
 
 	require.Empty(t, digests,
-		"a runtime image default pinned by digest carries no version, so nothing ties it to the resolved revision")
-	require.NotEmpty(t, binaryRefs, "no %s defaults found — input renamed or layout changed?", binaryRefInput)
-
-	// Empty defaults select one concrete stable release at runtime. The bootstrap
-	// resolver returns its matching CLI ref and all runtime image references;
-	// bootstrap_revision_guard_test.go executes that selection and checks wiring.
-	require.Len(t, binaryRefs, 1, "binary defaults must share stable-release resolution")
-	require.Contains(t, binaryRefs, "", "binary defaults must not retain a hard-coded release")
+		"a runtime image default pinned by digest names one release for every caller")
+	require.Empty(t, binaryRefs, "%s is a required full commit and has no default", binaryRefInput)
 
 	for site, value := range rollingPreReleaseSites(t, files) {
 		require.Equalf(t, release.SelfRuntimeChannelTag, value,

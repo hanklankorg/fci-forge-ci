@@ -642,6 +642,9 @@ attestor    (KMS sign creds ONLY here, ephemeral)  ──signed provenance──
             .github/workflows/slsa-attestor.yml
 ```
 
+- **Runtime:** the job runs in the `runtime-image` digest the caller pins, the
+  forge-ci base runtime image, where forge-ci and the pinned cosign are
+  baked in; the selected runner must run job containers.
 - **Signer:** `forge-ci container attest --method=kms --key <kms-uri>`. Works
   with any cosign KMS (`hashivault://` OpenBao/Vault, `awskms://`, `gcpkms://`,
   `azurekms://`, PKCS#11/HSM). `--builder-id` sets the provenance `builder.id` to
@@ -726,8 +729,9 @@ The engine input `release.requireallowlistedsigner` defaults to **false** so the
 # .github/workflows/release-workflow.yml
 jobs:
   release:
-    uses: diggsweden/forge-ci/.github/workflows/release-orchestrator.yml@v0.90.0
+    uses: diggsweden/forge-ci/.github/workflows/release-orchestrator.yml@84180b5ac07af63d33917bec306e7f838aa8e366 # v0.90.0
     with:
+      # Engine commit and image digests: see the Advanced Pinning Recipe.
       branch: main
       release.requireallowlistedsigner: true   # org default; override only for private repos
 ```
@@ -1012,7 +1016,7 @@ What this design does NOT defend against:
 **No setting skips the check quietly.** The fix is at the runner. The two overrides are described below, and each says in the log that it was used: the `--debug-allow-swap` flag, and the test hook `FORGE_CI_PROC_SWAPS`, which replaces only the file that is read. The error message lists:
 
 1. The one-line runner fix: `sudo swapoff -a` (persist in `/etc/fstab`).
-2. That a hosted runner is no exception. GitHub-hosted runners have swap on, so the GitHub release layer signs on the plain runner and turns swap off first; a job container could not, because it starts before the first step. On self-hosted runners, any forge, swap is turned off in the host setup.
+2. That a hosted runner is no exception. GitHub-hosted runners have swap on, so the GitHub release layer's GPG signing job runs on the plain runner, with the canonical CLI delivered for the run, and turns swap off first; a job container could not, because it starts before the first step. Sigstore and KMS signing hold no long-lived key in process and run in the admitted runtime image. On self-hosted runners, any forge, swap is turned off in the host setup.
 3. Alternatives for operators who genuinely cannot disable swap: **Sigstore keyless** (`cosign sign` + OIDC; no long-lived private key) or forge-ci's **KMS-backed signing** (`sign.method: kms`; AWS KMS, GCP KMS, Azure Key Vault, OpenBao/Vault, or PKCS#11). The key remains in the provider; provider authentication and reachability are operator responsibilities.
 
 **Debug-only override.** Local debugging sometimes needs to exercise the signing path on a developer laptop where swap is on for unrelated reasons. The narrow escape hatch is the `--debug-allow-swap` CLI flag:
@@ -1075,20 +1079,17 @@ This is operative, not aspirational:
 `container: image:` references in workflow YAML come from inputs
 (caller-controlled), never hardcoded. There used to be one exception
 (`lint-swift.yml`) which now reads from the standard `runtime-image`
-input. The default values for those inputs are tied to this repo's own
-release version (bumped at release time, not by Renovate).
+input. Those inputs have no defaults: the caller passes each image by digest.
 
 ### Trust boundaries
 
 What's left after Renovate is one named choice, not a silent gap:
 
 - **Self-published GHCR images** (`ghcr.io/diggsweden/forge-ci-runtime-*`)
-  are referenced by tag (`:v0.90.0`), not by digest. These tags come from
-  workflow input defaults that this repo bumps at release time, not from
-  Renovate. The trust model is registry-side immutability of our own
-  org's tagged releases: we do not rewrite tags. Adopters who need
-  stricter determinism may pin to a digest (`@sha256:…`) on their
-  override of `runtime-image-*` inputs.
+  are passed by digest (`@sha256:…`). The first job of each workflow that
+  runs one refuses a tag or an empty value, so the content a job runs is the
+  content its caller reviewed; the caller reads each digest from the release
+  it calls.
 
 For the full picture of trust boundaries (consumer code, build extensions,
 multi-tenant secret reuse, etc.), see [docs/threat-model.md](threat-model.md).

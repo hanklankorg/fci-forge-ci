@@ -6,7 +6,9 @@
 # This reusable workflow accepts a digest-qualified image, runs the forge-ci
 # provenance attestor with a KMS key, and pushes the resulting cosign
 # attestation. It requests contents:read and packages:write, does not request a
-# GitHub OIDC token, and lets the caller select the runner label.
+# GitHub OIDC token, and lets the caller select the runner label. The job runs
+# in the administrator-pinned forge-ci base runtime image, where forge-ci and
+# cosign are baked in, so the selected runner must run job containers.
 #
 # This workflow does not establish a SLSA build level or enforce isolation from
 # the build job. The operator must provide separate build/attestor identities,
@@ -60,11 +62,14 @@ on:
         required: false
         type: string
         default: '["ubuntu-26.04"]'
-      forge-ci-binary-ref:
-        description: "forge-ci ref/version whose bootstrap installers + CLI to use."
-        required: false
+      runtime-image:
+        description: "Administrator-pinned forge-ci base runtime image@sha256 digest the attestor runs in: forge-ci and cosign baked in, nothing installed."
+        required: true
         type: string
-        default: ""
+      forge-ci-binary-ref:
+        description: "Full engine commit (40 hex) the workflow ref names; a tag or branch is refused"
+        required: true
+        type: string
     secrets:
       registry-password:
         description: "Registry password/token for pushing the attestation. Falls back to the job's GITHUB_TOKEN on GHCR."
@@ -84,35 +89,27 @@ permissions:
   packages: write # push the signed attestation to the registry
 
 jobs:
+  # Admits the engine commit and the runtime image by digest before the job
+  # container starts.
   resolve-bootstrap:
     permissions:
       contents: read
     uses: ./.github/workflows/resolve-forge-ci-bootstrap.yml
     with:
       forge-ci-binary-ref: ${{ inputs['forge-ci-binary-ref'] }}
+      images: |
+        runtime-image=${{ inputs['runtime-image'] }}
   attest:
-    needs: [resolve-bootstrap]
     name: Attest provenance (cosign + KMS)
+    needs: [resolve-bootstrap]
     runs-on: ${{ fromJSON(inputs.runs-on) }}
+    # The admitted image: forge-ci and the pinned cosign baked in.
+    container:
+      image: ${{ inputs['runtime-image'] }}
+    permissions:
+      contents: read
+      packages: write # push the signed attestation to the registry
     steps:
-      - name: Harden runner
-        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
-        with:
-          egress-policy: audit
-      - name: Checkout forge-ci bootstrap installers
-        id: forge-ci-bootstrap
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
-        with:
-          repository: ${{ needs.resolve-bootstrap.outputs.forge-ci-repository }}
-          ref: ${{ needs.resolve-bootstrap.outputs.forge-ci-binary-ref }}
-          path: .github-shared
-          sparse-checkout: scripts/bootstrap
-      - name: Install forge-ci binary
-        env:
-          FORGE_CI_BINARY_REF: ${{ needs.resolve-bootstrap.outputs.forge-ci-binary-ref }}
-          FORGE_CI_SOURCE_SHA: ${{ steps.forge-ci-bootstrap.outputs.commit }}
-          FORGE_CI_REPOSITORY: ${{ needs.resolve-bootstrap.outputs.forge-ci-repository }}
-        run: bash .github-shared/scripts/bootstrap/install-forge-ci.sh "$FORGE_CI_BINARY_REF"
       - name: Refuse PR-context trigger (signing and registry secrets in scope)
         run: forge-ci validate event-context
       - name: Validate transparency-log
@@ -147,12 +144,6 @@ jobs:
           PREDICATE_TYPE: ${{ inputs.predicate-type }}
           IMAGE_REF: ${{ inputs.image }}
         run: |
-          set -euo pipefail
-          # cosign installs to a temp dir and is on PATH only within this step,
-          # so install and attest together (same pattern as publish-container).
-          # shellcheck disable=SC1091
-          source .github-shared/scripts/bootstrap/install-cosign.sh
-          install_cosign
           forge-ci container attest \
             --type "$PREDICATE_TYPE" \
             --method kms \

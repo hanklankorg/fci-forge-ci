@@ -86,13 +86,4 @@ func TestWorkflowBoundary_DirectivesActionsAndRemote(t *testing.T) {
 		body := "jobs:\n  job:\n    steps:\n      - uses: " + action + "@pinned\n        with:\n          path: .\n"
 		require.Len(t, auditUploadArtifactPaths(t, "fixture.yml", []byte(body)), 1)
 	}
-
-	body := "jobs:\n  parse-config:\n    steps:\n      - name: Resolve forge-ci ref to commit SHA\n        env:\n          REMOTE_URL: " + canonicalForgeCIRemote + "\n        run: forge-ci platform resolve-ref\n"
-	require.True(t, canonicalResolveStep([]byte(body)))
-
-	for _, command := range []string{"# forge-ci platform resolve-ref", "REMOTE_URL=https://evil.invalid forge-ci platform resolve-ref", "forge-ci platform resolve-ref --remote https://evil.invalid"} {
-		require.False(t, canonicalResolveStep([]byte(strings.Replace(body, "run: forge-ci platform resolve-ref", "run: |\n          "+command, 1))))
-	}
-
-	require.False(t, canonicalResolveStep([]byte("env:\n  BASH_ENV: evil.sh\n"+body)))
 }

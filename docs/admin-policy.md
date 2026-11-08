@@ -145,6 +145,7 @@ jobs:
   quality:
     uses: diggsweden/forge-ci/.github/workflows/pullrequest-orchestrator.yml@PIN_SHA
     with:
+      # Engine commit and image digests: see the Advanced Pinning Recipe.
       project-type: maven
       enforce-lint: true
       enforce-vulnerabilities: true

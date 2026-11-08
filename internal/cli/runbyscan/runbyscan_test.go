@@ -42,7 +42,7 @@ func TestUnitNamesActionsByDirectory(t *testing.T) {
 
 	for rel, want := range map[string]string{
 		".forgejo/actions/build-go/action.yml":  ".forgejo/actions/build-go",
-		".github/actions/install-forge-ci/x.sh": ".github/actions/install-forge-ci",
+		".github/actions/build-darwin-cli/x.sh": ".github/actions/build-darwin-cli",
 		".github/workflows/build-go.yml":        ".github/workflows/build-go.yml",
 		"templates/build-go.yml":                "templates/build-go.yml",
 	} {

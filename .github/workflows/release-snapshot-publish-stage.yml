@@ -18,13 +18,11 @@ on:
         required: true
         type: string
       forge-ci-binary-ref:
-        required: false
-        default: ""
+        required: true
         type: string
       runtime-image:
         description: "forge-ci runtime image (full — generate-snapshot-sboms needs syft)"
-        required: false
-        default: ""
+        required: true
         type: string
       runtime-image-node:
         description: "forge-ci runtime image for snapshot NPM publish jobs"
@@ -79,6 +77,8 @@ jobs:
     uses: ./.github/workflows/resolve-forge-ci-bootstrap.yml
     with:
       forge-ci-binary-ref: ${{ inputs['forge-ci-binary-ref'] }}
+      images: |
+        runtime-image=${{ inputs['runtime-image'] }}
   forge-packages:
     needs: [resolve-bootstrap]
     name: "Publish: ${{ matrix.artifact.name }} to GitHub Packages"
@@ -97,11 +97,15 @@ jobs:
       working-directory: ${{ matrix.artifact.working_directory }}
       artifact-source: ${{ matrix.artifact.publication_artifact_name || matrix.artifact.build_artifact_name }}
       package-type: ${{ matrix.artifact.project_type }}
-      java-version: ${{ matrix.artifact.maven.java_version || '25' }}
       profile: ${{ matrix.artifact.project_type == 'maven' && matrix.artifact.build_type == 'library' && (matrix.artifact.maven.maven_profile || 'central-release') || '' }}
       from-build: ${{ matrix.artifact.project_type == 'maven' && matrix.artifact.build_type == 'library' }}
       snapshot: true
-      forge-ci-binary-ref: ${{ needs.resolve-bootstrap.outputs.forge-ci-binary-ref }}
+      # Maven-format snapshots only (npm is refused with snapshot); the
+      # publication runs in the toolchain image of its package type.
+      # Exactly the family image of the package type, empty when it was not
+      # passed: the callee's resolver refuses an empty image.
+      runtime-image: ${{ matrix.artifact.project_type == 'npm' && inputs['runtime-image-node'] || matrix.artifact.project_type != 'npm' && inputs['runtime-image-java'] || '' }}
+      forge-ci-binary-ref: ${{ inputs['forge-ci-binary-ref'] }}
   maven-central:
     needs: [resolve-bootstrap]
     name: "Publish: ${{ matrix.artifact.name }} to Central snapshots"
@@ -119,7 +123,7 @@ jobs:
       MAVEN_CENTRAL_USERNAME: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
       MAVEN_CENTRAL_PASSWORD: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
     with:
-      forge-ci-binary-ref: ${{ needs.resolve-bootstrap.outputs.forge-ci-binary-ref }}
+      forge-ci-binary-ref: ${{ inputs['forge-ci-binary-ref'] }}
       branch: ${{ fromJson(inputs['snapshot-release-plan-json']).context.release_sha }}
       working-directory: ${{ matrix.artifact.working_directory }}
       artifact-source: ${{ matrix.artifact.publication_artifact_name || matrix.artifact.build_artifact_name }}
@@ -128,7 +132,7 @@ jobs:
       settings-path: ${{ matrix.artifact.maven.settings_path || '' }}
       private-dependencies: ${{ matrix.artifact.maven.private_dependencies || false }}
       snapshot: true
-      runtime-image: ${{ inputs['runtime-image-java'] || needs.resolve-bootstrap.outputs['runtime-image-java'] }}
+      runtime-image: ${{ inputs['runtime-image-java'] }}
   # Package publication and package SBOMs are independent of the snapshot image
   # workflow, which consumes these builds from the same resolved source commit.
   npm:
@@ -141,7 +145,7 @@ jobs:
       packages: write
     uses: ./.github/workflows/publish-snapshot-npm.yml
     with:
-      forge-ci-binary-ref: ${{ needs.resolve-bootstrap.outputs.forge-ci-binary-ref }}
+      forge-ci-binary-ref: ${{ inputs['forge-ci-binary-ref'] }}
       working-directory: ${{ fromJson(inputs['snapshot-publish-stage-plan-json']).inputs.npm_working_directory }}
       artifact-source: ${{ fromJson(inputs['snapshot-publish-stage-plan-json']).inputs.npm_build_artifact_name || 'npm-build-artifacts' }}
       branch: ${{ fromJson(inputs['snapshot-release-plan-json']).context.release_sha }}
@@ -150,7 +154,7 @@ jobs:
       package-scope: ${{ fromJson(inputs['snapshot-release-plan-json']).context.package_scope }}
       npm-tag: release-{version}
       use-ci-token: ${{ fromJson(inputs['snapshot-release-plan-json']).policy.use_ci_token }}
-      runtime-image: ${{ inputs['runtime-image-node'] || needs.resolve-bootstrap.outputs['runtime-image-node'] }}
+      runtime-image: ${{ inputs['runtime-image-node'] }}
     secrets:
       registry-password: ${{ secrets.registry-password }}
   # Container-first cargo's lockfile-derived "build" SBOM. Artefact-first
@@ -168,10 +172,10 @@ jobs:
     # sbom-cargo uses only auto-provided GITHUB_TOKEN.
     uses: ./.github/workflows/sbom-cargo.yml
     with:
-      forge-ci-binary-ref: ${{ needs.resolve-bootstrap.outputs.forge-ci-binary-ref }}
+      forge-ci-binary-ref: ${{ inputs['forge-ci-binary-ref'] }}
       working-directory: ${{ fromJson(inputs['snapshot-publish-stage-plan-json']).inputs.cargo_working_directory }}
       branch: ${{ fromJson(inputs['snapshot-release-plan-json']).context.release_sha }}
-      runtime-image: ${{ inputs['runtime-image-rust'] || needs.resolve-bootstrap.outputs['runtime-image-rust'] }}
+      runtime-image: ${{ inputs['runtime-image-rust'] }}
   go-container-first:
     needs: [resolve-bootstrap]
     name: "Build: Go SBOM"
@@ -184,11 +188,11 @@ jobs:
     # sbom-go uses only auto-provided GITHUB_TOKEN.
     uses: ./.github/workflows/sbom-go.yml
     with:
-      forge-ci-binary-ref: ${{ needs.resolve-bootstrap.outputs.forge-ci-binary-ref }}
+      forge-ci-binary-ref: ${{ inputs['forge-ci-binary-ref'] }}
       working-directory: ${{ fromJson(inputs['snapshot-publish-stage-plan-json']).inputs.go_sbom_working_directory }}
       branch: ${{ fromJson(inputs['snapshot-release-plan-json']).context.release_sha }}
       artifact-name: ${{ fromJson(inputs['snapshot-publish-stage-plan-json']).inputs.go_sbom_artifact_name }}
-      runtime-image: ${{ inputs['runtime-image-go'] || needs.resolve-bootstrap.outputs['runtime-image-go'] }}
+      runtime-image: ${{ inputs['runtime-image-go'] }}
   sbom:
     name: "Build: SBOMs"
     needs: [resolve-bootstrap, cargo-container-first, go-container-first]
@@ -198,7 +202,7 @@ jobs:
     if: ${{ needs.resolve-bootstrap.result == 'success' && inputs.sboms != 'none' && (fromJson(inputs['build-result-json']).result == 'success' || fromJson(inputs['build-result-json']).result == 'skipped') && !cancelled() && needs.cargo-container-first.result != 'failure' && needs.go-container-first.result != 'failure' }}
     runs-on: ubuntu-26.04
     container:
-      image: ${{ inputs['runtime-image'] || needs.resolve-bootstrap.outputs['runtime-image-full'] }}
+      image: ${{ inputs['runtime-image'] }}
     permissions:
       actions: read
       contents: read
@@ -244,7 +248,7 @@ jobs:
     if: always() && needs.resolve-bootstrap.result == 'success'
     runs-on: ubuntu-26.04
     container:
-      image: ${{ inputs['runtime-image'] || needs.resolve-bootstrap.outputs['runtime-image-full'] }}
+      image: ${{ inputs['runtime-image'] }}
     permissions:
       contents: read
     outputs:

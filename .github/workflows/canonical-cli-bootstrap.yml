@@ -16,7 +16,7 @@ on: # yamllint disable-line rule:truthy
         required: true
         type: string
       runtime-image:
-        description: "Administrator-approved native linux/amd64 Go builder image@sha256 digest with authenticated cold-module preparation support and native Actions"
+        description: "Administrator-approved native linux/amd64 Go builder image@sha256 digest with authenticated cold-module preparation support and native Actions; it cross-compiles the arm64 file"
         required: true
         type: string
       receive-runtime-image:
@@ -104,12 +104,14 @@ jobs:
           GO: /usr/local/go/bin/go
           GOMAXPROCS: '2'
         run: /bin/bash "$ENGINE_CHECKOUT/scripts/ci/canonical-cli-delivery.sh" build
-      - name: Upload exactly the canonical amd64 file
+      - name: Upload exactly the canonical Linux files
         id: upload
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ${{ steps.build.outputs.artifact-name }}
-          path: ${{ runner.temp }}/forge-ci-canonical-${{ github.run_id }}-${{ github.run_attempt }}/forge-ci-linux-amd64
+          # The directory holds the amd64 and arm64 builds and nothing else;
+          # every receiver checks that inventory before running its own file.
+          path: ${{ runner.temp }}/forge-ci-canonical-${{ github.run_id }}-${{ github.run_attempt }}/
           if-no-files-found: error
           retention-days: ${{ inputs.artifact-retention-days }}
           overwrite: false
@@ -158,7 +160,7 @@ jobs:
         run: |
           set -euo pipefail
           unset GH_DEBUG
-          /bin/bash -p "$ENGINE_CHECKOUT/scripts/ci/trusted-runtime-tools.sh" gh api --hostname "${GH_HOST#https://}" \
+          /bin/bash -p "$ENGINE_CHECKOUT/scripts/ci/trusted-runtime-tools.sh" runtime gh api --hostname "${GH_HOST#https://}" \
             "repos/$GITHUB_REPOSITORY/actions/artifacts/$PRODUCER_ARTIFACT_ID" >"$RUNNER_TEMP/forge-ci-canonical-metadata.json"
       - name: Admit exact artifact metadata before download
         shell: bash
@@ -172,6 +174,8 @@ jobs:
       - name: Bound inventory, verify bytes, then execute only the trusted canonical CLI
         id: bootstrap
         shell: bash
+        env:
+          TOOL_PROFILE: runtime # This receiver runs inside the approved image.
         run: /bin/bash "$ENGINE_CHECKOUT/scripts/ci/canonical-cli-delivery.sh" receive
       - name: Expose original artifact ID only after successful bootstrap
         id: verified

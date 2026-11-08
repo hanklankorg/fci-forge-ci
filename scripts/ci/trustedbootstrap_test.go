@@ -23,7 +23,7 @@ func TestTrustedBootstrap(t *testing.T) {
 		t.Skip("trusted leaf bootstrap intentionally requires native linux/amd64")
 	}
 
-	for _, scenario := range []string{"verified-new-file", "wrong-origin", "wrong-commit", "short-commit", "wrong-hash", "missing", "symlink", "symlink-parent", "nonexec", "directory", "dirty-helper", "hidden-helper-edit", "hidden-record-edit", "missing-record", "fsmonitor-verified", "fsmonitor-wrong-hash", "clean-filter-helper", "clean-filter-record", "unrelated-dirty", "dirty-tools", "hidden-tools", "missing-tools", "linked-tools"} {
+	for _, scenario := range []string{"verified-new-file", "wrong-origin", "wrong-commit", "short-commit", "wrong-hash", "missing", "symlink", "symlink-parent", "nonexec", "directory", "dirty-helper", "hidden-helper-edit", "hidden-record-edit", "missing-record", "fsmonitor-verified", "fsmonitor-wrong-hash", "clean-filter-helper", "clean-filter-record", "unrelated-dirty", "dirty-tools", "hidden-tools", "missing-tools", "linked-tools", "missing-other-record"} {
 		t.Run(scenario, func(t *testing.T) {
 			root := t.TempDir()
 			engine := filepath.Join(root, "engine")
@@ -80,6 +80,10 @@ func TestTrustedBootstrap(t *testing.T) {
 
 			record := filepath.Join(engine, ".engine", "bin", "forge-ci-linux-amd64.sha256")
 			write(record, fmt.Sprintf("%x  bin/forge-ci\n", sha256.Sum256([]byte(body))), 0o600)
+			// The other architecture's record is consumed by the loop too: a
+			// checkout missing it is not the approved engine.
+			otherRecord := filepath.Join(engine, ".engine", "bin", "forge-ci-linux-arm64.sha256")
+			write(otherRecord, fmt.Sprintf("%x  bin/forge-ci\n", sha256.Sum256([]byte(body))), 0o600)
 
 			git := func(args ...string) string {
 				t.Helper()
@@ -181,6 +185,10 @@ func TestTrustedBootstrap(t *testing.T) {
 				if err := os.Remove(record); err != nil {
 					t.Fatal(err)
 				}
+			case "missing-other-record":
+				if err := os.Remove(otherRecord); err != nil {
+					t.Fatal(err)
+				}
 			case "clean-filter-helper", "clean-filter-record":
 				git("config", "filter.marker.clean", filter)
 				git("config", "filter.marker.required", "true")
@@ -204,7 +212,7 @@ func TestTrustedBootstrap(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			cmd := exec.CommandContext(t.Context(), "/bin/bash", "--noprofile", "--norc", helper, engine, origin, commit, binary, "--", "--version")
+			cmd := exec.CommandContext(t.Context(), "/bin/bash", "--noprofile", "--norc", helper, engine, origin, commit, binary, "runtime", "--", "--version")
 			cmd.Env = []string{"PATH=" + hostile, "HOME=" + root, "PROCESS_MARKER=" + marker, "ADMIN_INPUT=retained", "FORGE_CI_BIN=" + filepath.Join(hostile, "forge-ci"), "FORGE_CI_PATH=" + hostile, "FORGE_CI_BINARY_REF=old-sdk", "FORGE_CI_PLAN=/consumer/plan.json", "HELPERS_ENGINE_VERIFIED=" + binary, "SIGNER_STRICT=0", "GIT_DIR=/consumer/git", "GIT_WORK_TREE=/consumer", "GIT_CONFIG_COUNT=1", "GIT_CONFIG_KEY_0=remote.origin.url", "GIT_CONFIG_VALUE_0=https://hostile.invalid/engine", "TEST_IMAGE_ROOT=" + filepath.Join(root, "image"), "TOOL_MARKER=" + filepath.Join(root, "tools"), "CARGO_HOME=/consumer/cache", "RUSTUP_HOME=/consumer/toolchain", "TRUSTED_TOOL_PATH=" + hostile}
 
 			out, runErr := cmd.CombinedOutput()
@@ -260,7 +268,7 @@ func TestTrustedBootstrapOrdering(t *testing.T) {
 		`source "$checkout/.engine/bin/lib-forge-ci.sh"`,
 		`SIGNER_STRICT=1`,
 		`verify_forge_ci || exit $?`,
-		`exec /bin/bash -p "$checkout/scripts/ci/trusted-runtime-tools.sh" "$HELPERS_ENGINE_VERIFIED" "$@"`,
+		`exec /bin/bash -p "$checkout/scripts/ci/trusted-runtime-tools.sh" "$profile" "$HELPERS_ENGINE_VERIFIED" "$@"`,
 	} {
 		position := strings.Index(string(body), step)
 		if position <= previous {

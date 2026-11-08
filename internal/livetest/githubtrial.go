@@ -164,7 +164,7 @@ func (trial *GitHubTrial) EnsureEngine(root, platforms string) GitHubEngine {
 	trial.tb.Logf("retained engine package coordinates (no deletion authority): %v", packageNames)
 	trial.SetVariable(name, "FORGE_CI_IMAGE_NAMESPACE", namespace)
 	trial.SetVariable(name, "FORGE_CI_REPOSITORY", trial.org+"/"+name)
-	trial.ensurePrerelease(name)
+	trial.ensurePrerelease(root, name)
 	trial.push(root, "--force", trial.remote(name), "HEAD:refs/heads/main")
 
 	run := trial.WaitRun(name, githubEngineWorkflow, "push", commit, githubEngineTimeout)
@@ -175,9 +175,80 @@ func (trial *GitHubTrial) EnsureEngine(root, platforms string) GitHubEngine {
 	}
 
 	trial.waitPrerelease(name, commit)
+	engine.Digests = trial.resolveEngineDigests(engine)
 	trial.tb.Logf("engine under test: %s/%s at %s, images %s/forge-ci-runtime*:%s", trial.org, name, commit, engine.Registry(), engine.ImageTag())
 
 	return engine
+}
+
+// resolveEngineDigests asks the organization's packages what each runtime
+// image serves for the commit's tag, so fixtures render the digests every
+// workflow admits. The base and Go builder images must exist; a fixture that
+// names another image the engine did not publish is refused when it renders.
+func (trial *GitHubTrial) resolveEngineDigests(engine GitHubEngine) map[string]string {
+	trial.tb.Helper()
+
+	packages, err := engine.RuntimePackageNames()
+	if err != nil {
+		trial.tb.Fatalf("livetest: runtime package coordinates: %v", err)
+	}
+
+	digests := map[string]string{}
+
+	for _, name := range packages {
+		image := name[strings.LastIndex(name, "/")+1:]
+		if !strings.HasPrefix(image, "forge-ci-runtime") {
+			continue
+		}
+
+		if digest, ok := trial.packageDigest(name, engine.ImageTag()); ok {
+			digests[image] = digest
+		}
+	}
+
+	for _, image := range []string{"forge-ci-runtime-base", "forge-ci-runtime-go-1.27"} {
+		if digests[image] == "" {
+			trial.tb.Fatalf("livetest: %s/%s:%s has no published digest; every workflow admits only digest-pinned images", engine.Registry(), image, engine.ImageTag())
+		}
+	}
+
+	return digests
+}
+
+// packageDigest finds the version of a container package that carries tag
+// and returns its digest.
+func (trial *GitHubTrial) packageDigest(name, tag string) (string, bool) {
+	trial.tb.Helper()
+
+	options := &github.PackageListOptions{State: github.Ptr("active"), ListOptions: github.ListOptions{PerPage: 100}}
+
+	for {
+		versions, response, err := trial.api.Organizations.PackageGetAllVersions(trial.tb.Context(), trial.org, "container", name, options)
+		if response != nil && response.StatusCode == http.StatusNotFound {
+			return "", false
+		}
+
+		if err != nil {
+			trial.tb.Fatalf("livetest: list versions of package %s: %v", name, err)
+		}
+
+		for _, version := range versions {
+			var metadata github.PackageMetadata
+			if json.Unmarshal(version.Metadata, &metadata) != nil || metadata.Container == nil {
+				continue
+			}
+
+			if slices.Contains(metadata.Container.Tags, tag) && pinnedImage.MatchString("x@"+version.GetName()) {
+				return version.GetName(), true
+			}
+		}
+
+		if response.NextPage == 0 {
+			return "", false
+		}
+
+		options.Page = response.NextPage
+	}
 }
 
 // ReuseEngine reads an engine prepared by EnsureEngine in this same hosted
@@ -213,7 +284,10 @@ func (trial *GitHubTrial) ReuseEngine(root string) GitHubEngine {
 
 	trial.tb.Logf("reusing prepared engine without mutations: %s/%s at %s", trial.org, name, commit)
 
-	return GitHubEngine{Owner: trial.org, Repository: name, Commit: commit, Namespace: "ghcr.io/" + strings.ToLower(trial.org+"/"+name), admin: admin}
+	engine := GitHubEngine{Owner: trial.org, Repository: name, Commit: commit, Namespace: "ghcr.io/" + strings.ToLower(trial.org+"/"+name), admin: admin}
+	engine.Digests = trial.resolveEngineDigests(engine)
+
+	return engine
 }
 
 // WithHistory returns the trial pushing the consumer's own history under the
@@ -1346,7 +1420,7 @@ func signedBy(status, fingerprint string) bool {
 	return false
 }
 
-func (trial *GitHubTrial) ensurePrerelease(repo string) {
+func (trial *GitHubTrial) ensurePrerelease(root, repo string) {
 	ctx := trial.tb.Context()
 
 	_, response, err := trial.api.Repositories.GetReleaseByTag(ctx, trial.org, repo, GitHubPrerelease)
@@ -1359,14 +1433,47 @@ func (trial *GitHubTrial) ensurePrerelease(repo string) {
 	}
 
 	// Self Runtime Container replaces the assets of an existing pre-release
-	// and refuses when there is none (docs/github.md#forks).
+	// and refuses when there is none (docs/github.md#forks). GitHub refuses
+	// a release in an empty repository, as a new engine repository is, so
+	// the tag is first pushed at an empty seed commit. Its push starts no
+	// workflow (the push trigger excludes v*-pre tags), and Self Runtime
+	// Container moves it to the engine commit, which waitPrerelease awaits.
+	_, response, err = trial.api.Git.GetRef(ctx, trial.org, repo, "tags/"+GitHubPrerelease)
+
+	switch {
+	case err == nil:
+	case response != nil && (response.StatusCode == http.StatusNotFound || response.StatusCode == http.StatusConflict):
+		trial.push(root, trial.remote(repo), trial.seedCommit(root)+":refs/tags/"+GitHubPrerelease)
+	default:
+		trial.tb.Fatalf("livetest: look up tag %s: %v", GitHubPrerelease, err)
+	}
+
 	_, _, err = trial.api.Repositories.CreateRelease(ctx, trial.org, repo, github.CreateReleaseRequest{
-		TagName: GitHubPrerelease, TargetCommitish: new(defaultBranch), Name: new("forge-ci 0.90.0-pre (rolling pre-release)"),
+		TagName: GitHubPrerelease, Name: new("forge-ci 0.90.0-pre (rolling pre-release)"),
 		Prerelease: new(true), MakeLatest: new("false"), Body: new(""),
 	})
 	if err != nil {
 		trial.tb.Fatalf("livetest: create %s: %v", GitHubPrerelease, err)
 	}
+}
+
+// seedCommit writes a commit of the empty tree into the checkout's object
+// database, touching neither its index nor its refs, and returns its ID.
+func (trial *GitHubTrial) seedCommit(root string) string {
+	trial.tb.Helper()
+
+	dir, err := os.MkdirTemp("", "forge-ci-seed-")
+	if err != nil {
+		trial.tb.Fatalf("livetest: seed index directory: %v", err)
+	}
+
+	defer os.RemoveAll(dir)
+
+	index := filepath.Join(dir, "index")
+	tree := strings.TrimSpace(trial.run(root, append(trial.gitEnv(), "GIT_INDEX_FILE="+index), "git", "-C", root, "write-tree"))
+
+	return strings.TrimSpace(trial.git(root, "-c", "user.name=Forge CI trial", "-c", "user.email=trial@example.invalid",
+		"commit-tree", tree, "-m", "seed the rolling pre-release tag"))
 }
 
 func (trial *GitHubTrial) waitPrerelease(repo, commit string) {

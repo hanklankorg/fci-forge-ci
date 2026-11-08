@@ -8,11 +8,13 @@ import (
 	"errors"
 	"io"
 	"os"
+	"path/filepath"
 	"slices"
 	"testing"
 
 	appcontainer "github.com/diggsweden/forge-ci/internal/app/container"
 	"github.com/diggsweden/forge-ci/internal/domain/container"
+	"github.com/diggsweden/forge-ci/internal/domain/errs"
 	"github.com/diggsweden/forge-ci/internal/domain/output"
 	"github.com/diggsweden/forge-ci/internal/testutil/fakeoutputsink"
 )
@@ -128,6 +130,37 @@ func TestBuildAndScan_ScansEveryPublishingBuild(t *testing.T) {
 
 	if len(scanner.runs) != 1 {
 		t.Errorf("a push-by-digest build was not scanned: %v", scanner.runs)
+	}
+}
+
+// An oci-mode build may leave its exported layout to the layout scan job,
+// which runs where Trivy is baked in; the layout is exported all the same.
+func TestBuildAndScan_DefersTheScanOfAnExportedLayout(t *testing.T) {
+	t.Chdir(t.TempDir())
+
+	builder, scanner := &fakeBuilder{}, &fakeTrivy{}
+	in := pushByDigestInput()
+	in.Mode, in.OutputDir = container.BuildModeOCI, filepath.Join(t.TempDir(), "layout")
+
+	if _, err := appcontainer.BuildAndScan(t.Context(), builder, &fakePusher{}, scanner, fakeoutputsink.New(t), io.Discard, io.Discard, output.Annotator{}, appcontainer.BuildAndScanInput{Build: in, DeferScan: true}); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(scanner.runs) != 0 || !builder.builtLayout {
+		t.Errorf("deferred scan: runs=%v layout=%v", scanner.runs, builder.builtLayout)
+	}
+}
+
+// Nothing stands between a push-by-digest scan and its push, so the scan
+// cannot be deferred there; the request is refused before any build.
+func TestBuildAndScan_RefusesToDeferThePushByDigestScan(t *testing.T) {
+	t.Parallel()
+
+	builder, pusher, scanner := &fakeBuilder{}, &fakePusher{digest: oneDigest}, &fakeTrivy{}
+
+	_, err := appcontainer.BuildAndScan(t.Context(), builder, pusher, scanner, fakeoutputsink.New(t), io.Discard, io.Discard, output.Annotator{}, appcontainer.BuildAndScanInput{Build: pushByDigestInput(), DeferScan: true})
+	if !errors.Is(err, errs.ErrUsage) || builder.calls != 0 || pusher.calls != 0 || len(scanner.runs) != 0 {
+		t.Fatalf("deferring a push-by-digest scan: err=%v builds=%d pushes=%d scans=%v", err, builder.calls, pusher.calls, scanner.runs)
 	}
 }
 

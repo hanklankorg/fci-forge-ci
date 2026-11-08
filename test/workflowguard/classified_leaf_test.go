@@ -28,39 +28,6 @@ func classifiedLeafStep(t *testing.T, job, prefix string) canonicalConsumerStep 
 	return canonicalConsumerStep{}
 }
 
-// Compare the full predicate with the actual committed native one. With mode
-// native each added restriction is an identity; classified never runs a legacy
-// publisher and never waives a successful/fresh upstream prerequisite.
-func assertClassifiedRootCondition(t *testing.T, job, before, after string) {
-	t.Helper()
-
-	expected := before
-
-	switch job {
-	case "canonical-cli":
-		expected = "${{ inputs['require-canonical-bootstrap'] || inputs['release-file-mode'] == 'classified-files' }}"
-	case "parse-config", "validate-prerequisites":
-		expected = strings.Replace(before, "!inputs['require-canonical-bootstrap'] ||", "(!inputs['require-canonical-bootstrap'] && inputs['release-file-mode'] == 'native') ||", 1)
-		if job == "parse-config" {
-			expected = strings.Replace(expected, "inputs['release-file-mode'] == 'native'", "inputs['release-file-mode'] != 'classified-files'", 1)
-		}
-
-		if job == "validate-prerequisites" {
-			expected = strings.TrimSuffix(expected, " }}") + " && (inputs['release-file-mode'] != 'classified-files' || (needs.parse-config.outputs.binding-run-id == github.run_id && needs.parse-config.outputs.binding-run-attempt == github.run_attempt)) }}"
-		}
-	case "execute-prepare-stage":
-		expected = strings.TrimSuffix(before, " }}") + " && (inputs['release-file-mode'] == 'native' || (inputs['release-file-mode'] == 'classified-files' && needs.parse-config.result == 'success' && needs.validate-prerequisites.result == 'success' && needs.canonical-cli.result == 'success' && needs.parse-config.outputs.binding-run-id == github.run_id && needs.parse-config.outputs.binding-run-attempt == github.run_attempt && needs.validate-prerequisites.outputs.binding-run-id == github.run_id && needs.validate-prerequisites.outputs.binding-run-attempt == github.run_attempt)) }}"
-	case "execute-build-stage", "execute-publish-stage", "promote-dev", "promote-staging", "promote-release":
-		expected = strings.Replace(before, "!cancelled()", "!cancelled() && inputs['release-file-mode'] == 'native'", 1)
-	case "create-release":
-		expected = strings.Replace(before, "${{ ", "${{ inputs['release-file-mode'] == 'native' && ", 1)
-	default:
-		t.Fatalf("unapproved native condition delta in %s", job)
-	}
-
-	require.Equal(t, expected, after, job)
-}
-
 func TestClassifiedLeafGraphAndCapabilities(t *testing.T) {
 	t.Parallel()
 	workflow := readCanonicalConsumerWorkflow(t, "release-classified-files.yml")
@@ -71,10 +38,12 @@ func TestClassifiedLeafGraphAndCapabilities(t *testing.T) {
 		require.Contains(t, root.Jobs[name].If, "inputs['release-file-mode'] == 'native'")
 	}
 
-	require.Contains(t, root.Jobs["canonical-cli"].If, "inputs['release-file-mode'] == 'classified-files'")
+	require.Empty(t, root.Jobs["canonical-cli"].If, "the canonical CLI is delivered on every route")
 
 	for _, name := range []string{"validate-prerequisites", "execute-prepare-stage"} {
-		require.Equal(t, "${{ inputs['require-canonical-bootstrap'] || inputs['release-file-mode'] == 'classified-files' }}", root.Jobs[name].With["require-canonical-bootstrap"])
+		// Container callees consume the canonical CLI on the classified route;
+		// the host jobs of the prepare stage always do.
+		require.Equal(t, "${{ inputs['release-file-mode'] == 'classified-files' }}", root.Jobs[name].With["require-canonical-bootstrap"])
 		require.Contains(t, root.Jobs[name].If, "needs.parse-config.outputs.binding-run-attempt == github.run_attempt")
 	}
 

@@ -23,6 +23,10 @@
 #   contents: read   # Checkout source
 #   packages: write  # Publish to GitHub Packages
 #
+# The job runs inside the forge-ci runtime image the caller selects by
+# package type (Java or Node flavour); forge-ci and the product toolchain
+# are baked in, and nothing is installed on a host.
+#
 name: Publish Maven GitHub
 on:
   workflow_call:
@@ -45,11 +49,6 @@ on:
         required: false
         default: false
         type: boolean
-      java-version:
-        description: "Java version"
-        required: false
-        default: "25"
-        type: string
       profile:
         description: "Optional Maven profile owning publication attachments; empty preserves application defaults."
         required: false
@@ -60,11 +59,6 @@ on:
         required: false
         default: false
         type: boolean
-      node-version:
-        description: "Node.js version"
-        required: false
-        default: "24"
-        type: string
       npm-tag:
         description: "Required for npm: release-{version} or release-<packed-version>. No latest, next or movable channel tags."
         required: false
@@ -84,25 +78,34 @@ on:
         description: "Explicit branch, tag, or SHA whose package is published"
         required: true
         type: string
+      runtime-image:
+        description: "forge-ci runtime image the publication runs in: the Java image (JDK, Maven and Gradle baked in) for maven, gradle and gradle-android, the Node image for npm. The caller selects it by package type, pinned by digest; the resolver refuses anything else before the job container starts."
+        required: true
+        type: string
       forge-ci-binary-ref:
-        description: "forge-ci ref/version to install; empty resolves the current stable release tag once"
-        required: false
-        default: ""
+        description: "Full engine commit (40 hex) the workflow ref names; a tag or branch is refused"
+        required: true
         type: string
 permissions:
   contents: read
 jobs:
+  # Admits the engine commit and the runtime image by digest before the job
+  # container starts.
   resolve-bootstrap:
     permissions:
       contents: read
     uses: ./.github/workflows/resolve-forge-ci-bootstrap.yml
     with:
       forge-ci-binary-ref: ${{ inputs['forge-ci-binary-ref'] }}
+      images: |
+        runtime-image=${{ inputs['runtime-image'] }}
   publish-maven-github:
-    needs: [resolve-bootstrap]
     name: Publish to GitHub Packages (${{ inputs['package-type'] }})
+    needs: [resolve-bootstrap]
     runs-on: ubuntu-26.04
     timeout-minutes: 30
+    container:
+      image: ${{ inputs['runtime-image'] }}
     env:
       MAVEN_SNAPSHOT: ${{ inputs.snapshot }}
     permissions:
@@ -130,21 +133,6 @@ jobs:
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           ref: ${{ inputs.branch }}
-      - name: Checkout forge-ci bootstrap installers
-        id: forge-ci-bootstrap
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
-        with:
-          repository: ${{ needs.resolve-bootstrap.outputs.forge-ci-repository }}
-          ref: ${{ needs.resolve-bootstrap.outputs.forge-ci-binary-ref }}
-          path: .github-shared
-          sparse-checkout: scripts/bootstrap
-          persist-credentials: false
-      - name: Install forge-ci binary
-        env:
-          FORGE_CI_BINARY_REF: ${{ needs.resolve-bootstrap.outputs.forge-ci-binary-ref }}
-          FORGE_CI_SOURCE_SHA: ${{ steps.forge-ci-bootstrap.outputs.commit }}
-          FORGE_CI_REPOSITORY: ${{ needs.resolve-bootstrap.outputs.forge-ci-repository }}
-        run: bash .github-shared/scripts/bootstrap/install-forge-ci.sh "$FORGE_CI_BINARY_REF"
       # Defense-in-depth: refuse PR-context triggers. GITHUB_PACKAGES
       # publish uses the auto GITHUB_TOKEN today; the gate prevents
       # any future secret addition (or a misconfigured direct caller)
@@ -176,13 +164,7 @@ jobs:
           MAVEN_SNAPSHOT: ${{ inputs.snapshot }}
         run: forge-ci publish forge-packages deploy --project-type gradle --working-dir .forge-ci/gradle-publication
       # Maven publishing. Auth/settings/registry are resolved by the binary
-      # (`publish forge-packages deploy`), so setup-java only installs the JDK.
-      - name: Set up JDK for Maven
-        if: ${{ inputs['package-type'] == 'maven' && (!inputs['from-build'] || inputs.snapshot) }}
-        uses: actions/setup-java@be666c2fcd27ec809703dec50e508c2fdc7f6654 # v5.2.0
-        with:
-          java-version: ${{ inputs['java-version'] }}
-          distribution: 'temurin'
+      # (`publish forge-packages deploy`); the JDK and Maven are the image's.
       - name: Publish Maven to GitHub Packages
         if: ${{ inputs['package-type'] == 'maven' && !inputs['from-build'] }}
         working-directory: ${{ inputs['working-directory'] }}
@@ -202,12 +184,7 @@ jobs:
           VERSION: ${{ inputs.version }}
         run: forge-ci publish forge-packages deploy --project-type maven --from-build --working-dir .forge-ci/maven-build
       # NPM publishing. The binary resolves the npm registry + .npmrc, finds the
-      # *.tgz, and publishes — setup-node only installs Node.
-      - name: Set up Node.js for NPM
-        if: ${{ inputs['package-type'] == 'npm' }}
-        uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
-        with:
-          node-version: ${{ inputs['node-version'] }}
+      # *.tgz, and publishes with the image's Node.
       - name: Publish NPM to GitHub Packages
         if: ${{ inputs['package-type'] == 'npm' }}
         working-directory: ${{ inputs['working-directory'] }}

@@ -55,7 +55,9 @@ func TestCosignSigningStepsCarryTheTransparencyChoice(t *testing.T) {
 
 		for jobName, job := range workflow.Jobs {
 			for _, step := range job.Steps {
-				if !cosignSigningCall.MatchString(step.Run) || step.Env["SIGN_METHOD"] == "sigstore" {
+				// A literal sigstore method needs no transparency choice, and a
+				// literal gpg method never calls Cosign.
+				if !cosignSigningCall.MatchString(step.Run) || step.Env["SIGN_METHOD"] == "sigstore" || step.Env["SIGN_METHOD"] == "gpg" {
 					continue
 				}
 

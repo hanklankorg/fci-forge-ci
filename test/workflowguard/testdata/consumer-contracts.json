@@ -6,6 +6,10 @@
         "type": "string",
         "default": ""
       },
+      "canonical-builder-image": {
+        "required": true,
+        "type": "string"
+      },
       "enforce-lint": {
         "required": false,
         "type": "boolean",
@@ -17,9 +21,8 @@
         "default": false
       },
       "forge-ci-binary-ref": {
-        "required": false,
-        "type": "string",
-        "default": ""
+        "required": true,
+        "type": "string"
       },
       "lint-engine": {
         "required": false,
@@ -56,9 +59,8 @@
         "default": "secrets,sast"
       },
       "runtime-image": {
-        "required": false,
-        "type": "string",
-        "default": ""
+        "required": true,
+        "type": "string"
       }
     },
     "secrets": [
@@ -89,9 +91,8 @@
         "type": "string"
       },
       "canonical-builder-image": {
-        "required": false,
-        "type": "string",
-        "default": ""
+        "required": true,
+        "type": "string"
       },
       "cargo-test-selections-json": {
         "required": false,
@@ -169,9 +170,8 @@
         "default": ""
       },
       "forge-ci-binary-ref": {
-        "required": false,
-        "type": "string",
-        "default": ""
+        "required": true,
+        "type": "string"
       },
       "go-test-selections-json": {
         "required": false,
@@ -247,15 +247,9 @@
         "type": "boolean",
         "default": true
       },
-      "require-canonical-bootstrap": {
-        "required": false,
-        "type": "boolean",
-        "default": false
-      },
       "runtime-image": {
-        "required": false,
-        "type": "string",
-        "default": ""
+        "required": true,
+        "type": "string"
       },
       "runtime-image-android": {
         "required": false,
@@ -331,6 +325,10 @@
         "required": true,
         "type": "string"
       },
+      "canonical-builder-image": {
+        "required": true,
+        "type": "string"
+      },
       "container-image-repository": {
         "required": false,
         "type": "string",
@@ -352,9 +350,8 @@
         "default": false
       },
       "forge-ci-binary-ref": {
-        "required": false,
-        "type": "string",
-        "default": ""
+        "required": true,
+        "type": "string"
       },
       "java-version": {
         "required": false,
@@ -402,9 +399,8 @@
         "default": "ghcr.io"
       },
       "runtime-image": {
-        "required": false,
-        "type": "string",
-        "default": ""
+        "required": true,
+        "type": "string"
       },
       "runtime-image-android": {
         "required": false,
@@ -412,9 +408,8 @@
         "default": ""
       },
       "runtime-image-full": {
-        "required": false,
-        "type": "string",
-        "default": ""
+        "required": true,
+        "type": "string"
       },
       "runtime-image-go": {
         "required": false,

@@ -250,7 +250,7 @@ func TestCanonicalModuleWorkflowOrdering(t *testing.T) {
 
 	last := -1
 
-	for _, boundary := range []string{"Checkout approved engine only", "ref: ${{ inputs.engine-commit }}", "persist-credentials: false", "GO: /usr/local/go/bin/go", "canonical-cli-delivery.sh\" build", "Upload exactly the canonical amd64 file", "steps.build.outputs.artifact-name"} {
+	for _, boundary := range []string{"Checkout approved engine only", "ref: ${{ inputs.engine-commit }}", "persist-credentials: false", "GO: /usr/local/go/bin/go", "canonical-cli-delivery.sh\" build", "Upload exactly the canonical Linux files", "steps.build.outputs.artifact-name"} {
 		index := strings.Index(string(body)[last+1:], boundary)
 		if index < 0 {
 			t.Fatalf("missing/out-of-order workflow boundary: %s", boundary)
@@ -266,7 +266,7 @@ func TestCanonicalModuleWorkflowOrdering(t *testing.T) {
 
 	last = -1
 
-	for _, boundary := range []string{"wrong engine checkout", "wrong engine origin", "files+=(go.mod go.sum)", "modified engine file:", "mktemp -d", "mod download\n", "module preparation changed", "engine-binary.sh\" build amd64", "engine-binary.sh\" verify amd64", "GITHUB_OUTPUT:?"} {
+	for _, boundary := range []string{"wrong engine checkout", "wrong engine origin", "files+=(go.mod go.sum)", "modified engine file:", "mktemp -d", "mod download\n", "module preparation changed", "engine-binary.sh\" build \"$arch\"", "engine-binary.sh\" verify \"$arch\"", "GITHUB_OUTPUT:?"} {
 		index := strings.Index(string(body), boundary)
 		if index <= last {
 			t.Fatalf("missing/out-of-order preparation boundary: %s", boundary)

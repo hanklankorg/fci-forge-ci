@@ -23,7 +23,25 @@ import (
 	"github.com/diggsweden/forge-ci/internal/domain/errs"
 )
 
-var trialEngine = GitHubEngine{Owner: "Example-Org", Repository: "fc-forge-ci", Commit: strings.Repeat("a", 40)}
+// trialEngine is an engine as EnsureEngine returns it: every runtime image it
+// published resolved to the digest the organization's registry serves for
+// ImageTag.
+var trialEngine = GitHubEngine{Owner: "Example-Org", Repository: "fc-forge-ci", Commit: strings.Repeat("a", 40),
+	Digests: publishedDigests()}
+
+// publishedDigests is a distinct digest for every runtime image the engine
+// publishes; the base image's is all b and the Go builder's all c.
+func publishedDigests() map[string]string {
+	return map[string]string{
+		"forge-ci-runtime-base":        "sha256:" + strings.Repeat("b", 64),
+		"forge-ci-runtime-go-1.27":     "sha256:" + strings.Repeat("c", 64),
+		"forge-ci-runtime":             "sha256:" + strings.Repeat("d", 64),
+		"forge-ci-runtime-java-25":     "sha256:" + strings.Repeat("e", 64),
+		"forge-ci-runtime-node-24":     "sha256:" + strings.Repeat("f", 64),
+		"forge-ci-runtime-rust-stable": "sha256:" + strings.Repeat("1", 64),
+		"forge-ci-runtime-android-35":  "sha256:" + strings.Repeat("2", 64),
+	}
+}
 
 func TestReportRunRetriesTransientJobReads(t *testing.T) {
 	for _, tc := range []struct {
@@ -224,6 +242,7 @@ const fixturePullRequest = `jobs:
     with:
       forge-ci-binary-ref: v0.90.0
       runtime-image: ghcr.io/diggsweden/forge-ci-runtime-base:v0.90.0
+      canonical-builder-image: ghcr.io/diggsweden/forge-ci-runtime-go-1.27:v0.90.0
       runtime-image-go: "ghcr.io/diggsweden/forge-ci-runtime-go-1.27:v0.90.0"
       nanolinter-image: ghcr.io/itiquette/nanolinter:go
   test:
@@ -232,8 +251,9 @@ const fixturePullRequest = `jobs:
 `
 
 // The fixture's pins are the published engine's; rendered, every one names
-// the engine under test: its workflows at the commit, the rolling pre-release
-// binary, and the runtime images built for the commit, in lowercase GHCR.
+// the engine under test: its workflows and binary at the commit, and the
+// runtime images built for the commit, in lowercase GHCR, by digest where
+// the engine resolved one.
 func TestRenderGitHubConsumer_PinsTheEngineUnderTest(t *testing.T) {
 	t.Parallel()
 
@@ -244,9 +264,10 @@ func TestRenderGitHubConsumer_PinsTheEngineUnderTest(t *testing.T) {
 
 	for _, want := range []string{
 		"uses: Example-Org/fc-forge-ci/.github/workflows/pullrequest-orchestrator.yml@" + trialEngine.Commit,
-		"forge-ci-binary-ref: v0.90.0-pre",
-		"runtime-image: ghcr.io/example-org/forge-ci-runtime-base:sha-aaaaaaa",
-		`"ghcr.io/example-org/forge-ci-runtime-go-1.27:sha-aaaaaaa"`,
+		"forge-ci-binary-ref: " + trialEngine.Commit,
+		"runtime-image: ghcr.io/example-org/forge-ci-runtime-base@sha256:" + strings.Repeat("b", 64),
+		"canonical-builder-image: ghcr.io/example-org/forge-ci-runtime-go-1.27@sha256:" + strings.Repeat("c", 64),
+		`"ghcr.io/example-org/forge-ci-runtime-go-1.27@sha256:` + strings.Repeat("c", 64) + `"`,
 		"nanolinter-image: ghcr.io/itiquette/nanolinter:go",
 		"uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10",
 	} {
@@ -274,6 +295,7 @@ func TestRenderGitHubConsumer_CargoLintImageOverride(t *testing.T) {
     with:
       forge-ci-binary-ref: v0.90.0
       runtime-image: ghcr.io/diggsweden/forge-ci-runtime-base:v0.90.0
+      canonical-builder-image: ghcr.io/diggsweden/forge-ci-runtime-go-1.27:v0.90.0
       project-type: cargo
       lint-engine: nanolinter
       nanolinter-image: codefloe.com/itiquette/nanolinter:go
@@ -577,10 +599,83 @@ func TestRenderGitHubConsumer_RequiresTheRuntimeImageOfAnOrchestratorCall(t *tes
 	}
 
 	withImage := call + "      runtime-image: ghcr.io/diggsweden/forge-ci-runtime-base:v0.90.0\n"
+	if _, _, err := RenderGitHubConsumer("release.yml", withImage, engine, nil); !errors.Is(err, errs.ErrValidation) ||
+		!strings.Contains(err.Error(), "canonical-builder-image") {
+		t.Fatalf("RenderGitHubConsumer() = %v, want the missing canonical-builder-image named", err)
+	}
 
-	rendered, _, err := RenderGitHubConsumer("release.yml", withImage, engine, nil)
-	if err != nil || !strings.Contains(rendered, "runtime-image: "+engine.Registry()+"/forge-ci-runtime-base:"+engine.ImageTag()) {
-		t.Fatalf("RenderGitHubConsumer() = %v:\n%s", err, rendered)
+	withBuilder := withImage + "      canonical-builder-image: ghcr.io/diggsweden/forge-ci-runtime-go-1.27@sha256:" + strings.Repeat("0", 64) + "\n"
+	if _, _, err := RenderGitHubConsumer("release.yml", withBuilder, engine, nil); !errors.Is(err, errs.ErrValidation) ||
+		!strings.Contains(err.Error(), "digest") {
+		t.Fatalf("RenderGitHubConsumer() = %v, want a refusal while the engine knows no digests", err)
+	}
+
+	engine.Digests = map[string]string{"forge-ci-runtime-base": "sha256:" + strings.Repeat("b", 64), "forge-ci-runtime-go-1.27": "sha256:" + strings.Repeat("c", 64)}
+
+	rendered, _, err := RenderGitHubConsumer("release.yml", withBuilder, engine, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, want := range []string{
+		"runtime-image: " + engine.Registry() + "/forge-ci-runtime-base@sha256:" + strings.Repeat("b", 64),
+		"canonical-builder-image: " + engine.Registry() + "/forge-ci-runtime-go-1.27@sha256:" + strings.Repeat("c", 64),
+	} {
+		if !strings.Contains(rendered, want) {
+			t.Errorf("rendered release call lacks %q:\n%s", want, rendered)
+		}
+	}
+}
+
+// A release call's plain-runner jobs run the canonical CLI built from the
+// full engine commit, so its binary ref renders as that commit while a
+// pull-request call keeps the rolling pre-release; every image renders by the
+// digest the engine published, a fixture's own pin or tag replaced, and an
+// image the engine published no digest for is refused.
+func TestRenderGitHubConsumer_ReleaseCallPinsTheEngineCommitAndDigests(t *testing.T) {
+	t.Parallel()
+
+	engine := GitHubEngine{Owner: "Example-Org", Repository: "fc-forge-ci", Commit: strings.Repeat("a", 40),
+		Digests: publishedDigests()}
+
+	fixture := strings.Join([]string{
+		"jobs:",
+		"  release:",
+		"    uses: diggsweden/forge-ci/.github/workflows/release-orchestrator.yml@84180b5ac07af63d33917bec306e7f838aa8e366 # v0.90.0",
+		"    with:",
+		"      forge-ci-binary-ref: 84180b5ac07af63d33917bec306e7f838aa8e366 # v0.90.0",
+		"      runtime-image: ghcr.io/diggsweden/forge-ci-runtime-base@sha256:" + strings.Repeat("0", 64) + " # FIXME",
+		"      canonical-builder-image: ghcr.io/diggsweden/forge-ci-runtime-go-1.27@sha256:" + strings.Repeat("0", 64),
+		"      runtime-image-full: ghcr.io/diggsweden/forge-ci-runtime:v0.90.0",
+		"",
+	}, "\n")
+
+	rendered, _, err := RenderGitHubConsumer("release.yml", fixture, engine, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, want := range []string{
+		"uses: Example-Org/fc-forge-ci/.github/workflows/release-orchestrator.yml@" + engine.Commit + " # v0.90.0",
+		"forge-ci-binary-ref: " + engine.Commit + "\n",
+		"runtime-image: ghcr.io/example-org/forge-ci-runtime-base@sha256:" + strings.Repeat("b", 64) + " # FIXME",
+		"canonical-builder-image: ghcr.io/example-org/forge-ci-runtime-go-1.27@sha256:" + strings.Repeat("c", 64),
+		"runtime-image-full: ghcr.io/example-org/forge-ci-runtime@sha256:" + strings.Repeat("d", 64),
+	} {
+		if !strings.Contains(rendered, want) {
+			t.Errorf("rendered release call lacks %q:\n%s", want, rendered)
+		}
+	}
+
+	if strings.Contains(rendered, strings.Repeat("0", 64)) || strings.Contains(rendered, GitHubPrerelease) {
+		t.Errorf("rendered release call keeps a placeholder digest or the pre-release binary:\n%s", rendered)
+	}
+
+	delete(engine.Digests, "forge-ci-runtime")
+
+	if _, _, err := RenderGitHubConsumer("release.yml", fixture, engine, nil); !errors.Is(err, errs.ErrValidation) ||
+		!strings.Contains(err.Error(), "forge-ci-runtime,") {
+		t.Errorf("an image the engine published no digest for must be refused, got %v", err)
 	}
 }
 
@@ -598,7 +693,7 @@ func TestRenderGitHubConsumer_AcceptsAnyFixtureOwner(t *testing.T) {
 
 	for _, want := range []string{
 		"uses: Example-Org/fc-forge-ci/.github/workflows/pullrequest-orchestrator.yml@" + trialEngine.Commit,
-		"runtime-image: ghcr.io/example-org/forge-ci-runtime-base:sha-aaaaaaa",
+		"runtime-image: ghcr.io/example-org/forge-ci-runtime-base@sha256:" + strings.Repeat("b", 64),
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("rendered fixture lacks %q:\n%s", want, got)

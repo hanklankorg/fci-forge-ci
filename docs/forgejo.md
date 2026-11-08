@@ -738,9 +738,10 @@ checkout. Jobs that select an upstream release use a different trust anchor:
 | Upstream release installer | A tagged release from GitHub Releases. | `checksums.txt` and its Sigstore bundle. | The identity of the workflow that built and signed the release. |
 | Shared engine resolver (Forgejo and GitLab) | The build a commit names, from the serving instance's generic package registry. | The SHA-256 recorded in the pinned commit. | The commit pin. Nothing says who built the bytes; the recorded line says which bytes, and the rebuild above ties them to the sources. |
 
-The upstream GitHub release has a Sigstore-verified binary installer,
-`.github/actions/install-forge-ci`, for jobs that select that release. The
-shared engine resolver uses its separately recorded build and instance-local
+The upstream GitHub release's Sigstore bundle is for people who download the
+CLI; GitHub jobs build the engine from the pinned commit instead
+([Installing `forge-ci`](providers.md#installing-forge-ci)). The shared
+engine resolver uses its separately recorded build and instance-local
 package; an upstream release archive does not replace that checksum-bound
 package. See [GitLab](gitlab.md) for the GitLab bootstrap and registry setup.
 
@@ -765,10 +766,7 @@ the commit the workflow already pins:
 
 The action downloads the binary that commit records from the instance's
 package registry, verifies it against the recorded checksum and adds it to
-`PATH`; `expected-sha256` adds a pin of the caller's own. A standalone job can
-instead install an authenticated upstream release with
-`.github/actions/install-forge-ci`; see
-[Installing `forge-ci`](providers.md#installing-forge-ci).
+`PATH`; `expected-sha256` adds a pin of the caller's own.
 
 Run artifacts between such jobs are the current run's only: keep producing
 and consuming jobs `needs:`-chained inside one workflow run, as the release

@@ -9,19 +9,50 @@ the former strict `/usr/bin:/bin` hid the approved runtime's gh, Cosign,
 git-cliff, Go and Cargo. It does not qualify an image, provide cold modules,
 select production pins or activate a release.
 
-`scripts/ci/trusted-runtime-tools.sh` is the single fixed tool-profile owner:
+`scripts/ci/trusted-runtime-tools.sh` is the single fixed tool-profile owner.
+Its first argument names one of three finite profiles; the admitted workflow
+YAML states it as a literal (`tool-profile` on the consume action, or the
+literal in a producer step), and an unknown name is refused:
 
 ```text
-PATH=/usr/local/go/bin:/usr/local/cargo/bin:/usr/local/bin:/usr/bin:/bin
-RUSTUP_HOME=/usr/local/rustup
-CARGO_HOME=$HOME/.cargo
+runtime         PATH=/usr/local/go/bin:/usr/local/cargo/bin:/usr/local/bin:/usr/bin:/bin
+                RUSTUP_HOME=/usr/local/rustup
+                CARGO_HOME=$HOME/.cargo
+host            PATH=/usr/bin:/bin
+host-toolchain  PATH=/usr/bin:/bin:/usr/local/bin
 ```
 
-No caller-supplied PATH or tool-directory input is accepted. No workspace, current
-directory, home bin, job-install directory or source-tree/Mise shim is searched.
-These image-owned directories must be immutable/trusted in the qualified runtime;
-the profile does not authenticate an arbitrary image or a writable tool directory.
-There is no SDK CLI identity comparison and no installer/download fallback.
+`runtime` is the approved runtime Containerfile's fixed tool directories, for
+every receiver whose job container is the admitted image. `host` is a hosted
+runner's root-owned system tools (bash, git, gh, jq, gpg, python3 in
+`/usr/bin`), for the plain-runner jobs that hold signing keys or the release
+token: version-bump, the GPG signer and the publisher. `host-toolchain` adds
+the hosted runner's documented product-toolchain directory and is used by
+exactly one job, `prepare-version-files`, whose CLI runs the product's own
+version tools (`mvn`, `npm`) and holds no key. Those tools are unqualified by
+design: on the hosted image `mvn` resolves into a world-writable Maven tree
+and `/usr/local/bin` is world-writable. This is an explicitly stated
+trusted-platform premise, not a verified property. A profile fixes `PATH`
+only (`runtime` also fixes the two Cargo homes); every other variable of the
+job environment, `JAVA_HOME` and the toolchain homes among them, reaches the
+CLI and its children unchanged, so the hosted runner's own environment is
+what lets `mvn`, `npm` and a JDK resolve there. That resolution is owed live
+proof by a Maven and an npm consumer release; the Go consumer exercises
+neither. The product tools run consumer code (`npm version` scripts, Maven
+plugins), and the patch and its digest are then produced by the same
+key-free job with the runner's inherited `PATH`: the digest is the
+producer's own statement, not an independent one. What the privileged
+`version-bump` job re-verifies is transport integrity, by exact artifact ID
+and digest, and the bump-plan validation of the patch (its file set and
+parseability), before any private effect. A tampered tool therefore
+changes a file the next job validates on those terms and can refuse, never
+a key operation; it does not make that content independently reviewed.
+No profile reads a caller PATH or
+tool-directory input, and no workspace, current directory, home bin,
+job-install directory or source-tree/Mise shim is searched. The image-owned
+directories must be immutable/trusted in the qualified runtime; a profile does
+not authenticate an arbitrary image or a writable tool directory. There is no
+SDK CLI identity comparison and no installer/download fallback.
 
 The existing runtime Containerfile installs Go at `/usr/local/go`, Cargo's
 executables at `/usr/local/cargo/bin`, and Rust toolchains at `/usr/local/rustup`.

@@ -76,14 +76,16 @@ on:
         default: false
         type: boolean
       forge-ci-binary-ref:
-        description: "forge-ci ref/version passed downstream; empty resolves the current stable release tag once"
-        required: false
-        default: ""
+        description: "Full approved engine commit (40 hex). The canonical CLI every control-plane job and lint job runs is built from exactly this commit; the stage pins its callees to it."
+        required: true
         type: string
       runtime-image:
-        description: "forge-ci base runtime image for PR control-plane and summary jobs. Empty uses the resolved forge-ci version."
-        required: false
-        default: ""
+        description: "Administrator-pinned forge-ci base runtime image@sha256 digest for the PR control-plane and summary jobs. Tags are refused by canonical admission."
+        required: true
+        type: string
+      canonical-builder-image:
+        description: "Administrator-pinned Go-qualified image@sha256 digest for the canonical CLI build only. No fallback to policy or product runtimes."
+        required: true
         type: string
       nanolinter-image:
         description: "Required when lint-engine=nanolinter: the image the nanolinter lint job runs in, pinned by @sha256:<64 lowercase hex>. Pick the flavour for project-type: go, java (maven), kotlin (gradle, gradle-android), javascript-typescript (npm), rust (cargo), swift (xcode-ios), core otherwise; the plan job refuses a tag."
@@ -113,26 +115,85 @@ jobs:
     uses: ./.github/workflows/resolve-forge-ci-bootstrap.yml
     with:
       forge-ci-binary-ref: ${{ inputs['forge-ci-binary-ref'] }}
+      images: |
+        runtime-image=${{ inputs['runtime-image'] }}
+  canonical-cli:
+    needs: [resolve-bootstrap]
+    permissions:
+      contents: read
+      actions: read
+    # Integrated delivery owner; the approved engine commit must also contain
+    # the consumer action/script used by each receiving job.
+    uses: ./.github/workflows/canonical-cli-bootstrap.yml
+    with:
+      engine-repository: ${{ needs.resolve-bootstrap.outputs.forge-ci-repository }}
+      engine-commit: ${{ inputs['forge-ci-binary-ref'] }}
+      runtime-image: ${{ inputs['canonical-builder-image'] }}
+      receive-runtime-image: ${{ inputs['runtime-image'] }}
 
   # ===== Stage 0: PR Plan =====
   compose-pr-plan:
-    needs: [resolve-bootstrap]
+    needs: [resolve-bootstrap, canonical-cli]
+    if: ${{ !failure() && !cancelled() && needs.canonical-cli.result == 'success' }}
     name: "Check: plan"
     runs-on: ubuntu-26.04
     container:
-      image: ${{ inputs['runtime-image'] || needs.resolve-bootstrap.outputs['runtime-image'] }}
+      image: ${{ inputs['runtime-image'] }}
     permissions:
       contents: read
+      actions: read # Canonical metadata/download; intentional read-only increase.
     outputs:
       pr-plan-json: ${{ steps.plan.outputs.pr-plan-json }}
       quality-stage-plan-json: ${{ steps.plan.outputs.quality-stage-plan-json }}
     steps:
+      - &canonical-context
+        name: Require original canonical success and approved identity
+        shell: /bin/bash --noprofile --norc -peuo pipefail {0}
+        env:
+          ENGINE_REPOSITORY: ${{ needs.resolve-bootstrap.outputs.forge-ci-repository }}
+          ENGINE_COMMIT: ${{ inputs['forge-ci-binary-ref'] }}
+          ENGINE_ORIGIN: ${{ github.server_url }}/${{ needs.resolve-bootstrap.outputs.forge-ci-repository }}
+          RUNTIME_IMAGE: ${{ inputs['runtime-image'] }}
+          PRODUCER_ARTIFACT_ID: ${{ needs.canonical-cli.outputs.artifact-id }}
+          PRODUCER_ARTIFACT_NAME: ${{ needs.canonical-cli.outputs.artifact-name }}
+          PRODUCER_RUN_ID: ${{ needs.canonical-cli.outputs.producer-run-id }}
+          PRODUCER_RUN_ATTEMPT: ${{ needs.canonical-cli.outputs.producer-run-attempt }}
+          PRODUCER_ENGINE_REPOSITORY: ${{ needs.canonical-cli.outputs.engine-repository }}
+          PRODUCER_ENGINE_COMMIT: ${{ needs.canonical-cli.outputs.engine-commit }}
+          CANONICAL_PRODUCER_RESULT: ${{ needs.canonical-cli.result }}
+        run: |
+          [[ "$GITHUB_RUN_ID" =~ ^[1-9][0-9]*$ && "$GITHUB_RUN_ATTEMPT" =~ ^[1-9][0-9]*$ ]]
+          [[ "$CANONICAL_PRODUCER_RESULT" == success && "$PRODUCER_RUN_ID" == "$GITHUB_RUN_ID" && "$PRODUCER_RUN_ATTEMPT" == "$GITHUB_RUN_ATTEMPT" ]]
+          [[ "$ENGINE_REPOSITORY" =~ ^[A-Za-z0-9_-][A-Za-z0-9_.-]*/[A-Za-z0-9_-][A-Za-z0-9_.-]*$ && "$ENGINE_COMMIT" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$PRODUCER_ENGINE_REPOSITORY" == "$ENGINE_REPOSITORY" && "$PRODUCER_ENGINE_COMMIT" == "$ENGINE_COMMIT" ]]
+          [[ "$PRODUCER_ARTIFACT_ID" =~ ^[1-9][0-9]*$ && "$PRODUCER_ARTIFACT_NAME" == "forge-ci-canonical-linux-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-$ENGINE_COMMIT" ]]
+          [[ "$RUNTIME_IMAGE" =~ ^[a-z0-9][a-z0-9./:_-]*@sha256:[0-9a-f]{64}$ ]]
+          [[ "$GITHUB_SERVER_URL" =~ ^https://[^/?#@[:space:]]+$ && "$ENGINE_ORIGIN" == "$GITHUB_SERVER_URL/$ENGINE_REPOSITORY" ]]
+          for variable in ENGINE_REPOSITORY ENGINE_COMMIT ENGINE_ORIGIN RUNTIME_IMAGE PRODUCER_ARTIFACT_ID PRODUCER_ARTIFACT_NAME PRODUCER_RUN_ID PRODUCER_RUN_ATTEMPT PRODUCER_ENGINE_REPOSITORY PRODUCER_ENGINE_COMMIT CANONICAL_PRODUCER_RESULT; do
+            printf '%s=%s\n' "$variable" "${!variable}" >>"$GITHUB_ENV"
+          done
+      - &canonical-checkout
+        name: Checkout only the approved engine before consumer or private steps
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          repository: ${{ env.ENGINE_REPOSITORY }}
+          ref: ${{ env.ENGINE_COMMIT }}
+          path: _forge_ci_bootstrap
+          persist-credentials: false
+          submodules: false
+          lfs: false
+      - &canonical-consume
+        name: Consume canonical CLI from the independently pinned engine checkout
+        id: canonical-bootstrap
+        uses: ./_forge_ci_bootstrap/.github/actions/consume-canonical-cli
+        with:
+          tool-profile: runtime # The job container is the approved image.
       - name: Compose PR control-plane plan
         id: plan
         env:
           PROJECT_TYPE: ${{ inputs['project-type'] }}
           BASE_BRANCH: ${{ inputs['base-branch'] }}
-          FORGE_CI_BINARY_REF: ${{ needs.resolve-bootstrap.outputs.forge-ci-binary-ref }}
+          FORGE_CI_BINARY_REF: ${{ inputs['forge-ci-binary-ref'] }}
           LINT_ENGINE: ${{ inputs['lint-engine'] }}
           NANOLINTER_IMAGE: ${{ inputs['nanolinter-image'] }}
           LINTER_SWIFTFORMAT: ${{ inputs['linters.swiftformat'] }}
@@ -142,7 +203,7 @@ jobs:
   # ===== Stage 1: Quality =====
   execute-quality-stage:
     name: Check
-    needs: [resolve-bootstrap, compose-pr-plan]
+    needs: [resolve-bootstrap, canonical-cli, compose-pr-plan]
     permissions:
       actions: read
       contents: read
@@ -154,25 +215,35 @@ jobs:
       enforce-vulnerabilities: ${{ inputs['enforce-vulnerabilities'] }}
       pr-plan-json: ${{ needs.compose-pr-plan.outputs.pr-plan-json }}
       quality-stage-plan-json: ${{ needs.compose-pr-plan.outputs.quality-stage-plan-json }}
-      runtime-image: ${{ inputs['runtime-image'] || needs.resolve-bootstrap.outputs['runtime-image'] }}
+      runtime-image: ${{ inputs['runtime-image'] }}
       required-lints: ${{ inputs['required-lints'] }}
       megalinter-image: ${{ inputs['megalinter-image'] }}
-      forge-ci-binary-ref: ${{ needs.resolve-bootstrap.outputs.forge-ci-binary-ref }}
+      forge-ci-binary-ref: ${{ inputs['forge-ci-binary-ref'] }}
+      canonical-artifact-id: ${{ needs.canonical-cli.outputs.artifact-id }}
+      canonical-artifact-name: ${{ needs.canonical-cli.outputs.artifact-name }}
+      canonical-producer-run-id: ${{ needs.canonical-cli.outputs.producer-run-id }}
+      canonical-producer-run-attempt: ${{ needs.canonical-cli.outputs.producer-run-attempt }}
+      canonical-producer-engine-repository: ${{ needs.canonical-cli.outputs.engine-repository }}
+      canonical-producer-engine-commit: ${{ needs.canonical-cli.outputs.engine-commit }}
+      canonical-producer-result: ${{ needs.canonical-cli.result }}
 
   # ===== Summary =====
   pr-summary:
     name: Summary
-    needs: [resolve-bootstrap, compose-pr-plan, execute-quality-stage]
+    needs: [resolve-bootstrap, canonical-cli, compose-pr-plan, execute-quality-stage]
     if: always() && needs.resolve-bootstrap.result == 'success'
     runs-on: ubuntu-26.04
     container:
-      image: ${{ inputs['runtime-image'] || needs.resolve-bootstrap.outputs['runtime-image'] }}
+      image: ${{ inputs['runtime-image'] }}
     permissions:
       actions: read
       contents: read
     steps:
+      - *canonical-context
+      - *canonical-checkout
+      - *canonical-consume
       - name: Download quality stage manifests
-        if: always()
+        if: always() && steps.canonical-bootstrap.outputs.verified == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: forge-ci artifact download --name ci-results-pr-quality --dir .ci-results

@@ -7,11 +7,13 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"fmt"
+	"maps"
 	"regexp"
 	"slices"
 	"strings"
 
 	"golang.org/x/crypto/nacl/box"
+	"gopkg.in/yaml.v3"
 
 	"github.com/diggsweden/forge-ci/internal/domain/container"
 	"github.com/diggsweden/forge-ci/internal/domain/errs"
@@ -23,7 +25,8 @@ import (
 // the live calls are in githubtrial.go.
 
 // GitHubPrerelease is the rolling pre-release Self Runtime Container moves to
-// the commit it built, and the binary ref a trial's consumer installs.
+// the commit it built. The trial waits for it as the sign that the engine's
+// images exist; no consumer installs from it.
 const GitHubPrerelease = "v0.90.0-pre"
 
 const githubWorkflowDirectory = ".github/workflows"
@@ -35,7 +38,23 @@ type GitHubEngine struct {
 	Repository string // repository name, without the owner
 	Commit     string // the full commit its reusable workflows are pinned to
 	Namespace  string // optional full runtime image namespace; empty preserves owner-global coordinates
-	admin      *workflowAdmin
+	// Digests are what the registry serves for ImageTag, by image name such as
+	// forge-ci-runtime-base. Every image a fixture names renders by digest, as
+	// every workflow admits only digest-pinned images; a fixture naming an
+	// image the engine has no digest for is refused.
+	Digests map[string]string
+	admin   *workflowAdmin
+}
+
+// RuntimeImage is the digest-pinned reference of a runtime image the engine
+// published, such as forge-ci-runtime-base, and false when it published none.
+func (engine GitHubEngine) RuntimeImage(image string) (string, bool) {
+	digest, ok := engine.Digests[image]
+	if !ok {
+		return "", false
+	}
+
+	return engine.Registry() + "/" + image + "@" + digest, true
 }
 
 // ImageTag is the runtime-image tag Self Runtime Container publishes for the
@@ -67,13 +86,15 @@ func (engine GitHubEngine) KeylessIdentityRegexp() string {
 var (
 	githubWorkflowUse = regexp.MustCompile(`(uses:[ \t]*['"]?)[A-Za-z0-9_.-]+/forge-ci(/\.github/workflows/[^@\s'"]+)@[^\s'"#]+`)
 	githubBinaryRef   = regexp.MustCompile(`(?m)^([ \t]*forge-ci-binary-ref:[ \t]*).*$`)
-	githubRuntimeRef  = regexp.MustCompile(`ghcr\.io/[A-Za-z0-9_.-]+/(forge-ci-runtime[a-z0-9.-]*):[A-Za-z0-9._-]+`)
+	githubRuntimeRef  = regexp.MustCompile(`ghcr\.io/[A-Za-z0-9_.-]+/(forge-ci-runtime[a-z0-9.-]*)(?::[A-Za-z0-9._-]+|@sha256:[0-9a-f]{64})`)
 	githubLeftover    = regexp.MustCompile(`uses:[ \t]*['"]?([^\s'"#]+/\.github/workflows/[^\s'"#]+)`)
 )
 
 // RenderGitHubConsumer puts the engine where a fixture names the published
-// one: its reusable workflows at the commit, the rolling pre-release binary,
-// and the runtime images Self Runtime Container built for the commit.
+// one: its reusable workflows at the commit, the binary (the full engine
+// commit: every route runs the canonical CLI built from it, or the engine
+// baked into its images), and the runtime images Self Runtime Container
+// built for the commit, by digest where the engine knows one.
 // Overrides are further `input: value` lines the caller sets, such as a
 // mirrored nanolinter image. Each replaces the line wherever this workflow
 // writes it; the inputs it replaced are returned, so the caller can refuse a
@@ -94,8 +115,31 @@ func RenderGitHubConsumer(name, text string, engine GitHubEngine, overrides map[
 	}
 
 	rendered := githubWorkflowUse.ReplaceAllString(text, "${1}"+engine.Owner+"/"+engine.Repository+"${2}@"+engine.Commit)
-	rendered = githubBinaryRef.ReplaceAllString(rendered, "${1}"+GitHubPrerelease)
-	rendered = githubRuntimeRef.ReplaceAllString(rendered, engine.Registry()+"/${1}:"+engine.ImageTag())
+	rendered = githubBinaryRef.ReplaceAllString(rendered, "${1}"+engine.Commit)
+
+	var unresolved []string
+
+	rendered = githubRuntimeRef.ReplaceAllStringFunc(rendered, func(reference string) string {
+		image := githubRuntimeRef.FindStringSubmatch(reference)[1]
+
+		pinned, ok := engine.RuntimeImage(image)
+		if !ok {
+			unresolved = append(unresolved, image)
+
+			return reference
+		}
+
+		return pinned
+	})
+
+	if len(unresolved) > 0 {
+		return "", nil, fmt.Errorf("%s names %s, which the engine under test published no digest for; every workflow admits "+
+			"its images only by digest: %w", name, strings.Join(slices.Compact(slices.Sorted(slices.Values(unresolved))), ", "), errs.ErrValidation)
+	}
+
+	if err := requireAdmittedImages(name, rendered); err != nil {
+		return "", nil, err
+	}
 
 	rendered, applied := githubInputOverrides(rendered, overrides)
 
@@ -136,17 +180,65 @@ func githubInputOverrides(text string, overrides map[string]string) (string, []s
 }
 
 // requireOrchestratorImages refuses a fixture that calls an orchestrator
-// without passing runtime-image. An orchestrator's image inputs default to the
-// released images, which an unreleased engine has not built; only an image a
-// fixture names can be pointed at the organization's build of it.
+// without passing runtime-image and the canonical builder image. Only an
+// image a fixture names can be pointed at the organization's build of it,
+// and every orchestrator admits both as digests.
 func requireOrchestratorImages(name, text string) error {
-	if !githubOrchestratorUse.MatchString(text) || githubRuntimeImageInput.MatchString(text) {
+	if !githubOrchestratorUse.MatchString(text) {
 		return nil
 	}
 
-	return fmt.Errorf("%s calls a forge-ci orchestrator without passing runtime-image; pass it, and the image of each "+
-		"project type the workflow builds (runtime-image-java for maven), as ghcr.io/diggsweden/forge-ci-runtime-*:<tag>, "+
-		"so the trial can point them at the engine under test: %w", name, errs.ErrValidation)
+	if !githubRuntimeImageInput.MatchString(text) {
+		return fmt.Errorf("%s calls a forge-ci orchestrator without passing runtime-image; pass it, and the image of each "+
+			"project type the workflow builds (runtime-image-java for maven), as ghcr.io/diggsweden/forge-ci-runtime-*:<tag> "+
+			"or @sha256:<digest>, so the trial can point them at the engine under test: %w", name, errs.ErrValidation)
+	}
+
+	if !githubCanonicalBuilderInput.MatchString(text) {
+		return fmt.Errorf("%s calls a forge-ci orchestrator without passing canonical-builder-image; pass it as "+
+			"ghcr.io/diggsweden/forge-ci-runtime-go-1.27@sha256:<digest>, so the trial can point it at the engine under test: %w",
+			name, errs.ErrValidation)
+	}
+
+	return nil
+}
+
+// requireAdmittedImages refuses a rendered call of an engine workflow that
+// passes a runtime image other than by digest: the callee's first job would
+// refuse it, after the push.
+func requireAdmittedImages(name, rendered string) error {
+	var workflow struct {
+		Jobs map[string]struct {
+			Uses string            `yaml:"uses"`
+			With map[string]string `yaml:"with"`
+		} `yaml:"jobs"`
+	}
+
+	if err := yaml.Unmarshal([]byte(rendered), &workflow); err != nil {
+		return fmt.Errorf("%s: %w", name, err)
+	}
+
+	for _, job := range slices.Sorted(maps.Keys(workflow.Jobs)) {
+		call := workflow.Jobs[job]
+		workflowPath, _, _ := strings.Cut(call.Uses, "@")
+
+		if !strings.Contains(workflowPath, "/.github/workflows/") {
+			continue
+		}
+
+		for _, input := range slices.Sorted(maps.Keys(call.With)) {
+			if !strings.HasPrefix(input, "runtime-image") && input != "canonical-builder-image" {
+				continue
+			}
+
+			if value := call.With[input]; !pinnedImage.MatchString(value) {
+				return fmt.Errorf("%s renders %s of job %s as %q, which the workflow admits only as image@sha256 digest; "+
+					"the engine under test must resolve the digest of that image: %w", name, input, job, value, errs.ErrValidation)
+			}
+		}
+	}
+
+	return nil
 }
 
 var (
@@ -155,6 +247,9 @@ var (
 	githubOrchestratorUse = regexp.MustCompile(`uses:[ \t]*['"]?[A-Za-z0-9_.-]+/forge-ci/\.github/workflows/[a-z-]+-orchestrator\.yml@`)
 	// githubRuntimeImageInput is the base runtime image passed as an input.
 	githubRuntimeImageInput = regexp.MustCompile(`(?m)^[ \t]+runtime-image:[ \t]*\S`)
+	// githubCanonicalBuilderInput is the Go builder image an orchestrator
+	// builds its canonical CLI in, passed as an input.
+	githubCanonicalBuilderInput = regexp.MustCompile(`(?m)^[ \t]+canonical-builder-image:[ \t]*\S`)
 )
 
 // SealGitHubSecret encrypts a secret value for GitHub's Actions secrets API:

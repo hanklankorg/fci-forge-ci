@@ -36,13 +36,11 @@ on:
         required: true
         type: string
       forge-ci-binary-ref:
-        required: false
-        default: ""
+        required: true
         type: string
       runtime-image:
         description: "forge-ci runtime image for the summarize job (base is sufficient)"
-        required: false
-        default: ""
+        required: true
         type: string
       runtime-image-java:
         description: "forge-ci runtime image for Maven/Gradle jobs"
@@ -122,11 +120,13 @@ jobs:
     uses: ./.github/workflows/resolve-forge-ci-bootstrap.yml
     with:
       forge-ci-binary-ref: ${{ inputs['forge-ci-binary-ref'] }}
+      images: |
+        runtime-image=${{ inputs['runtime-image'] }}
   validate-test-selections:
     needs: [resolve-bootstrap]
     runs-on: ubuntu-26.04
     container:
-      image: ${{ inputs['runtime-image'] || needs.resolve-bootstrap.outputs['runtime-image'] }}
+      image: ${{ inputs['runtime-image'] }}
     permissions:
       contents: read
     outputs:
@@ -159,7 +159,7 @@ jobs:
     uses: ./.github/workflows/build-maven.yml
     with:
       enforce-application-tests: ${{ inputs['enforce-application-tests'] }}
-      forge-ci-binary-ref: ${{ needs.resolve-bootstrap.outputs.forge-ci-binary-ref }}
+      forge-ci-binary-ref: ${{ inputs['forge-ci-binary-ref'] }}
       working-directory: ${{ matrix.artifact.working_directory }}
       private-dependencies: ${{ matrix.artifact.maven.private_dependencies || false }}
       settings-path: ${{ matrix.artifact.maven.settings_path || '' }}
@@ -168,7 +168,7 @@ jobs:
       profile: ${{ matrix.artifact.build_type == 'library' && (matrix.artifact.maven.maven_profile || 'central-release') || '' }}
       artifact-name: ${{ matrix.artifact.name }}
       enable-build-sbom: ${{ contains(matrix.artifact.effective_sboms, 'build') }}
-      runtime-image: ${{ inputs['runtime-image-java'] || needs.resolve-bootstrap.outputs['runtime-image-java'] }}
+      runtime-image: ${{ inputs['runtime-image-java'] }}
   npm:
     needs: [resolve-bootstrap, validate-test-selections]
     name: "Build: ${{ matrix.artifact.name }} (npm)"
@@ -184,14 +184,14 @@ jobs:
     uses: ./.github/workflows/build-npm.yml
     with:
       enforce-application-tests: ${{ inputs['enforce-application-tests'] }}
-      forge-ci-binary-ref: ${{ needs.resolve-bootstrap.outputs.forge-ci-binary-ref }}
+      forge-ci-binary-ref: ${{ inputs['forge-ci-binary-ref'] }}
       working-directory: ${{ matrix.artifact.working_directory }}
       private-dependencies: ${{ matrix.artifact.npm.private_dependencies || false }}
       dependency-registry: ${{ matrix.artifact.npm.dependency_registry || '' }}
       branch: ${{ inputs.branch }}
       artifact-name: ${{ matrix.artifact.name }}
       enable-build-sbom: ${{ contains(matrix.artifact.effective_sboms, 'build') }}
-      runtime-image: ${{ inputs['runtime-image-node'] || needs.resolve-bootstrap.outputs['runtime-image-node'] }}
+      runtime-image: ${{ inputs['runtime-image-node'] }}
       node-version: ${{ matrix.artifact.npm.node_version || '' }}
       expect-version: ${{ inputs['release-tag'] }}
   gradle:
@@ -209,7 +209,7 @@ jobs:
     uses: ./.github/workflows/build-gradle-app.yml
     with:
       enforce-application-tests: ${{ inputs['enforce-application-tests'] }}
-      forge-ci-binary-ref: ${{ needs.resolve-bootstrap.outputs.forge-ci-binary-ref }}
+      forge-ci-binary-ref: ${{ inputs['forge-ci-binary-ref'] }}
       working-directory: ${{ matrix.artifact.working_directory }}
       private-dependencies: ${{ matrix.artifact.gradle.private_dependencies || false }}
       branch: ${{ inputs.branch }}
@@ -219,7 +219,7 @@ jobs:
       central-publication: ${{ contains(matrix.artifact.publish_to, 'maven-central') }}
       gradle-tasks: ${{ matrix.artifact.gradle.gradle_tasks }}
       enable-build-sbom: ${{ contains(matrix.artifact.effective_sboms, 'build') }}
-      runtime-image: ${{ inputs['runtime-image-java'] || needs.resolve-bootstrap.outputs['runtime-image-java'] }}
+      runtime-image: ${{ inputs['runtime-image-java'] }}
   go:
     needs: [resolve-bootstrap, validate-test-selections]
     name: "Build: ${{ matrix.artifact.name }} (Go)"
@@ -235,7 +235,7 @@ jobs:
     with:
       test-selection-json: ${{ needs.validate-test-selections.outputs.go-test-selections-json != '{}' && toJson(fromJson(needs.validate-test-selections.outputs.go-test-selections-json)[matrix.artifact.name]) || '' }}
       enforce-application-tests: ${{ inputs['enforce-application-tests'] }}
-      forge-ci-binary-ref: ${{ needs.resolve-bootstrap.outputs.forge-ci-binary-ref }}
+      forge-ci-binary-ref: ${{ inputs['forge-ci-binary-ref'] }}
       working-directory: ${{ matrix.artifact.working_directory }}
       branch: ${{ inputs.branch }}
       artifact-name: ${{ matrix.artifact.name }}
@@ -249,7 +249,7 @@ jobs:
       ldflags: ${{ matrix.artifact.go.ldflags || '' }}
       skip-tests: ${{ matrix.artifact.go.skip_tests || false }}
       enable-build-sbom: ${{ contains(matrix.artifact.effective_sboms, 'build') }}
-      runtime-image: ${{ inputs['runtime-image-go'] || needs.resolve-bootstrap.outputs['runtime-image-go'] }}
+      runtime-image: ${{ inputs['runtime-image-go'] }}
   cargo:
     needs: [resolve-bootstrap, validate-test-selections]
     name: "Build: ${{ matrix.artifact.name }} (Cargo)"
@@ -265,7 +265,7 @@ jobs:
     with:
       test-selection-json: ${{ needs.validate-test-selections.outputs.cargo-test-selections-json != '{}' && toJson(fromJson(needs.validate-test-selections.outputs.cargo-test-selections-json)[matrix.artifact.name]) || '' }}
       enforce-application-tests: ${{ inputs['enforce-application-tests'] }}
-      forge-ci-binary-ref: ${{ needs.resolve-bootstrap.outputs.forge-ci-binary-ref }}
+      forge-ci-binary-ref: ${{ inputs['forge-ci-binary-ref'] }}
       working-directory: ${{ matrix.artifact.working_directory }}
       branch: ${{ inputs.branch }}
       artifact-name: ${{ matrix.artifact.name }}
@@ -276,7 +276,7 @@ jobs:
       platforms: ${{ matrix.artifact.cargo.platforms || 'linux/amd64' }}
       skip-tests: ${{ matrix.artifact.cargo.skip_tests || false }}
       enable-build-sbom: ${{ contains(matrix.artifact.effective_sboms, 'build') }}
-      runtime-image: ${{ inputs['runtime-image-rust'] || needs.resolve-bootstrap.outputs['runtime-image-rust'] }}
+      runtime-image: ${{ inputs['runtime-image-rust'] }}
   gradle-android:
     needs: [resolve-bootstrap, validate-test-selections]
     name: "Build: ${{ matrix.artifact.name }} (Android)"
@@ -296,7 +296,7 @@ jobs:
     uses: ./.github/workflows/build-gradle-android.yml
     with:
       enforce-application-tests: ${{ inputs['enforce-application-tests'] }}
-      forge-ci-binary-ref: ${{ needs.resolve-bootstrap.outputs.forge-ci-binary-ref }}
+      forge-ci-binary-ref: ${{ inputs['forge-ci-binary-ref'] }}
       library: ${{ matrix.artifact.build_type == 'library' }}
       publication-artifact-name: ${{ matrix.artifact.publication_artifact_name || '' }}
       version: ${{ inputs['release-tag'] }}
@@ -316,7 +316,7 @@ jobs:
       artifact-name: ${{ matrix.artifact.name }}
       enable-signing: ${{ matrix.artifact.gradle_android.enable_android_signing }}
       enable-build-sbom: ${{ contains(matrix.artifact.effective_sboms, 'build') }}
-      runtime-image: ${{ inputs['runtime-image-android'] || needs.resolve-bootstrap.outputs['runtime-image-android'] }}
+      runtime-image: ${{ inputs['runtime-image-android'] }}
   xcode-ios:
     needs: [resolve-bootstrap, validate-test-selections]
     name: "Build: ${{ matrix.artifact.name }} (Xcode)"
@@ -350,7 +350,7 @@ jobs:
       build-number: ${{ matrix.artifact.xcode_ios.build_number }}
       working-directory: ${{ matrix.artifact.working_directory }}
       macos-version: ${{ matrix.artifact.xcode_ios.macos_version || 'macos-26' }}
-      forge-ci-binary-ref: ${{ needs.resolve-bootstrap.outputs.forge-ci-binary-ref }}
+      forge-ci-binary-ref: ${{ inputs['forge-ci-binary-ref'] }}
   # Container-first cargo and container-first Go produce nothing at the
   # build-stage level. Their manifest-derived Build SBOMs and actual
   # compiles (inside the Containerfile) both run in release-publish-stage,
@@ -362,7 +362,7 @@ jobs:
     if: always() && needs.resolve-bootstrap.result == 'success' && needs.validate-test-selections.result == 'success'
     runs-on: ubuntu-26.04
     container:
-      image: ${{ inputs['runtime-image'] || needs.resolve-bootstrap.outputs['runtime-image'] }}
+      image: ${{ inputs['runtime-image'] }}
     permissions:
       contents: read
     outputs:

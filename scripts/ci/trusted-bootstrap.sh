@@ -13,13 +13,17 @@ fail() {
   printf 'trusted-bootstrap: %s\n' "$1" >&2
   exit 69
 }
-[[ $# -ge 6 && "$5" == -- ]] || fail 'expected CHECKOUT HTTPS_ORIGIN FULL_COMMIT ABSOLUTE_BINARY -- CLI_ARGUMENT...'
-checkout=$1 origin=$2 commit=$3 binary=$4
-shift 5
+[[ $# -ge 7 && "$6" == -- ]] || fail 'expected CHECKOUT HTTPS_ORIGIN FULL_COMMIT ABSOLUTE_BINARY TOOL_PROFILE -- CLI_ARGUMENT...'
+checkout=$1 origin=$2 commit=$3 binary=$4 profile=$5
+shift 6
+[[ "$profile" =~ ^[a-z][a-z-]*$ ]] || fail 'tool profile must be one literal profile name'
 [[ "$commit" =~ ^([0-9a-f]{40}|[0-9a-f]{64})$ ]] || fail 'engine commit must be full and lowercase'
 [[ "$origin" =~ ^https://[^/?#@[:space:]]+/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] || fail 'engine origin must be an explicit HTTPS repository URL'
 [[ "$checkout" == /* && "$binary" == /* ]] || fail 'checkout and binary paths must be absolute'
-[[ "$(uname -s)" == Linux && "$(uname -m)" == x86_64 ]] || fail 'only native linux/amd64 is supported'
+case "$(uname -s)/$(uname -m)" in
+Linux/x86_64 | Linux/aarch64) ;;
+*) fail 'only native linux/amd64 and linux/arm64 are supported' ;;
+esac
 [[ -d "$checkout" && ! -L "$checkout" && "$(realpath -e -- "$checkout")" == "$checkout" ]] || fail 'engine checkout must be a canonical non-symlink directory'
 [[ -f "$binary" && ! -L "$binary" && -x "$binary" && "$(realpath -e -- "$binary")" == "$binary" ]] || fail 'delivery binary must be an available executable regular non-symlink file'
 
@@ -40,7 +44,7 @@ actual_origin=$(engine_git config --local --no-includes --get remote.origin.url)
 # Whole-checkout cleanliness is the fresh trusted checkout caller's obligation;
 # do not use status/diff here (fsmonitor, filters and submodules can run code).
 # No selected-checkout shell is sourced until identity AND contents pass.
-for relative in .engine/bin/lib-forge-ci.sh .engine/bin/forge-ci-linux-amd64.sha256 scripts/ci/trusted-runtime-tools.sh; do
+for relative in .engine/bin/lib-forge-ci.sh .engine/bin/forge-ci-linux-amd64.sha256 .engine/bin/forge-ci-linux-arm64.sha256 scripts/ci/trusted-runtime-tools.sh; do
   file=$checkout/$relative
   [[ -f "$file" && ! -L "$file" && "$(realpath -e -- "$file")" == "$file" ]] || fail "unsafe engine file: $relative"
   mode=$(engine_git ls-tree "$commit" -- "$relative")
@@ -59,5 +63,6 @@ FORGE_CI_BIN=$binary
 verify_forge_ci || exit $?
 unset FORGE_CI_BIN
 # Admit tool placement only AFTER the original absolute CLI's hash verification.
+# The admitted helper owns the finite profile set and refuses an unknown name.
 # Never discover forge-ci on the image's PATH (which may contain an older SDK).
-exec /bin/bash -p "$checkout/scripts/ci/trusted-runtime-tools.sh" "$HELPERS_ENGINE_VERIFIED" "$@"
+exec /bin/bash -p "$checkout/scripts/ci/trusted-runtime-tools.sh" "$profile" "$HELPERS_ENGINE_VERIFIED" "$@"

@@ -23,7 +23,7 @@ and installing a local binary does not publish workflow images.
 | Path | Content |
 |---|---|
 | `.github/workflows/` | Three orchestrators a consumer calls, the stages they compose, and the build, publish, lint, security and release leaves. [Components Reference](components.md#workflow-inventory) is the complete inventory. |
-| `.github/actions/install-forge-ci` | The composite installer for plain-runner jobs: verifies a released binary against its Sigstore bundle. See [Installing `forge-ci`](providers.md#installing-forge-ci). |
+| `.github/actions/consume-canonical-cli`, `.github/actions/build-darwin-cli` | How a job that is not a runtime container gets the engine: Linux host jobs receive the canonical CLI built in the run from the pinned engine commit; macOS jobs build it from the engine checkout. See [Installing `forge-ci`](providers.md#installing-forge-ci). |
 | `containers/runtime/Containerfile` | The runtime images the workflow jobs run in, published on `ghcr.io`. See [Runtime Images](runtime-images.md). |
 | `examples/` | A pull-request, release and, where it applies, snapshot workflow per ecosystem under `<ecosystem>/github/`, and the signing backends. See [Examples](../examples/README.md). |
 
@@ -104,9 +104,10 @@ By hand:
    runs `nanolinter verify`, which discovers root `nanolinter.toml`, then
    `development/nanolinter.toml`, then uses defaults. It requires at least the `required-lints`
    floor, default `secrets,sast`.
-3. **Pin the references.** Replace the examples' `v0.90.0` with the release
-   you install: `uses: ...@vX.Y.Z`, `forge-ci-binary-ref` and any
-   `runtime-image*` override move together; see
+3. **Pin the references.** Replace the examples' `v0.90.0` pins with the
+   release you install: the `uses: ...@<commit>` ref, `forge-ci-binary-ref`
+   (the same full commit), the `runtime-image` and `canonical-builder-image`
+   digests and any other `runtime-image*` override move together; see
    [Advanced Pinning Recipe](runtime-images.md#advanced-pinning-recipe).
 4. **Set the [secrets](#secrets-and-tokens)** your release plan selects
    (`forge-ci setup secrets` lists them), and
@@ -166,8 +167,9 @@ carries a description. The orchestrator inputs most callers set:
 | `release-asset-retention` | release | How many of the newest releases keep every file; older ones keep their checksums and signatures. Empty, the default, deletes nothing. See [Old releases' files](#old-releases-files). |
 | `promote-staging-environment`, `promote-release-environment`, `promote-release-*` | release | The GitHub Environments that gate the promotion ladder, and an optional separate release registry. |
 | `enforce-lint`, `enforce-vulnerabilities`, `enforce-application-tests`, `enforce-reproducible-builds` | PR, release, snapshot | [Check enforcement](admin-policy.md), default `false`, forwarded to every gate. Checks run and report findings; explicit `true` makes recognized findings block. Organisation-mandated values belong in its ruleset-required workflow. No workflow reads them from `vars` or the environment. |
-| `forge-ci-binary-ref` | all | The CLI release plain-runner jobs install. |
-| `runtime-image*` | all | The runtime image of each toolchain family. |
+| `forge-ci-binary-ref` | all | Required: the full engine commit the canonical CLI is built from in the run, for every plain-runner job of the PR, snapshot and release routes. The macOS lanes build the engine from a checkout of the same commit. |
+| `runtime-image*` | all | The runtime image of each toolchain family. `runtime-image` is required on every orchestrator and admitted only as an `@sha256:` digest; it is the control-plane, release-notes, SARIF-upload and cosign signing container. |
+| `canonical-builder-image` | all | Required: the Go runtime image digest the canonical CLI is built in. |
 
 Configuration of what is built, published and signed lives in
 `.forge-ci/artifacts.yml`, not in inputs; see the
@@ -180,8 +182,8 @@ repository; each falls back to the default below. A consumer sets none.
 
 | Variable | Default | Used for |
 |---|---|---|
-| `FORGE_CI_REPOSITORY` | the repository serving the called workflow (`job.workflow_repository`). GitHub Enterprise Server has no such context: there the variable is required, and a job refuses to start without it | bootstrap checkouts and script downloads, binary installs, release URLs, trusted signing identities, and the repository allowed to publish the rolling pre-release CLI |
-| `FORGE_CI_PRERELEASE_BRANCH` | `main` | the branch whose pushes publish runtime images and the pre-release CLI, and the branch the installer trusts for pre-release signatures |
+| `FORGE_CI_REPOSITORY` | the repository serving the called workflow (`job.workflow_repository`). GitHub Enterprise Server has no such context: there the variable is required, and a job refuses to start without it | the engine checkouts and images every job trusts, release URLs, trusted signing identities, and the repository allowed to publish the rolling pre-release CLI |
+| `FORGE_CI_PRERELEASE_BRANCH` | `main` | the branch whose pushes publish runtime images and the pre-release CLI |
 | `RELEASE_PLATFORMS` | `linux/amd64,linux/arm64` | the runtime images' platforms in Self Runtime Container; unset selects both declared architectures, and an explicit value may narrow the selection. An undeclared, duplicated or malformed entry fails before anything is built. Consumers read the same variable for their images with the same meaning, unset building what their configuration declares |
 | `CI_IMAGE_BUILDER` | `buildah` | Linux container and snapshot image builder: `buildah` or `kaniko`. The image leaves' explicit `image-builder` input takes precedence. |
 | `CI_IMAGE_BUILDER_JOB_IMAGE` | unset | Approved digest-pinned Kaniko job image; required when Kaniko is selected. The image leaves' explicit `image-builder-job-image` input takes precedence. |
@@ -238,29 +240,42 @@ names.
 Containerized jobs run in the runtime images, which carry the `forge-ci`
 binary and the toolchain of one family (base, full, Java, Node, Rust, Go,
 Android). Each orchestrator has one `runtime-image*` override per family, and
-each build, publish and changelog workflow one `runtime-image`. An empty
-`forge-ci-binary-ref` resolves the current published stable release to its concrete
-tag once, such as `v0.93.0`. Empty runtime-image overrides select the same tag,
-under `FORGE_CI_IMAGE_NAMESPACE` or the serving repository's owner on `ghcr.io`.
-No workflow names a fixed image.
-Explicit binary refs and image overrides take precedence; source commits use
-the corresponding `sha-<short>` runtime references. No `latest` image tag is used.
+each build, publish and changelog workflow one `runtime-image`. Every
+orchestrator requires `forge-ci-binary-ref` as the full engine commit and
+`runtime-image` and `canonical-builder-image` as `@sha256:` digests, admitted
+before any job runs; the
+[Advanced Pinning Recipe](runtime-images.md#advanced-pinning-recipe) reads them
+from the release you call. `runtime-image-full` and the family images are
+digests too, passed for the artifact types the caller builds; the workflow that
+runs one refuses a tag or an empty value before its job starts. No workflow
+names a fixed image or picks one for its caller.
 [Runtime Images](runtime-images.md) has the roster, which workflow uses
 which image, tag and pinning conventions, and mirroring. Android images are
 linux/amd64 only.
 
-Plain-runner jobs, the container build and the macOS jobs, install the
-binary named by `forge-ci-binary-ref`. A release tag installs the archive
-verified against `checksums.txt` and its Sigstore bundle; a branch or commit
-ref builds from source. [CLI binary channels](runtime-images.md#cli-binary-channels)
-and [Installing `forge-ci`](providers.md#installing-forge-ci) describe both.
-Keep the workflow ref, `forge-ci-binary-ref` and the runtime images on one
-version.
+Every orchestrator pins instead of resolving: `forge-ci-binary-ref` is the
+full engine commit, and `runtime-image` and `canonical-builder-image` are
+`@sha256:` digests, all required. Its first job admits them, builds the CLI
+from that commit in the builder image and hands the exact artifact to every
+Linux plain-runner job of the route, which runs it with the hosted runner's
+root-owned system tools ([canonical CLI delivery](../scripts/ci/canonical-cli-delivery.md),
+[tool profiles](trusted-runtime-tools.md)). No workflow downloads a forge-ci
+binary onto a host.
+
+Every other image a job runs is passed by digest too: `runtime-image-full` and
+the family images (`-java`, `-node`, `-go`, `-rust`, `-android`). The workflow
+that runs one admits it in its first job and refuses a tag or an empty value
+before the job's container starts, so a caller passes the family images its
+artifacts use and leaves out the others. A native release always runs release
+assembly in `runtime-image-full`. The macOS jobs build forge-ci from a checkout
+of the same commit ([Installing `forge-ci`](providers.md#installing-forge-ci)).
+Keep the workflow ref, `forge-ci-binary-ref` and the image digests on one
+release.
 
 Self Release supplies the exact commit named by its release-request tag and
-that commit's runtime images, even while the new stable release does not exist.
-Standalone container-only leaf workflows retain their documented explicit
-runtime defaults; orchestrators pass their resolved image overrides to them.
+that commit's image digests, even while the new stable release does not exist.
+A leaf workflow called on its own takes the same `forge-ci-binary-ref` and a
+`runtime-image` digest.
 
 ### Linux image builders
 
@@ -459,15 +474,24 @@ permissions:
   contents: read
 jobs:
   snapshot-release:
-    uses: diggsweden/forge-ci/.github/workflows/release-snapshot-orchestrator.yml@v0.90.0
+    uses: diggsweden/forge-ci/.github/workflows/release-snapshot-orchestrator.yml@84180b5ac07af63d33917bec306e7f838aa8e366 # v0.90.0
     permissions:
+      actions: read
       contents: read
       packages: write
     # An npm snapshot to GitHub Packages needs no secret. An Android or iOS
     # snapshot passes its signing secrets by name under `secrets:`.
     with:
       branch: ${{ github.ref_name }}
-      forge-ci-binary-ref: v0.90.0
+      # The full commit the workflow ref above names; the snapshot route runs
+      # the CLI built in this run from exactly this commit.
+      forge-ci-binary-ref: 84180b5ac07af63d33917bec306e7f838aa8e366 # v0.90.0
+      # Pinned by digest and admitted before any job runs; replace FIXME with
+      # the digests of the release you call (docs/runtime-images.md).
+      runtime-image: ghcr.io/diggsweden/forge-ci-runtime-base@sha256:0000000000000000000000000000000000000000000000000000000000000000 # FIXME v0.90.0 digest
+      canonical-builder-image: ghcr.io/diggsweden/forge-ci-runtime-go-1.27@sha256:0000000000000000000000000000000000000000000000000000000000000000 # FIXME v0.90.0 digest
+      runtime-image-full: ghcr.io/diggsweden/forge-ci-runtime@sha256:0000000000000000000000000000000000000000000000000000000000000000 # FIXME v0.90.0 digest
+      runtime-image-node: ghcr.io/diggsweden/forge-ci-runtime-node-24@sha256:0000000000000000000000000000000000000000000000000000000000000000 # FIXME v0.90.0 digest
       artifacts-config: .forge-ci/artifacts.yml
 ```
 
@@ -483,13 +507,15 @@ Release artifacts are signed with one method, `sign.method` in
 | `kms` | A KMS key reference (AWS, GCP, Azure, Vault/OpenBao, PKCS#11) | `.bundle` sidecars; the token exchange with the KMS is the caller's. See the [OpenBao example](../examples/signing/openbao-kms/). |
 | `kms` with `key: env://COSIGN_KEY` | A Cosign key pair: the private key in `RELEASE_COSIGN_PRIVATE_KEY`, its passphrase in `RELEASE_COSIGN_PASSPHRASE` | `.bundle` sidecars, verified against the public key. The GitLab and Forgejo layers sign the same way. See the [example](../examples/signing/cosign-key/). |
 
-Signing and publishing run in separate plain-runner jobs with the same
-forge-ci binary pinned by the orchestrator. The runtime image only assembles
-the files. GitHub-hosted runners have swap on, and
-`release sign` refuses to load a long-lived key while it is
-([swap policy](verification.md#swap-policy)), so the signing job turns swap off
-first. A self-hosted runner needs swap off, or passwordless `sudo` for the
-job to do it.
+Signing and publishing are separate jobs. `gpg` signs on a plain runner with
+the canonical CLI delivered for the run: GitHub-hosted runners have swap on,
+and `release sign` refuses to load a long-lived key while it is
+([swap policy](verification.md#swap-policy)), so that job turns swap off
+first; a self-hosted runner needs swap off, or passwordless `sudo` for the job
+to do it. `sigstore` and `kms` sign inside the admitted `runtime-image`
+digest, whose baked cosign does the work; no installer runs. The full runtime
+image only assembles the files, and publication runs on a plain runner with
+the same canonical CLI.
 
 The publisher verifies the signer's checkpoint digest and the prepared tag,
 then publishes those exact bytes without signing credentials or OIDC access.
@@ -584,7 +610,8 @@ maintainer side.
 | Findings missing from Code Scanning | No `CODE_SCANNING_TOKEN` passed, or `upload-sarif: false`. The gate itself still ran. |
 | A build succeeds but nothing is published | See [Configuration troubleshooting](artifacts-reference.md#configuration-troubleshooting). |
 | A release failed after the final tag was pushed | Re-run forward; see [Failed Release Recovery](failed-release-recovery.md). |
-| Plain-runner job cannot install the CLI | `forge-ci-binary-ref` names a release that does not exist yet, or a source ref the module restriction blocks; see [Branch Testing](runtime-images.md#branch-testing). |
+| Plain-runner job cannot install the CLI | PR and snapshot: `forge-ci-binary-ref` names a release that does not exist yet, or a source ref the module restriction blocks; see [Branch Testing](runtime-images.md#branch-testing). |
+| Release stops in `canonical-cli` | `forge-ci-binary-ref` is not a full 40-hex commit, or `runtime-image` / `canonical-builder-image` is a tag rather than an `@sha256:` digest; see [Advanced Pinning Recipe](runtime-images.md#advanced-pinning-recipe). |
 
 `forge-ci doctor` in a job prints the detected forge, its capabilities and what
 to do where it degrades.

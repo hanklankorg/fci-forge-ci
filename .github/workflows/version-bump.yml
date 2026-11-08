@@ -69,14 +69,12 @@ on:
         type: string
         default: ""
       runtime-image:
-        description: "forge-ci runtime image to run inside. Caller picks based on project-type — runtime-java-25 for maven/gradle/gradle-android, runtime-node-24 for npm, runtime-rust-stable for cargo, runtime-base for xcode-ios. Empty uses the resolved forge-ci version's base image, enough for the sed-only bumps."
-        required: false
-        default: ""
+        description: "forge-ci runtime image to run inside. Caller picks based on project-type — runtime-java-25 for maven/gradle/gradle-android, runtime-node-24 for npm, runtime-rust-stable for cargo, runtime-base for xcode-ios. Pinned by digest (image@sha256:<64 hex>); the resolver refuses anything else."
+        required: true
         type: string
       forge-ci-binary-ref:
-        description: "forge-ci release tag or commit whose runtime image the jobs run in; empty resolves the current stable release tag"
-        required: false
-        default: ""
+        description: "Full engine commit (40 hex) the workflow ref names; a tag or branch is refused"
+        required: true
         type: string
       git-signing-method:
         description: "How to sign the release commit + tag: gpg (default; imports RELEASE_GPG_PRIVATE_KEY) or ssh (RELEASE_SSH_SIGNING_KEY, no OpenPGP key on the runner). Caller passes fromJSON(config-plan-json).git_signing.method."
@@ -118,6 +116,8 @@ jobs:
     uses: ./.github/workflows/resolve-forge-ci-bootstrap.yml
     with:
       forge-ci-binary-ref: ${{ inputs['forge-ci-binary-ref'] }}
+      images: |
+        runtime-image=${{ inputs['runtime-image'] }}
   # Generate full changelog for committing to repository
   generate-full-changelog:
     needs: [resolve-bootstrap]
@@ -128,8 +128,8 @@ jobs:
     uses: ./.github/workflows/generate-changelog.yml
     with:
       branch: ${{ github.sha }}
-      forge-ci-binary-ref: ${{ needs.resolve-bootstrap.outputs.forge-ci-binary-ref }}
-      runtime-image: ${{ inputs['runtime-image'] || needs.resolve-bootstrap.outputs['runtime-image'] }}
+      forge-ci-binary-ref: ${{ inputs['forge-ci-binary-ref'] }}
+      runtime-image: ${{ inputs['runtime-image'] }}
       upload-as-artifact: true
       changelog-config: "/opt/forge-ci/templates/gitcliff/keepachangelog.toml"
       git-cliff-args: "" # Empty means full history
@@ -145,8 +145,8 @@ jobs:
     uses: ./.github/workflows/generate-changelog.yml
     with:
       branch: ${{ github.sha }}
-      forge-ci-binary-ref: ${{ needs.resolve-bootstrap.outputs.forge-ci-binary-ref }}
-      runtime-image: ${{ inputs['runtime-image'] || needs.resolve-bootstrap.outputs['runtime-image'] }}
+      forge-ci-binary-ref: ${{ inputs['forge-ci-binary-ref'] }}
+      runtime-image: ${{ inputs['runtime-image'] }}
       upload-as-artifact: true
       changelog-config: "/opt/forge-ci/templates/gitcliff/minimal.toml"
       git-cliff-args: "--latest --strip header"
@@ -157,7 +157,7 @@ jobs:
     name: "Prepare: native version files without signing keys"
     runs-on: ubuntu-26.04
     container:
-      image: ${{ inputs['runtime-image'] || needs.resolve-bootstrap.outputs['runtime-image'] }}
+      image: ${{ inputs['runtime-image'] }}
     permissions:
       contents: read
     outputs:
@@ -211,7 +211,7 @@ jobs:
     needs: [resolve-bootstrap, generate-full-changelog, generate-minimal-changelog, prepare-version-files]
     runs-on: ubuntu-26.04
     container:
-      image: ${{ inputs['runtime-image'] || needs.resolve-bootstrap.outputs['runtime-image'] }}
+      image: ${{ inputs['runtime-image'] }}
     permissions:
       actions: read
       contents: write

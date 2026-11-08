@@ -42,9 +42,15 @@ func scanContainerCmd() *cli.Command {
 
    # Write the trivy JSON for a downstream step
    forge-ci security scan container --image-ref ghcr.io/owner/app:v1.2.3 \
-     --json-file dist/trivy.json`,
+     --json-file dist/trivy.json
+
+   # Gate an exported, not yet published layout (a container build --defer-scan)
+   forge-ci security scan container --image-ref ghcr.io/owner/app \
+     --oci-layout "$RUNNER_TEMP/image-layout" --platform linux/arm64`,
 		Flags: []cli.Flag{
 			&cli.StringFlag{Name: flagImageRef, Required: true, Sources: cli.EnvVars("IMAGE_REF"), Usage: "fully-qualified image (registry/owner/name@sha256:…) to scan"},
+			&cli.StringFlag{Name: "oci-layout", Sources: cli.EnvVars("CONTAINER_OCI_LAYOUT"), Usage: "local OCI layout directory to scan instead of pulling --image-ref, which stays the report identity"},
+			&cli.StringFlag{Name: "platform", Sources: cli.EnvVars("CONTAINER_PLATFORM"), Usage: "os/arch to select from a multi-platform input, e.g. linux/arm64; empty leaves the choice to Trivy"},
 			&cli.StringFlag{Name: "json-file", Value: security.DefaultTrivyContainerJSONFile, Sources: cli.EnvVars("CONTAINER_JSON_FILE"), Usage: "destination path for the raw trivy JSON findings"},
 			&cli.StringFlag{Name: flagSARIFFile, Value: security.DefaultTrivyContainerSARIFFile, Sources: cli.EnvVars("CONTAINER_SARIF_FILE"), Usage: "destination path for the trivy SARIF findings"},
 			&cli.StringFlag{Name: "gitlab-report-file", Value: security.DefaultTrivyGitLabContainerFile, Sources: cli.EnvVars("CONTAINER_GITLAB_REPORT_FILE"), Usage: "destination path for the GitLab container-scanning report"},
@@ -57,6 +63,8 @@ func scanContainerCmd() *cli.Command {
 
 			return appsecurity.ScanContainer(ctx, trivy.New(), os.Stderr, os.Stderr, annot, appsecurity.ScanContainerInput{
 				ImageRef:         cmd.String(flagImageRef),
+				OCILayout:        cmd.String("oci-layout"),
+				Platform:         cmd.String("platform"),
 				JSONFile:         cmd.String("json-file"),
 				SARIFFile:        cmd.String(flagSARIFFile),
 				GitLabReportFile: cmd.String("gitlab-report-file"),

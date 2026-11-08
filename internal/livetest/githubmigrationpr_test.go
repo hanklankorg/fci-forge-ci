@@ -6,6 +6,7 @@
 package livetest
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -13,6 +14,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/google/go-github/v91/github"
 )
 
 // The original consumer workflow with a scratch PR caller and strict Surefire
@@ -122,7 +125,7 @@ jobs:
 	trial.waitWorkflows(repo, filepath.Join(dir, ".github", "workflows"))
 	head := trial.PushChange(repo, GitHubConsumerTree{Dir: dir, Main: main}, "consumer-pr")
 
-	t.Cleanup(func() { settleBootstrapRuns(t, trial, repo, head, callerWorkflow, "pull_request") })
+	t.Cleanup(func() { settleOwnedRuns(t, trial, repo, head, callerWorkflow, "pull_request") })
 	trial.OpenPullRequest(repo, "consumer-pr")
 	t.Logf("consumer baseline PR opened: repository=%s/%s source=%s main=%s head=%s", trial.org, repo, source, main, head)
 	run := trial.WaitRun(repo, callerWorkflow, "pull_request", head, 25*time.Minute)
@@ -135,5 +138,60 @@ jobs:
 
 	if run.GetConclusion() != "success" {
 		t.Fatal("original consumer PR unit workflow failed")
+	}
+}
+
+// settleOwnedRuns cancels the runs this test started on the head commit that
+// are still active at cleanup, and waits for them to reach a terminal state,
+// so the scratch repository can be deleted without orphaning a run.
+func settleOwnedRuns(t *testing.T, trial *GitHubTrial, repo, head, workflow, event string) {
+	t.Helper()
+
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(t.Context()), 2*time.Minute)
+	defer cancel()
+
+	requested := make(map[int64]bool)
+
+	for {
+		runs, _, err := trial.api.Actions.ListWorkflowRunsByFileName(ctx, trial.org, repo, workflow, &github.ListWorkflowRunsOptions{HeadSHA: head, Event: event})
+		if err != nil {
+			t.Errorf("run cleanup cannot observe owned runs: %v", err)
+
+			return
+		}
+
+		active := false
+
+		for _, run := range runs.WorkflowRuns {
+			if run.GetStatus() == "completed" {
+				continue
+			}
+
+			active = true
+
+			if !requested[run.GetID()] {
+				if _, err := trial.api.Actions.CancelWorkflowRunByID(ctx, trial.org, repo, run.GetID()); err != nil {
+					t.Errorf("cancel owned run %d: %v", run.GetID(), err)
+
+					return
+				}
+
+				requested[run.GetID()] = true
+			}
+		}
+
+		if !active {
+			t.Log("run cleanup: all observed owned runs terminal")
+
+			return
+		}
+
+		select {
+		case <-ctx.Done():
+			t.Error("run cleanup timed out waiting for owned runs")
+
+			return
+		case <-time.After(2 * time.Second):
+		}
 	}
 }

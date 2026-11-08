@@ -102,51 +102,38 @@ job/stage records use the [file-based report handoff](workflows.md#file-based-re
 
 ## Installing `forge-ci`
 
-Jobs using a forge-ci runtime container already have the binary installed.
-Plain Linux and macOS jobs should use the repository's composite installer,
-with the action itself pinned to an immutable commit SHA:
+No GitHub workflow installs forge-ci at run time. Every job gets the engine
+of the commit it pins, one of three ways:
 
-```yaml
-- name: Install forge-ci
-  uses: diggsweden/forge-ci/.github/actions/install-forge-ci@<full-commit-sha>
-  with:
-    ref: v0.90.0
-```
+- **Container jobs** run in a forge-ci runtime image pinned by digest
+  (`runtime-image*`); forge-ci is baked into it.
+- **Linux host jobs** (Buildah build legs, the Docker-started lint jobs, the
+  GPG release signer) receive the canonical CLI of the run: each orchestrator
+  runs `canonical-cli-bootstrap.yml` once, which builds forge-ci for
+  linux/amd64 and linux/arm64 from the full engine commit in the
+  administrator-pinned Go builder image, and every receiving job admits that
+  delivery through `consume-canonical-cli` before it checks anything out
+  ([canonical delivery](../scripts/ci/canonical-cli-delivery.md)). A direct
+  caller of such a leaf carries a `canonical-cli` job of its own, as the
+  [publish-container example](publishing.md#github-container-registry-ghcrio) shows.
+- **macOS jobs** (`lint-swift.yml`, `build-xcode-ios.yml`,
+  `publish-apple-appstore.yml`) check the engine out at the full commit and
+  build it there with `.github/actions/build-darwin-cli`, because canonical
+  delivery builds Linux files in a Linux image with Linux tool profiles.
 
-The action pin selects the reviewed installer implementation; `ref` selects the
-binary release, and `repository` the repository whose releases and signer are
-trusted. `repository` defaults to the repository the action comes from; pass it
-where that is unknown, as on GitHub Enterprise Server. An omitted ref resolves the current published stable release to
-a concrete tag before installation. Explicit refs take precedence; no `latest`
-binary asset or image tag is executed. For published release refs, the installer bootstraps the
-repository-pinned cosign with a SHA-256 check, then downloads the release assets
-and verifies `checksums.txt` and its Sigstore bundle before checking the binary
-archive. Bootstrap, download, checksum or signature failures stop installation;
-there is no automatic source fallback. Cosign need not be preinstalled.
+All three take `forge-ci-binary-ref` as the full 40-hex engine commit, the same
+commit the `uses:` ref names; release tags, branches and short hashes are
+refused. The resolver keeps one job: it admits the repository whose engine
+and images are trusted (`FORGE_CI_REPOSITORY`, defaulting to the repository
+the called workflow comes from).
 
-Branch and full commit refs select source installation and require Git and Go.
-Upstream and forks both fetch a detached Git checkout and build
-`go install ./cmd/forge-ci` from it. Full SHA-1 (40 hex characters) and SHA-256
-(64 hex characters) commit IDs are supported. Host workflows bind source builds
-to their bootstrap checkout; PR and snapshot orchestrators resolve a source
-branch once for all downstream jobs. The reviewed
-[source checkout procedure](DEVELOPMENT.md#source-checkout) also supports local work.
-Setting
-`FORGE_CI_USE_GO_INSTALL=1` explicitly selects source installation even for a
-release ref; that route does not verify release assets.
-
-The underlying [`install-forge-ci.sh`](../scripts/bootstrap/install-forge-ci.sh)
-is for this composite action and for jobs that have already checked out or
-vendored the forge-ci repository. A consumer must not assume that
-`scripts/bootstrap/install-forge-ci.sh` exists in its own checkout. The script
-has no default repository: except for a `local` install it refuses to run
-until `FORGE_CI_REPOSITORY` names one as `owner/name`.
-
-This bootstrap verifies GitHub-produced keyless release assets. Native Forgejo
-and GitLab delivery instead use their commit-pinned layer/component and recorded
-engine checksum; changing the server URL does not change signature policy.
-The initializer's default remains the highest stable Git tag, which may differ
-from the provider's current published release if a tag has no release assets.
+A person installs the CLI from a GitHub release and verifies `checksums.txt`
+against its Sigstore bundle, as [verification](verification.md) describes.
+Native Forgejo and GitLab delivery use their commit-pinned layer/component
+and recorded engine checksum; changing the server URL does not change
+signature policy. The initializer's default remains the highest stable Git
+tag, which may differ from the provider's current published release if a tag
+has no release assets.
 
 On Forgejo, a job gets the binary from the delivery layer instead: the
 `setup-forge-ci` action under `.forgejo/actions/` downloads the binary the
