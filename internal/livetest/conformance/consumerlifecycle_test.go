@@ -149,14 +149,21 @@ func runForgejoConsumerLifecycle(t *testing.T, root string, private bool) {
 
 	head := consumer.PushChange(t, repo, lifecycleBranch, base)
 
-	// The layer's own variables, the consumer's names for the lab's facts,
-	// the service's, then the caller's. The commit the release requests is
-	// not known before the merge; until then it is the base.
-	variables := trialVariables(t, target, map[string]string{
+	// The plan's bindings first: the service's development workflow takes the
+	// layer from the forge-ci-repository fact, so the plan already names
+	// FORGE_CI_REPOSITORY, as in every development trial. The trial's runtime
+	// values must agree with it, then come the caller's. The commit the
+	// release requests is not known before the merge; until then it is the base.
+	runtime, err := livetest.MergeConsumerVariables(plan.Variables, map[string]string{
 		layerRunnerVariable: runnerLabelsJSON(t, scenario.label), containerRunnerVariable: runnerLabelsJSON(t, containerLabel),
 		"FORGE_CI_REPOSITORY": scenario.layer.Repository, layerRegistryUserVariable: registryUser(target, external),
 		"SERVICE_IMAGE_REPOSITORY": image, "DEVELOPMENT_REGISTRY_USERNAME": target.CredentialUsername,
-	}, plan.Variables, settings.ResolvedVariables(scenario.layer.Commit, base))
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	variables := trialVariables(t, target, runtime, settings.ResolvedVariables(scenario.layer.Commit, base))
 
 	// Nothing has run so far: the pushes arrived with Actions off.
 	livetest.EnableActions(t, target, repo)
