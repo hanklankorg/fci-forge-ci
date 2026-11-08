@@ -88,6 +88,20 @@ precedence = "override"
 SPDX-FileCopyrightText = "2026 Digg - Agency for Digital Government"
 SPDX-License-Identifier = "CC0-1.0"
 
+# Demo source code, EUPL-1.2 OR GPL-3.0-or-later: code is never CC0. Override,
+# because the demos override above would otherwise hide the files' own headers,
+# which state the same terms.
+[[annotations]]
+path = [
+  "test/live/demos/**/*.go",
+  "test/live/demos/**/*.java",
+  "test/live/demos/**/*.kt",
+  "test/live/demos/**/*.rs",
+]
+precedence = "override"
+SPDX-FileCopyrightText = "2026 Digg - Agency for Digital Government"
+SPDX-License-Identifier = "EUPL-1.2 OR GPL-3.0-or-later"
+
 # Vendored Gradle wrapper, Apache-2.0: override, as third-party material
 # keeps its own terms.
 [[annotations]]
