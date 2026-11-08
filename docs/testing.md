@@ -2115,10 +2115,11 @@ Retain evidence for each provider and selected revision covering:
   binary normalization without making all files executable. Reject tampered or
   stale bundles and missing/extra producer outputs. Shared Go `restore-context`
   must reject path escapes and source/Git/plan replacement before restoring inputs.
-- One valid packaged npm tarball per producer at the isolated
-  `<context>/.forge-ci/snapshot-inputs/<name>` destination and a matching
-  Containerfile COPY path. Exercise native digest-pinned producer image overrides
-  and their documented host-tools/trusted-job-image fallbacks.
+- One packed npm tarball per producer, verified unpacked at the isolated
+  `<context>/.forge-ci/snapshot-inputs/<name>` destination and laid over the
+  context root by the build, so the release Containerfile's `COPY dist/` reads
+  it; one npm package per image. Exercise native digest-pinned producer image
+  overrides and their documented host-tools/trusted-job-image fallbacks.
 - Independent scan enablement/severity and image SBOM selection, signing `NONE`,
   and early refusal of explicit snapshot OCI signing/provenance, build secrets
   and extraction. Confirm no stable aliases or promotions are advanced; signature

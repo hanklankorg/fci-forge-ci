@@ -22,34 +22,35 @@ import (
 )
 
 var (
-	errSourceIdentity         = errors.New("snapshot source requires an exact commit and logical branch")
-	errBaseRepository         = errors.New("snapshot requires a full base OCI repository")
-	errUnsupportedContainer   = errors.New("snapshot build secrets, extraction and OCI provenance are unsupported")
-	errInvalidTag             = errors.New("invalid snapshot tag")
-	errMissingDependency      = errors.New("missing dependency")
-	errNoBuiltArtifact        = errors.New("has no supported built artifact")
-	errUnsupportedDependency  = errors.New("is unsupported")
-	errSharedDestination      = errors.New("snapshot inputs must have distinct destinations")
-	errPlanIdentity           = errors.New("invalid snapshot plan identity")
-	errDisabledPlanHasWork    = errors.New("disabled snapshot plan has work")
-	errEnabledPlanEmpty       = errors.New("enabled snapshot plan has no images or postfix tag")
-	errTagOmitsCommit         = errors.New("snapshot tag omits source commit")
-	errTagDiffers             = errors.New("snapshot tag differs from logical branch or source commit")
-	errImageTagDiffers        = errors.New("tag differs from frozen base, suffix or branch")
-	errInvalidImage           = errors.New("invalid or duplicate snapshot image")
-	errConflictingDestination = errors.New("conflicting snapshot image destination")
-	errNonNativePlatform      = errors.New("snapshot requires native linux/amd64 or linux/arm64")
-	errDuplicatePlatform      = errors.New("duplicate snapshot platform")
-	errUnsupportedSeverity    = errors.New("unsupported snapshot scan severity")
-	errUnscannedImage         = errors.New("snapshot plan publishes an image without its scan")
-	errInvalidBuild           = errors.New("invalid or duplicate snapshot build")
-	errInvalidDependency      = errors.New("invalid snapshot artifact dependency")
-	errReservedDestination    = errors.New("reserved snapshot artifact destination")
-	errMissingNativeBuilds    = errors.New("snapshot plan omits native builds")
-	errUnplannedImage         = errors.New("unplanned snapshot image")
-	errReceiptCount           = errors.New("snapshot receipts must cover exactly all planned images")
-	errDuplicateReceipt       = errors.New("duplicate snapshot receipt")
-	errReceiptIdentityDiffers = errors.New("snapshot receipt identity differs from plan")
+	errSourceIdentity          = errors.New("snapshot source requires an exact commit and logical branch")
+	errBaseRepository          = errors.New("snapshot requires a full base OCI repository")
+	errUnsupportedContainer    = errors.New("snapshot build secrets, extraction and OCI provenance are unsupported")
+	errInvalidTag              = errors.New("invalid snapshot tag")
+	errMissingDependency       = errors.New("missing dependency")
+	errNoBuiltArtifact         = errors.New("has no supported built artifact")
+	errUnsupportedDependency   = errors.New("is unsupported")
+	errSharedDestination       = errors.New("snapshot inputs must have distinct destinations")
+	errNPMPackagesShareContext = errors.New("would both be laid over the build context root; an image takes one npm package")
+	errPlanIdentity            = errors.New("invalid snapshot plan identity")
+	errDisabledPlanHasWork     = errors.New("disabled snapshot plan has work")
+	errEnabledPlanEmpty        = errors.New("enabled snapshot plan has no images or postfix tag")
+	errTagOmitsCommit          = errors.New("snapshot tag omits source commit")
+	errTagDiffers              = errors.New("snapshot tag differs from logical branch or source commit")
+	errImageTagDiffers         = errors.New("tag differs from frozen base, suffix or branch")
+	errInvalidImage            = errors.New("invalid or duplicate snapshot image")
+	errConflictingDestination  = errors.New("conflicting snapshot image destination")
+	errNonNativePlatform       = errors.New("snapshot requires native linux/amd64 or linux/arm64")
+	errDuplicatePlatform       = errors.New("duplicate snapshot platform")
+	errUnsupportedSeverity     = errors.New("unsupported snapshot scan severity")
+	errUnscannedImage          = errors.New("snapshot plan publishes an image without its scan")
+	errInvalidBuild            = errors.New("invalid or duplicate snapshot build")
+	errInvalidDependency       = errors.New("invalid snapshot artifact dependency")
+	errReservedDestination     = errors.New("reserved snapshot artifact destination")
+	errMissingNativeBuilds     = errors.New("snapshot plan omits native builds")
+	errUnplannedImage          = errors.New("unplanned snapshot image")
+	errReceiptCount            = errors.New("snapshot receipts must cover exactly all planned images")
+	errDuplicateReceipt        = errors.New("duplicate snapshot receipt")
+	errReceiptIdentityDiffers  = errors.New("snapshot receipt identity differs from plan")
 )
 
 // Version is the snapshot plan and receipt schema version.
@@ -252,18 +253,8 @@ func dependencies(cfg pipeline.ConfigPlan, ctr pipeline.PlannedContainer) ([]Dep
 			return nil, fmt.Errorf("container %s: dependency %s %w", ctr.Name, name, errNoBuiltArtifact)
 		}
 
-		var dest string
-
-		switch artifact.ProjectType {
-		case projecttype.Go, projecttype.Cargo:
-			dest = filepath.Join(ctr.Context, "dist")
-		case projecttype.Maven:
-			dest = filepath.Join(artifact.WorkingDirectory, "target")
-		case projecttype.Gradle:
-			dest = filepath.Join(artifact.WorkingDirectory, "build/libs")
-		case projecttype.NPM:
-			dest = ArtifactDestination(artifact, ctr.Context)
-		default:
+		dest := ArtifactDestination(artifact, ctr.Context)
+		if dest == "" {
 			return nil, fmt.Errorf("container %s: snapshot dependency type %s %w", ctr.Name, artifact.ProjectType, errUnsupportedDependency)
 		}
 
@@ -275,7 +266,30 @@ func dependencies(cfg pipeline.ConfigPlan, ctr pipeline.PlannedContainer) ([]Dep
 		out = append(out, Dependency{Name: name, ArtifactName: artifact.BuildArtifactName, Destination: dest, ProjectType: artifact.ProjectType})
 	}
 
+	if err := requireOneNPMPackage(out); err != nil {
+		return nil, fmt.Errorf("container %s: %w", ctr.Name, err)
+	}
+
 	return out, nil
+}
+
+// requireOneNPMPackage refuses two npm packages in one image: the build lays
+// each verified package over the context root, and every package carries a
+// package.json, so two would overwrite each other there.
+func requireOneNPMPackage(deps []Dependency) error {
+	names := []string{}
+
+	for _, dep := range deps {
+		if dep.ProjectType == projecttype.NPM {
+			names = append(names, dep.Name)
+		}
+	}
+
+	if len(names) > 1 {
+		return fmt.Errorf("npm packages %s %w", strings.Join(names, " and "), errNPMPackagesShareContext)
+	}
+
+	return nil
 }
 
 func plainName(s string) bool {

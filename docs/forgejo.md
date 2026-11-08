@@ -1515,7 +1515,9 @@ manifest and dependency inventory, including names, platforms, sizes, digests an
 canonical string modes `0644`/`0755`. It restores only confined planned paths;
 shell adapters transport artifacts rather than implement context validation.
 Retain the producer's inventory rather than regenerating it after transport.
-Npm tarballs use `<context>/.forge-ci/snapshot-inputs/<name>`; see the
+An npm package is verified under `<context>/.forge-ci/snapshot-inputs/<name>`
+and laid over the context root by the build, where `release-images.yml` lays
+the unpacked package; see the
 [shared input contract](workflows.md#automatic-artifact-first-inputs).
 Build secrets, binary extraction and explicit snapshot OCI signing/provenance
 requests remain unsupported. Scan severity and image SBOM policy are independent.
