@@ -63,7 +63,10 @@ func TestCampaignScenariosUseRecipesWithExplicitBoundedInputs(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
+			// The consumer the release scenarios take ships the release build
+			// the policy's build job runs.
 			consumer := t.TempDir()
+			writeFile(t, filepath.Join(consumer, filepath.FromSlash(GitLabConsumerBuildScript)), "#!/usr/bin/env bash\n")
 			dir, cases := newCampaign(t, "CAMPAIGN_COMMIT="+campaignHead+"\nNATIVE_CONSUMER="+consumer+"\nBUILD_PROBE_ARCHIVE=/probe.tar\n", "scenario "+tc.name+" "+tc.extra+"\n")
 
 			plan, err := PlanCampaignLane(reporoot.Path(t), dir, "gitlab", cases, campaignHead, CampaignRun{})

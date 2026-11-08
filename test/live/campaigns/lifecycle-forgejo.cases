@@ -4,18 +4,21 @@
 # The lifecycle of the Maven service demo in one scratch repository: a pull
 # request on branch development, its native merge, the service development
 # snapshot dispatched on the merged main, then a signed release request from
-# it. One line per image builder, since on Forgejo the builder is the
-# consumer's CI_IMAGE_BUILDER variable: Buildah on the contract's runner that
-# permits user namespaces, or kaniko in the campaign's job image, labelled
-# for the consumer trial's layer repository the lifecycle runs from. Leave
-# FORGE_CI_LIVE_FORGEJO_IMAGE_BUILDER unset: set, it refuses the other
-# builder's line. The visibility is the run's: FORGE_CI_LIVE_CONSUMER_VISIBILITY
-# unset or both runs each line public and private. Native linux/amd64, and
-# the contract's container/readiness runner for either builder, since the
-# service's readiness runs the published image with Podman. Prepare with
-# forgejo=<this file> and job-image=java:<reviewed local image>; CI_JOB_IMAGE
-# is also the Java image the snapshot builds the service with. amd64 runners
-# only for now.
+# it. The Maven service development workflow is the one development route
+# Forgejo has, so the Maven service is the one demo this lane runs; a demo
+# without a root Maven application and one container is refused
+# (docs/live-campaigns.md, Lifecycle). One line per image builder, since on
+# Forgejo the builder is the consumer's CI_IMAGE_BUILDER variable: Buildah on
+# the contract's runner that permits user namespaces, or kaniko in the
+# campaign's job image, labelled for the consumer trial's layer repository
+# the lifecycle runs from. Leave FORGE_CI_LIVE_FORGEJO_IMAGE_BUILDER unset:
+# set, it refuses the other builder's line. The visibility is the run's:
+# FORGE_CI_LIVE_CONSUMER_VISIBILITY unset or both runs each line public and
+# private. Native linux/amd64, and the contract's container/readiness runner
+# for either builder, since the service's readiness runs the published image
+# with Podman. Prepare with forgejo=<this file> and job-image=java:<reviewed
+# local image>; CI_JOB_IMAGE is also the Java image the snapshot builds the
+# service with. amd64 runners only for now.
 #
 #   just campaign-lane <dir> forgejo test/live/campaigns/lifecycle-forgejo.cases
 setting admin-lint=false

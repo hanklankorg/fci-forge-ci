@@ -202,10 +202,10 @@ ephemeral signed-request and isolated signer lifecycle.
 The intended product flow is PR/MR, a **published development snapshot in unsigned
 mode**, a human-signed release request, secret-free build/tests, scan/handoff,
 trusted signing/publication and public readback. Ephemeral checks are not publication.
-The new `published-snapshot-forgejo.cases` profile reuses the native Maven-service
-trial, not these CLI adapters; it is standalone and does not link lifecycle stages.
-It verifies source/image/digest/readiness, not signature/attestation absence or scan
-readbacks. See `docs/live-campaigns.md` for its deliberately narrow supported road.
+The `lifecycle` campaign event (`lifecycle-forgejo.cases`,
+`lifecycle-gitlab.cases`) links these stages for the demos with a development
+route, through the native Maven-service and snapshot routes, not these CLI
+adapters. See `docs/live-campaigns.md`, Lifecycle, for its phases and limits.
 
 | Product lane | Remaining requirement |
 | --- | --- |

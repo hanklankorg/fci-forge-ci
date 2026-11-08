@@ -169,13 +169,9 @@ func validateProducer(artifact pipeline.PlannedArtifact, byName map[string]pipel
 		return fmt.Errorf("snapshot producer %s %w", artifact.Name, errDisagreesTypedConfig)
 	}
 
-	switch artifact.ProjectType {
-	case projecttype.Go, projecttype.Cargo, projecttype.Maven, projecttype.Gradle, projecttype.NPM:
-	default:
-		return fmt.Errorf("%w %s", errUnsupportedProducerType, artifact.ProjectType)
-	}
+	_, err = ToolchainFamily(artifact.ProjectType)
 
-	return nil
+	return err
 }
 
 // validateEcosystemConfig rejects a producer carrying configuration for an

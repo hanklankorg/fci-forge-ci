@@ -70,7 +70,7 @@ func npmApplicationFixture(ctx context.Context, source Consumer, config NPMAppli
 		return source, err
 	}
 
-	recipe, err := os.ReadFile(filepath.Join(config.RecipeDirectory, ".forgejo/workflows/release.yml"))
+	recipe, err := os.ReadFile(filepath.Join(config.RecipeDirectory, forgejoReleaseWorkflow))
 	if err != nil {
 		return source, err
 	}
@@ -294,7 +294,7 @@ func npmStableReleaseWorkflow(workflow string, pin ConsumerPin, image string) (s
 // npmFixtureFiles is the CI overlay: the rendered workflow, the oracle and the
 // declaration, plus the recipe's changelog inputs for a stable release.
 func npmFixtureFiles(recipeDirectory, workflow string, oracle []byte, development bool) (map[string]string, error) {
-	name := ".forgejo/workflows/release.yml"
+	name := forgejoReleaseWorkflow
 	if development {
 		name = forgejoDevelopmentWorkflow
 	}

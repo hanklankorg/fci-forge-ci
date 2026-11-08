@@ -18,6 +18,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/diggsweden/forge-ci/internal/domain/enforcement"
 	"github.com/diggsweden/forge-ci/internal/domain/errs"
 )
 
@@ -190,21 +191,7 @@ func PlanCampaignLane(root, dir, provider, casesPath, head string, run CampaignR
 		return CampaignPlan{}, fmt.Errorf("%s: %w", casesPath, err)
 	}
 
-	plan := CampaignPlan{Unset: slices.Clone(campaignCaseNamed), Env: []string{"FORGE_CI_LIVE_PROVIDER=" + provider}}
-
-	for _, key := range campaignExported {
-		if value, found := env[key]; found {
-			plan.Env = append(plan.Env, key+"="+value)
-		} else {
-			plan.Unset = append(plan.Unset, key)
-		}
-	}
-
-	for _, key := range slices.Sorted(maps.Keys(env)) {
-		if strings.HasPrefix(key, GitLabJobImageArchiveEnv) {
-			plan.Env = append(plan.Env, key+"="+env[key])
-		}
-	}
+	plan := campaignLaneEnvironment(provider, env, run)
 
 	for _, line := range file.cases {
 		args, caseErr := campaignCaseArgs(dir, provider, env, line.words)
@@ -227,23 +214,58 @@ func PlanCampaignLane(root, dir, provider, casesPath, head string, run CampaignR
 	return plan, nil
 }
 
+// caseConsumer opens a case line that runs a shipped demo through an event.
+const caseConsumer = "consumer"
+
+// demosDir holds the shipped demos, relative to the repository root.
+const demosDir = "test/live/demos"
+
+// demoConsumerDir is the consumer checkout a shipped demo is run from.
+func demoConsumerDir(root, demo string) string {
+	return filepath.Join(root, filepath.FromSlash(demosDir), demo, caseConsumer)
+}
+
+// campaignLaneEnvironment is what every case of the lane gets: the
+// provider, campaign.env's exported keys and runtime archives, and the
+// administrator inputs the lane was admitted with, stated where they default
+// to false too, so each case's verdict header records them.
+func campaignLaneEnvironment(provider string, env map[string]string, run CampaignRun) CampaignPlan {
+	plan := CampaignPlan{Unset: slices.Clone(campaignCaseNamed), Env: []string{"FORGE_CI_LIVE_PROVIDER=" + provider}}
+
+	for _, key := range campaignExported {
+		if value, found := env[key]; found {
+			plan.Env = append(plan.Env, key+"="+value)
+		} else {
+			plan.Unset = append(plan.Unset, key)
+		}
+	}
+
+	for _, key := range slices.Sorted(maps.Keys(env)) {
+		if strings.HasPrefix(key, GitLabJobImageArchiveEnv) {
+			plan.Env = append(plan.Env, key+"="+env[key])
+		}
+	}
+
+	for _, check := range enforcement.Checks {
+		plan.Env = append(plan.Env, adminInputEnvironment(check)+"="+run.Settings["admin-"+string(check)])
+	}
+
+	return plan
+}
+
 // campaignCaseArgs maps one case's words to the recipe that runs it.
 func campaignCaseArgs(dir, provider string, env map[string]string, words []string) ([]string, error) {
 	switch words[0] {
 	case settingScenario:
 		return campaignScenarioRecipe(provider, env, words)
-	case "consumer":
+	case caseConsumer:
 	default:
 		return nil, fmt.Errorf("a case is consumer or scenario: %w", errs.ErrValidation)
 	}
 
 	events := []string{TrialPullRequest, TrialRelease}
-	if len(words) > 1 && campaignSupportsLifecycle(provider, words[1]) {
+	if len(words) > 1 && campaignSupportsLifecycle(provider, filepath.Join(dir, "demos", words[1])) {
 		events = append(events, TrialLifecycle)
-	}
-
-	if len(words) > 1 && campaignSupportsPublishedSnapshot(provider, words[1]) {
-		events = append(events, campaignPublishedSnapshot)
 	}
 
 	if len(words) < 3 {
@@ -252,10 +274,6 @@ func campaignCaseArgs(dir, provider string, env map[string]string, words []strin
 
 	if !campaignDemo.MatchString(words[1]) || !isDir(filepath.Join(dir, "demos", words[1])) {
 		return nil, fmt.Errorf("no such demo in %s: %w", filepath.Join(dir, "demos"), errs.ErrValidation)
-	}
-
-	if words[2] == campaignPublishedSnapshot {
-		return campaignSnapshotRecipe(dir, provider, env, words)
 	}
 
 	if !slices.Contains([]string{TrialPullRequest, TrialRelease, TrialLifecycle}, words[2]) {
@@ -267,7 +285,7 @@ func campaignCaseArgs(dir, provider string, env map[string]string, words []strin
 		return nil, err
 	}
 
-	if err := campaignAdmitConsumer(filepath.Join(dir, "demos", words[1]), provider, words[1], words[2], words[3:], settings, env); err != nil {
+	if err := campaignAdmitConsumer(filepath.Join(dir, "demos", words[1]), provider, words[2], words[3:], settings, env); err != nil {
 		return nil, err
 	}
 
@@ -282,11 +300,11 @@ func campaignEventList(events []string) string {
 }
 
 // campaignAdmitConsumer refuses a consumer case the lane could not run: a
-// lifecycle outside its one demo, or a GitLab consumer without what its
-// gate, release or lifecycle need.
-func campaignAdmitConsumer(checkout, provider, demo, event string, words, settings []string, env map[string]string) error {
+// lifecycle of a demo without a development route, or a GitLab consumer
+// without what its gate, release or lifecycle need.
+func campaignAdmitConsumer(checkout, provider, event string, words, settings []string, env map[string]string) error {
 	if event == TrialLifecycle {
-		if err := campaignAdmitLifecycle(provider, demo); err != nil {
+		if err := campaignAdmitLifecycle(provider, checkout); err != nil {
 			return err
 		}
 	}
@@ -311,8 +329,9 @@ func campaignScenarioRecipe(provider string, env map[string]string, words []stri
 }
 
 // campaignAdmitGitLabConsumer holds a GitLab case's settings to its event's
-// rules, as the trial will, and refuses a demo whose gate needs an image the
-// campaign has no archive of.
+// rules, as the trial will, refuses a release of a demo that ships no GitLab
+// release build, and a demo whose gate needs an image the campaign has no
+// archive of.
 func campaignAdmitGitLabConsumer(checkout, event string, words, settings []string, env map[string]string) error {
 	var err error
 
@@ -327,12 +346,32 @@ func campaignAdmitGitLabConsumer(checkout, event string, words, settings []strin
 		return err
 	}
 
+	if event != TrialPullRequest {
+		if err = requireGitLabReleaseBuild(checkout); err != nil {
+			return err
+		}
+	}
+
 	gate, err := readCampaignGate(filepath.Join(checkout, GitLabGateFile), words)
 	if err != nil {
 		return err
 	}
 
 	return campaignHasGateImages(env, gate)
+}
+
+// requireGitLabReleaseBuild refuses a GitLab release of a demo without the
+// build the release policy's build job runs, GitLabConsumerBuildScript: the
+// release commands are the adopter's, and the example demos ship their
+// merge-request gate alone (test/live/demos/README.md), so their GitLab
+// release is not a case the lane could run.
+func requireGitLabReleaseBuild(checkout string) error {
+	info, err := os.Lstat(filepath.Join(checkout, GitLabConsumerBuildScript))
+	if err != nil || !info.Mode().IsRegular() {
+		return fmt.Errorf("the demo has no %s, so no GitLab release: its release commands are the adopter's (test/live/demos/README.md): %w", GitLabConsumerBuildScript, errs.ErrValidation)
+	}
+
+	return nil
 }
 
 // readCampaignGate reads the GitLab gate at path of a consumer with the
@@ -564,12 +603,12 @@ func campaignCaseTargets(root, provider string, words []string, prepared, target
 	case provider != campaignGitLab:
 	case words[0] == "scenario":
 		targets[campaignScenarioTarget] = true
-	case words[0] == "consumer" && len(words) > 1:
+	case words[0] == caseConsumer && len(words) > 1:
 		if !campaignDemo.MatchString(words[1]) {
 			return fmt.Errorf("not a demo name: %q: %w", words[1], errs.ErrValidation)
 		}
 
-		gate, err := readCampaignGate(filepath.Join(root, "test", "live", "demos", words[1], "consumer", filepath.FromSlash(GitLabGateFile)), words[2:])
+		gate, err := readCampaignGate(filepath.Join(demoConsumerDir(root, words[1]), filepath.FromSlash(GitLabGateFile)), words[2:])
 		if err != nil {
 			return err
 		}

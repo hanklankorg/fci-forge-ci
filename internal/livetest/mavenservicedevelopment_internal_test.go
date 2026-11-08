@@ -4,8 +4,12 @@
 package livetest
 
 import (
+	"errors"
+	"io/fs"
+	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -13,6 +17,7 @@ import (
 	"github.com/diggsweden/forge-ci/internal/domain/pipeline"
 	"github.com/diggsweden/forge-ci/internal/domain/snapshotimage"
 	"github.com/diggsweden/forge-ci/internal/domain/version"
+	"github.com/diggsweden/forge-ci/internal/testutil/reporoot"
 	"gopkg.in/yaml.v3"
 )
 
@@ -192,7 +197,7 @@ func requireAuthenticatedReadinessPull(t *testing.T, script string) {
 
 // A route whose pipeline the forge's policy owns takes the declaration alone:
 // no workflow, no fixture script, and the source otherwise as admitted.
-func TestMavenServiceSnapshotDeclarationStagesOnlyTheDeclaration(t *testing.T) {
+func TestServiceSnapshotDeclarationStagesOnlyTheDeclaration(t *testing.T) {
 	root, git := stageTestRepo(t, "sha1")
 	for path, body := range map[string]string{
 		".forge-ci/artifacts.yml": "containers:\n  - name: service\n    container-file: Containerfile\n    context: .\n    platforms: linux/amd64,linux/arm64\n",
@@ -210,28 +215,167 @@ func TestMavenServiceSnapshotDeclarationStagesOnlyTheDeclaration(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	staged := source.WithMavenServiceSnapshotDeclaration(t)
+	staged := source.WithServiceSnapshotDeclaration(t, GitLabDefaultArtifactsConfig)
 
 	diff, err := git.run(t.Context(), staged.stage, "diff-tree", "--no-commit-id", "--name-only", "-r", source.Commit, staged.Commit)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if diff != MavenServiceDeclarationFile {
-		t.Fatalf("the declaration staged %q, want %s alone", diff, MavenServiceDeclarationFile)
+	if diff != ServiceSnapshotDeclarationFile {
+		t.Fatalf("the declaration staged %q, want %s alone", diff, ServiceSnapshotDeclarationFile)
 	}
 
-	declaration, err := githubWorkflow(t.Context(), staged, MavenServiceDeclarationFile)
+	declaration, err := githubWorkflow(t.Context(), staged, ServiceSnapshotDeclarationFile)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	cfg, err := parseMavenServiceDeclaration(declaration)
+	cfg, err := parseServiceDeclaration(declaration)
 	if err != nil || len(cfg.Containers) != 1 || cfg.Containers[0].Platforms != "linux/amd64" || cfg.Containers[0].EnableSLSA == nil || *cfg.Containers[0].EnableSLSA {
 		t.Fatalf("declaration %+v, %v; want the one container on linux/amd64 without SLSA", cfg, err)
 	}
 
 	if err = git.requireClean(t.Context(), root, "."); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// The Maven service development workflow builds the root Maven application
+// again in its check job, so a snapshot whose producer is another family's,
+// nested, or a library, all of which the snapshot itself builds, is not this
+// route's: the rule is the workflow's, and the same declaration is a service
+// snapshot on a forge whose policy builds the producer itself.
+func TestMavenServiceDevelopmentRefusesOtherProducers(t *testing.T) {
+	for name, artifact := range map[string]string{
+		"npm producer":            "{name: app, project-type: npm}",
+		"nested Maven producer":   "{name: app, project-type: maven, working-directory: web, build-type: application}",
+		"Maven library producer":  "{name: app, project-type: maven, build-type: library}",
+		"Gradle library producer": "{name: app, project-type: gradle, build-type: library}",
+	} {
+		t.Run(name, func(t *testing.T) {
+			declaration := "artifacts: [" + artifact + "]\ncontainers: [{name: service, from: [app], container-file: Containerfile, context: ., platforms: linux/amd64}]\n"
+
+			root, git := stageTestRepo(t, "sha1")
+			for path, body := range map[string]string{
+				".forge-ci/artifacts.yml": declaration,
+				"pom.xml":                 "<project><artifactId>service</artifactId><version>1.0.0</version></project>",
+				"web/pom.xml":             "<project><artifactId>web</artifactId><version>1.0.0</version></project>",
+				"package.json":            "{\"name\": \"app\", \"version\": \"1.0.0\"}",
+				"Containerfile":           "FROM example.invalid/base\nCOPY . /src\n",
+			} {
+				stageTestWrite(t, root, path, body, 0644)
+			}
+
+			stageTestCommit(t, git, root)
+
+			source, err := openConsumer(t.Context(), git, root, t.TempDir())
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			recipe, err := filepath.Abs("../../test/live/demos/hello-maven-service/consumer")
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			_, err = mavenServiceDevelopmentFixture(t.Context(), source, MavenServiceDevelopmentConfig{
+				RecipeDirectory: recipe, JavaImage: "registry.invalid/java@sha256:" + strings.Repeat("a", 64),
+				Branch: "development", ReadinessURL: "http://127.0.0.1:8080/health",
+			})
+			if !errors.Is(err, errMavenServiceProducer) {
+				t.Fatalf("%s: %v, want %v", name, err, errMavenServiceProducer)
+			}
+
+			if _, _, err = serviceSnapshotDeclarationOverlay(declaration); err != nil {
+				t.Fatalf("%s is not a service snapshot's declaration: %v", name, err)
+			}
+		})
+	}
+}
+
+func TestMavenServiceDevelopmentPreservesDemoArtifactRoute(t *testing.T) {
+	root, git := stageTestRepo(t, "sha1")
+	recipe := filepath.Join(reporoot.Path(t), "test/live/demos/hello-maven-service/consumer")
+
+	err := fs.WalkDir(os.DirFS(recipe), ".", func(path string, entry fs.DirEntry, err error) error {
+		if err != nil || entry.IsDir() {
+			return err
+		}
+
+		body, err := os.ReadFile(filepath.Join(recipe, path))
+		if err != nil {
+			return err
+		}
+
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+
+		stageTestWrite(t, root, path, string(body), info.Mode().Perm())
+
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	stageTestCommit(t, git, root)
+
+	source, err := openConsumer(t.Context(), git, root, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	fixture, err := mavenServiceDevelopmentFixture(t.Context(), source, MavenServiceDevelopmentConfig{
+		RecipeDirectory: recipe, JavaImage: "registry.invalid/java@sha256:" + strings.Repeat("a", 64),
+		Branch: "development", ReadinessURL: "http://127.0.0.1:8080/health",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	changed, err := git.run(t.Context(), fixture.stage, "diff-tree", "--no-commit-id", "--name-only", "-r", source.Commit, fixture.Commit)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	wantChanged := ".forge-ci/service-development.yml\n.forge-ci/service-fixture.sh\n.forgejo/workflows/development.yml"
+	if changed != wantChanged {
+		t.Fatalf("original demo bytes or modes changed: %s", changed)
+	}
+
+	if err = git.requireClean(t.Context(), root, "."); err != nil {
+		t.Fatal(err)
+	}
+
+	tag, err := version.ComposeSnapshotContainerTag("0.1.0", "development", fixture.Commit[:7])
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	plan := ServiceSnapshotPlan(t.Context(), t, fixture, snapshotimage.Input{
+		SourceSHA: fixture.Commit, SourceBranch: "development", Tag: tag,
+		ImageRepository: "registry.invalid/owner/service", SourceDateEpoch: "1", Publish: true,
+	})
+	if len(plan.Artifacts) != 1 || plan.Artifacts[0].Name != "hello-maven-service" || len(plan.Builds) != 1 ||
+		len(plan.Builds[0].RequiredArtifacts) != 1 || plan.Builds[0].RequiredArtifacts[0].Name != "hello-maven-service" ||
+		plan.Builds[0].RequiredArtifacts[0].Destination != "target" || plan.Builds[0].Arch != "amd64" || plan.Images[0].Signing != "NONE" {
+		t.Fatalf("artifact-first route lost: %+v", plan)
+	}
+
+	if families := ServiceSnapshotFamilies(t.Context(), t, fixture); !slices.Equal(families, []string{snapshotimage.FamilyJava}) {
+		t.Fatalf("families %v, want java", families)
+	}
+
+	workflow, err := githubWorkflow(t.Context(), fixture, ".forgejo/workflows/development.yml")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !strings.Contains(workflow, "artifact-job-image-java: registry.invalid/java@sha256:") ||
+		strings.Contains(workflow, "context-artifact:") || !strings.Contains(workflow, "check:\n    needs: snapshot") {
+		t.Fatal("native automatic producer or separate checked-JAR job changed")
 	}
 }

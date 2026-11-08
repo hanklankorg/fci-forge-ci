@@ -24,10 +24,10 @@ func newCampaign(t *testing.T, env, cases string) (string, string) {
 	t.Helper()
 
 	dir := t.TempDir()
+	// The stub demos have what the shipped demos have, the GitLab release
+	// build among them.
 	for _, demo := range []string{"hello-go-cli", "hello-maven"} {
-		if err := os.MkdirAll(filepath.Join(dir, "demos", demo), 0o700); err != nil {
-			t.Fatal(err)
-		}
+		writeShippedDemoStubs(t, dir, demo)
 	}
 
 	casesPath := filepath.Join(t.TempDir(), "lane.cases")
@@ -73,13 +73,19 @@ consumer hello-go-cli release CI_JOB_IMAGE=@JOB_IMAGE_GO CI_IMAGE_BUILDER_JOB_IM
 scenario TestThird
 `)
 
-	plan, err := PlanCampaignLane(reporoot.Path(t), dir, "forgejo", cases, campaignHead, CampaignRun{})
+	plan, err := PlanCampaignLane(reporoot.Path(t), dir, "forgejo", cases, campaignHead, operatorCampaignRun(t, "forgejo", nil))
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	// Only the keys the live tier reads are exported; the provider is the lane's.
-	if want := []string{"FORGE_CI_LIVE_PROVIDER=forgejo", "FORGE_CI_LIVE_SIGNER_IMAGE=lab/signer@sha256:aa"}; !slices.Equal(plan.Env, want) {
+	// Only the keys the live tier reads are exported; the provider is the
+	// lane's, and the administrator inputs the lane was admitted with are
+	// stated, false where the operator set none.
+	if want := []string{
+		"FORGE_CI_LIVE_PROVIDER=forgejo", "FORGE_CI_LIVE_SIGNER_IMAGE=lab/signer@sha256:aa",
+		"FORGE_CI_LIVE_ADMIN_LINT=false", "FORGE_CI_LIVE_ADMIN_VULNERABILITIES=false",
+		"FORGE_CI_LIVE_ADMIN_APPLICATION_TESTS=false", "FORGE_CI_LIVE_ADMIN_REPRODUCIBLE_BUILDS=false",
+	}; !slices.Equal(plan.Env, want) {
 		t.Errorf("env %q, want %q", plan.Env, want)
 	}
 
@@ -119,7 +125,7 @@ func TestPlanCampaignLane_MapsAGitLabConsumerToItsRecipes(t *testing.T) {
 			"consumer hello-go-cli pull-request job-archive=@FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_JAVA\n")
 	writeFile(t, filepath.Join(dir, "demos", "hello-maven", filepath.FromSlash(GitLabGateFile)), lintingGate)
 
-	plan, err := PlanCampaignLane(reporoot.Path(t), dir, "gitlab", cases, campaignHead, CampaignRun{})
+	plan, err := PlanCampaignLane(reporoot.Path(t), dir, "gitlab", cases, campaignHead, operatorCampaignRun(t, "gitlab", map[string]string{"FORGE_CI_LIVE_ADMIN_LINT": "true"}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -129,6 +135,8 @@ func TestPlanCampaignLane_MapsAGitLabConsumerToItsRecipes(t *testing.T) {
 	if want := []string{
 		"FORGE_CI_LIVE_PROVIDER=gitlab", "FORGE_CI_LIVE_SIGNER_IMAGE_ARCHIVE=/c/signer.tar", "FORGE_CI_LIVE_BUILDAH_JOB_IMAGE_ARCHIVE=/c/buildah.tar",
 		"FORGE_CI_LIVE_KANIKO_JOB_IMAGE_ARCHIVE=/c/kaniko.tar", "FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_JAVA=/c/java.tar", "FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_NODE=/c/node.tar",
+		"FORGE_CI_LIVE_ADMIN_LINT=true", "FORGE_CI_LIVE_ADMIN_VULNERABILITIES=false",
+		"FORGE_CI_LIVE_ADMIN_APPLICATION_TESTS=false", "FORGE_CI_LIVE_ADMIN_REPRODUCIBLE_BUILDS=false",
 	}; !slices.Equal(plan.Env, want) {
 		t.Errorf("env %q, want %q", plan.Env, want)
 	}
@@ -183,7 +191,8 @@ func TestPlanCampaignLane_RefusesWhatItCannotRead(t *testing.T) {
 		"a lint gate without lint": {"gitlab", good, "consumer hello-maven pull-request job-archive=/a.tar\n", "name its nanolinter flavor's archive"},
 		"lint for no lint gate":    {"gitlab", good, "consumer hello-go-cli pull-request job-archive=/a.tar lint-archive=/l.tar\n", "takes no lint-archive="},
 		"a lint archive twice":     {"gitlab", good, "consumer hello-maven release job-archive=/a lint-archive=/l lint-archive=/m\n", "lint-archive= is named twice"},
-		"a GitLab release short":   {"gitlab", good, "consumer hello-go-cli release job-archive=/a.tar\n", "build-archive="},
+		"a GitLab release short":   {"gitlab", good, "consumer hello-maven release job-archive=/a.tar lint-archive=/l.tar\n", "build-archive="},
+		"a GitLab release unbuilt": {"gitlab", good, "consumer hello-gradle release job-archive=/a.tar build-archive=/b.tar signer-archive=/s.tar\n", "no .gitlab/build-release.sh"},
 		"a GitLab archive twice":   {"gitlab", good, "consumer hello-go-cli pull-request job-archive=/a.tar job-archive=/b.tar\n", "job-archive= is named twice"},
 		"a NUL byte":               {"forgejo", good, "scenario TestA\x00\n", "a NUL byte"},
 		"no case":                  {"forgejo", good, "# nothing\n\n", "names no case"},
@@ -198,6 +207,8 @@ func TestPlanCampaignLane_RefusesWhatItCannotRead(t *testing.T) {
 			}
 
 			writeFile(t, filepath.Join(dir, "demos", "hello-maven", filepath.FromSlash(GitLabGateFile)), lintingGate)
+			// A demo of the merge-request gate alone, as the example demos are.
+			writeFile(t, filepath.Join(dir, "demos", "hello-gradle", filepath.FromSlash(GitLabGateFile)), lintingGate)
 
 			_, err := PlanCampaignLane(reporoot.Path(t), dir, tc.provider, cases, campaignHead, CampaignRun{})
 			if !errors.Is(err, errs.ErrValidation) || !strings.Contains(err.Error(), tc.want) {
@@ -356,4 +367,17 @@ func TestPlanCampaignLane_RefusesAGateImageTheCampaignLacks(t *testing.T) {
 	if _, err := PlanCampaignLane(reporoot.Path(t), dir, "forgejo", forgejo, campaignHead, CampaignRun{}); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// operatorCampaignRun is the run the campaign script resolves from the
+// operator's environment, here the given variables alone.
+func operatorCampaignRun(t *testing.T, provider string, environment map[string]string) CampaignRun {
+	t.Helper()
+
+	run, err := CampaignRunSettings(provider, func(name string) string { return environment[name] })
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	return run
 }

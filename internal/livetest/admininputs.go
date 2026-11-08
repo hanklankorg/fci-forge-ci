@@ -177,7 +177,7 @@ func (admin *workflowAdmin) render(text string, prefixes map[string]string, comm
 		return text, nil
 	}
 
-	return encodeAdminYAML(&document)
+	return encodeYAML(&document)
 }
 
 func (admin *workflowAdmin) bindJob(job *yaml.Node, prefixes map[string]string) (bool, error) {
@@ -319,12 +319,15 @@ func (admin *workflowAdmin) bindInputs(call, declared *yaml.Node, field string) 
 	return changed, nil
 }
 
-func encodeAdminYAML(document *yaml.Node) (string, error) {
+// encodeYAML writes YAML the harness stages into a consumer as the repo's
+// yamlfmt wants it, two-space indented; yaml.Marshal's four spaces fail the
+// consumer's own lint.
+func encodeYAML(value any) (string, error) {
 	var encoded bytes.Buffer
 
 	encoder := yaml.NewEncoder(&encoded)
 	encoder.SetIndent(2)
-	err := encoder.Encode(document)
+	err := encoder.Encode(value)
 
 	return encoded.String(), err
 }

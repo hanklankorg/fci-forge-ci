@@ -7,7 +7,9 @@ used.
 > Current testing policy for the Go codebase.
 
 For the dated, evidence-scoped acceptance snapshot, see
-[Testing parity and proof](testing-parity.md). Test layers below describe what
+[Testing parity and proof](testing-parity.md), and for what each project kind
+and variant is proven on per forge, the generated
+[Testing matrices](testing-matrices.md). Test layers below describe what
 can run; they do not establish that a feature has passed on a real forge.
 
 ## Layers
@@ -364,7 +366,7 @@ setup, evidence and cleanup.
 | Forgejo PR, release or lifecycle | `just test-live-consumer forgejo <checkout> <pull-request\|release\|lifecycle> [setting ...]` | Local `forgeci` contract and runner; consumer job image; signer image for releases; lifecycle: the Maven service demo and the container/readiness runner (docs/live-campaigns.md, Lifecycle) |
 | GitLab MR | `just test-live-consumer gitlab <checkout> pull-request job-archive=<image-archive>` | Local `forgeci` contract and runner; prepared MR job image archive |
 | GitLab release | `just test-live-consumer gitlab <checkout> release job-archive=<archive> build-archive=<archive> signer-archive=<archive> [setting ...]` | Local contract, prepared image archives and guarded full-release runner profile |
-| GitLab lifecycle | `just test-live-consumer gitlab <checkout> lifecycle job-archive=<archive> build-archive=<archive> signer-archive=<archive> lint-archive=<archive> [setting ...]` | As the release; the `hello-maven-service` demo alone (docs/live-campaigns.md, Lifecycle) |
+| GitLab lifecycle | `just test-live-consumer gitlab <checkout> lifecycle job-archive=<archive> build-archive=<archive> signer-archive=<archive> lint-archive=<archive> [setting ...]` | As the release; a demo with a service snapshot and a GitLab release, `hello-maven-service` or `hello-cargo-container` (docs/live-campaigns.md, Lifecycle) |
 | GitHub PR, development build or release | `just test-live-consumer github <checkout> <pull-request\|dev-release\|release> org=<org-id> [setting ...]` | Forge Lab's hosted `github run` session, consumer workflow fixtures and public engine images |
 | GitHub lifecycle | `just test-live-consumer github <checkout> lifecycle org=<org-id> [version=X.Y.Z] [image=<name>]` | As the release, plus the consumer's `release-dev.yml` fixture and the release credential; the `hello-maven-service` demo (docs/live-campaigns.md, Lifecycle) |
 
@@ -834,13 +836,15 @@ just test-live-consumer forgejo <consumer-checkout> <pull-request|release|lifecy
 
 just test-live-consumer forgejo /absolute/myapp pull-request CI_JOB_IMAGE=<digest reference>
 just test-live-consumer forgejo /absolute/myapp release
-just test-live-consumer forgejo /absolute/hello-maven-service/consumer lifecycle CI_JOB_IMAGE=<digest reference>
+just test-live-consumer forgejo /absolute/hello-maven-service/consumer lifecycle CI_JOB_IMAGE=<nanolinter java image, digest reference>
 ```
 
 `lifecycle` is the Maven service demo's linked flow, pull request to merge to
 development snapshot to release, `TestForgejoLayer_ConsumerLifecycle`, in the
-scratch repository `fci-consumer-lifecycle` with the layer served as below;
-docs/live-campaigns.md, Lifecycle, describes its phases and limits.
+scratch repository `fci-consumer-lifecycle` with the layer served as below.
+Its `CI_JOB_IMAGE` is a nanolinter image of the java flavour, the one image
+the demo's lint and build jobs run in and the snapshot builds the service
+with; docs/live-campaigns.md, Lifecycle, describes its phases and limits.
 
 It is `TestForgejoLayer_ConsumerTrial` behind `just test-live`'s script, so
 the contract, the lock, the preflight and the log are the same. The test
@@ -1585,94 +1589,57 @@ proves that a deployed service works.
 
 ##### Java service development
 
-Setting `FORGE_CI_LIVE_MAVEN_APPLICATION_IMAGE` selects the Java-service case
-of `TestForgejoLayer_ConsumerDevelopment`: an unsigned snapshot trial of a
-declared Maven service, public or private, on the existing private-index
-staging, scratch-resource cleanup and shared snapshot workflow. It does not
-exercise stable release or PR linting.
+The Maven service's development snapshot is phase 3 of the Forgejo lifecycle
+(`TestForgejoLayer_ConsumerLifecycle`; docs/live-campaigns.md, Lifecycle): the
+Maven service development workflow dispatched on the merged `main`, snapshotting
+`development` with the shared `snapshot-images.yml`. The standalone
+`published-unsigned-snapshot` event and its `test-live-forgejo-snapshot` recipe
+retired into it; the lifecycle's acceptance is the one they had.
 
-| Environment variable | Value |
-| --- | --- |
-| `FORGE_CI_LIVE_CONSUMER` | Absolute path to a clean checkout at the desired source revision |
-| `FORGE_CI_LIVE_CONSUMER_VISIBILITY` | `public`, `private` or `both` (default) |
-| `FORGE_CI_LIVE_MAVEN_APPLICATION_IMAGE` | Trusted Maven/JDK **25** job image, full registry reference pinned with `@sha256:…` |
-| `FORGE_CI_LIVE_SERVICE_BRANCH` | Logical scratch source branch, e.g. `feature/service-trial`, different from `main` |
-| `FORGE_CI_LIVE_SERVICE_READINESS_URL` | Project-owned readiness endpoint, e.g. `http://127.0.0.1:8080/actuator/health/readiness` |
-| `FORGE_CI_LIVE_SERVICE_FIXTURE` | Optional absolute regular CI script path; never production credentials |
+The service snapshot's declaration is the consumer's validated
+`.forge-ci/artifacts.yml`, overlaid for the trial: platforms narrowed to
+`linux/amd64`, unsigned snapshot policy, nothing else changed; the original
+release declaration and signing inputs stay where they are. What the snapshot
+builds is the planner's rule, read by planning the overlay
+(`snapshotimage.New`); the trial's own scope is one container of the root
+Containerfile and context with native amd64 declared, and the Maven service
+workflow's is a root Maven application whose producers are that application
+alone, since its check job builds it again. A declaration either refuses is
+refused before anything is created, never silently reduced.
 
-Filter `^TestForgejoLayer_ConsumerDevelopment$` in
-`./internal/livetest/conformance` with `-tags=live`. The normal live driver
-supplies the contract and session; the controller needs no Java, Maven or
-application container. The runner fixture must provide:
+For the artifact-first service (`hello-maven-service`), the shared snapshot
+workflow builds the declared Maven application in the reviewed Java job image
+(`artifact-job-image-java`, the lifecycle's `CI_JOB_IMAGE`), gathers its bound
+`target` JAR input and only then builds the original jar-wrapping Containerfile;
+`context-artifact` stays empty. For a container-only declaration, compilation
+belongs in the original Containerfile and no unused artifact producer is
+scheduled. A separate Maven `app` job after snapshot publication keeps its
+normal checks and tests and copies the actual `target/<artifactId>-*.jar`
+outputs; **the checked JAR is not asserted to be the JAR inside the image**.
 
-- Permission for the Buildah setup helper and apt installation. The readiness
-  job uses the helper to provision Podman, jq and nftables in its own job
-  storage; Netavark needs `nft` for the loopback port mapping.
-- Trust in the lab registry, configured in the fixture rather than by
-  bypassing TLS. For a private consumer the readiness job logs in with the
-  development registry credential into a job-local auth file, pulls the digest
-  and deletes the file before the service starts.
-- Rootless Podman port forwarding. The readiness URL names the container port;
-  Podman maps it to a random loopback host port so the probe cannot accept a
-  service that already runs on the runner.
+The readiness job runs the published digest with Podman on the contract's
+container/readiness runner: it needs the Buildah setup helper and apt, trust
+in the lab registry configured in the fixture, and rootless port forwarding;
+the readiness URL names the container port and Podman maps it to a random
+loopback host port. For a private consumer the job logs in with the
+development registry credential into a job-local auth file, pulls the digest
+and deletes the file before the service starts. An optional runtime fixture
+script (`FORGE_CI_LIVE_SERVICE_FIXTURE`, an absolute regular CI script) runs
+inside the Java job and writes `trial-runtime/runtime.env` plus optional
+files, mounted read-only at `/trial` and passed with `--env-file`; only
+disposable, nonsecret trial material belongs there. Readiness makes at most 60
+HTTP requests, each bounded to two seconds with two-second retries.
 
-The source checkout is admitted once at HEAD. The selected scratch branch
-receives that source, the CI overlay and the standard trial canary, so policy
-`main` and the selected branch have different commits. Dispatch runs on policy
-`main`; `snapshot-images.yml` resolves the selected branch once and its exact
-SHA feeds both the image build and the checked Maven job. The source POM,
-business code, Containerfile, Maven checks and rules stay unchanged.
-
-The private snapshot declaration preserves the consumer's validated
-`.forge-ci/artifacts.yml` artifacts, `from` dependencies and build settings.
-The trial admits one root service with native amd64 support, narrows its platforms
-to `linux/amd64`, and applies unsigned snapshot policy without modifying the
-original release declaration or importing signing inputs. Other contexts/images,
-non-Maven application dependencies, build secrets, extraction and explicit OCI
-provenance are refused, not silently removed.
-
-For artifact-first services (including `hello-maven-service`), the shared snapshot
-workflow automatically builds the declared Maven application in the reviewed Java
-job image, gathers its bound `target` JAR input and only then builds the original
-jar-wrapping Containerfile. Its `artifact-job-image-java` input uses the same
-reviewed Java image; `context-artifact` stays empty. For an explicit container-only
-declaration, compilation belongs in the original Containerfile and no unused
-artifact producer is scheduled. Missing or invalid declarations never imply a
-fallback between these routes.
-
-A separate Maven `app` job after snapshot publication keeps its normal checks and
-tests and copies the actual `target/<artifactId>-*.jar` outputs. This separate
-checked build is intentional: **the checked JAR is not asserted to be the JAR
-inside the image**. Acceptance derives the expected producer/dependency graph
-from the validated private declaration rather than assuming zero producers.
-
-The runtime fixture script runs inside the Java job and writes
-`trial-runtime/runtime.env` plus optional files. They are transferred in the
-same run, mounted read-only at `/trial` and passed to the service with
-`--env-file`; only disposable, nonsecret trial material belongs there. The
-runtime is pulled and started by immutable digest. Readiness makes at most 60
-HTTP requests, each bounded to two seconds with two-second retries, and
-cleanup uses the exact created container ID.
-
-The acceptance binds the frozen branch and SHA, the registry digest, the OCI
-revision and branch labels, the checked JARs and the HTTP readiness evidence.
-It rejects unexpected registry aliases, Git tags or releases, and movement of
-either scratch branch. Successful job traces are retained by the existing log
-protocol. The offline guard for source preservation is:
+The offline guard for source preservation and the declaration's admission is:
 
 ```sh
 env GOTOOLCHAIN=local GOPROXY=off GOSUMDB=off go test ./internal/livetest \
-  -run '^TestMavenService(Development|SnapshotDeclaration)' -count=1
+  -run '^Test(MavenServiceDevelopment|ServiceSnapshot)' -count=1
 ```
 
 The bundled fixture `test/live/cases/maven-issuer-service/service-fixture.sh`
 generates a one-day EC PKCS12 key with `keytool` in the Java 25 job and
-supplies inert issuer metadata with `example.invalid` URLs. A consumer whose
-Containerfile copies only part of the tree, or whose POM skips its own checks,
-fails on its original inputs; that is a **CI integration blocker** to report
-with the exact failing job, not an application defect to fix in the trial.
-Likewise, a consumer that adds a database or Testcontainers dependency needs
-its runner fixture provisioned, not its checks disabled.
+supplies inert issuer metadata with `example.invalid` URLs.
 
 ##### Original Maven tests with Testcontainers
 
@@ -1849,6 +1816,13 @@ just test-live-consumer gitlab /absolute/hello-maven-service/consumer lifecycle 
   job-archive=/absolute/java-image.tar build-archive=/absolute/java-image.tar \
   signer-archive=/absolute/signer-image.tar lint-archive=/absolute/lint-java.tar \
   version=0.2.0 version-bump=maven job-user=65532:65532
+
+# Cargo container demo: the same lifecycle, container-first; the snapshot
+# builds the runtime image of .forge-ci/release-images.yml, as the release does.
+just test-live-consumer gitlab /absolute/hello-cargo-container/consumer lifecycle \
+  job-archive=/absolute/rust-image.tar build-archive=/absolute/rust-image.tar \
+  signer-archive=/absolute/signer-image.tar lint-archive=/absolute/lint-rust.tar \
+  version=0.2.0 version-bump=cargo job-user=65532:65532
 ```
 
 The image archives are settings, as for `just demo gitlab`: `job-archive=`
@@ -2153,7 +2127,7 @@ saying what it guards does not compile past CI.
 | `test/archguard` | where code may live: which layer may read the environment, mint a credential, or branch on the platform (import direction, ADR 0004, is the depguard `layer-*` rules in `.golangci.yml`) | Go source under `internal/` |
 | `test/forgejoguard` | the Forgejo layer's signing boundary and consumer contract: secrets per job, signer bootstrap order, coordinate preflight, routing, strict YAML, no organization named, workflows that start only when called, actions that call no sibling by path and take no credential | `.forgejo/`, `containers/signer/`, the Forgejo examples under `examples/` |
 | `test/lexiconguard` | a spelling, regex, or pattern literal is declared once | every file in the repo |
-| `test/syncguard` | a generated file still matches the Go it is generated from | `docs/`, `.forge-ci/` |
+| `test/syncguard` | a generated file still matches the Go it is generated from, or the tree it describes | `docs/`, `.forge-ci/`, `test/live/` |
 | `test/workflowguard` | the workflow contract adopters code against | `.github/workflows/`, `examples/` |
 
 The rule: a guard that reads files outside its own package goes in one of

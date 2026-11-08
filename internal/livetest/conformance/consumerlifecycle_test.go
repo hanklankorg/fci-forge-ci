@@ -21,7 +21,9 @@ const lifecycleBranch = "development"
 
 // A consumer lifecycle: the linked flow one consumer goes through in one
 // repository, run on the lab against the layer of this checkout. It is the
-// Maven service demo's, the one demo with a development route:
+// Maven service demo's: its development route, the Maven service development
+// workflow over the service snapshot of its one container, is the one
+// Forgejo has (docs/live-campaigns.md, Lifecycle):
 //
 //  1. a pull request from development into main, judged by the consumer's
 //     own pull-request workflow;
@@ -212,6 +214,9 @@ func runForgejoConsumerLifecycle(t *testing.T, root string, private bool) {
 	receipt, jars, producers := requireMavenServiceDevelopment(t, target, repo, development, consumer, config, head, image)
 	requireRunIDs(t, target, repo, review.ID, development.ID)
 	scenario.requireNone(t, "/tags", "/releases")
+	// The snapshot moves neither branch: main stays the merge, the source the
+	// reviewed head.
+	scenario.requireBranches(t, map[string]string{layerMain: request, lifecycleBranch: head})
 	t.Logf("lifecycle phase 3 development: run %d dispatched on %s@%s snapshots %s@%s as %s; checked JARs %d, producers %d", development.ID, layerMain, request, lifecycleBranch, head, receipt.Ref, jars, producers)
 
 	// Phase 4: the signed release request at the merged main. The release's

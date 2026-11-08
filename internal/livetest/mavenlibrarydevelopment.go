@@ -13,9 +13,12 @@ import (
 	"strings"
 )
 
-// forgejoDevelopmentWorkflow is the consumer path of the overlaid
+// The consumer paths of the Forgejo release workflow and of the overlaid
 // development workflow.
-const forgejoDevelopmentWorkflow = ".forgejo/workflows/development.yml"
+const (
+	forgejoReleaseWorkflow     = ".forgejo/workflows/release.yml"
+	forgejoDevelopmentWorkflow = ".forgejo/workflows/development.yml"
+)
 
 var (
 	errOracleJavaPath         = errors.New("oracle must be an absolute Java source path with a simple class name")

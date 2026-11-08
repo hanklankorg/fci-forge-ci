@@ -43,7 +43,7 @@ func WithMavenContainerTests(tb TB, source Consumer, image, runnerLabel string) 
 	ctx, cancel := context.WithTimeout(Context(tb), timeoutLayerPush)
 	defer cancel()
 
-	const file = ".forgejo/workflows/release.yml"
+	const file = forgejoReleaseWorkflow
 
 	body, err := githubWorkflow(ctx, source, file)
 	if err != nil {
@@ -121,7 +121,7 @@ func mavenContainerTestWorkflow(body, image, runnerLabel string) (string, error)
 	env["DOCKER_HOST"] = "tcp://docker:2375"
 	env["DOCKER_TLS_VERIFY"] = ""
 	env["TESTCONTAINERS_HOST_OVERRIDE"] = "docker"
-	result, err := yaml.Marshal(workflow)
+	result, err := encodeYAML(workflow)
 
-	return "# SPDX-FileCopyrightText: 2026 Digg - Agency for Digital Government\n# SPDX-License-Identifier: CC0-1.0\n\n" + string(result), err
+	return "# SPDX-FileCopyrightText: 2026 Digg - Agency for Digital Government\n# SPDX-License-Identifier: CC0-1.0\n\n" + result, err
 }

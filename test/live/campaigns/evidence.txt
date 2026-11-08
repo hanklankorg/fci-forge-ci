@@ -1,0 +1,75 @@
+# SPDX-FileCopyrightText: 2026 Digg - Agency for Digital Government
+# SPDX-License-Identifier: CC0-1.0
+
+# Live marks for docs/testing-matrices.md, hand-kept: one a line,
+#   <forgejo|gitlab|github> <demo or scenario> <pull-request|development|release|lifecycle|scenario> <mark> [note]
+# with the legend's marks (✅ live-proven, ◐ partial, ⏳ running or queued,
+# ❌ failed with the root fix committed). What is derivable, a line's
+# existence or a refusal, is not written here; the generator reads it from
+# the cases files and the planner. `go run ./internal/livetest/preflight
+# testing-evidence <live-runs> [<hosted-runs>]` drafts the lines from the
+# recorded verdicts and hosted trials (latest run of each flow wins); review
+# the draft before replacing these. A drafted failure is kept out until its
+# root fix is committed, and a trial of no shipped demo is left out.
+#
+# Seeded 2026-11-08 from ~/.local/state/forge-ci/live-runs:
+forgejo hello-cargo-container pull-request ✅ 2026-11-02
+forgejo hello-cargo-container release ✅ 2026-11-02
+forgejo hello-cargo-workspace pull-request ✅ 2026-11-02
+forgejo hello-cargo-workspace release ✅ 2026-11-02
+forgejo hello-go-cli pull-request ✅ 2026-11-02
+forgejo hello-go-cli release ✅ 2026-11-02
+forgejo hello-go-service pull-request ✅ 2026-11-02
+forgejo hello-go-service release ✅ 2026-11-02
+forgejo hello-maven pull-request ✅ 2026-11-02
+forgejo hello-maven release ✅ 2026-11-02
+forgejo hello-maven-service pull-request ✅ 2026-11-02
+forgejo hello-maven-service release ✅ 2026-11-02
+forgejo hello-npm-package pull-request ✅ 2026-11-02
+forgejo hello-npm-package release ✅ 2026-11-02
+forgejo hello-npm-service pull-request ✅ 2026-11-02
+forgejo hello-npm-service release ✅ 2026-11-02
+gitlab hello-cargo-container pull-request ✅ 2026-11-02
+gitlab hello-cargo-container release ✅ 2026-11-02
+gitlab hello-cargo-workspace pull-request ✅ 2026-11-02
+gitlab hello-cargo-workspace release ✅ 2026-11-02
+gitlab hello-go-cli pull-request ✅ 2026-11-02
+gitlab hello-go-service pull-request ✅ 2026-11-02
+gitlab hello-gradle pull-request ✅ 2026-11-02
+gitlab hello-maven pull-request ✅ 2026-11-02
+gitlab hello-maven release ✅ 2026-11-02
+gitlab hello-maven-service pull-request ✅ 2026-11-02
+gitlab hello-maven-service release ✅ 2026-11-02
+gitlab hello-monorepo pull-request ✅ 2026-11-02
+gitlab hello-npm-package pull-request ✅ 2026-11-02
+gitlab hello-npm-package release ✅ 2026-11-02
+gitlab hello-npm-service pull-request ✅ 2026-11-02
+gitlab hello-npm-service release ✅ 2026-11-02
+#
+# Seeded 2026-11-08 from the hosted GitHub trials of 2026-11-04
+# (diggsweden/r3/.live-validation):
+github hello-cargo-container pull-request ✅ 2026-11-04
+github hello-cargo-workspace pull-request ✅ 2026-11-04
+github hello-cargo-workspace release ✅ 2026-11-04
+github hello-go-cli pull-request ✅ 2026-11-04
+github hello-go-service pull-request ✅ 2026-11-04
+github hello-gradle release ✅ 2026-11-04
+github hello-maven pull-request ✅ 2026-11-04
+github hello-maven release ✅ 2026-11-04
+github hello-maven-service pull-request ✅ 2026-11-04
+github hello-npm-package pull-request ✅ 2026-11-04
+github hello-npm-package release ✅ 2026-11-04
+github hello-npm-service pull-request ✅ 2026-11-04
+# Drafted and held for the owner: hello-android pull-request and development
+# passed on 2026-11-04 from the android-bootstrap-5c5e5b79 checkout.
+#
+# Owner's judgements of the evidence roots named in docs/testing-parity.md
+# (snapshot of 2026-11-08):
+forgejo hello-maven-service development ✅ A run 517, the retired published snapshot
+forgejo hello-maven-service lifecycle ✅ 3c178f94
+gitlab hello-maven-service development ✅ lifecycle phase 3, 22ddcfd9
+gitlab hello-maven-service lifecycle ◐ phases 1–3 22ddcfd9, run 4 ec2380ef queued
+forgejo hello-cargo-container development ◐ fixture consumer proven, run 520; the demo is refused
+github hello-go-cli release ✅ GPG, hosted (matrix 1b, C)
+gitlab TestGitLabRelease_MinimalSignedArtifacts scenario ✅ 2026-11-07
+gitlab TestGitLabRelease_MinimalBranchProtection scenario ✅ 2026-11-07

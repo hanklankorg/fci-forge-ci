@@ -612,7 +612,7 @@ check-engine-binary:
 
 # ▪ Generate the CLI reference and schemas
 [group('documentation')]
-generate: gen-cli-reference gen-artifacts-schema gen-release-images-schema gen-runby
+generate: gen-cli-reference gen-artifacts-schema gen-release-images-schema gen-runby gen-testing-matrices
 
 # Renders the urfave/cli command tree.
 [doc('Generate docs/cli-reference.md')]
@@ -627,6 +627,15 @@ gen-cli-reference:
 gen-runby:
     @go run ./cmd/gen-runby > internal/cli/runby.json.tmp && mv internal/cli/runby.json.tmp internal/cli/runby.json
     @printf "Regenerated internal/cli/runby.json\n"
+
+# Regenerates matrices 1 and 2 of docs/testing-matrices.md from the demos'
+# declarations, the cases files and the live-evidence overlay
+# (test/live/campaigns/evidence.txt); matrix 1b and the prose stay as written.
+[doc('Generate the testing matrices sections')]
+[group('documentation')]
+gen-testing-matrices:
+    @go run ./internal/livetest/preflight testing-matrices . > docs/testing-matrices.md.tmp && mv docs/testing-matrices.md.tmp docs/testing-matrices.md
+    @printf "Regenerated docs/testing-matrices.md\n"
 
 # Writes .forge-ci/artifacts.schema.json from the Go schema declarations.
 [doc('Generate the artifacts.yml JSON schema')]
@@ -936,12 +945,14 @@ test-live-image kind forge_lab:
 # service development snapshot dispatched on the merged main, and a signed
 # release request from it. It takes the release's settings but workflow=,
 # next-version= and interrupt-after=, needs what a release needs and the
-# container/readiness runner, selects its builder with CI_IMAGE_BUILDER as
-# the other events do, and CI_JOB_IMAGE, pinned by digest, is also the Java
-# image the snapshot builds the service with. docs/live-campaigns.md,
-# Lifecycle, has the rest.
+# container/readiness runner, and selects its builder with CI_IMAGE_BUILDER
+# as the other events do. CI_JOB_IMAGE, pinned by digest, is a nanolinter
+# image of the java flavour (nanolinter, its check tools, a JDK and Maven):
+# the demo's lint and build jobs run in it, and the snapshot builds the
+# service with it. A plain Java runtime image fails the lint job on the
+# forge. docs/live-campaigns.md, Lifecycle, has the rest.
 #
-#   just test-live-consumer forgejo /absolute/hello-maven-service/consumer lifecycle CI_JOB_IMAGE=<digest reference> RELEASE_PLATFORMS=linux/amd64
+#   just test-live-consumer forgejo /absolute/hello-maven-service/consumer lifecycle CI_JOB_IMAGE=<nanolinter java image, digest reference> RELEASE_PLATFORMS=linux/amd64
 #
 # gitlab, on the lab, with prepared Docker image archives as settings, as for
 # `just demo gitlab`. pull-request runs the consumer's own MR gate and takes
@@ -953,13 +964,16 @@ test-live-image kind forge_lab:
 # signer-archive=, plus lint-archive= when the gate lints, KEY=value build
 # variables and scenario=<exact consumer release test name>; see
 # docs/live-campaigns.md. lifecycle is the linked flow in one project under
-# one policy, for the hello-maven-service demo alone: a merge request on
+# one policy, for a demo with a development route on GitLab, a service
+# snapshot of its one container from the declaration its release builds its
+# images from (hello-maven-service, hello-cargo-container): a merge request on
 # branch development, its native merge, the snapshot-images component on the
 # merged main, and a signed release request from it. It takes the release's
 # archives and settings but scenario= and next-version=; the build image is
-# also the Java image the snapshot builds the service with.
+# also the image the snapshot builds the service's producer with.
 #
 #   just test-live-consumer gitlab /absolute/hello-maven-service/consumer lifecycle job-archive=<path> build-archive=<path> signer-archive=<path> lint-archive=<path> version=0.2.0 version-bump=maven job-user=65532:65532
+#   just test-live-consumer gitlab /absolute/hello-cargo-container/consumer lifecycle job-archive=<path> build-archive=<path> signer-archive=<path> lint-archive=<path> version=0.2.0 version-bump=cargo job-user=65532:65532
 #
 # github, events pull-request, dev-release, release and lifecycle, on hosted GitHub. Runs
 # inside Forge Lab's hosted session (`just github run --org ... --prefix ...
@@ -1009,7 +1023,7 @@ test-live-consumer forge repo event *settings:
     case "$forge:$event" in
     forgejo:lifecycle)
         # The development phase is the Maven service's, with the demo's
-        # readiness probe and no runtime fixture, as test-live-forgejo-snapshot.
+        # readiness probe and no runtime fixture.
         export FORGE_CI_LIVE_SERVICE_READINESS_URL=http://127.0.0.1:8080/health FORGE_CI_LIVE_SERVICE_FIXTURE=''
         exec bash scripts/ci/run-live-tests.sh focused '^TestForgejoLayer_ConsumerLifecycle$'
         ;;
@@ -1058,22 +1072,6 @@ test-live-consumer forge repo event *settings:
         exit 2
         ;;
     esac
-
-# Published snapshot in unsigned mode, not an ephemeral checks-only build.
-# Reuses the native service trial and the normal launcher/locks/evidence path.
-# No signer is provisioned. Signature/attestation absence and scan readbacks
-# are not independently verified by this trial.
-[arg('repo', help='Absolute clean Maven-service consumer checkout with its original Containerfile')]
-[arg('image', help='Reviewed Java job image pinned by full SHA-256 digest')]
-[doc('Live Forgejo; unsigned development snapshot')]
-[group('live')]
-test-live-forgejo-snapshot repo image:
-    @FORGE_CI_LIVE_CONSUMER="$1" FORGE_CI_LIVE_MAVEN_APPLICATION_IMAGE="$2" FORGE_CI_LIVE_PROVIDER=forgejo \
-        FORGE_CI_LIVE_CONSUMER_EVENT=published-unsigned-snapshot FORGE_CI_LIVE_CONSUMER_SETTINGS='' \
-        FORGE_CI_LIVE_SERVICE_BRANCH=development FORGE_CI_LIVE_SERVICE_READINESS_URL=http://127.0.0.1:8080/health \
-        FORGE_CI_LIVE_SERVICE_FIXTURE='' FORGE_CI_LIVE_DEMO='' FORGE_CI_LIVE_SIGNING_KEY_DIR='' \
-        FORGE_CI_LIVE_SNAPSHOT_JOB_IMAGE='' FORGE_CI_LIVE_SNAPSHOT_DEPENDENCY_TOKEN_FILE='' \
-        exec bash scripts/ci/run-live-tests.sh focused '^TestForgejoLayer_ConsumerDevelopment$'
 
 # Show a consumer and keep it: a demo. `just demo-list` finds demos and
 # `just demo-delete` removes one.

@@ -15,7 +15,7 @@ import (
 // whose inline headers currently duplicate it. No consumer REUSE policy changes.
 var mavenConsumerRecipeFiles = []string{
 	".forgejo/workflows/pullrequest.yml",
-	".forgejo/workflows/release.yml",
+	forgejoReleaseWorkflow,
 	".chglog/config-keepachangelog.yml",
 	".chglog/config-minimal.yml",
 	".chglog/CHANGELOG-keepachangelog.tpl",
