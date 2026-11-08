@@ -192,7 +192,7 @@ func ReleaseRequestTag(version string) (string, string, error) {
 
 // GitHubTrialSettings is what the caller of a hosted GitHub trial chose.
 type GitHubTrialSettings struct {
-	Event     string            // TrialPullRequest or TrialRelease
+	Event     string            // TrialPullRequest, TrialDevRelease, TrialRelease or TrialLifecycle
 	Workflow  string            // the fixture workflow whose run is judged
 	Fixtures  string            // the consumer's fixture directory; "" finds it
 	Version   string            // the release version, vX.Y.Z
@@ -209,6 +209,11 @@ const githubDefaultPlatforms = "linux/amd64"
 // TrialDevRelease exercises a branch-dispatched development build without a
 // stable release request, signing secrets, or a mutation of the source branch.
 const TrialDevRelease = "dev-release"
+
+// GitHubDevelopmentWorkflow is the fixture workflow a development build
+// dispatches: the consumer's own call of the snapshot orchestrator. A
+// lifecycle's development phase dispatches the same workflow.
+const GitHubDevelopmentWorkflow = "release-dev.yml"
 
 // githubPlatforms reports whether value is a duplicate-free list of the
 // platforms GitHub's hosted runners build natively.
@@ -257,9 +262,13 @@ func ParseGitHubTrialSettings(event string, words []string) (GitHubTrialSettings
 	case TrialRelease:
 		settings.Workflow, settings.Version = trialReleaseWorkflow, "v0.1.0"
 	case TrialDevRelease:
-		settings.Workflow = "release-dev.yml"
+		settings.Workflow = GitHubDevelopmentWorkflow
+	case TrialLifecycle:
+		// The release phase's workflow and version; the pull request's and the
+		// development build's workflows are the fixed fixture names.
+		settings.Workflow, settings.Version = trialReleaseWorkflow, "v0.1.0"
 	default:
-		return GitHubTrialSettings{}, fmt.Errorf("event must be %s, %s or %s, got %q: %w", TrialPullRequest, TrialRelease, TrialDevRelease, event, errs.ErrValidation)
+		return GitHubTrialSettings{}, fmt.Errorf("event must be %s, %s, %s or %s, got %q: %w", TrialPullRequest, TrialDevRelease, TrialRelease, TrialLifecycle, event, errs.ErrValidation)
 	}
 
 	for _, word := range words {
@@ -278,7 +287,7 @@ func (settings *GitHubTrialSettings) parseWord(word string) error {
 	}
 
 	if !found || value == "" || (!settings.setPlatforms(key, value) && !settings.set(key, value)) {
-		return fmt.Errorf("setting %q: want workflow=<file>, fixtures=<dir>, version=X.Y.Z or image=<name[,name...]> (release), "+
+		return fmt.Errorf("setting %q: want workflow=<file> (not lifecycle), fixtures=<dir>, version=X.Y.Z or image=<name[,name...]> (release or lifecycle), "+
 			"RELEASE_PLATFORMS=linux/amd64[,linux/arm64], or nanolinter-image=/megalinter-image=<reference>: %w", word, errs.ErrValidation)
 	}
 
@@ -298,13 +307,14 @@ func (settings *GitHubTrialSettings) setPlatforms(key, value string) bool {
 }
 
 func (settings *GitHubTrialSettings) set(key, value string) bool {
-	release := settings.Event == TrialRelease
+	release := settings.Event == TrialRelease || settings.Event == TrialLifecycle
 
 	switch {
 	case key == settingWorkflow:
 		settings.Workflow = value
 
-		return trialWorkflow.MatchString(value)
+		// A lifecycle runs the three fixed fixture workflows.
+		return settings.Event != TrialLifecycle && trialWorkflow.MatchString(value)
 	case key == "fixtures":
 		settings.Fixtures = value
 

@@ -5,24 +5,27 @@ package livetest
 
 import (
 	"archive/zip"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"io"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	githubapi "github.com/google/go-github/v91/github"
 )
 
-// DispatchDevelopment sends exactly one dispatch to the new disposable
-// consumer. An uncertain response fails the trial; it is never dispatched again.
-func (trial *GitHubTrial) DispatchDevelopment(repo, workflow string) int64 {
+// DispatchDevelopment sends exactly one dispatch of workflow on main to the
+// new disposable consumer, with the workflow's inputs, if any. An uncertain
+// response fails the trial; it is never dispatched again.
+func (trial *GitHubTrial) DispatchDevelopment(repo, workflow string, inputs map[string]any) int64 {
 	trial.tb.Helper()
 
 	details, _, err := trial.api.Actions.CreateWorkflowDispatchEventByFileName(trial.tb.Context(), trial.org, repo, workflow,
-		githubapi.CreateWorkflowDispatchEventRequest{Ref: defaultBranch, ReturnRunDetails: new(true)})
+		githubapi.CreateWorkflowDispatchEventRequest{Ref: defaultBranch, Inputs: inputs, ReturnRunDetails: new(true)})
 	if err != nil {
 		trial.tb.Fatalf("dispatch development workflow %s: %v", workflow, err)
 	}
@@ -34,6 +37,37 @@ func (trial *GitHubTrial) DispatchDevelopment(repo, workflow string) int64 {
 	}
 
 	return 0
+}
+
+// CheckSnapshotPackage checks that a development run published the consumer's
+// snapshot image as a container package of its own repository, the snapshot
+// orchestrator's default image repository, and removes the package when the
+// trial ends, as the repository is.
+func (trial *GitHubTrial) CheckSnapshotPackage(repo string) GitHubPackageIdentity {
+	trial.tb.Helper()
+
+	ctx := trial.tb.Context()
+
+	repository, _, err := trial.api.Repositories.Get(ctx, trial.org, repo)
+	if err != nil {
+		trial.tb.Fatalf("livetest: read %s: %v", repo, err)
+	}
+
+	identity, err := trial.ReadContainerPackageIdentity(ctx, strings.ToLower(repo), repository.GetID())
+	if err != nil {
+		trial.tb.Fatalf("livetest: the development run published no snapshot image package %s of %s: %v", strings.ToLower(repo), repo, err)
+	}
+
+	trial.tb.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(trial.tb.Context()), 2*time.Minute)
+		defer cancel()
+
+		if err := trial.DeleteContainerPackage(ctx, identity); err != nil {
+			trial.tb.Errorf("livetest: delete the snapshot image package %s (id %d): %v", identity.Name, identity.ID, err)
+		}
+	})
+
+	return identity
 }
 
 // CheckDevelopmentRelease proves artifact transport and that a branch build

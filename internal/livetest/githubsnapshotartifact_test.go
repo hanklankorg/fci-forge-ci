@@ -125,7 +125,7 @@ jobs:
 	t.Logf("snapshot source: consumer=%s/%s id=%d policy=%s selected=%s branch=%s", trial.org, repo, repoID, policySHA, sourceSHA, snapshotArtifactBranch)
 	trial.waitWorkflows(repo, filepath.Join(dir, ".github", "workflows"))
 	t.Cleanup(func() { settleSnapshotGitHubRun(t, trial, repo, policySHA) })
-	trial.DispatchDevelopment(repo, "snapshot-smoke.yml")
+	trial.DispatchDevelopment(repo, "snapshot-smoke.yml", nil)
 	run := trial.WaitRun(repo, "snapshot-smoke.yml", "workflow_dispatch", policySHA, 35*time.Minute)
 	trial.ReportRun(repo, run)
 	t.Logf("snapshot workflow: run=%d url=%s conclusion=%s", run.GetID(), run.GetHTMLURL(), run.GetConclusion())

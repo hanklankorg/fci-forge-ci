@@ -38,25 +38,17 @@ const (
 	trialBranch = "consumer-trial"
 )
 
-// A hosted GitHub consumer trial: a consumer's GitHub fixture workflows run in
-// a disposable repository of the test organization, against the engine this
-// checkout pushed to the organization.
-//
-// Like the Forgejo and GitLab trials it is not a scenario of the tier: what it
-// shows depends on the consumer it is given. For a pull request the verdict is
-// the run of the consumer's pull-request workflow on a pull request. For a
-// release it is the release run, and then what the engine promises of any
-// GitHub release: main advanced by one signed commit, the final tag exists,
-// the release offers assets whose Cosign bundles verify, and, with
-// image=<name>, the promoted image verifies too. Signatures verify against the
-// engine's keyless identity, or, when the fixture's release workflow pins a
-// `cosign-public-key-sha256`, against a Cosign key pair made for the trial.
-func TestGitHubLayer_ConsumerTrial(t *testing.T) {
-	livetest.RegisterLiveScenario(t)
+// openHostedConsumer reads what `just test-live-consumer github` hands over:
+// the consumer checkout, the authorized organization, the event's settings
+// and the fixture directory, whose GPG profile is validated. Without a
+// checkout the test is skipped with the command that names one, events being
+// the words it takes.
+func openHostedConsumer(t *testing.T, events string) (string, int64, livetest.GitHubTrialSettings, string) {
+	t.Helper()
 
 	root := os.Getenv(checkoutEnv)
 	if root == "" {
-		t.Skip("no consumer checkout is named; run `just test-live-consumer github <checkout> <pull-request|dev-release|release> org=<org-id>`")
+		t.Skipf("no consumer checkout is named; run `just test-live-consumer github <checkout> %s org=<org-id>`", events)
 	}
 
 	organizationID, err := strconv.ParseInt(os.Getenv(organizationEnv), 10, 64)
@@ -82,21 +74,75 @@ func TestGitHubLayer_ConsumerTrial(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	visibilities := livetest.ConsumerVisibilities(t)
+	return root, organizationID, settings, fixtures
+}
 
-	if livetest.DemoName() != "" && settings.Event != livetest.TrialRelease {
-		t.Fatal("a demo runs the release and then a pull request; start it with the release event")
-	}
+// hostedReleaseToken reads the consumer's release credential for an event that
+// releases, a release or a lifecycle, unless the engine is only being
+// prepared; a pull request or a development build gets no release authority.
+func hostedReleaseToken(t *testing.T, settings livetest.GitHubTrialSettings) string {
+	t.Helper()
 
 	var releaseToken string
-	if settings.Event == livetest.TrialRelease && os.Getenv("FORGE_CI_LIVE_ENGINE_MODE") != "prepare" {
+
+	if (settings.Event == livetest.TrialRelease || settings.Event == livetest.TrialLifecycle) && os.Getenv("FORGE_CI_LIVE_ENGINE_MODE") != "prepare" {
+		var err error
+
 		releaseToken, err = livetest.GitHubReleaseToken(os.Getenv(livetest.GitHubReleaseTokenFileEnv))
 		if err != nil {
 			t.Fatal(err)
 		}
 	}
 
+	return releaseToken
+}
+
+// A hosted GitHub consumer trial: a consumer's GitHub fixture workflows run in
+// a disposable repository of the test organization, against the engine this
+// checkout pushed to the organization.
+//
+// Like the Forgejo and GitLab trials it is not a scenario of the tier: what it
+// shows depends on the consumer it is given. For a pull request the verdict is
+// the run of the consumer's pull-request workflow on a pull request. For a
+// release it is the release run, and then what the engine promises of any
+// GitHub release: main advanced by one signed commit, the final tag exists,
+// the release offers assets whose Cosign bundles verify, and, with
+// image=<name>, the promoted image verifies too. Signatures verify against the
+// engine's keyless identity, or, when the fixture's release workflow pins a
+// `cosign-public-key-sha256`, against a Cosign key pair made for the trial.
+func TestGitHubLayer_ConsumerTrial(t *testing.T) {
+	livetest.RegisterLiveScenario(t)
+
+	root, organizationID, settings, fixtures := openHostedConsumer(t, "<pull-request|dev-release|release>")
+	if settings.Event == livetest.TrialLifecycle {
+		t.Fatal("a lifecycle is TestGitHubLayer_ConsumerLifecycle; run `just test-live-consumer github <checkout> lifecycle org=<org-id>`")
+	}
+
+	if livetest.DemoName() != "" && settings.Event != livetest.TrialRelease {
+		t.Fatal("a demo runs the release and then a pull request; start it with the release event")
+	}
+
+	releaseToken := hostedReleaseToken(t, settings)
 	trial := livetest.OpenGitHubTrial(t, organizationID)
+
+	engine, prepared := hostedEngine(t, trial, settings)
+	if prepared {
+		return
+	}
+
+	for _, visibility := range livetest.ConsumerVisibilities(t) {
+		t.Run(visibility.Name, func(t *testing.T) {
+			runTrial(t, livetest.OpenGitHubTrial(t, organizationID), engine, root, fixtures, settings, visibility, releaseToken)
+		})
+	}
+}
+
+// hostedEngine is the engine under test in the organization: HEAD of the
+// engine checkout, pushed and built by FORGE_CI_LIVE_ENGINE_MODE prepare or
+// by default, or the one already there with reuse. It reports whether the
+// run only prepared it.
+func hostedEngine(t *testing.T, trial *livetest.GitHubTrial, settings livetest.GitHubTrialSettings) (livetest.GitHubEngine, bool) {
+	t.Helper()
 
 	engineRoot := os.Getenv("FORGE_CI_LIVE_ENGINE_CHECKOUT")
 	if engineRoot == "" {
@@ -112,29 +158,34 @@ func TestGitHubLayer_ConsumerTrial(t *testing.T) {
 
 	t.Logf("controller checkout: %s (working tree executed; HEAD %s); engine checkout: %s", reporoot.Path(t), strings.TrimSpace(string(controllerCommit)), engineRoot)
 
-	var engine livetest.GitHubEngine
-
 	switch mode := os.Getenv("FORGE_CI_LIVE_ENGINE_MODE"); mode {
 	case "", "prepare":
-		engine = trial.EnsureEngine(engineRoot, livetest.GitHubEnginePlatforms(settings.Platforms))
-
-		if mode == "prepare" {
-			return
-		}
+		return trial.EnsureEngine(engineRoot, livetest.GitHubEnginePlatforms(settings.Platforms)), mode == "prepare"
 	case "reuse":
-		engine = trial.ReuseEngine(engineRoot)
+		return trial.ReuseEngine(engineRoot), false
 	default:
 		t.Fatalf("unknown FORGE_CI_LIVE_ENGINE_MODE %q", mode)
 	}
 
-	for _, visibility := range visibilities {
-		t.Run(visibility.Name, func(t *testing.T) {
-			runTrial(t, livetest.OpenGitHubTrial(t, organizationID), engine, root, fixtures, settings, visibility, releaseToken)
-		})
-	}
+	return livetest.GitHubEngine{}, false
 }
 
-func runTrial(t *testing.T, trial *livetest.GitHubTrial, engine livetest.GitHubEngine, root, fixtures string, settings livetest.GitHubTrialSettings, visibility livetest.ConsumerVisibility, releaseToken string) {
+// trialSigning is what a release signs with, decided from the fixture's
+// release workflow before the consumer is rendered.
+type trialSigning struct {
+	trust     livetest.CosignTrust
+	cosignKey *livetest.TrialCosignKey
+	sshKey    string
+	overrides map[string]string
+}
+
+// prepareSigning reads the fixture's release signing profile and makes the
+// keys the release signs with: a Cosign key pair when the release pins one,
+// whose public hash the rendered fixture gets, and an SSH signing key when
+// the release signs Git with SSH, with the allowed-signers line that names it
+// for the workflow's bot-email staged in the consumer. It returns the trial
+// with that file.
+func prepareSigning(t *testing.T, trial *livetest.GitHubTrial, engine livetest.GitHubEngine, root, fixtures string, settings livetest.GitHubTrialSettings) (*livetest.GitHubTrial, trialSigning) {
 	t.Helper()
 
 	keySigned, sshPrincipal, err := releaseSigning(root, fixtures, settings)
@@ -142,6 +193,89 @@ func runTrial(t *testing.T, trial *livetest.GitHubTrial, engine livetest.GitHubE
 		t.Fatal(err)
 	}
 
+	signing := trialSigning{trust: livetest.KeylessTrust(engine), overrides: maps.Clone(settings.Overrides)}
+
+	if keySigned {
+		key := trial.NewTrialCosignKey()
+		signing.cosignKey, signing.trust = &key, key.Trust()
+
+		if signing.overrides == nil {
+			signing.overrides = map[string]string{}
+		}
+
+		signing.overrides["cosign-public-key-sha256"] = key.SHA256
+	}
+
+	if sshPrincipal != "" {
+		private, public := livetest.SSHKey(t, t.TempDir())
+		signing.sshKey = private
+		trial = trial.WithFile(".forge-ci/allowed_signers", sshPrincipal+" "+public+"\n")
+	}
+
+	return trial, signing
+}
+
+// setReleaseSecrets gives the repository the release's authority: the trial's
+// GPG key, the release token and the signing keys the fixture's release uses,
+// and the Cosign public key as a variable when the release pins one. A kept
+// demo holds no credential once the run is over.
+func setReleaseSecrets(t *testing.T, trial *livetest.GitHubTrial, repo string, signing trialSigning, key livetest.TrialGPGKey, releaseToken string, demo bool) {
+	t.Helper()
+
+	secrets := map[string]string{
+		"RELEASE_GPG_PRIVATE_KEY": key.Private,
+		"RELEASE_GPG_PASSPHRASE":  key.Passphrase,
+		"RELEASE_GPG_PUBLIC_KEY":  key.Public,
+		"RELEASE_TOKEN":           releaseToken,
+	}
+
+	if signing.sshKey != "" {
+		secrets["RELEASE_SSH_SIGNING_KEY"] = signing.sshKey
+	}
+
+	if signing.cosignKey != nil {
+		secrets["RELEASE_COSIGN_PRIVATE_KEY"] = signing.cosignKey.Private
+		secrets["RELEASE_COSIGN_PASSPHRASE"] = signing.cosignKey.Passphrase
+	}
+
+	if demo {
+		trial.DeleteSecretsAfter(repo, slices.Sorted(maps.Keys(secrets)))
+	}
+
+	for secret, value := range secrets {
+		trial.SetSecret(repo, secret, value)
+	}
+
+	if signing.cosignKey != nil {
+		trial.SetVariable(repo, "COSIGN_PUBLIC_KEY", signing.cosignKey.Public)
+	}
+}
+
+// checkImages verifies each released image image= names at the final tag,
+// a private consumer's with the host's registry credentials.
+func checkImages(t *testing.T, trial *livetest.GitHubTrial, repo string, settings livetest.GitHubTrialSettings, final string, engine livetest.GitHubEngine, trust livetest.CosignTrust, private bool) {
+	t.Helper()
+
+	if settings.Image == "" {
+		return
+	}
+
+	if private {
+		t.Log("private image verification uses the host's registry credentials; provide an isolated DOCKER_CONFIG for GHCR access")
+	}
+
+	for image := range strings.SplitSeq(settings.Image, ",") {
+		verified := trial.CheckImage(repo, image, final, engine, trust)
+		if private && verified != "" {
+			trial.CheckPrivateImage(verified)
+		}
+	}
+}
+
+func runTrial(t *testing.T, trial *livetest.GitHubTrial, engine livetest.GitHubEngine, root, fixtures string, settings livetest.GitHubTrialSettings, visibility livetest.ConsumerVisibility, releaseToken string) {
+	t.Helper()
+
+	trial, signing := prepareSigning(t, trial, engine, root, fixtures, settings)
 	demo := livetest.DemoName()
 
 	var repo string
@@ -153,33 +287,7 @@ func runTrial(t *testing.T, trial *livetest.GitHubTrial, engine livetest.GitHubE
 		repo = trial.NewConsumerRepository(consumerRepositoryName(root, visibility.Name, settings.Event, settings.Workflow), visibility.Private)
 	}
 
-	overrides := maps.Clone(settings.Overrides)
-	trust := livetest.KeylessTrust(engine)
-
-	var cosignKey *livetest.TrialCosignKey
-
-	if keySigned {
-		key := trial.NewTrialCosignKey()
-		cosignKey, trust = &key, key.Trust()
-
-		if overrides == nil {
-			overrides = map[string]string{}
-		}
-
-		overrides["cosign-public-key-sha256"] = key.SHA256
-	}
-
-	// A release that signs Git with SSH gets a key made for this run, and the
-	// allowed-signers line that names it for the workflow's bot-email.
-	var sshSigningKey string
-
-	if sshPrincipal != "" {
-		private, public := livetest.SSHKey(t, t.TempDir())
-		sshSigningKey = private
-		trial = trial.WithFile(".forge-ci/allowed_signers", sshPrincipal+" "+public+"\n")
-	}
-
-	tree := trial.PushConsumer(repo, root, fixtures, engine, overrides)
+	tree := trial.PushConsumer(repo, root, fixtures, engine, signing.overrides)
 	trial.SetVariable(repo, "FORGE_CI_REPOSITORY", engine.Owner+"/"+engine.Repository)
 	trial.SetVariable(repo, "RELEASE_PLATFORMS", settings.Platforms)
 
@@ -194,7 +302,7 @@ func runTrial(t *testing.T, trial *livetest.GitHubTrial, engine livetest.GitHubE
 	}
 
 	if settings.Event == livetest.TrialDevRelease {
-		dispatched := trial.DispatchDevelopment(repo, settings.Workflow)
+		dispatched := trial.DispatchDevelopment(repo, settings.Workflow, nil)
 
 		run := judge(t, trial, repo, settings.Workflow, "workflow_dispatch", tree.Main)
 		if dispatched != 0 && run.GetID() != dispatched {
@@ -207,34 +315,7 @@ func runTrial(t *testing.T, trial *livetest.GitHubTrial, engine livetest.GitHubE
 	}
 
 	key := trial.NewTrialGPGKey()
-	secrets := map[string]string{
-		"RELEASE_GPG_PRIVATE_KEY": key.Private,
-		"RELEASE_GPG_PASSPHRASE":  key.Passphrase,
-		"RELEASE_GPG_PUBLIC_KEY":  key.Public,
-		"RELEASE_TOKEN":           releaseToken,
-	}
-
-	if sshSigningKey != "" {
-		secrets["RELEASE_SSH_SIGNING_KEY"] = sshSigningKey
-	}
-
-	if cosignKey != nil {
-		secrets["RELEASE_COSIGN_PRIVATE_KEY"] = cosignKey.Private
-		secrets["RELEASE_COSIGN_PASSPHRASE"] = cosignKey.Passphrase
-	}
-
-	// A kept demo holds no credential once the run is over.
-	if demo != "" {
-		trial.DeleteSecretsAfter(repo, slices.Sorted(maps.Keys(secrets)))
-	}
-
-	for secret, value := range secrets {
-		trial.SetSecret(repo, secret, value)
-	}
-
-	if cosignKey != nil {
-		trial.SetVariable(repo, "COSIGN_PUBLIC_KEY", cosignKey.Public)
-	}
+	setReleaseSecrets(t, trial, repo, signing, key, releaseToken, demo != "")
 
 	request, final, err := livetest.ReleaseRequestTag(settings.Version)
 	if err != nil {
@@ -244,23 +325,12 @@ func runTrial(t *testing.T, trial *livetest.GitHubTrial, engine livetest.GitHubE
 	trial.PushReleaseRequest(repo, tree, key, request, settings.Version)
 	judge(t, trial, repo, settings.Workflow, "push", tree.Main)
 
-	assets := trial.CheckRelease(repo, tree, final, trust, key)
+	assets := trial.CheckRelease(repo, tree, final, signing.trust, key)
 	if visibility.Private {
 		trial.CheckPrivateReleaseAssets(repo, assets)
 	}
 
-	if settings.Image != "" {
-		if visibility.Private {
-			t.Log("private image verification uses the host's registry credentials; provide an isolated DOCKER_CONFIG for GHCR access")
-		}
-
-		for image := range strings.SplitSeq(settings.Image, ",") {
-			verified := trial.CheckImage(repo, image, final, engine, trust)
-			if visibility.Private && verified != "" {
-				trial.CheckPrivateImage(verified)
-			}
-		}
-	}
+	checkImages(t, trial, repo, settings, final, engine, signing.trust, visibility.Private)
 
 	// A demo then shows a pull request, judged by the consumer's own
 	// pull-request workflow.
@@ -297,11 +367,12 @@ func TestConsumerRepositoryNamesSeparateConcurrentEvents(t *testing.T) {
 	}
 }
 
-// releaseSigning inspects only a stable release's selected workflow. PR and
-// development fixtures need not declare a stable release workflow at all.
-// An SSH signer must name its principal, which binds allowed_signers to the key.
+// releaseSigning inspects only a stable release's selected workflow, a
+// release's or a lifecycle's. PR and development fixtures need not declare a
+// stable release workflow at all. An SSH signer must name its principal,
+// which binds allowed_signers to the key.
 func releaseSigning(root, fixtures string, settings livetest.GitHubTrialSettings) (bool, string, error) {
-	if settings.Event != livetest.TrialRelease {
+	if settings.Event != livetest.TrialRelease && settings.Event != livetest.TrialLifecycle {
 		return false, "", nil
 	}
 

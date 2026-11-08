@@ -300,13 +300,32 @@ variables are the documented ones, `CI_PIPELINE_SOURCE` and
 trial: the lifecycle's development phase is its first conformance exercise,
 so a failure there may be the component's rather than the flow's.
 
+On hosted GitHub (`TestGitHubLayer_ConsumerLifecycle`) the same five phases
+run in one disposable repository of the test organization, against the engine
+the checkout pushed there, through the three orchestrators the demo's GitHub
+fixtures call: `pullrequest.yml` for the pull request, `release-dev.yml`, the
+demo's call of the snapshot orchestrator, dispatched on the merged `main` with
+`source-branch: development` for the development phase, and `release.yml`
+for the release. The pull request is merged through the API, told the head
+commit, and the merge commit is read back from the API: `main` at it, its
+parents the base and the change, its tree the change's. The development
+phase's acceptance is the development build's (a green run, its artifacts
+delivered, `main`, tags and releases unchanged) and the snapshot image
+published to the repository's container package, which is removed with the
+repository; the engine's snapshot inventory is read from the run's artifacts
+by the standalone snapshot trial, not claimed here. The release is judged as
+the GitHub release trial's. The snapshot publishes with the workflow's own
+token; the release secrets are set at the release phase and not before. It
+runs outside the campaign route, inside Forge Lab's hosted session:
+`just test-live-consumer github <checkout> lifecycle org=<org-id>`
+(docs/testing.md, Trying a consumer on GitHub).
+
 The event is admitted for the `hello-maven-service` demo alone, the one demo
-with a development route; a demo without one is refused rather than run as a
-shorter flow, and hosted GitHub refuses the event. amd64 runners only for now.
-Standalone `test-live-consumer <forgejo|gitlab> <checkout> lifecycle …` runs
-the same test outside a campaign. The standalone pull-request, release and
-snapshot trials remain the single-phase entrypoints; the lifecycle calls their
-extracted checks.
+with a development route on every forge; a demo without one is refused rather
+than run as a shorter flow. amd64 runners only for now. Standalone
+`test-live-consumer <forge> <checkout> lifecycle …` runs the same test outside
+a campaign. The standalone pull-request, release and snapshot trials remain
+the single-phase entrypoints; the lifecycle calls their extracted checks.
 
 ### Explicit-input GitLab regressions
 

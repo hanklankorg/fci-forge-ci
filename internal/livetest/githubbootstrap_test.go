@@ -79,7 +79,7 @@ func TestGitHubBootstrap_SourceAndStableSelection(t *testing.T) {
 	// Register before dispatch: cleanup settles only this new repository's runs,
 	// including an uncertain dispatch response, before its ID-bound deletion.
 	t.Cleanup(func() { settleBootstrapRuns(t, trial, repo, snapshot) })
-	trial.DispatchDevelopment(repo, "bootstrap-smoke.yml")
+	trial.DispatchDevelopment(repo, "bootstrap-smoke.yml", nil)
 	run := trial.WaitRun(repo, "bootstrap-smoke.yml", "workflow_dispatch", snapshot, 22*time.Minute)
 	t.Logf("bootstrap workflow: run=%d url=%s", run.GetID(), run.GetHTMLURL())
 	trial.ReportRun(repo, run)

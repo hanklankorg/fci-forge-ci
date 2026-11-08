@@ -523,6 +523,21 @@ func TestParseGitHubTrialSettings_DevelopmentRelease(t *testing.T) {
 	}
 }
 
+// A lifecycle takes the release's version and images; its workflows are the
+// fixed fixture names, so workflow= is refused.
+func TestParseGitHubTrialSettings_Lifecycle(t *testing.T) {
+	t.Parallel()
+
+	settings, err := ParseGitHubTrialSettings(TrialLifecycle, []string{"version=0.2.0", "image=app"})
+	if err != nil || settings.Workflow != "release.yml" || settings.Version != "v0.2.0" || settings.Image != "app" {
+		t.Fatalf("lifecycle settings = %+v, %v", settings, err)
+	}
+
+	if _, err := ParseGitHubTrialSettings(TrialLifecycle, []string{"workflow=release-gpg.yml"}); !errors.Is(err, errs.ErrValidation) {
+		t.Errorf("a lifecycle accepted workflow=: %v", err)
+	}
+}
+
 // A failed job's log ends with its cleanup steps; the excerpt is the lines
 // leading to the first error annotation, and the end only without one.
 func TestFailureExcerpt(t *testing.T) {

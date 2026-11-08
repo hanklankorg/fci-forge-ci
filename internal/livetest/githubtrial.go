@@ -538,17 +538,106 @@ func (trial *GitHubTrial) PushChange(repo string, tree GitHubConsumerTree, branc
 	return head
 }
 
-// OpenPullRequest opens branch against main.
-func (trial *GitHubTrial) OpenPullRequest(repo, branch string) {
+// OpenPullRequest opens branch against main and returns its number.
+func (trial *GitHubTrial) OpenPullRequest(repo, branch string) int {
 	trial.tb.Helper()
 
-	_, _, err := trial.api.PullRequests.Create(trial.tb.Context(), trial.org, repo, github.CreatePullRequest{
+	pull, _, err := trial.api.PullRequests.Create(trial.tb.Context(), trial.org, repo, github.CreatePullRequest{
 		Title: new("Hosted trial: pull-request gate"), Head: branch, Base: defaultBranch,
 		Body: new("Forge Lab hosted consumer trial. Disposable."),
 	})
 	if err != nil {
 		trial.tb.Fatalf("livetest: open the pull request from %s: %v", branch, err)
 	}
+
+	return pull.GetNumber()
+}
+
+// MergePullRequest merges the pull request natively with a merge commit, the
+// forge told which head commit is meant, and returns the merge commit.
+func (trial *GitHubTrial) MergePullRequest(repo string, number int, head string) string {
+	trial.tb.Helper()
+
+	result, _, err := trial.api.PullRequests.Merge(trial.tb.Context(), trial.org, repo, number, "Merge the change under review",
+		&github.PullRequestOptions{SHA: head, MergeMethod: "merge"})
+	if err != nil || !result.GetMerged() || len(result.GetSHA()) != 40 {
+		trial.tb.Fatalf("livetest: merge pull request #%d of %s at %s: %v", number, repo, head, err)
+	}
+
+	return result.GetSHA()
+}
+
+// CheckMerge checks what the native merge did: main is at merge, a commit
+// whose parents are the base the pull request was opened on and the change
+// under review, with the change's tree.
+func (trial *GitHubTrial) CheckMerge(repo, merge, base, head string) {
+	trial.tb.Helper()
+
+	ctx := trial.tb.Context()
+
+	branch, _, err := trial.api.Repositories.GetBranch(ctx, trial.org, repo, defaultBranch, 0)
+	if err != nil || branch.GetCommit().GetSHA() != merge {
+		trial.tb.Fatalf("livetest: main of %s is %s, want the merge commit %s: %v", repo, branch.GetCommit().GetSHA(), merge, err)
+	}
+
+	commit, _, err := trial.api.Repositories.GetCommit(ctx, trial.org, repo, merge, nil)
+	if err != nil {
+		trial.tb.Fatalf("livetest: read the merge commit %s: %v", merge, err)
+	}
+
+	if parents := commit.Parents; len(parents) != 2 || parents[0].GetSHA() != base || parents[1].GetSHA() != head {
+		trial.tb.Fatalf("livetest: the merge commit %s has %d parents, want the base %s and the change %s", merge, len(commit.Parents), base, head)
+	}
+
+	change, _, err := trial.api.Repositories.GetCommit(ctx, trial.org, repo, head, nil)
+	if err != nil {
+		trial.tb.Fatalf("livetest: read the change %s: %v", head, err)
+	}
+
+	if tree := commit.GetCommit().GetTree().GetSHA(); tree == "" || tree != change.GetCommit().GetTree().GetSHA() {
+		trial.tb.Fatalf("livetest: the merge commit's tree %s is not the change's %s", tree, change.GetCommit().GetTree().GetSHA())
+	}
+}
+
+// FetchMain brings the trial's working copy to main of repo as the forge has
+// it, after a merge the forge made, and returns the tree at it.
+func (trial *GitHubTrial) FetchMain(repo string, tree GitHubConsumerTree) GitHubConsumerTree {
+	trial.tb.Helper()
+
+	trial.git(tree.Dir, "fetch", gitQuiet, trial.remote(repo), "refs/heads/"+defaultBranch)
+	trial.git(tree.Dir, "checkout", gitQuiet, "-B", defaultBranch, "FETCH_HEAD")
+
+	return GitHubConsumerTree{Dir: tree.Dir, Main: strings.TrimSpace(trial.git(tree.Dir, "rev-parse", "HEAD"))}
+}
+
+// GitHubInventory counts what a repository holds.
+type GitHubInventory struct {
+	Runs, Tags, Releases int
+}
+
+// RepositoryInventory counts the workflow runs, tags and releases of repo.
+func (trial *GitHubTrial) RepositoryInventory(repo string) GitHubInventory {
+	trial.tb.Helper()
+
+	ctx := trial.tb.Context()
+	page := github.ListOptions{PerPage: 100}
+
+	runs, _, err := trial.api.Actions.ListRepositoryWorkflowRuns(ctx, trial.org, repo, &github.ListWorkflowRunsOptions{ListOptions: page})
+	if err != nil {
+		trial.tb.Fatalf("livetest: list the runs of %s: %v", repo, err)
+	}
+
+	tags, _, err := trial.api.Repositories.ListTags(ctx, trial.org, repo, &page)
+	if err != nil {
+		trial.tb.Fatalf("livetest: list the tags of %s: %v", repo, err)
+	}
+
+	releases, _, err := trial.api.Repositories.ListReleases(ctx, trial.org, repo, &page)
+	if err != nil {
+		trial.tb.Fatalf("livetest: list the releases of %s: %v", repo, err)
+	}
+
+	return GitHubInventory{Runs: runs.GetTotalCount(), Tags: len(tags), Releases: len(releases)}
 }
 
 // SetVariable creates or updates a repository Actions variable.

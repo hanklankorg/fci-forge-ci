@@ -366,6 +366,7 @@ setup, evidence and cleanup.
 | GitLab release | `just test-live-consumer gitlab <checkout> release job-archive=<archive> build-archive=<archive> signer-archive=<archive> [setting ...]` | Local contract, prepared image archives and guarded full-release runner profile |
 | GitLab lifecycle | `just test-live-consumer gitlab <checkout> lifecycle job-archive=<archive> build-archive=<archive> signer-archive=<archive> lint-archive=<archive> [setting ...]` | As the release; the `hello-maven-service` demo alone (docs/live-campaigns.md, Lifecycle) |
 | GitHub PR, development build or release | `just test-live-consumer github <checkout> <pull-request\|dev-release\|release> org=<org-id> [setting ...]` | Forge Lab's hosted `github run` session, consumer workflow fixtures and public engine images |
+| GitHub lifecycle | `just test-live-consumer github <checkout> lifecycle org=<org-id> [version=X.Y.Z] [image=<name>]` | As the release, plus the consumer's `release-dev.yml` fixture and the release credential; the `hello-maven-service` demo (docs/live-campaigns.md, Lifecycle) |
 
 See [Forgejo trials](#trying-a-consumer), [GitLab acceptance](#gitlab-live-acceptance)
 and [GitHub trials](#trying-a-consumer-on-github). `just test-live` is the local
@@ -1455,6 +1456,18 @@ SHA256 metadata and ZIP contents within a 1 GiB compressed/expanded budget per
 artifact, and requires unchanged `main`, no tags and no releases. This proves
 artifact transport, not application-specific versions, package installation or
 container publication. `version=` and `image=` are stable-release-only settings.
+
+`lifecycle` runs the three fixtures in one disposable repository: a pull
+request from `development` judged by `pullrequest.yml`, its native merge
+through the API, `release-dev.yml` dispatched on the merged `main` with
+`source-branch: development`, judged as `dev-release` is and then for the
+snapshot image package the run published to the repository, and a signed
+release request at the merged `main`, judged as `release` is, with the
+release secrets set only then. The repository must then hold exactly those
+three runs, two tags and one release. It takes `version=` and `image=`, not
+`workflow=`; the development workflow must take a `source-branch` input, as
+the demo's does. The `hello-maven-service` demo is the consumer it was built
+for; docs/live-campaigns.md, Lifecycle, describes the phases on every forge.
 
 By default the controller checkout's `HEAD` is also the engine under test.
 `FORGE_CI_LIVE_ENGINE_CHECKOUT=/absolute/committed-engine` selects a separate
