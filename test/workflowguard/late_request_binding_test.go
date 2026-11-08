@@ -158,7 +158,7 @@ func TestNativePrivateBoundariesRequireOriginalRequest(t *testing.T) {
 				require.Equal(t, "${{ inputs['checkout-ref'] }}", step.Env["RELEASE_SHA"])
 				require.Equal(t, "${{ inputs['request-is-release'] }}", step.Env["RELEASE_REQUEST_IS_RELEASE"])
 				require.Equal(t, "${{ inputs['require-allowlisted-signer'] }}", step.Env["REQUIRE_ALLOWLISTED_SIGNER"])
-				require.Equal(t, "true", step.Env["REQUIRE_VALID_SIGNATURE"])
+				require.NotContains(t, step.Env, "REQUIRE_VALID_SIGNATURE", "validity is required of the final tag only")
 				require.Contains(t, step.Env["ALLOWED_SIGNERS_FILE"], "/release-request-metadata/.forge-ci/")
 				require.Contains(t, step.Env["ALLOWED_GPG_KEYS_FILE"], "/release-request-metadata/.forge-ci/")
 				require.Equal(t, "${{ runner.temp }}/release-source-metadata", step.WorkingDirectory)
@@ -216,7 +216,7 @@ printf '%s\n' "$*" >>"$CALLS"
 case "$*" in
   'validate tag signature --tag release-request/v1.2.3')
     test "$REMOTE_STATE" != unsigned-same-Q ;;
-  'validate tag signature --tag v1.2.3 --require-allowlisted-signer=false --allowed-gpg-keys-file /dev/null')
+  'validate tag signature --tag v1.2.3 --require-valid-signature --require-allowlisted-signer=false --allowed-gpg-keys-file /dev/null')
     : ;;
   'release validate-tag --expected-parent original-Q')
     case "$REMOTE_STATE" in

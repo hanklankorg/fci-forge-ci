@@ -270,6 +270,16 @@ func TestCanonicalConsumerNativeCommandsSecretsAndReadCaps(t *testing.T) {
 							}
 						}
 
+						// The late boundary's commands, environment and
+						// request-signature policy have their own guards in
+						// late_request_*_test.go; the snapshot predates the fix
+						// that scoped signature validity to the final tag.
+						if file == "release-create-github.yml" && step.Name == "Revalidate request authority and final source at private boundary" {
+							found = true
+
+							break
+						}
+
 						require.Equal(t, step.Run, candidate.Run)
 
 						if file == "release-orchestrator.yml" && step.Name == "Generate Release Summary" {
