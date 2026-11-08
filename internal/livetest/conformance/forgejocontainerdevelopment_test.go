@@ -188,23 +188,23 @@ func TestForgejoLayer_ContainerDevelopment(t *testing.T) {
 				"container", "image", "usable-digest", "--ref", image+"@"+digest,
 				"--arch", "amd64", "--auth-file", auth,
 				"--require-label", "org.opencontainers.image.revision="+head)
-			if readback.ExitCode != 0 || strings.TrimSpace(readback.Stdout) != digest {
-				t.Fatalf("development image does not match its source: exit=%d\n%s", readback.ExitCode, readback.Stderr)
+
+			child := strings.TrimSpace(readback.Stdout)
+			if readback.ExitCode != 0 || !container.ValidDigest(child) {
+				t.Fatalf("development image readback failed: exit=%d stdout=%q\n%s", readback.ExitCode, readback.Stdout, readback.Stderr)
 			}
 
-			want := map[string]string{
-				"commit.txt": head, "image-digest.txt": digest,
-				"image-ref.txt": image + "@" + digest, "image-tag.txt": image + ":dev-" + head,
-			}
-			if len(tree) != len(want) {
-				t.Fatalf("want four artifact files, got %v", sortedNames(tree))
+			t.Logf("development readback identities: run=%d artifact=%d parent=%s linux/amd64-child=%s revision=%s stdout=%q", run.ID, artifact.ID, digest, child, head, readback.Stdout)
+
+			if err = livetest.VerifyDevelopmentImage(t, target, image, digest, child, head); err != nil {
+				t.Fatalf("development image identities differ: parent=%s child=%s stdout=%q: %v", digest, child, readback.Stdout, err)
 			}
 
-			for name, value := range want {
-				if string(tree[name]) != value+"\n" {
-					t.Errorf("artifact %s = %q, want %q", name, tree[name], value+"\n")
-				}
+			if err = livetest.ValidateDevelopmentImageReceipt(tree, image, head, digest); err != nil {
+				t.Fatal(err)
 			}
+
+			t.Logf("development image and four-file receipt verified: parent=%s child=%s revision=%s", digest, child, head)
 		})
 	}
 }
