@@ -59,8 +59,8 @@ fan-out.
 | Hosting | The components, and for checksum-bound components the engine project, on the **same instance** as the consumer. |
 | Engine project | **Readable without credentials**, and its generic package downloadable anonymously. Downloads send no credential. |
 | Runner architecture | **linux/amd64 or linux/arm64** for checksum-bound jobs: the engine is recorded for both, and each job runs the one of its runner's architecture. Catalog runtime images are linux/amd64 and linux/arm64, except Android (amd64 only). |
-| Executor | Docker or Kubernetes. The components clear the entrypoint of `job-image`, `build-image`, `nanolinter-image` and `megalinter-image`, so an image that starts a tool of its own still runs the job's shell. |
-| Job images | For `check`: Bash, Git, curl, `sha256sum` and the consumer's check tools, pinned by digest. For the lint components' SAST conversion: Bash, Git, curl and `sha256sum` in the lint image; Nanolinter's flavours and MegaLinter have them. For `release`: a `job-image` run as an ordinary user, a `build-image`, with `release-images` a `builder-job-image`, and the organization's `signer-image`; see [Images and the engine binary](#images-and-the-engine-binary). |
+| Executor | Docker or Kubernetes. The components clear the entrypoint of `job-image`, `build-image`, the `runtime-image-<family>` images, `nanolinter-image` and `megalinter-image`, so an image that starts a tool of its own still runs the job's shell. |
+| Job images | For `check`: Bash, Git, curl, `sha256sum` and the consumer's check tools, pinned by digest. For the lint components' SAST conversion: Bash, Git, curl and `sha256sum` in the lint image; Nanolinter's flavours and MegaLinter have them. For `release`: a `job-image` run as an ordinary user, a `runtime-image-<family>` for each toolchain family the plan bumps or builds, with `release-images` a `builder-job-image`, and the organization's `signer-image`; see [Images and the engine binary](#images-and-the-engine-binary). |
 | Artifact size | Enough native artifact capacity for the release handoff; the GitLab default of 100 MB can be too small. See [Releases and promotion](#releases-and-promotion). |
 | Release branch | The project's default branch unless `release` is given another `release-branch`: the request must be its head. |
 | macOS runner | With Xcode and a reviewed `forge-ci` on it, for `publish-apple-appstore` only. |
@@ -196,7 +196,8 @@ images and pins, a validating regex. The inputs that are not obvious:
 | `release` | `forge-ci-repository`, `consumer-project` | The engine project, and the only project allowed to run this policy. |
 | | `server-url` | This instance's URL as `CI_SERVER_URL` reads, `https://host[:port]` without a path, for example `https://gitlab.example.com`; required. Each job refuses to start when `CI_SERVER_URL` differs, and derives `CI_API_V4_URL` from it. See [The instance as a literal](#the-instance-as-a-literal). |
 | | `registry` | This instance's container registry as `CI_REGISTRY` reads, `host[:port]`, for example `registry.gitlab.example.com`, or empty when the project has none; required. GitLab configures it apart from the web host, so it is stated, not derived. Each job refuses to start when `CI_REGISTRY` differs; the project's image repository is derived from it. |
-| | `job-image`, `build-image`, `signer-image` | Digest-pinned images for key-free jobs, the build job, and the signing jobs. |
+| | `job-image`, `signer-image` | Digest-pinned images for the key-free jobs, `Build: release files` among them, and for the signing jobs. |
+| | `runtime-image-java`, `-node`, `-go`, `-rust`, `-android` | Digest-pinned runtime images of the toolchain families: the plan's version and build jobs of each family run in its image. Empty, the default, for a family the plan has none of; a planned family without one is refused at `Release: plan`. See [Plan-driven release jobs](#plan-driven-release-jobs). |
 | | `job-user` | UID or `UID:GID` the `job-image` jobs run as, for example `65532:65532` with a runtime image. Empty, the default, keeps the image's user. |
 | | `publication-project`, `publication-image-repository` | The separate project that owns final images, and the exact registry repository in it. |
 | | `cosign-public-key-sha256` | SHA-256 of your Cosign public key, written out. |
@@ -329,7 +330,7 @@ the runtime images the GitHub workflows use, or, for an installation that must
 not pull from `ghcr.io`, to your mirror of them. `forge-ci plan
 gitlab-build-pipeline` takes the same images as `--runtime-image-java`,
 `-node`, `-go`, `-rust` and `-android`, one per toolchain family the plan
-builds. [Runtime Images](runtime-images.md) has the roster and pinning
+builds, and the `release` component as its `runtime-image-<family>` inputs. [Runtime Images](runtime-images.md) has the roster and pinning
 conventions.
 
 ### The job's user
@@ -357,23 +358,24 @@ that is not `job-user` as written, then a process whose UID, or `UID:GID`
 when the input gives both, differs from it, before any checkout. Either way
 it prints one line, `job user: uid=65532 gid=65532`, the user it runs as;
 the job's log shows which user each executor gave it. In `release` only
-the `job-image` jobs take `job-user`: the build, image build and signer jobs
-hold the same variable to empty and run as their images' own users. Which
+the `job-image` jobs take `job-user`: the family version and build, image
+build and signer jobs hold the same variable to empty and run as their
+images' own users. Which
 of these a job is follows from its role, a literal of the template, never
 from its name, which a project variable can set too.
 The images need `id`, as coreutils and BusyBox provide.
 
 ### Images of the release policy
 
-The policy selects separate digest-pinned `job-image`, `build-image` and
-`signer-image` inputs. Run checks and rendering as an ordinary user;
-permission tests must run with ordinary-user filesystem semantics. A runtime
-image with `job-user: "65532:65532"` does that, as [The job's user](#the-jobs-user)
-describes; the jobs in the other images keep those images' users. Only the
-build job selects `build-image`, the consumer's build tools. Pass the same
-image for both inputs when the build needs no separate environment, and the
-Buildah job image when the build runs `forge-ci container build` and nothing
-else.
+The policy selects separate digest-pinned `job-image`, `signer-image` and
+`runtime-image-<family>` inputs. Run checks, rendering and the release files
+job as an ordinary user; permission tests must run with ordinary-user
+filesystem semantics. A runtime image with `job-user: "65532:65532"` does
+that, as [The job's user](#the-jobs-user) describes; the jobs in the other
+images keep those images' users. The plan's version and build jobs of a
+toolchain family run in that family's `runtime-image-<family>`, the
+consumer's build tools for it: `runtime-image-java` for Maven and Gradle,
+`-node` for npm, `-go`, `-rust` for Cargo and `-android`.
 
 With `release-images`, the image build jobs run in `builder-job-image`, as
 root, whichever the builder. For Buildah, the default, it is the image of
@@ -381,7 +383,7 @@ root, whichever the builder. For Buildah, the default, it is the image of
 built and pinned by digest like the signer image; it carries Buildah and its
 helpers, and the job installs nothing. Buildah needs user namespaces. Where
 only some runners allow them, tag those runners and name the tags in
-`build-runner-tags`: the build job and the amd64 image job move there, and the
+`build-runner-tags`: the build jobs and the amd64 image job move there, and the
 signing jobs stay on the untagged runners.
 
 Where no runner allows them, set `image-builder: kaniko` and
@@ -407,8 +409,8 @@ request commit and repeats signature and branch-head validation before running
 `checks`. Both jobs refuse release credentials. Changelog and version
 preparation wait for successful consumer checks. This selector does not route
 merge-request checks or change the ordinary runner default.
-The components clear the entrypoint of `job-image` and `build-image`, here and
-in `check`, and of the lint images in `nanolinter` and `megalinter`, so an
+The components clear the entrypoint of `job-image` and the runtime images,
+here and in `check`, and of the lint images in `nanolinter` and `megalinter`, so an
 image that starts a tool of its own still runs the job's shell on a Docker
 executor as it does on a Kubernetes one. The signer image
 is the organization's and declares none.
@@ -679,11 +681,13 @@ trigger job runs it. It refuses a plan that names a component that does not
 exist. See the [monorepo example](../examples/monorepo/gitlab/.gitlab-ci.yml).
 
 In the native release, the build is the consumer's own `build` commands,
-running in `build-image` without signing keys. They must write
-`dist/release-files.json` and `release-notes.md`, and, for images, leave
-their build context in `image-context/`; the image ledger is the
-[release image jobs'](#release-images). The flow checks that the hand-off is
-unsigned.
+without signing keys: once per toolchain family the plan builds, in that
+family's runtime image, and once more in `Build: release files` over all
+their files, which must write `dist/release-files.json` and
+`release-notes.md`, and, for images, leave their build context in
+`image-context/`; the image ledger is the [release image jobs'](#release-images).
+See [Plan-driven release jobs](#plan-driven-release-jobs). The flow checks
+that the hand-off is unsigned.
 
 ## Releases and promotion
 
@@ -707,7 +711,7 @@ include:
       consumer-project: team/app
       job-image: ghcr.io/diggsweden/forge-ci-runtime-go-1.27@sha256:PIN_DIGEST
       job-user: "65532:65532"
-      build-image: registry.example.com/team/build-tools@sha256:PIN_DIGEST
+      runtime-image-go: ghcr.io/diggsweden/forge-ci-runtime-go-1.27@sha256:PIN_DIGEST
       signer-image: registry.example.com/team/forge-ci-signer@sha256:PIN_DIGEST
       publication-project: team/app-releases
       publication-image-repository: registry.example.com/team/app-releases/app
@@ -870,19 +874,83 @@ export:
     --arch "$EXPORT_ARCH" --expected-names app
 ```
 
+#### Plan-driven release jobs
+
+The release child is one pipeline, as GitHub's release is one run: checks,
+version, release commit, builds, images, signing and publication, its jobs
+handing their files on through native `needs:`. `Release: plan`, in the
+parent pipeline before the child starts, plans the request commit's
+`artifacts-config` (empty is `.forge-ci/artifacts.yml`) with
+`forge-ci plan gitlab-release-pipeline`, the planner GitHub's release uses,
+and writes the child's plan-driven jobs. The child is two files: the policy's
+`templates/release-jobs.yml`, included with the policy's inputs as written,
+and that generated file, which only names jobs, each extending its family's
+hidden job in `release-jobs.yml`. It holds no policy value and no consumer
+string, so what a job may do stays in the pinned template. `Release: plan`
+holds the job token alone and runs no consumer code.
+
+| Job | When | Image | Does |
+|---|---|---|---|
+| `Prepare: version java`, `node`, `rust` | the plan bumps Maven, npm or Cargo projects | `runtime-image-<family>` | Runs that family's native version tool (`mvn versions:set`, `npm version`, Cargo) on the request for each of its planned projects, and hands over only the patch of their native version files and its digest; holds no credential. |
+| `Build: java`, `node`, `go`, `rust`, `android` | the plan builds projects of the family | `runtime-image-<family>` | Runs `build` on the release commit with `FORGE_CI_BUILD_FAMILY` set to the family and `FORGE_CI_ARTIFACTS` to its planned artifacts, space-separated; hands on `dist/` and `image-context/` without a manifest. |
+
+The families are java (Maven, Gradle), node (npm), go, rust (Cargo) and
+android (Gradle Android); a family the plan uses needs its
+`runtime-image-<family>`, and `Release: plan` refuses the release without it.
+A Cargo or Go artifact built `container-first` is built by its Containerfile
+(see [Files exported from a Containerfile](#files-exported-from-a-containerfile)),
+not by a family job, though it is still version-bumped.
+
+`Build: release files` then lays every family's and export job's `dist/` and
+`image-context/` together, refusing a top-level path two of them hold, and
+runs `build` once more in `job-image` as `job-user`, with both variables
+empty: that run writes the release notes and declares the files with
+`forge-ci release files declare`. One script serves every run; a sketch for a
+Maven backend and an npm frontend:
+
+```bash
+case "${FORGE_CI_BUILD_FAMILY}" in
+java)
+  forge-ci build maven run --working-dir services/backend --expect-version "${RELEASE_VERSION}"
+  mkdir -p dist/backend && cp services/backend/target/backend-api-*.jar dist/backend/
+  ;;
+node)
+  npm --prefix packages/frontend ci && npm --prefix packages/frontend run build
+  mkdir -p dist/frontend && tar -C packages/frontend -czf dist/frontend/frontend-ui.tgz dist
+  ;;
+'')
+  forge-ci release notes --changelog-file CHANGELOG.md --release-version "${RELEASE_TAG}" --target-file dist/release-notes.md
+  forge-ci release files declare --asset 'dist/backend/*' --asset 'dist/frontend/*'
+  ;;
+esac
+```
+
+Without a declaration the release plans no family: `Build: release files`
+runs `build` alone, in `job-image`.
+
 #### Version bump
 
-With `version-bump: maven` in the policy's `release` inputs, the signed
-release commit carries the release version in the project's POMs, as it does
-on GitHub and on Forgejo. The `Prepare: version` job runs `mvn versions:set`
-in `job-image`, so that image needs the JDK and Maven, and holds no credential
-(`rc_release_context` refuses every release secret there). It hands over only
-the patch and its digest. `Prepare: release commit and tag`, which holds the
-SSH signing key, runs no build tool: `forge-ci version apply-bump` checks the patch as text,
-the files of `pom.xml` only, each changed line the version or the
-reproducible-build timestamp and nothing else, then commits it beside
-`CHANGELOG.md`. The build then finds the release version already declared.
-Empty, the default, leaves the release commit to the changelog.
+The plan decides the version bump, as on GitHub: the signed release commit
+carries the release version in the version files of every project the
+declaration plans, and a copy of the full changelog in each project's
+directory, as it does on GitHub. There is no `version-bump` input: a
+release without a declaration, or whose projects have no version file (Go),
+carries the changelog alone. Unlike GitHub, where only `git-cliff` bumps,
+either changelog renderer bumps.
+
+The `Prepare: version <family>` jobs run the native tools in their runtime
+images and hold no credential (`rc_release_context` refuses every release
+secret there). `Prepare: release commit and tag`, which holds the SSH signing
+key, runs no build tool: it checks each family's patch against its job's
+digest, joins them, and `forge-ci version bump-plan --patch` admits the
+joined patch only as version substitutions of the plan's project files,
+each changed line the version or the reproducible-build timestamp, before it
+applies it, writes the Gradle and Xcode version files as text and the
+changelog copies, and commits all of it beside `CHANGELOG.md`. Every job
+that checks the release commit out re-checks it with `forge-ci release
+validate-tag --prepare-plan-file`: the changelog, the copies and the planned
+version files, native ones a version substitution, and nothing else. The
+build then finds the release version already declared.
 
 #### The merge-request gate under a policy
 
@@ -975,10 +1043,11 @@ The child runs these jobs, in five stages that read the same on every forge
 | `Check: signing access`, `Check: publishing access`, `Check: registry access` | signer | The toolchain check, the Cosign key against the trusted public key, and the release and registry tokens, before anything else. Registry access is scheduled only when the protected `release-images` or `base-images` input is true; archive/export-only releases need no publication-registry token. |
 | `Check: release request` | job | On the restricted runner, validates the signed request and that it is the head of the release branch; executes no consumer commands. |
 | `Check: consumer checks` | job | After authorization, freshly checks out and revalidates the immutable request, then runs `checks` on `checks-runner-tags` (untagged by default). |
-| `Prepare: changelog` | job | Renders the changelog and commit message. Consumer configuration runs only here and in `Prepare: version`. |
-| `Prepare: version` | job | With `version-bump`, sets the release version in the project files and hands over the patch; holds no credential. |
-| `Prepare: release commit and tag` | job | Verifies the version patch, commits it with the changelog and pushes the signed release commit and final tag with `RELEASE_SSH_SIGNING_KEY`. |
-| `Build: release files` | build | Checks out the final tag and runs `build`; hands `dist/` on with its digest. |
+| `Prepare: changelog` | job | Renders the changelog and commit message. Consumer configuration runs only here and in the version jobs. |
+| `Prepare: version <family>` | runtime | One per family the plan bumps with a native tool; sets the release version in the family's project files and hands over the patch; holds no credential. See [Plan-driven release jobs](#plan-driven-release-jobs). |
+| `Prepare: release commit and tag` | job | Verifies the version patches, applies the plan's bump, commits it with the changelog and pushes the signed release commit and final tag with `RELEASE_SSH_SIGNING_KEY`. |
+| `Build: <family>` | runtime | One per family the plan builds; checks out the final tag and runs `build` for the family's artifacts; hands `dist/` and `image-context/` on. |
+| `Build: release files` | job | Checks out the final tag, lays the family and export files together and runs `build` to declare them; hands `dist/` on with its digest. |
 | `Sign: files and images` | signer | Imports images into the publication project, signs files, packages, provenance and images. |
 | `Publish: images` | signer | Moves final image tags, with a journal. |
 | `Publish: release` | signer | Creates the GitLab release with notes and assets. |
@@ -1001,8 +1070,8 @@ same way it takes its role, and `.gitlab/bin/release.sh` reads only those:
 the engine project and its fetch URL, `consumer-project`, the publication
 project and image repository, the Cosign key digest, the release Git URL and
 host key, the request's allowed signers, the bot identity, the changelog
-settings, `sign-distro-packages`, `base-images`, `release-branch`,
-`version-bump`, `release-asset-retention`, `transparency-log`, which the
+settings, `artifacts-config`, `sign-distro-packages`, `base-images`,
+`release-branch`, `release-asset-retention`, `transparency-log`, which the
 engine reads as `FORGE_CI_COSIGN_TRANSPARENCY` and the start exports, and the
 four [check enforcement](admin-policy.md) settings, which reach the engine as
 flags. A

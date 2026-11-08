@@ -94,7 +94,7 @@ func TestGitLabConsumerReleaseScenarioAdmissionIsExactAndBounded(t *testing.T) {
 		"scenario=TestGitLabRelease_ConsumerTrial\nscenario=TestGitLabRelease_ConsumerTrial",
 		"scenario=TestGitLabRelease_ConsumerInterruptedRecovery",
 		"scenario=TestGitLabRelease_ConsumerInterruptedRecovery\nversion=0.0.0",
-		"scenario=TestGitLabRelease_RejectsPreseededProvenance\nversion=0.3.0\nnext-version=0.3.1\nversion-bump=npm",
+		"scenario=TestGitLabRelease_RejectsPreseededProvenance\nversion=0.3.0\nnext-version=0.3.1",
 	} {
 		if _, err := ParseGitLabReleaseSettings(input); !errors.Is(err, errs.ErrValidation) {
 			t.Fatalf("unsafe consumer case inputs accepted: %q %v", input, err)

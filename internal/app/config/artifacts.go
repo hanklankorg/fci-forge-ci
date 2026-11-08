@@ -345,3 +345,38 @@ func joinProjectTypes(types []projecttype.Type) string {
 
 	return strings.Join(parts, ", ")
 }
+
+// ReleaseStagePlans are the prepare and build stage plans of a release whose
+// policy decides signing and publication, from its declaration alone.
+type ReleaseStagePlans struct {
+	Prepare pipeline.ReleasePrepareStagePlan
+	Build   pipeline.ReleaseBuildStagePlan
+}
+
+// LoadReleaseStagePlans plans the version bump and the builds of the
+// declaration at in.Path, as `plan release` does for the same declaration.
+// Without the file, and with absentIsEmpty, the release has neither: a
+// repository without a declaration builds with its build commands alone.
+func LoadReleaseStagePlans(in EmitConfigPlanInput, annot output.Annotator, absentIsEmpty bool) (ReleaseStagePlans, error) {
+	if _, err := readArtifactsFile(in); errors.Is(err, fs.ErrNotExist) {
+		if !absentIsEmpty {
+			return ReleaseStagePlans{}, fmt.Errorf("%s does not exist: %w", in.Path, errs.ErrMissingInput)
+		}
+
+		prepare, build := pipeline.UndeclaredReleaseStagePlans()
+
+		return ReleaseStagePlans{Prepare: prepare, Build: build}, nil
+	}
+
+	plan, err := loadConfigPlan(in, annot)
+	if err != nil {
+		return ReleaseStagePlans{}, err
+	}
+
+	prepare, build, err := pipeline.NewPolicyReleaseStagePlans(plan)
+	if err != nil {
+		return ReleaseStagePlans{}, err
+	}
+
+	return ReleaseStagePlans{Prepare: prepare, Build: build}, nil
+}

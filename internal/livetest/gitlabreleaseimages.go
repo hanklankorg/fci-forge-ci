@@ -4,6 +4,7 @@
 package livetest
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -102,4 +103,27 @@ func exists(path string) (bool, error) {
 	}
 
 	return err == nil, err
+}
+
+// GitLabPlannedVersionBumps are the projects a consumer's GitLab release
+// bumps: the release plan of the declaration its artifacts-config names
+// (artifactsConfig, empty for the default), as the release's own plan job
+// reads it. Without a declaration nothing is bumped.
+func GitLabPlannedVersionBumps(consumerRoot, artifactsConfig string) ([]pipeline.PlannedArtifact, error) {
+	if consumerRoot == "" {
+		return nil, nil
+	}
+
+	plans, err := appconfig.LoadReleaseStagePlans(appconfig.EmitConfigPlanInput{
+		Path: filepath.Join(consumerRoot, cmp.Or(artifactsConfig, GitLabDefaultArtifactsConfig)),
+	}, output.Annotator{}, artifactsConfig == "")
+	if err != nil {
+		return nil, err
+	}
+
+	if !plans.Prepare.Targets.VersionBump.Runs {
+		return nil, nil
+	}
+
+	return plans.Prepare.Targets.VersionBump.Items, nil
 }

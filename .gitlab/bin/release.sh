@@ -3,9 +3,10 @@
 # SPDX-License-Identifier: CC0-1.0
 
 # Trusted GitLab orchestration. The project must select a pinned external CI
-# policy. Only "Check: consumer checks", "Prepare: changelog", "Prepare:
-# version" and "Build: release files" execute consumer code, and the "Images:
-# build" jobs the consumer's Containerfiles, with the job token alone. Native
+# policy. Only "Check: consumer checks", "Prepare: changelog", the "Prepare:
+# version <family>" and "Build: <family>" jobs and "Build: release files"
+# execute consumer code, and the "Images: build" jobs the consumer's
+# Containerfiles, with the job token alone. Native
 # artifacts carry data; they are never dotenv reports or sourced.
 #
 # The policy's values, RC_* and FORGE_CI_COSIGN_TRANSPARENCY, are the
@@ -97,18 +98,25 @@ rc_request_checkout() {
   rc_engine validate tag commit --tag "${CI_COMMIT_TAG}" --branch "${RC_RELEASE_BRANCH}" --require-head
 }
 
+# rc_release_plan plans the checkout's release from the artifacts-config
+# declaration, as "Release: plan" did at the request: the arguments name what
+# to write. Without a declaration it plans no bump and no family.
+rc_release_plan() {
+  local -a file=()
+  if [ -n "${RC_ARTIFACTS_CONFIG?}" ]; then file=(--file "${RC_ARTIFACTS_CONFIG}"); fi
+  rc_engine plan gitlab-release-pipeline "${file[@]}" "$@"
+}
+
 rc_release_checkout() {
   rc_checkout "refs/tags/${RELEASE_TAG}"
   export RELEASE_SHA
   RELEASE_SHA=$(git rev-parse HEAD)
-  # The release commit is the tested request plus the changelog, and with a
-  # version bump the verified version substitution: nothing else is built.
-  local -a bump_args=()
-  if [ -n "${RC_VERSION_BUMP:-}" ]; then
-    bump_args=(--version-bump "${RC_VERSION_BUMP}")
-  fi
+  # The release commit is the tested request plus the changelog, and the
+  # plan's version bump: each planned project's changelog copy and version
+  # files, native ones a verified version substitution. Nothing else is built.
+  rc_release_plan --prepare-plan-output "${RC_WORK:?}/prepare-plan.json"
   rc_engine release validate-tag --release-sha "${RELEASE_SHA}" --tag "${RELEASE_TAG}" \
-    --expected-parent "${RELEASE_REQUEST_SHA}" --changelog-only "${bump_args[@]}" \
+    --expected-parent "${RELEASE_REQUEST_SHA}" --changelog-only --prepare-plan-file "${RC_WORK}/prepare-plan.json" \
     --repo-url "${RC_SERVER_URL}/${CI_PROJECT_PATH}.git"
 }
 
@@ -171,40 +179,79 @@ rc_render_changelog() {
   done
 }
 
-# rc_bump_version runs the project's build tool to set the release version and
-# hands over only the patch and its digest. The job holds no credential.
+# rc_native_project_type is the project type whose native version tool a
+# family's version job runs.
+rc_native_project_type() {
+  case "$1" in
+  java) echo maven ;;
+  node) echo npm ;;
+  rust) echo cargo ;;
+  *)
+    echo "ERROR: the family '$1' has no native version tool." >&2
+    return 1
+    ;;
+  esac
+}
+
+# rc_bump_version runs the native version tool of one family's planned
+# projects at the request, in the family's runtime image, and hands over only
+# the patch of their native version files and its digest. The job holds no
+# credential.
 rc_bump_version() {
+  local family=$1 kind
+  kind=$(rc_native_project_type "${family}") || return
   rc_request_checkout
-  rc_engine version bump --project-type "${RC_VERSION_BUMP:?}" --version "${RELEASE_VERSION:?}" --working-dir . \
+  rc_release_plan --prepare-plan-output "${RC_WORK:?}/prepare-plan.json"
+  # The plan copies the full changelog into each project; take the rendered one.
+  rc_require_regular_file "${CI_PROJECT_DIR}/_release-render/CHANGELOG.md"
+  cp --remove-destination -- "${CI_PROJECT_DIR}/_release-render/CHANGELOG.md" CHANGELOG.md
+  rc_engine version bump-plan --plan-json "$(cat -- "${RC_WORK}/prepare-plan.json")" --version "${RELEASE_VERSION:?}" \
+    --release-policy "${RELEASE_POLICY:?}" --project-type "${kind}" \
     --maven-cli-opts '--batch-mode --no-transfer-progress --errors --fail-at-end'
-  local handoff="${CI_PROJECT_DIR}/_release-bump"
+  local handoff="${CI_PROJECT_DIR}/_release-bump-${family}"
   rc_new_handoff "${handoff}" || return
-  # Literal paths and plain text whatever the project's Git configuration says.
+  # Literal paths and plain text whatever the project's Git configuration
+  # says, and the native version files alone: the release commit's job
+  # writes the changelogs and the other types' version files itself.
   git -c core.quotePath=true diff --binary --no-ext-diff --no-textconv --no-color --no-renames \
-    --src-prefix=a/ --dst-prefix=b/ >"${handoff}/version-bump.patch"
-  test -s "${handoff}/version-bump.patch"
+    --src-prefix=a/ --dst-prefix=b/ -- ':(glob)**/pom.xml' ':(glob)**/package.json' ':(glob)**/package-lock.json' \
+    ':(glob)**/npm-shrinkwrap.json' ':(glob)**/Cargo.toml' ':(glob)**/Cargo.lock' >"${handoff}/version-bump.patch"
   sha256sum -- "${handoff}/version-bump.patch" | cut -d' ' -f1 >"${handoff}/digest"
 }
 
 rc_prepare_release() {
   rc_request_checkout
-  local file
+  local file family bump patch="${RC_WORK:?}/version-bump.patch"
   local -a include=()
   git -c core.hooksPath=/dev/null checkout -b "${RC_RELEASE_BRANCH}"
   for file in CHANGELOG.md commit-msg.txt; do
     rc_require_regular_file "${CI_PROJECT_DIR}/_release-render/${file}"
     cp --remove-destination -- "${CI_PROJECT_DIR}/_release-render/${file}" "${file}"
   done
-  # Text checks only, no build tool: the patch matches its digest, touches only
-  # the project files of the type, and moves the version and nothing else.
-  if [ -n "${RC_VERSION_BUMP:-}" ]; then
-    local bump="${CI_PROJECT_DIR}/_release-bump" patch_digest
+  # Text checks only, no build tool: each family's patch matches its digest,
+  # and the engine admits the joined patch only as version substitutions of
+  # the plan's project files, applies it, and writes the changelog copies and
+  # the other types' version files itself.
+  : >"${patch}"
+  for family in java node rust; do
+    bump="${CI_PROJECT_DIR}/_release-bump-${family}"
+    if [ ! -e "${bump}" ] && [ ! -L "${bump}" ]; then continue; fi
     for file in version-bump.patch digest; do
-      rc_require_regular_file "${bump}/${file}"
+      rc_require_regular_file "${bump}/${file}" || return
     done
-    patch_digest=$(head -c 64 -- "${bump}/digest")
-    rc_engine version apply-bump --release-policy "${RELEASE_POLICY:?}" --project-type "${RC_VERSION_BUMP}" --version "${RELEASE_TAG}" --working-dir . \
-      --patch "${bump}/version-bump.patch" --sha256 "${patch_digest}" --paths-file "${RC_WORK:?}/bump-paths"
+    if [ "$(sha256sum -- "${bump}/version-bump.patch" | cut -d' ' -f1)" != "$(head -c 64 -- "${bump}/digest")" ]; then
+      echo "ERROR: the ${family} version patch differs from its job's digest." >&2
+      return 1
+    fi
+    cat -- "${bump}/version-bump.patch" >>"${patch}"
+  done
+  rc_release_plan --prepare-plan-output "${RC_WORK}/prepare-plan.json"
+  rc_engine version bump-plan --plan-json "$(cat -- "${RC_WORK}/prepare-plan.json")" --version "${RELEASE_VERSION:?}" \
+    --release-policy "${RELEASE_POLICY:?}" --patch "${patch}" --patch-sha256 "$(sha256sum -- "${patch}" | cut -d' ' -f1)"
+  # What the bump wrote besides the root changelog, literal and plain.
+  git -c core.quotePath=true ls-files --modified --others --exclude-standard |
+    { grep -vxF CHANGELOG.md || true; } >"${RC_WORK}/bump-paths"
+  if [ -s "${RC_WORK}/bump-paths" ]; then
     include=(--include-paths-file "${RC_WORK}/bump-paths")
   fi
   # Left out, the engine pushes to this project on the web host.
@@ -216,6 +263,49 @@ rc_prepare_release() {
     --tag "${RELEASE_TAG}" --branch "${RC_RELEASE_BRANCH}" --repository "${CI_PROJECT_PATH}" "${git_url[@]}" \
     --host-key-fingerprint "${RC_GIT_HOST_KEY:?}" --author-name "${RC_BOT_NAME:?}" --author-email "${RC_BOT_EMAIL:?}" \
     "${include[@]}"
+}
+
+# rc_family_checkout checks the release commit out for one family's build
+# job and names, for the build commands, the family and its planned
+# artifacts.
+rc_family_checkout() {
+  local family=$1
+  rc_release_checkout || return
+  rc_release_plan --family "${family}" --artifacts-output "${RC_WORK:?}/family-artifacts" || return
+  export FORGE_CI_BUILD_FAMILY="${family}" FORGE_CI_ARTIFACTS
+  FORGE_CI_ARTIFACTS=$(tr '\n' ' ' <"${RC_WORK}/family-artifacts")
+  FORGE_CI_ARTIFACTS=${FORGE_CI_ARTIFACTS% }
+  echo "build family ${family}: ${FORGE_CI_ARTIFACTS}"
+}
+
+# rc_family_handoff hands one family's dist/ and image-context/ to the release
+# files job, without a manifest: that job declares the files once.
+rc_family_handoff() {
+  local handoff="${CI_PROJECT_DIR}/_release-build-$1" tree
+  if [ -e dist/release-files.json ] || [ -L dist/release-files.json ]; then
+    echo 'ERROR: a family build leaves its files in dist/; the build commands declare them in "Build: release files", where FORGE_CI_BUILD_FAMILY is empty.' >&2
+    return 1
+  fi
+  rc_new_handoff "${handoff}" || return
+  for tree in dist image-context; do
+    rc_engine release gather-exports --allow-missing --source "${tree}" --path "${handoff}/${tree}" || return
+  done
+}
+
+# rc_gather_families lays every family build's dist/ and image-context/ into
+# the release files job's, refusing a path two of them, or the checkout,
+# both hold. The build commands then run with no family.
+rc_gather_families() {
+  local tree family
+  local -a sources
+  for tree in dist image-context; do
+    sources=()
+    for family in java node go rust android; do
+      sources+=(--source "${CI_PROJECT_DIR}/_release-build-${family}/${tree}")
+    done
+    rc_engine release gather-exports --allow-missing --path "${tree}" "${sources[@]}" || return
+  done
+  export FORGE_CI_BUILD_FAMILY='' FORGE_CI_ARTIFACTS=''
 }
 
 rc_build_handoff() {
@@ -662,11 +752,17 @@ rc_cleanup_release() {
 rc_release_summary() {
   local images=${1:-false} arm64_tags=${2:-[]} name jobs=()
   for name in "Check: signing access" "Check: publishing access" "Check: registry access" \
-    "Check: release request" "Check: consumer checks" "Prepare: changelog" "Prepare: version" \
-    "Prepare: release commit and tag" "Build: release files" "Images: plan" "Images: build amd64" \
+    "Check: release request" "Check: consumer checks" "Prepare: changelog" "Prepare: version java" \
+    "Prepare: version node" "Prepare: version rust" "Prepare: release commit and tag" "Build: java" \
+    "Build: node" "Build: go" "Build: rust" "Build: android" "Build: release files" "Images: plan" "Images: build amd64" \
     "Images: build arm64" "Images: publish" "Sign: files and images" \
     "Publish: images" "Publish: release" "Publish: tidy up"; do
-    if [ "${name}" = "Prepare: version" ] && [ -z "${RC_VERSION_BUMP:-}" ]; then continue; fi
+    # A family job ran when the plan named it; its hand-off is here.
+    case "${name}" in
+    "Prepare: version "*) if [ ! -d "${CI_PROJECT_DIR:-}/_release-bump-${name#Prepare: version }" ]; then continue; fi ;;
+    "Build: release files") ;;
+    "Build: "*) if [ ! -d "${CI_PROJECT_DIR:-}/_release-build-${name#Build: }" ]; then continue; fi ;;
+    esac
     if [ "${name}" = "Check: registry access" ] && [ "${images}" != true ] && [ "${RC_BASE_IMAGES:-false}" != true ]; then continue; fi
     case "${name}" in "Images: "*) if [ "${images}" != true ]; then continue; fi ;; esac
     if [ "${name}" = "Images: build arm64" ] && [ "${arm64_tags}" = '[]' ]; then continue; fi

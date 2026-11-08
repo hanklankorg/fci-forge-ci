@@ -29,8 +29,6 @@ const (
 	parityBuildahImage = "registry.invalid/team/buildah-job@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
 )
 
-const parityBuildImage = "registry.invalid/team/build@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-
 // The GitLab release image stage and the Forgejo release-images workflow are
 // one stage on two forges: for the same containers: declaration both plan,
 // build every planned architecture natively, publish after every build, hand
@@ -268,7 +266,7 @@ func renderGitLabImageStage(t *testing.T, releaseImages, builder, arm64Tags stri
 
 	for name, value := range map[string]string{
 		"release-images": releaseImages, "image-builder": builder, "builder-job-image": builderImage,
-		"build-image": parityBuildImage, "build-runner-tags": `["privileged"]`, "build-runner-tags-arm64": arm64Tags,
+		"build-runner-tags": `["privileged"]`, "build-runner-tags-arm64": arm64Tags,
 	} {
 		text = strings.ReplaceAll(text, "$[[ inputs."+name+" ]]", value)
 	}

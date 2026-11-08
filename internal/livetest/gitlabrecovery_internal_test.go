@@ -72,8 +72,8 @@ func TestGitLabRecoveryPolicyDAG(t *testing.T) {
 	}
 
 	includes := trigger["include"].([]any)
-	if len(includes) != 2 {
-		t.Fatalf("child needs production DAG then test extension, got %v", includes)
+	if len(includes) != 3 {
+		t.Fatalf("child needs production DAG, the generated jobs, then test extension, got %v", includes)
 	}
 
 	production := includes[0].(map[string]any)
@@ -86,7 +86,11 @@ func TestGitLabRecoveryPolicyDAG(t *testing.T) {
 		t.Fatal("engine pin drifted to the policy wrapper's commit")
 	}
 
-	ext := includes[1].(map[string]any)
+	if generated := includes[1].(map[string]any); generated["artifact"] != "_release-plan/release-families.yml" || generated["job"] != "Release: plan" {
+		t.Fatalf("wrapper changed the generated jobs' source: %v", generated)
+	}
+
+	ext := includes[2].(map[string]any)
 	if ext["project"] != "owned/policy" || ext["ref"] != extensionRef || ext["file"] != "/recovery-checkpoint.yml" {
 		t.Fatalf("checkpoint is not independently pinned: %v", ext)
 	}
@@ -162,7 +166,11 @@ func recoveryJobs(t *testing.T, body []byte) map[string]any {
 func recoveryDepends(t *testing.T, jobs map[string]any, from, on string) bool {
 	t.Helper()
 
-	job := jobs[from].(map[string]any)
+	// An optional need names a generated family job this plan does not run.
+	job, planned := jobs[from].(map[string]any)
+	if !planned {
+		return false
+	}
 
 	needs, _ := job["needs"].([]any)
 	for _, need := range needs {

@@ -31,6 +31,7 @@ func New() *cli.Command {
 			prCmd(),
 			gitlabBuildPipelineCmd(),
 			gitlabPublishPipelineCmd(),
+			gitlabReleasePipelineCmd(),
 			gitlabSnapshotPipelineCmd(),
 			writeCmd(),
 		},

@@ -11,7 +11,6 @@ import (
 	"io"
 	"os"
 	"path"
-	"slices"
 	"strings"
 
 	"github.com/diggsweden/forge-ci/internal/cliio"
@@ -91,20 +90,12 @@ func applyPlannedNativeBumps(ctx context.Context, git applyBumpOps, inputs []bum
 }
 
 func plannedPatchTarget(inputs []bumpTarget, file string) int {
+	scopes := make([]domainversion.BumpScope, len(inputs))
 	for index, target := range inputs {
-		files, supported := domainversion.BumpPatchFiles(target.ProjectType)
-		if !supported {
-			continue
-		}
-
-		dir := path.Clean(target.WorkingDir)
-		if slices.Contains(files, path.Base(file)) && (path.Dir(file) == dir ||
-			target.ProjectType == projecttype.Maven && (dir == "." || strings.HasPrefix(file, dir+"/"))) {
-			return index
-		}
+		scopes[index] = domainversion.BumpScope{ProjectType: target.ProjectType, WorkingDir: target.WorkingDir}
 	}
 
-	return -1
+	return domainversion.PlannedBumpScope(scopes, file)
 }
 
 func applyProjectPatch(ctx context.Context, git applyBumpOps, target bumpTarget, policy, version string, patch []byte, out io.Writer) error {

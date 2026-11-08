@@ -13,7 +13,7 @@ import (
 
 	"github.com/diggsweden/forge-ci/internal/domain/errs"
 	domaingit "github.com/diggsweden/forge-ci/internal/domain/git"
-	"github.com/diggsweden/forge-ci/internal/domain/projecttype"
+	"github.com/diggsweden/forge-ci/internal/domain/pipeline"
 	"github.com/diggsweden/forge-ci/internal/domain/version"
 	"github.com/diggsweden/forge-ci/internal/runcontext"
 )
@@ -53,10 +53,13 @@ type VerifyReleaseTagInput struct {
 	// ChangelogOnly admits exactly a CHANGELOG.md change and binds the local
 	// release-request/<tag> to ExpectedParent, for a tested prepare candidate.
 	ChangelogOnly bool
-	// VersionBump, with ChangelogOnly, also admits the project files of that
-	// type, and only as a version bump to the tag's version: the same text
-	// check the prepare job applied before committing them.
-	VersionBump projecttype.Type
+	// PreparePlan, with ChangelogOnly, also admits the version bump of the
+	// plan's projects when its version_bump target runs: the changelog copy
+	// in each project's directory, each native project file only as a
+	// version substitution to the tag's version (the text check the prepare
+	// job applied before committing it), and the engine-written version files
+	// of the other types by name.
+	PreparePlan *pipeline.ReleasePrepareStagePlan
 }
 
 // VerifyReleaseTag re-verifies, at the signing trust boundary, that:
@@ -171,7 +174,7 @@ func VerifyReleaseTag(ctx context.Context, git tagVerifyGit, out io.Writer, in V
 
 func validateRequestRoute(in VerifyReleaseTagInput) error {
 	if in.RequestIsRelease {
-		if in.ExpectedParent == "" || in.ChangelogOnly || in.VersionBump != "" {
+		if in.ExpectedParent == "" || in.ChangelogOnly || in.PreparePlan != nil {
 			return fmt.Errorf("verify-release-tag: request-is-release requires expected-parent and no prepared-change profile: %w", errs.ErrUsage)
 		}
 
@@ -260,55 +263,93 @@ func verifyChangelogOnly(ctx context.Context, git tagVerifyGit, in VerifyRelease
 		return fmt.Errorf("verify-release-tag: inspect prepared changes: %w", err)
 	}
 
-	if in.VersionBump == "" {
-		if len(changed) != 1 || changed[0] != "CHANGELOG.md" {
+	if in.PreparePlan == nil || !in.PreparePlan.Targets.VersionBump.Runs {
+		if len(changed) != 1 || changed[0] != changelogFile {
 			return fmt.Errorf("verify-release-tag: prepared release must change only CHANGELOG.md; changed paths: %q: %w", changed, errs.ErrValidation)
 		}
 
 		return nil
 	}
 
-	return verifyChangelogAndBump(ctx, git, in, changed)
+	return verifyChangelogAndPlannedBumps(ctx, git, in, changed)
 }
 
-// verifyChangelogAndBump admits CHANGELOG.md and the version bump the prepare
-// job verified: the bump's project files and nothing else, their diff a
-// version substitution to the tag's version.
-func verifyChangelogAndBump(ctx context.Context, git tagVerifyGit, in VerifyReleaseTagInput, changed []string) error {
-	files, supported := version.BumpPatchFiles(in.VersionBump)
-	if !supported {
-		return fmt.Errorf("verify-release-tag: project type %q has no isolated version bump: %w", in.VersionBump, errs.ErrUsage)
-	}
+const changelogFile = "CHANGELOG.md"
 
-	changelog, bumped := false, make([]string, 0, len(changed))
+// verifyChangelogAndPlannedBumps admits CHANGELOG.md and what the plan's
+// version bump writes, nothing else: each native project's files as a
+// verified version substitution, the changelog copies, and the text-written
+// version files of the other planned types.
+func verifyChangelogAndPlannedBumps(ctx context.Context, git tagVerifyGit, in VerifyReleaseTagInput, changed []string) error {
+	items := in.PreparePlan.Targets.VersionBump.Items
+	scopes := make([]version.BumpScope, len(items))
 
-	for _, path := range changed {
-		switch {
-		case path == "CHANGELOG.md":
-			changelog = true
-		case in.VersionBump == projecttype.Cargo && path != pathpkg.Base(path):
-			return fmt.Errorf("verify-release-tag: Cargo prepare requires root version files, got %q: %w", path, errs.ErrValidation)
-		case slices.Contains(files, pathpkg.Base(path)):
-			bumped = append(bumped, path)
-		default:
-			return fmt.Errorf("verify-release-tag: prepared release must change only CHANGELOG.md and the %s version bump; changed paths: %q: %w",
-				in.VersionBump, changed, errs.ErrValidation)
+	for index, item := range items {
+		scopes[index] = version.BumpScope{ProjectType: item.ProjectType, WorkingDir: pathpkg.Clean(item.WorkingDirectory)}
+		if item.WorkingDirectory == "" {
+			scopes[index].WorkingDir = "."
 		}
 	}
 
-	if !changelog || len(bumped) == 0 {
-		return fmt.Errorf("verify-release-tag: prepared release must change CHANGELOG.md and the %s version; changed paths: %q: %w",
-			in.VersionBump, changed, errs.ErrValidation)
+	changelog, native := false, make(map[int][]string)
+
+	for _, path := range changed {
+		switch {
+		case path == changelogFile:
+			changelog = true
+		case pathpkg.Base(path) == changelogFile && slices.ContainsFunc(scopes, func(scope version.BumpScope) bool { return scope.WorkingDir == pathpkg.Dir(path) }):
+		case version.PlannedBumpScope(scopes, path) >= 0:
+			index := version.PlannedBumpScope(scopes, path)
+			native[index] = append(native[index], path)
+		case slices.ContainsFunc(scopes, func(scope version.BumpScope) bool { return textVersionFile(scope, path) }):
+		default:
+			return fmt.Errorf("verify-release-tag: prepared release must change only CHANGELOG.md and the planned version bumps; changed paths: %q: %w",
+				changed, errs.ErrValidation)
+		}
 	}
 
-	patch, err := git.PathsDiff(ctx, in.ExpectedParent, in.ReleaseSHA, bumped)
-	if err != nil {
-		return fmt.Errorf("verify-release-tag: read the version bump: %w", err)
+	if !changelog {
+		return fmt.Errorf("verify-release-tag: prepared release must change CHANGELOG.md; changed paths: %q: %w", changed, errs.ErrValidation)
 	}
 
-	if _, err := version.VerifyBumpPatch([]byte(patch), files, strings.TrimPrefix(in.Tag, "v")); err != nil {
-		return fmt.Errorf("verify-release-tag: %w", err)
+	for index, paths := range native {
+		files, _ := version.BumpPatchFiles(scopes[index].ProjectType)
+
+		patch, err := git.PathsDiff(ctx, in.ExpectedParent, in.ReleaseSHA, paths)
+		if err != nil {
+			return fmt.Errorf("verify-release-tag: read the version bump: %w", err)
+		}
+
+		if _, err := version.VerifyBumpPatch([]byte(patch), files, strings.TrimPrefix(in.Tag, "v")); err != nil {
+			return fmt.Errorf("verify-release-tag: %w", err)
+		}
 	}
 
 	return nil
+}
+
+// textVersionFile reports whether path is a version file the engine writes
+// as text for a planned project without a native tool: Gradle's and Xcode's.
+func textVersionFile(scope version.BumpScope, path string) bool {
+	if _, native := version.BumpPatchFiles(scope.ProjectType); native {
+		return false
+	}
+
+	inside := scope.WorkingDir == "." || strings.HasPrefix(path, scope.WorkingDir+"/")
+
+	for pathspec := range strings.FieldsSeq(version.FilePattern(scope.ProjectType)) {
+		suffix, glob := strings.CutPrefix(pathspec, ":(glob)**/*")
+
+		switch {
+		case pathspec == changelogFile:
+		case glob:
+			if inside && strings.HasSuffix(path, suffix) {
+				return true
+			}
+		case pathpkg.Base(path) == pathspec && pathpkg.Dir(path) == scope.WorkingDir:
+			return true
+		}
+	}
+
+	return false
 }

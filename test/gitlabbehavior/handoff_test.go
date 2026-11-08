@@ -20,7 +20,14 @@ func TestReleaseArtifactsAreReadableWithoutOpeningPrivateFiles(t *testing.T) {
 	// Each producer job and the hand-off directory it leaves for the next.
 	for job, dir := range map[string]string{
 		"Prepare: changelog":     "_release-render",
-		"Prepare: version":       "_release-bump",
+		"Prepare: version java":  "_release-bump-java",
+		"Prepare: version node":  "_release-bump-node",
+		"Prepare: version rust":  "_release-bump-rust",
+		"Build: java":            "_release-build-java",
+		"Build: node":            "_release-build-node",
+		"Build: go":              "_release-build-go",
+		"Build: rust":            "_release-build-rust",
+		"Build: android":         "_release-build-android",
 		"Build: release files":   "_release-build",
 		"Images: plan":           "_release-images-plan",
 		"Images: build amd64":    "_release-images-amd64",

@@ -11,6 +11,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"unicode"
 
@@ -36,6 +37,11 @@ type BumpPlanInput struct {
 	PatchPath     string
 	PatchSHA256   string
 	ReleasePolicy string
+	// ProjectTypes, when set, runs the native tools of these project types
+	// alone, for the plan's projects of them: a key-free job whose image
+	// carries one toolchain prepares its share of a patch the release job
+	// applies whole. It takes no patch.
+	ProjectTypes []projecttype.Type
 }
 
 // defaultChangelogFile is the path the changelog verbs assume when the caller
@@ -65,6 +71,8 @@ func BumpPlan(ctx context.Context, ops BumpOps, sink ci.OutputSink, out, stderr 
 		return setBumpPlanPattern(ctx, sink, "")
 	}
 
+	items := plannedBumpItems(plan.Targets.VersionBump.Items, in.ProjectTypes)
+
 	changelog := in.ChangelogFile
 	if changelog == "" {
 		changelog = defaultChangelogFile
@@ -85,8 +93,8 @@ func BumpPlan(ctx context.Context, ops BumpOps, sink ci.OutputSink, out, stderr 
 	}
 	// Validate the engine-owned local prerequisites for every item before changing
 	// the first project. This is not rollback of later tool or filesystem failures.
-	inputs := make([]bumpTarget, 0, len(plan.Targets.VersionBump.Items))
-	for _, artifact := range plan.Targets.VersionBump.Items {
+	inputs := make([]bumpTarget, 0, len(items))
+	for _, artifact := range items {
 		dir, err := normalizedPlanWorkingDir(artifact.WorkingDirectory)
 		if err != nil {
 			return err
@@ -128,10 +136,10 @@ func BumpPlan(ctx context.Context, ops BumpOps, sink ci.OutputSink, out, stderr 
 		}
 	}
 
-	pathspecs := make([]string, 0, len(plan.Targets.VersionBump.Items)*3)
+	pathspecs := make([]string, 0, len(items)*3)
 	seen := make(map[string]struct{})
 
-	for index, artifact := range plan.Targets.VersionBump.Items {
+	for index, artifact := range items {
 		bump := inputs[index]
 
 		workingDir := bump.WorkingDir
@@ -171,9 +179,36 @@ func BumpPlan(ctx context.Context, ops BumpOps, sink ci.OutputSink, out, stderr 
 	return setBumpPlanPattern(ctx, sink, strings.Join(pathspecs, " "))
 }
 
+// plannedBumpItems is the plan's projects of the selected types, or every
+// project when none is selected.
+func plannedBumpItems(items []pipeline.PlannedArtifact, types []projecttype.Type) []pipeline.PlannedArtifact {
+	if len(types) == 0 {
+		return items
+	}
+
+	selected := make([]pipeline.PlannedArtifact, 0, len(items))
+	for _, item := range items {
+		if slices.Contains(types, item.ProjectType) {
+			selected = append(selected, item)
+		}
+	}
+
+	return selected
+}
+
 func validateBumpPlanInput(in BumpPlanInput) error {
 	if strings.TrimSpace(in.Version) == "" {
 		return fmt.Errorf("version is required: %w", errs.ErrUsage)
+	}
+
+	for _, kind := range in.ProjectTypes {
+		if !nativeBump(kind) {
+			return fmt.Errorf("project-type %q has no native version tool to run: %w", kind, errs.ErrUsage)
+		}
+	}
+
+	if len(in.ProjectTypes) > 0 && in.PatchPath != "" {
+		return fmt.Errorf("project-type selects native tools to run; a prepared patch runs none: %w", errs.ErrUsage)
 	}
 
 	if (in.PatchPath == "") != (in.PatchSHA256 == "") {

@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -23,6 +24,8 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/diggsweden/forge-ci/internal/domain/imageledger"
+	"github.com/diggsweden/forge-ci/internal/domain/pipeline"
+	"github.com/diggsweden/forge-ci/internal/domain/projecttype"
 	"github.com/diggsweden/forge-ci/internal/domain/provider"
 	"github.com/diggsweden/forge-ci/internal/livetest"
 )
@@ -205,7 +208,7 @@ func gitlabConsumerSettings(t *testing.T, consumerRoot string) livetest.GitLabRe
 		t.Fatal(err)
 	}
 
-	if consumerRoot == "" && (len(settings.Variables) != 0 || settings.VersionBump != "" || settings.Version != "" || settings.NextVersion != "") {
+	if consumerRoot == "" && (len(settings.Variables) != 0 || settings.Version != "" || settings.NextVersion != "") {
 		t.Fatal("consumer settings require a consumer release trial")
 	}
 
@@ -215,7 +218,8 @@ func gitlabConsumerSettings(t *testing.T, consumerRoot string) livetest.GitLabRe
 // gitlabConsumerProfile is what a GitLab consumer's release and lifecycle
 // derive from the checkout and the settings before anything is created: the
 // build command, the selected builder, the release images the consumer
-// declares, its export commands and the tags of the requested version.
+// declares, its export commands, the tags of the requested version, and
+// whether the release plan bumps a root npm package.
 type gitlabConsumerProfile struct {
 	build                string
 	kaniko               bool
@@ -223,6 +227,7 @@ type gitlabConsumerProfile struct {
 	releaseImagesConfig  string
 	export               []string
 	requestTag, finalTag string
+	npmBump              bool
 }
 
 // gitlabConsumerProfileOf binds the settings to the lab's runners and reads
@@ -268,6 +273,15 @@ func gitlabConsumerProfileOf(t *testing.T, consumerRoot string, settings livetes
 	if settings.Version != "" {
 		profile.requestTag, profile.finalTag = "release-request/v"+settings.Version, "v"+settings.Version
 	}
+
+	bumps, err := livetest.GitLabPlannedVersionBumps(consumerRoot, profile.artifactsConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	profile.npmBump = slices.ContainsFunc(bumps, func(item pipeline.PlannedArtifact) bool {
+		return item.ProjectType == projecttype.NPM && path.Clean(item.WorkingDirectory) == "."
+	})
 
 	return settings, profile
 }
@@ -654,7 +668,7 @@ func runGitLabReleaseScenario(t *testing.T, consumerRoot string, scenario gitlab
 
 	t.Logf("GitLab release %s: parent %d, child %d, %d verified bundles", finalTag, run.ID, child, verified)
 
-	if settings.VersionBump == "npm" {
+	if profile.npmBump {
 		requireNPMVersionContract(t, target, repo, finalTag)
 	}
 
@@ -674,7 +688,7 @@ func runGitLabReleaseScenario(t *testing.T, consumerRoot string, scenario gitlab
 
 		t.Logf("second consecutive GitLab release %s: parent commit %s, pipeline %d, child %d, %d verified bundles", finalTag, parent, next.ID, child, bundles)
 
-		if settings.VersionBump == "npm" {
+		if profile.npmBump {
 			requireNPMVersionContract(t, target, repo, finalTag)
 		}
 	}
@@ -856,7 +870,11 @@ func (policy gitlabReleasePolicy) include(t *testing.T, target livetest.Target, 
 		"inputs": livetest.AdminInputs(t, withGitChglog(map[string]any{
 			"forge-ci-repository": layer.Repository, "consumer-project": policy.project,
 			"server-url": target.BaseURL(), "registry": policy.registry,
-			"job-image": policy.images.job, "job-user": policy.settings.JobUser, "build-image": policy.images.build, "signer-image": policy.images.signer,
+			"job-image": policy.images.job, "job-user": policy.settings.JobUser, "signer-image": policy.images.signer,
+			// The consumer's one build image serves whichever family its
+			// plan bumps or builds.
+			"runtime-image-java": policy.images.build, "runtime-image-node": policy.images.build, "runtime-image-go": policy.images.build,
+			"runtime-image-rust": policy.images.build, "runtime-image-android": policy.images.build,
 			"publication-project":          policy.publication,
 			"publication-image-repository": policy.registry + "/" + policy.publication,
 			"cosign-public-key-sha256":     policy.keys.cosignPublicSHA256,
@@ -864,7 +882,6 @@ func (policy gitlabReleasePolicy) include(t *testing.T, target livetest.Target, 
 			"request-allowed-signers": "livetest@localhost " + policy.requestPublic,
 			"bot-name":                "Layer acceptance", "bot-email": releaseBotEmail,
 			"sign-distro-packages": policy.distro,
-			"version-bump":         policy.settings.VersionBump,
 			"base-images":          policy.bases,
 			"checks":               policy.checks,
 			"checks-runner-tags":   policy.checksRunnerTags,

@@ -98,7 +98,18 @@ func releaseCaseVersion(t *testing.T, provider, consumer string, words []string)
 			t.Fatal(err)
 		}
 
-		return cmp.Or(parsed.Version, defaults.Version), parsed.VersionBump != ""
+		// The GitLab release bumps what the plan of its declaration bumps.
+		_, artifactsConfig, err := GitLabReleaseImages(consumer)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		bumps, err := GitLabPlannedVersionBumps(consumer, artifactsConfig)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		return cmp.Or(parsed.Version, defaults.Version), len(bumps) != 0
 	}
 
 	parsed, err := ParseTrialSettings(TrialRelease, settings)

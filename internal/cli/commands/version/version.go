@@ -68,6 +68,7 @@ func bumpPlanCmd() *cli.Command {
 			&cli.StringFlag{Name: "changelog-file", Value: defaultChangelogFile, Sources: cli.EnvVars("CHANGELOG_FILE"), Usage: "full changelog copied into each planned artifact directory"},
 			&cli.StringFlag{Name: "xcode-version-file", Sources: cli.EnvVars("XCODE_VERSION_FILE"), Usage: "xcconfig file holding MARKETING_VERSION"},
 			&cli.StringFlag{Name: "maven-cli-opts", Sources: cli.EnvVars("MAVEN_CLI_OPTS"), Usage: "extra args forwarded to mvn"},
+			&cli.StringSliceFlag{Name: "project-type", Usage: "run the native tools of this project type alone (maven, npm or cargo), for a key-free job with one toolchain; repeatable, and not with --patch"},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			return deps.FromCmd(ctx, cmd, func(dependencies *deps.Deps) error {
@@ -79,6 +80,9 @@ func bumpPlanCmd() *cli.Command {
 					PatchPath:     cmd.String("patch"),
 					PatchSHA256:   cmd.String("patch-sha256"),
 					ReleasePolicy: cmd.String("release-policy"),
+				}
+				for _, kind := range cmd.StringSlice("project-type") {
+					in.ProjectTypes = append(in.ProjectTypes, projecttype.Type(kind))
 				}
 				if opts := cmd.String("maven-cli-opts"); opts != "" {
 					in.MavenCLIOpts = strings.Fields(opts)

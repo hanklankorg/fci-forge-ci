@@ -15,8 +15,9 @@ import (
 	"github.com/diggsweden/forge-ci/internal/cli/cienv"
 	"github.com/diggsweden/forge-ci/internal/cli/clitoken"
 	"github.com/diggsweden/forge-ci/internal/cli/commonflags"
+	"github.com/diggsweden/forge-ci/internal/cliio"
 	"github.com/diggsweden/forge-ci/internal/domain/errs"
-	"github.com/diggsweden/forge-ci/internal/domain/projecttype"
+	"github.com/diggsweden/forge-ci/internal/domain/pipeline"
 )
 
 // verifyTagCmd is the Go port of forgejo-ci's verify-release-tag.sh: a
@@ -37,7 +38,7 @@ func verifyTagCmd() *cli.Command {
 			&cli.StringFlag{Name: "expected-parent", Sources: cli.EnvVars("RELEASE_REQUEST_SHA"), Usage: "require the single child of this authorised source SHA and freshly bind the exact remote release-request/<tag> object and peeled commit; signed-request authorization remains separate"},
 			&cli.BoolFlag{Name: "changelog-only", Usage: "require exactly a CHANGELOG.md change from --expected-parent, and bind release-request/<tag> to that tested commit"},
 			&cli.BoolFlag{Name: "request-is-release", Sources: cli.EnvVars("RELEASE_REQUEST_IS_RELEASE"), Usage: "explicit no-bump route: require release-sha to equal expected-parent, retaining remote request binding; incompatible with prepared-change profiles"},
-			&cli.StringFlag{Name: "version-bump", Usage: "with --changelog-only, also admit this project type's version bump (maven/npm/cargo), checked as a version substitution to the tag's version"},
+			&cli.StringFlag{Name: "prepare-plan-file", Usage: "with --changelog-only, also admit the version bump of this prepare-stage plan JSON file: each planned project's changelog copy and version files, native ones checked as a version substitution to the tag's version"},
 			clitoken.FileFlag("Read token for a private repository."),
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
@@ -46,8 +47,26 @@ func verifyTagCmd() *cli.Command {
 				return err
 			}
 
-			if cmd.String("version-bump") != "" && !cmd.Bool("changelog-only") {
-				return fmt.Errorf("--version-bump only widens --changelog-only: %w", errs.ErrUsage)
+			var plan *pipeline.ReleasePrepareStagePlan
+
+			if file := cmd.String("prepare-plan-file"); file != "" {
+				if !cmd.Bool("changelog-only") {
+					return fmt.Errorf("--prepare-plan-file only widens --changelog-only: %w", errs.ErrUsage)
+				}
+
+				body, err := cliio.ReadRegularFile(file)
+				if err != nil {
+					return fmt.Errorf("read --prepare-plan-file: %w", err)
+				}
+
+				plan = new(pipeline.ReleasePrepareStagePlan)
+				if err := pipeline.DecodeStagePlan(string(body), "prepare-stage plan", plan); err != nil {
+					return err
+				}
+
+				if plan.Version != pipeline.ReleasePlanVersion || plan.Stage != "prepare" {
+					return fmt.Errorf("unsupported prepare-stage plan version/stage %d/%q: %w", plan.Version, plan.Stage, errs.ErrInvalidConfig)
+				}
 			}
 
 			return apprelease.VerifyReleaseTag(ctx, git.New(), os.Stderr, apprelease.VerifyReleaseTagInput{
@@ -58,7 +77,7 @@ func verifyTagCmd() *cli.Command {
 				ExpectedParent:   cmd.String("expected-parent"),
 				RequestIsRelease: cmd.Bool("request-is-release"),
 				ChangelogOnly:    cmd.Bool("changelog-only"),
-				VersionBump:      projecttype.Type(cmd.String("version-bump")),
+				PreparePlan:      plan,
 				Token:            token,
 			})
 		},

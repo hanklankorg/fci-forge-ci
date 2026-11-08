@@ -44,14 +44,12 @@ func ParseTrialVariables(input string) (map[string]string, error) {
 }
 
 // GitLabReleaseSettings are what the caller of a GitLab consumer release trial
-// decides: the release policy's version bump, and literal variables for the
-// consumer's build.
+// decides: the requested versions, the release policy's job user, and
+// literal variables for the consumer's build. The consumer's declaration,
+// not a setting, decides what the release bumps.
 type GitLabReleaseSettings struct {
 	// Scenario selects a reviewed consumer release case; empty is ConsumerTrial.
 	Scenario string
-	// VersionBump is the release component's version-bump input: maven/npm/cargo, or ""
-	// for none.
-	VersionBump string
 	// Version is the X.Y.Z the release requests, or "" for the trial's default.
 	Version string
 	// NextVersion requests a second release from the signed main left by the first.
@@ -61,10 +59,6 @@ type GitLabReleaseSettings struct {
 	JobUser   string
 	Variables map[string]string
 }
-
-// settingVersionBump is a lowercase setting of a GitLab release trial, as
-// version is; every uppercase KEY=value is a consumer variable.
-const settingVersionBump = "version-bump"
 
 // settingJobUser is the GitLab release trial's job-user, the release policy's
 // input of that name.
@@ -82,8 +76,8 @@ const (
 // the policy's input check and then never equal what `id -u` prints.
 var jobUserValue = regexp.MustCompile(`^(0|[1-9][0-9]*)(:(0|[1-9][0-9]*))?$`)
 
-// ParseGitLabReleaseSettings reads one setting per line: version-bump=maven|npm|cargo
-// and job-user=UID[:GID], which the trial writes into the release policy,
+// ParseGitLabReleaseSettings reads one setting per line: job-user=UID[:GID],
+// which the trial writes into the release policy,
 // version=X.Y.Z, the release it requests, or a literal KEY=value consumer
 // variable (ParseTrialVariables).
 func ParseGitLabReleaseSettings(input string) (GitLabReleaseSettings, error) {
@@ -123,7 +117,7 @@ func ParseGitLabReleaseSettings(input string) (GitLabReleaseSettings, error) {
 	}
 
 	if !validNextTrialVersion(settings) {
-		return GitLabReleaseSettings{}, fmt.Errorf("next-version requires an increasing explicit version and isolated version-bump mode: %w", errs.ErrValidation)
+		return GitLabReleaseSettings{}, fmt.Errorf("next-version requires an increasing explicit version: %w", errs.ErrValidation)
 	}
 
 	return settings, nil
@@ -141,12 +135,6 @@ func (settings *GitLabReleaseSettings) setRecipeOption(key, value string) (bool,
 		}
 
 		settings.Scenario = value
-	case settingVersionBump:
-		if settings.VersionBump != "" || !slices.Contains([]string{"maven", "npm", "cargo"}, value) {
-			return true, fmt.Errorf("%s must be given once, as maven, npm or cargo: %w", settingVersionBump, errs.ErrValidation)
-		}
-
-		settings.VersionBump = value
 	case settingJobUser:
 		return true, setTrialJobUser(&settings.JobUser, value)
 	case settingVersion:
@@ -230,7 +218,7 @@ func setTrialVersion(destination *string, key, value string) error {
 }
 
 func validNextTrialVersion(settings GitLabReleaseSettings) bool {
-	return settings.NextVersion == "" || (settings.Version != "" && settings.VersionBump != "" && semver.Compare("v"+settings.NextVersion, "v"+settings.Version) > 0)
+	return settings.NextVersion == "" || (settings.Version != "" && semver.Compare("v"+settings.NextVersion, "v"+settings.Version) > 0)
 }
 
 // GitLabConsumerBuildScript and GitLabConsumerExportScript are the consumer's

@@ -115,7 +115,7 @@ func TestPlanCampaignLane_MapsAGitLabConsumerToItsRecipes(t *testing.T) {
 		"FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_JAVA=/c/java.tar\nFORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_NODE=/c/node.tar\nFORGE_CI_LIVE_BUILDAH_JOB_IMAGE_ARCHIVE=/c/buildah.tar\nFORGE_CI_LIVE_KANIKO_JOB_IMAGE_ARCHIVE=/c/kaniko.tar\n"+
 		"LINT_IMAGE_ARCHIVE_JAVA=/c/lint-java.tar\n",
 		"consumer hello-maven pull-request job-archive=@FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_JAVA lint-archive=@LINT_IMAGE_ARCHIVE_JAVA\n"+
-			"consumer hello-maven release job-archive=@FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_JAVA build-archive=/b.tar signer-archive=@FORGE_CI_LIVE_SIGNER_IMAGE_ARCHIVE version-bump=maven lint-archive=@LINT_IMAGE_ARCHIVE_JAVA job-user=65532:65532\n"+
+			"consumer hello-maven release job-archive=@FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_JAVA build-archive=/b.tar signer-archive=@FORGE_CI_LIVE_SIGNER_IMAGE_ARCHIVE lint-archive=@LINT_IMAGE_ARCHIVE_JAVA job-user=65532:65532\n"+
 			"consumer hello-go-cli pull-request job-archive=@FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_JAVA\n")
 	writeFile(t, filepath.Join(dir, "demos", "hello-maven", filepath.FromSlash(GitLabGateFile)), lintingGate)
 
@@ -141,7 +141,7 @@ func TestPlanCampaignLane_MapsAGitLabConsumerToItsRecipes(t *testing.T) {
 		!slices.Equal(plan.Cases[1].Args, []string{
 			"test-live-consumer", "gitlab", checkout, "release",
 			"job-archive=/c/java.tar", "build-archive=/b.tar", "signer-archive=/c/signer.tar",
-			"lint-archive=/c/lint-java.tar", "version-bump=maven", "job-user=65532:65532",
+			"lint-archive=/c/lint-java.tar", "job-user=65532:65532",
 		}) ||
 		!slices.Equal(plan.Cases[2].Args, []string{"test-live-consumer", "gitlab", filepath.Join(dir, "demos", "hello-go-cli"), "pull-request", "job-archive=/c/java.tar"}) {
 		t.Fatalf("cases %q", plan.Cases)

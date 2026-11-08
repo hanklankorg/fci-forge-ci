@@ -340,6 +340,27 @@ func validateContainerSigning(plan ConfigPlan, policy ReleasePolicy) error {
 	return nil
 }
 
+// NewPolicyReleaseStagePlans returns the prepare and build stage plans of a
+// declaration for a release whose policy, not artifacts.yml, decides signing
+// and publication: the GitLab release component's. The stages are the ones
+// NewReleasePlan derives from the same declaration; the release commit bumps
+// every declared project, whichever renderer writes the changelog.
+func NewPolicyReleaseStagePlans(configPlan ConfigPlan) (ReleasePrepareStagePlan, ReleaseBuildStagePlan, error) {
+	if err := ValidateConfigPlan(configPlan); err != nil {
+		return ReleasePrepareStagePlan{}, ReleaseBuildStagePlan{}, err
+	}
+
+	policy := ReleasePolicy{RunVersionBump: true}
+
+	return newReleasePrepareStagePlan(configPlan, policy, ""), newReleaseBuildStagePlan(configPlan), nil
+}
+
+// UndeclaredReleaseStagePlans are the stage plans of a release without a
+// declaration: no project to bump and none to build.
+func UndeclaredReleaseStagePlans() (ReleasePrepareStagePlan, ReleaseBuildStagePlan) {
+	return newReleasePrepareStagePlan(ConfigPlan{}, ReleasePolicy{}, ""), newReleaseBuildStagePlan(ConfigPlan{})
+}
+
 // newReleasePrepareStagePlan builds the standalone release prepare-stage plan.
 func newReleasePrepareStagePlan(configPlan ConfigPlan, policy ReleasePolicy, filePattern string) ReleasePrepareStagePlan {
 	return ReleasePrepareStagePlan{

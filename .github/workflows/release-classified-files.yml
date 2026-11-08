@@ -146,11 +146,13 @@ jobs:
         run: |
           cd "$RUNNER_TEMP/classified-source" || exit
           kind=$(jq -er '.artifacts.all[0].project_type' <<<"$CONFIG_PLAN")
-          extra=()
-          case "$kind" in go) ;; cargo) extra=(--version-bump cargo) ;; *) exit 1 ;; esac
+          case "$kind" in go | cargo) ;; *) exit 1 ;; esac
+          # The validated plan's prepare stage names the version bump the
+          # prepared commit may carry beside the changelog.
+          jq -cer '.stages.prepare' <<<"$RELEASE_PLAN" >"$RUNNER_TEMP/prepare-plan.json"
           policy=$(jq -er '.context.release_policy' <<<"$RELEASE_PLAN")
           forge-ci release validate-tag --tag "$TAG" --release-sha "$PREPARED_SHA" --repo-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" \
-            --release-policy "$policy" --expected-parent "$GITHUB_SHA" --changelog-only "${extra[@]}"
+            --release-policy "$policy" --expected-parent "$GITHUB_SHA" --changelog-only --prepare-plan-file "$RUNNER_TEMP/prepare-plan.json"
           forge-ci validate tag signature --tag "release-request/$TAG" --repository "$GITHUB_REPOSITORY" --require-valid-signature --require-allowlisted-signer
           forge-ci validate tag signature --tag "$TAG" --repository "$GITHUB_REPOSITORY" --require-valid-signature --require-allowlisted-signer
       - name: Validate complete test map then execute selected native policy

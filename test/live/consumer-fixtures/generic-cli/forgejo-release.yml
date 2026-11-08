@@ -102,7 +102,13 @@ jobs:
           git -c gpg.ssh.allowedSignersFile=.forgejo/release-allowed-signers verify-tag "$REQUEST"
           args=()
           case "$(cat .gitlab/generic-cli-kind)" in
-            cargo) args+=(--version-bump cargo) ;;
+            cargo)
+              # The overlay's version-bump: cargo bumps the root crate; this
+              # prepare plan admits exactly that bump beside the changelog.
+              plan=$(mktemp "${RUNNER_TEMP:?}/prepare-plan.XXXXXX")
+              jq -n '{version:1,stage:"prepare",targets:{version_bump:{runs:true,items:[{name:"nanolinter",project_type:"cargo",working_directory:"."}]}}}' >"$plan"
+              args+=(--prepare-plan-file "$plan")
+              ;;
             go) ;;
             *) exit 1 ;;
           esac

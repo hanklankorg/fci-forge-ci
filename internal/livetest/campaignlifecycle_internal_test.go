@@ -82,7 +82,7 @@ func TestCampaignLifecycle_RunsTheMavenServiceDemoOnGitLab(t *testing.T) {
 	want := []string{
 		campaignConsumerRecipe, campaignGitLab, filepath.Join(dir, "demos/hello-maven-service"), TrialLifecycle,
 		"job-archive=/c/java.tar", "build-archive=/c/java.tar", "signer-archive=/c/signer.tar", "lint-archive=/c/lint-java.tar",
-		"version=0.2.0", "version-bump=maven", "job-user=65532:65532",
+		"version=0.2.0", "job-user=65532:65532",
 	}
 	if len(plan.Cases) != 1 || !slices.Equal(plan.Cases[0].Args, want) {
 		t.Fatalf("lifecycle recipe %+v, want %v", plan.Cases, want)
@@ -107,7 +107,7 @@ func TestCampaignLifecycle_RefusesWhatItCannotRun(t *testing.T) {
 		"gitlab without the lint archive":  {campaignGitLab, "consumer hello-maven-service lifecycle job-archive=/a.tar build-archive=/b.tar signer-archive=/s.tar", "nanolinter flavor's archive"},
 		"gitlab without the signer":        {campaignGitLab, "consumer hello-maven-service lifecycle job-archive=/a.tar build-archive=/b.tar lint-archive=/l.tar", "signer-archive="},
 		"gitlab second case":               {campaignGitLab, "consumer hello-maven-service lifecycle" + gitlabArchives + " scenario=TestGitLabRelease_ConsumerTrial", "no scenario="},
-		"gitlab second release":            {campaignGitLab, "consumer hello-maven-service lifecycle" + gitlabArchives + " version=0.2.0 version-bump=maven next-version=0.3.0", "no scenario= or next-version="},
+		"gitlab second release":            {campaignGitLab, "consumer hello-maven-service lifecycle" + gitlabArchives + " version=0.2.0 next-version=0.3.0", "no scenario= or next-version="},
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()

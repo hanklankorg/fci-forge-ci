@@ -107,8 +107,10 @@ func GitLabRecoveryParent(parent []byte, engineSHA, policyProject, extensionRef 
 	}
 
 	includes, ok := trigger["include"].([]any)
-	if !ok || len(includes) != 1 {
-		return nil, fmt.Errorf("expected one production child include: %w", errRecovery)
+	// The pinned release jobs and the generated plan-driven jobs; GitLab
+	// admits a third include, the checkpoint.
+	if !ok || len(includes) != 2 {
+		return nil, fmt.Errorf("expected the production child include and the generated jobs: %w", errRecovery)
 	}
 
 	trigger["include"] = append(includes, map[string]any{

@@ -236,7 +236,7 @@ consumer in one scratch repository, the `lifecycle` event:
 
 ```text
 consumer hello-maven-service lifecycle CI_JOB_IMAGE=@JOB_IMAGE_JAVA CI_IMAGE_BUILDER=buildah RELEASE_PLATFORMS=linux/amd64
-consumer hello-maven-service lifecycle job-archive=@FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_JAVA build-archive=@FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_JAVA signer-archive=@FORGE_CI_LIVE_SIGNER_IMAGE_ARCHIVE lint-archive=@LINT_IMAGE_ARCHIVE_JAVA version=0.2.0 version-bump=maven job-user=65532:65532
+consumer hello-maven-service lifecycle job-archive=@FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_JAVA build-archive=@FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_JAVA signer-archive=@FORGE_CI_LIVE_SIGNER_IMAGE_ARCHIVE lint-archive=@LINT_IMAGE_ARCHIVE_JAVA version=0.2.0 job-user=65532:65532
 ```
 
 The same reader, `key=value` words and `@NAME` expansion as the other consumer

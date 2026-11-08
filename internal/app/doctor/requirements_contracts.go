@@ -102,7 +102,7 @@ func (report *RequirementsReport) keySettings(call *SetupCall, inputs *yaml.Node
 			report.unknown(call.Location + ": forge-ci-sha must match the literal uses revision")
 		}
 	} else {
-		for _, name := range []string{"forge-ci-repository", "server-url", "registry", "consumer-project", "publication-project", "publication-image-repository", "job-image", "build-image", "request-allowed-signers"} {
+		for _, name := range []string{"forge-ci-repository", "server-url", "registry", "consumer-project", "publication-project", "publication-image-repository", "job-image", "request-allowed-signers"} {
 			report.setting(call, inputs, name, "Reviewed GitLab release input; see docs/gitlab.md")
 		}
 

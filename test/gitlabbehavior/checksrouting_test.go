@@ -5,9 +5,11 @@ package gitlabbehavior
 
 import (
 	"bytes"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -78,30 +80,48 @@ func TestReleaseChecksRoutingAndPreparationBarrier(t *testing.T) {
 		t.Fatalf("consumer checks lost authorization, fresh revalidation, or secret isolation: %+v", checks)
 	}
 
-	for _, name := range []string{"Prepare: changelog", "Prepare: version"} {
-		if !reflect.DeepEqual(jobs[name].Needs, []any{"Check: consumer checks"}) {
-			t.Fatalf("%s can bypass successful checks: %+v", name, jobs[name])
-		}
+	if !reflect.DeepEqual(jobs["Prepare: changelog"].Needs, []any{"Check: consumer checks"}) {
+		t.Fatalf("the changelog can bypass successful checks: %+v", jobs["Prepare: changelog"])
 	}
 
-	prepare := jobs["Prepare: release commit and tag"]
-	if !reflect.DeepEqual(prepare.Needs, []any{
+	// The plan's version jobs, whichever it names, wait for the checks and
+	// carry no rule of their own: "Release: plan" decides that they exist.
+	version := jobs[".forge-ci-release-version"]
+	if !reflect.DeepEqual(version.Needs, []any{
+		map[string]any{"job": "Check: consumer checks", "artifacts": false},
 		map[string]any{"job": "Prepare: changelog", "artifacts": true},
-		map[string]any{"job": "Prepare: version", "artifacts": true, "optional": true},
-	}) {
+	}) || len(version.Rules) != 0 {
+		t.Fatalf("a version job can bypass successful checks: %+v", version)
+	}
+
+	families := map[string][]string{"version": {"java", "node", "rust"}, "build": {"java", "node", "go", "rust", "android"}}
+
+	prepareNeeds := []any{map[string]any{"job": "Prepare: changelog", "artifacts": true}}
+	for _, family := range families["version"] {
+		prepareNeeds = append(prepareNeeds, map[string]any{"job": "Prepare: version " + family, "artifacts": true, "optional": true})
+	}
+
+	if prepare := jobs["Prepare: release commit and tag"]; !reflect.DeepEqual(prepare.Needs, prepareNeeds) {
 		t.Fatalf("release preparation lost required changelog or optional version barrier: %+v", prepare)
 	}
 
-	if !reflect.DeepEqual(jobs["Prepare: version"].Rules, []any{map[string]any{"if": `"$[[ inputs.version-bump ]]" != ""`}}) {
-		t.Fatal("version bump must remain optional without weakening the checks barrier")
+	if family := jobs[".forge-ci-release-build-family"]; !reflect.DeepEqual(family.Needs, []any{
+		map[string]any{"job": "Prepare: release commit and tag", "artifacts": false},
+	}) || family.Tags != "$[[ inputs.build-runner-tags ]]" || len(family.Rules) != 0 {
+		t.Fatalf("a family build bypasses gated release preparation: %+v", family)
 	}
 
-	if !reflect.DeepEqual(jobs["Build: release files"].Needs, []any{
+	buildNeeds := []any{
 		map[string]any{"job": "Prepare: release commit and tag", "artifacts": false},
 		map[string]any{"job": "Build: export amd64", "artifacts": true, "optional": true},
 		map[string]any{"job": "Build: export arm64", "artifacts": true, "optional": true},
-	}) {
-		t.Fatal("build bypasses gated release preparation")
+	}
+	for _, family := range families["build"] {
+		buildNeeds = append(buildNeeds, map[string]any{"job": "Build: " + family, "artifacts": true, "optional": true})
+	}
+
+	if !reflect.DeepEqual(jobs["Build: release files"].Needs, buildNeeds) {
+		t.Fatal("build bypasses gated release preparation or a family build")
 	}
 
 	for _, arch := range []string{"amd64", "arm64"} {
@@ -115,6 +135,7 @@ func TestReleaseChecksRoutingAndPreparationBarrier(t *testing.T) {
 	scheduled := map[string]string{
 		"Check: consumer checks":                   "$[[ inputs.checks-runner-tags ]]",
 		"Build: release files":                     "$[[ inputs.build-runner-tags ]]",
+		".forge-ci-release-build-family":           "$[[ inputs.build-runner-tags ]]",
 		".forge-ci-release-image-builder-buildah":  "$[[ inputs.build-runner-tags ]]",
 		"Images: build arm64":                      "$[[ inputs.build-runner-tags-arm64 ]]",
 		".forge-ci-release-export-builder-buildah": "$[[ inputs.build-runner-tags ]]",
@@ -154,21 +175,38 @@ func TestReleaseChecksRoutingAndPreparationBarrier(t *testing.T) {
 	}
 }
 
-func TestReleaseSummaryIncludesChecksAndOnlyEnabledVersionBump(t *testing.T) {
+// The summary lists the plan's family jobs whose hand-offs reached it, and
+// no other.
+func TestReleaseSummaryIncludesChecksAndOnlyThePlannedFamilyJobs(t *testing.T) {
 	t.Parallel()
 
-	for _, bump := range []string{"", "cargo"} {
-		t.Run("bump="+bump, func(t *testing.T) {
+	for _, handoffs := range [][]string{nil, {"_release-bump-rust", "_release-build-java", "_release-build-node"}} {
+		t.Run(strings.Join(handoffs, ","), func(t *testing.T) {
 			t.Parallel()
+
+			dir := t.TempDir()
+			for _, handoff := range handoffs {
+				if err := os.Mkdir(filepath.Join(dir, handoff), 0o700); err != nil {
+					t.Fatal(err)
+				}
+			}
+
 			command := exec.CommandContext(t.Context(), componentBash(t), "--noprofile", "--norc", "-eu", "-c",
 				`source "$1"; rc_engine() { printf '%s\n' "$@"; }; rc_release_summary`, "summary",
 				filepath.Join(reporoot.Path(t), ".gitlab/bin/release.sh"))
-			command.Env = []string{"PATH=/usr/bin:/bin", "RC_VERSION_BUMP=" + bump, "RELEASE_TAG=v1.2.3", "RC_RELEASE_BRANCH=main"}
+			command.Env = []string{"PATH=/usr/bin:/bin", "RELEASE_TAG=v1.2.3", "RC_RELEASE_BRANCH=main", "CI_PROJECT_DIR=" + dir}
 
 			out, err := command.CombinedOutput()
-			if err != nil || !strings.Contains(string(out), "Check: consumer checks=success") ||
-				strings.Contains(string(out), "Prepare: version=success") != (bump != "") {
-				t.Fatalf("summary misrepresents checks/version jobs: %v\n%s", err, out)
+			if err != nil || !strings.Contains(string(out), "Check: consumer checks=success") || !strings.Contains(string(out), "Build: release files=success") {
+				t.Fatalf("summary misrepresents the checks or the release files: %v\n%s", err, out)
+			}
+
+			for _, job := range []string{"Prepare: version rust", "Prepare: version java", "Build: java", "Build: node", "Build: go"} {
+				ran := map[string]string{"Prepare: version rust": "_release-bump-rust", "Prepare: version java": "_release-bump-java",
+					"Build: java": "_release-build-java", "Build: node": "_release-build-node", "Build: go": "_release-build-go"}[job]
+				if strings.Contains(string(out), job+"=success") != slices.Contains(handoffs, ran) {
+					t.Errorf("summary misrepresents %s:\n%s", job, out)
+				}
 			}
 		})
 	}

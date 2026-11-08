@@ -89,7 +89,7 @@ func TestCampaignScenarioInputsRefuseBeforeAnyCaseCanExecute(t *testing.T) {
 		"missing probe archive":    "scenario TestGitLabRelease_BuildImageCapability job-archive=/job",
 		"duplicate case selection": "scenario TestGitLabRelease_ConsumerTrial checkout=@NATIVE_CONSUMER job-archive=/job build-archive=/build signer-archive=/signer scenario=TestGitLabRelease_ConsumerTrial",
 		"missing recovery version": "scenario TestGitLabRelease_ConsumerInterruptedRecovery checkout=@NATIVE_CONSUMER job-archive=/job build-archive=/build signer-archive=/signer",
-		"preseeded next version":   "scenario TestGitLabRelease_RejectsPreseededProvenance checkout=@NATIVE_CONSUMER job-archive=/job build-archive=/build signer-archive=/signer version=0.3.0 next-version=0.3.1 version-bump=npm",
+		"preseeded next version":   "scenario TestGitLabRelease_RejectsPreseededProvenance checkout=@NATIVE_CONSUMER job-archive=/job build-archive=/build signer-archive=/signer version=0.3.0 next-version=0.3.1",
 		"interruption extra input": "scenario TestGitLabWorkflow_InterruptedJob force=true",
 	} {
 		t.Run(name, func(t *testing.T) {
