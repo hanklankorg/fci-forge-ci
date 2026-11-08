@@ -1,0 +1,42 @@
+# SPDX-FileCopyrightText: 2026 Digg - Agency for Digital Government
+# SPDX-License-Identifier: CC0-1.0
+
+# A development snapshot of a branch: Forge CI's snapshot orchestrator builds
+# the jar, builds the service image from it and publishes the image to this
+# repository's container package, without a release, a tag or a change to the
+# branch. Dispatched by hand, or on a push to development.
+name: Development Snapshot
+
+on:
+  workflow_dispatch:
+    inputs:
+      source-branch:
+        description: "Branch to snapshot; empty snapshots the branch the workflow runs on"
+        required: false
+        default: ""
+        type: string
+  push:
+    branches:
+      - development
+
+concurrency:
+  group: snapshot-${{ inputs.source-branch || github.ref_name }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  snapshot:
+    uses: diggsweden/forge-ci/.github/workflows/release-snapshot-orchestrator.yml@v0.90.0
+    permissions:
+      actions: read
+      contents: read
+      packages: write
+    with:
+      branch: ${{ inputs.source-branch || github.ref_name }}
+      forge-ci-binary-ref: v0.90.0
+      artifacts-config: .forge-ci/artifacts.yml
+      runtime-image: ghcr.io/diggsweden/forge-ci-runtime-base:v0.90.0
+      runtime-image-full: ghcr.io/diggsweden/forge-ci-runtime:v0.90.0
+      runtime-image-java: ghcr.io/diggsweden/forge-ci-runtime-java-25:v0.90.0
