@@ -4,6 +4,7 @@
 package livetest
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -41,18 +42,22 @@ func campaignAdmitLifecycle(provider, checkout string) error {
 	return serviceSnapshotAdmission(checkout, source)
 }
 
+// errNoDevelopmentRoute is a demo without the root Containerfile or the
+// declaration a service snapshot is planned from: the live harness's scope.
+var errNoDevelopmentRoute = errors.New("no service snapshot and no development route")
+
 // serviceSnapshotAdmission refuses a demo whose source declaration the
 // planner cannot plan as a service snapshot, the development route every
 // forge's lifecycle shares; a demo without a root Containerfile or the
 // declaration has none.
 func serviceSnapshotAdmission(checkout, source string) error {
 	if present, err := exists(filepath.Join(checkout, "Containerfile")); err != nil || !present {
-		return fmt.Errorf("%s: the demo has no root Containerfile, so no service snapshot and no development route: %w", TrialLifecycle, errs.ErrValidation)
+		return fmt.Errorf("%s: the demo has no root Containerfile, so %w: %w", TrialLifecycle, errNoDevelopmentRoute, errs.ErrValidation)
 	}
 
 	body, err := os.ReadFile(filepath.Join(checkout, source)) //nolint:gosec // G304: a fixed file under the demo checkout the harness itself chose.
 	if err != nil {
-		return fmt.Errorf("%s: the demo has no %s, so no service snapshot and no development route: %w", TrialLifecycle, source, errs.ErrValidation)
+		return fmt.Errorf("%s: the demo has no %s, so %w: %w", TrialLifecycle, source, errNoDevelopmentRoute, errs.ErrValidation)
 	}
 
 	if _, _, err = serviceSnapshotDeclarationOverlay(string(body)); err != nil {

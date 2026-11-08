@@ -24,7 +24,7 @@ import (
 var (
 	errSourceIdentity          = errors.New("snapshot source requires an exact commit and logical branch")
 	errBaseRepository          = errors.New("snapshot requires a full base OCI repository")
-	errUnsupportedContainer    = errors.New("snapshot build secrets, extraction and OCI provenance are unsupported")
+	errUnsupportedContainer    = errors.New("snapshot build secrets and OCI provenance are unsupported")
 	errInvalidTag              = errors.New("invalid snapshot tag")
 	errMissingDependency       = errors.New("missing dependency")
 	errNoBuiltArtifact         = errors.New("has no supported built artifact")
@@ -162,9 +162,11 @@ func New(cfg pipeline.ConfigPlan, in Input) (Plan, error) {
 }
 
 // planContainer resolves one configured container into its snapshot image and
-// one native build per platform.
+// one native build per platform. A declared binary extraction is a release's
+// output, its binaries a release's assets: a snapshot publishes the runtime
+// image alone, so it builds the container and extracts nothing.
 func planContainer(cfg pipeline.ConfigPlan, in Input, baseVersion string, ctr pipeline.PlannedContainer) (Image, []Build, error) {
-	if len(ctr.BuildSecrets) > 0 || ctr.ExtractBinaryTarget != "" || len(ctr.ExtractBinaryNames) > 0 || len(ctr.ExtractBinaryPaths) > 0 || ctr.EnableSLSA {
+	if len(ctr.BuildSecrets) > 0 || ctr.EnableSLSA {
 		return Image{}, nil, fmt.Errorf("container %s: %w", ctr.Name, errUnsupportedContainer)
 	}
 

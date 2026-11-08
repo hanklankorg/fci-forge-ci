@@ -85,7 +85,8 @@ registry publication credentials. Publication waits for all builds and collectio
 requires exactly the planned image set.
 
 Snapshots use signing `NONE` and do not move stable aliases or promotion stages.
-Explicit snapshot OCI signing/provenance requests, build secrets and binary
-extraction remain unsupported and fail explicitly. Minimal three-forge snapshot
+Explicit snapshot OCI signing/provenance requests and build secrets remain
+unsupported and fail explicitly; a snapshot builds the runtime image and runs
+no `extract.binary`, a release's output. Minimal three-forge snapshot
 acceptance is **pending operator execution**. See the
 [shared snapshot contract](../../docs/workflows.md#snapshot-container-contract-all-three-forges).

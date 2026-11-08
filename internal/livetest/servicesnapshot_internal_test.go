@@ -129,8 +129,7 @@ func TestServiceSnapshotDeclarationRefusesUnsupportedInputs(t *testing.T) {
 		"other image":              {"containers: [{name: service, image-name: other/image}]", scope},
 		"two producers":            {"artifacts: [{name: a, project-type: maven, build-type: application}, {name: b, project-type: npm}]\ncontainers: [{name: service, from: [a, b]}]", scope},
 		"provenance":               {"containers: [{name: service, enable-slsa: true}]", scope},
-		"build secret":             {"containers: [{name: service, build-secrets: [TOKEN]}]", "build secrets, extraction and OCI provenance are unsupported"},
-		"extraction":               {"containers: [{name: service, extract: {binary: {target: export, names: [app]}}}]", "build secrets, extraction and OCI provenance are unsupported"},
+		"build secret":             {"containers: [{name: service, build-secrets: [TOKEN]}]", "build secrets and OCI provenance are unsupported"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			overlay, _, err := serviceSnapshotDeclarationOverlay(test.body)
@@ -156,8 +155,9 @@ func TestServiceSnapshotSourceOfTheDemos(t *testing.T) {
 		"hello-cargo-container": {source: GitLabDedicatedReleaseImagesConfig, families: []string{}},
 		// Two runtime images: the trial judges one container.
 		"hello-cargo-workspace": {source: GitLabDedicatedReleaseImagesConfig, refused: "one container"},
-		// Extraction, which the planner refuses.
-		"hello-go-service": {source: GitLabDefaultArtifactsConfig, refused: "extraction"},
+		// Container-first with a release's extraction, which a snapshot
+		// does not run: no producer.
+		"hello-go-service": {source: GitLabDefaultArtifactsConfig, families: []string{}},
 		// No container, so no snapshot.
 		"hello-go-cli":      {source: GitLabDefaultArtifactsConfig, refused: "one container"},
 		"hello-maven":       {source: GitLabDefaultArtifactsConfig, refused: "one container"},

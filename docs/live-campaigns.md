@@ -379,7 +379,7 @@ behind it:
 | hello-cargo-container | lifecycle | lifecycle | container-first from `release-images.yml`, no producer |
 | hello-npm-service | lifecycle | lifecycle | artifact-first: `artifacts.yml` is a service snapshot's (one npm producer), with the snapshot-npm-layout merge's layout, and the demo ships its GitLab release build |
 | hello-cargo-workspace | — | — | two runtime images; the trial judges one container |
-| hello-go-service | — | — | extraction, which the planner refuses; no GitLab release build either |
+| hello-go-service | lifecycle | — | container-first from `artifacts.yml`, no producer; its `extract.binary` is the release's, which the snapshot does not run; no GitLab release build, as no example demo ships one |
 | hello-go-cli, hello-maven, hello-npm-package | — | — | no container, so no snapshot; hello-maven's library development route publishes a SNAPSHOT package, another shape |
 | hello-gradle, hello-monorepo, hello-android, hello-ios | — | — | no Forgejo flow or no container; the example demos ship no GitLab release build |
 

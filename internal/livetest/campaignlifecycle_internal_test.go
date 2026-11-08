@@ -29,20 +29,25 @@ const lifecycleRustJobImage = "registry.invalid/rust@sha256:bbbbbbbbbbbbbbbbbbbb
 // javascript-typescript flavour, the npm service's lifecycle job image.
 const lifecycleNodeJobImage = "registry.invalid/node@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
 
-// lifecycleCampaignEnv is a campaign with the Java, Rust, Node and kaniko
+// lifecycleGoJobImage is the campaign's nanolinter image of the go flavour,
+// the Go service's lifecycle job image.
+const lifecycleGoJobImage = "registry.invalid/go@sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+
+// lifecycleCampaignEnv is a campaign with the Java, Rust, Node, Go and kaniko
 // job images of the Forgejo lifecycle and the archives of the GitLab one.
 const lifecycleCampaignEnv = "CAMPAIGN_COMMIT=" + campaignHead + "\nJOB_IMAGE_JAVA=" + snapshotJobImage + "\nJOB_IMAGE_RUST=" + lifecycleRustJobImage +
-	"\nJOB_IMAGE_JAVASCRIPT_TYPESCRIPT=" + lifecycleNodeJobImage +
+	"\nJOB_IMAGE_JAVASCRIPT_TYPESCRIPT=" + lifecycleNodeJobImage + "\nJOB_IMAGE_GO=" + lifecycleGoJobImage +
 	"\nKANIKO_JOB_IMAGE=" + lifecycleKanikoJobImage + "\n" +
 	"FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_JAVA=/c/java.tar\nFORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_RUST=/c/rust.tar\nFORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_NODE=/c/node.tar\n" +
 	"FORGE_CI_LIVE_SIGNER_IMAGE_ARCHIVE=/c/signer.tar\nLINT_IMAGE_ARCHIVE_JAVA=/c/lint-java.tar\nLINT_IMAGE_ARCHIVE_RUST=/c/lint-rust.tar\nLINT_IMAGE_ARCHIVE_JAVASCRIPT_TYPESCRIPT=/c/lint-js.tar\n"
 
 // lifecycleDemos are the demos a lifecycle's admission reads in these tests,
-// laid out as the shipped demos are (writeLifecycleDemo): the Maven service
-// and the Cargo container have a development route; the npm service's
-// declaration is one too; the Go service's declaration extracts; the Go CLI
-// declares no container.
-var lifecycleDemos = []string{"hello-maven-service", "hello-cargo-container", "hello-npm-service", "hello-go-service", "hello-go-cli"}
+// laid out as the shipped demos are (writeLifecycleDemo): the Maven service,
+// the Cargo container and the Go service have a development route, the Go
+// service on Forgejo alone, since it ships no GitLab release build; the npm
+// service's declaration is one too; the Cargo workspace declares two images,
+// more than the trial judges; the Go CLI declares no container.
+var lifecycleDemos = []string{"hello-maven-service", "hello-cargo-container", "hello-npm-service", "hello-go-service", "hello-cargo-workspace", "hello-go-cli"}
 
 // shippedDemoFiles are the files a demo's admission reads for their presence,
 // not their content: the lifecycle's root Containerfile and the GitLab
@@ -132,8 +137,8 @@ func planCheckedInLifecycle(t *testing.T, provider, casesFile, visibility, build
 // On Forgejo the lifecycle runs every demo with a service snapshot, each in
 // the nanolinter image of its toolchain flavour: the Maven service,
 // artifact-first, whose producer the snapshot builds in that image, under
-// both builders, the Cargo container, container-first, and the npm service,
-// artifact-first. The shipped file
+// both builders, the Cargo container and the Go service, container-first,
+// and the npm service, artifact-first. The shipped file
 // declares neither visibility nor builder: the visibility is the run's
 // selector, both by default, and the builder each line's CI_IMAGE_BUILDER,
 // Buildah or the campaign's kaniko job image, labelled for the layer
@@ -155,6 +160,10 @@ func TestCampaignLifecycle_RunsTheServiceDemosOnForgejo(t *testing.T) {
 		{
 			campaignConsumerRecipe, campaignForgejo, filepath.Join(dir, "demos/hello-npm-service"), TrialLifecycle,
 			"CI_JOB_IMAGE=" + lifecycleNodeJobImage, "CI_IMAGE_BUILDER=buildah", "RELEASE_PLATFORMS=linux/amd64",
+		},
+		{
+			campaignConsumerRecipe, campaignForgejo, filepath.Join(dir, "demos/hello-go-service"), TrialLifecycle,
+			"CI_JOB_IMAGE=" + lifecycleGoJobImage, "CI_IMAGE_BUILDER=buildah", "RELEASE_PLATFORMS=linux/amd64",
 		},
 	}
 
@@ -379,18 +388,18 @@ func TestCampaignLifecycle_RefusesWhatItCannotRun(t *testing.T) {
 }
 
 // A demo's development route is read from its declaration, not its name: a
-// demo whose declaration the snapshot planner refuses is refused with the
-// planner's reason, on both providers.
+// demo whose declaration the service snapshot cannot take is refused with
+// the reason, on both providers.
 func TestCampaignLifecycle_RefusesADeclarationTheSnapshotCannotBuild(t *testing.T) {
 	t.Parallel()
 
-	dir, cases := newLifecycleCampaign(t, "consumer hello-go-service lifecycle CI_JOB_IMAGE="+snapshotJobImage+"\n")
+	dir, cases := newLifecycleCampaign(t, "consumer hello-cargo-workspace lifecycle CI_JOB_IMAGE="+lifecycleRustJobImage+"\n")
 
 	for _, provider := range []string{campaignForgejo, campaignGitLab} {
 		_, err := PlanCampaignLane(reporoot.Path(t), dir, provider, cases, campaignHead, CampaignRun{})
 		if !errors.Is(err, errs.ErrValidation) || !strings.Contains(err.Error(), "not a service snapshot's declaration") ||
-			!strings.Contains(err.Error(), "build secrets, extraction and OCI provenance are unsupported") {
-			t.Fatalf("%s: %v, want the declaration refused with the planner's reason", provider, err)
+			!strings.Contains(err.Error(), "the trial judges one container") {
+			t.Fatalf("%s: %v, want the declaration refused with the trial's reason", provider, err)
 		}
 	}
 }

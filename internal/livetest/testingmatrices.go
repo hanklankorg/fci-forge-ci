@@ -48,7 +48,6 @@ const (
 	matrixGPGConfig     = ".forge-ci/artifacts-gpg.yml"
 	matrixEvidenceCols  = 4
 	routeNoContainer    = "no container"
-	routeExtraction     = "extraction image"
 	routeRefused        = "refused snapshot"
 	routeArtifactFirst  = "artifact-first"
 	routeContainerFirst = "container-first"
@@ -378,18 +377,11 @@ func matrixEcosystem(artifacts []pipeline.PlannedArtifact) string {
 
 // readRoute reads the snapshot route the planner takes for the declaration's
 // snapshot view: artifact-first when it plans producers for the images,
-// container-first when the images build alone. An extracting image is named
-// as such, and a snapshot the planner refuses otherwise takes no route and
-// keeps the planner's refusal.
+// container-first when the images build alone. A snapshot the planner
+// refuses takes no route and keeps the planner's refusal.
 func (demo *matrixDemo) readRoute(cfg *config.Config) error {
 	if len(cfg.Containers) == 0 {
 		demo.route = routeNoContainer
-
-		return nil
-	}
-
-	if slices.ContainsFunc(cfg.Containers, func(ctr config.Container) bool { return ctr.Extract != nil }) {
-		demo.route = routeExtraction
 
 		return nil
 	}
@@ -617,9 +609,20 @@ func (lane matrixLane) runs(setting, value string, words []string) bool {
 	return !found || declared == value
 }
 
-// lifecycleState is a demo's lifecycle state on a provider: refused, the
-// overlay's mark, a line that exists, or admitted without a line.
+// lifecycleApplies is whether the demo has a lifecycle on the provider: on
+// GitLab it needs the demo's release build, whose commands are the
+// adopter's; without one the lifecycle is not applicable, as the release.
+func lifecycleApplies(provider string, demo matrixDemo) bool {
+	return provider != campaignGitLab || demo.release[provider]
+}
+
+// lifecycleState is a demo's lifecycle state on a provider: not applicable,
+// refused, the overlay's mark, a line that exists, or admitted without a line.
 func (data matrices) lifecycleState(provider string, demo matrixDemo) matrixMark {
+	if !lifecycleApplies(provider, demo) {
+		return matrixMark{mark: markNotApply}
+	}
+
 	if demo.admission[provider] != nil {
 		return matrixMark{mark: markRefused}
 	}
@@ -651,11 +654,16 @@ func (data matrices) releaseCell(provider string, demo matrixDemo) string {
 	return markNoLine
 }
 
-// developmentCell is a demo's snapshot state on a provider: the admission's
-// refusal (its reason is footnoted, and the overlay's note kept, as when a
-// fixture of the demo ran), the overlay's mark, a lifecycle line that would
-// run it, or admitted without one.
+// developmentCell is a demo's snapshot state on a provider: not applicable
+// where the lifecycle is not (lifecycleApplies), the admission's refusal (its
+// reason is footnoted, and the overlay's note kept, as when a fixture of the
+// demo ran), the overlay's mark, a lifecycle line that would run it, or
+// admitted without one.
 func (data matrices) developmentCell(provider string, demo matrixDemo) string {
+	if !lifecycleApplies(provider, demo) {
+		return markNotApply
+	}
+
 	mark, found := data.mark(provider, demo.name, matrixDevelopment)
 
 	if demo.admission[provider] != nil {
@@ -696,9 +704,10 @@ func matrixReason(err error) string {
 }
 
 // markRank orders states, the best first: the overlay's live marks, then a
-// line, then admitted without a line, then refused, then nothing.
+// line, then admitted without a line, then refused, then not applicable, then
+// nothing.
 func markRank(mark string) int {
-	return slices.Index([]string{"✅", "◐", "⏳", "❌", markLine, markNoLine, markRefused, ""}, mark)
+	return slices.Index([]string{"✅", "◐", "⏳", "❌", markLine, markNoLine, markRefused, markNotApply, ""}, mark)
 }
 
 // bestOf is the best lifecycle state among the demos on the provider, with
@@ -720,8 +729,13 @@ func (data matrices) bestOf(provider string, demos []matrixDemo) string {
 }
 
 // axisState is a demo's lifecycle state on a provider for one axis value:
-// refused, the overlay's mark of a run that had the value, or the line.
+// not applicable, refused, the overlay's mark of a run that had the value, or
+// the line.
 func (data matrices) axisState(provider string, demo matrixDemo, setting, value string) matrixMark {
+	if !lifecycleApplies(provider, demo) {
+		return matrixMark{mark: markNotApply}
+	}
+
 	if demo.admission[provider] != nil {
 		return matrixMark{mark: markRefused}
 	}
@@ -889,7 +903,8 @@ func (data matrices) variantsSection() string {
 // projectKindsTable is matrix 1: every shipped demo as the project kind it
 // embodies, read from its declaration, against the flows the orchestrators
 // offer, a cell per forge. The snapshot column is the one the demo's route
-// takes; the other is not applicable. The refusals' reasons follow the table.
+// takes; the other is not applicable. The refusals' reasons follow the table,
+// the planner's and the admission's apart from the live harness's scope.
 func (data matrices) projectKindsTable() string {
 	var page strings.Builder
 
@@ -903,21 +918,48 @@ func (data matrices) projectKindsTable() string {
 			perForge(demo, func(provider string, demo matrixDemo) string { return data.lifecycleState(provider, demo).cell("") }))
 	}
 
-	page.WriteString("\nRefused snapshots and lifecycles, with the planner's or the admission's reason:\n\n")
+	var refused, scope []string
 
 	for _, demo := range data.demos {
 		if demo.snapshotRefusal != nil {
-			fmt.Fprintf(&page, "- %s, every forge: the planner refuses its snapshot: %s\n", demo.name, demo.snapshotRefusal)
+			refused = append(refused, fmt.Sprintf("- %s, every forge: the planner refuses its snapshot: %s\n", demo.name, demo.snapshotRefusal))
 		}
 
 		for _, provider := range matrixProviders {
-			if err := demo.admission[provider]; err != nil && demo.route != routeNoContainer {
-				fmt.Fprintf(&page, "- %s, %s: %s\n", demo.name, provider, matrixReason(err))
+			err := demo.admission[provider]
+			if err == nil || demo.route == routeNoContainer || !lifecycleApplies(provider, demo) {
+				continue
+			}
+
+			line := fmt.Sprintf("- %s, %s: %s\n", demo.name, provider, matrixReason(err))
+			if harnessScope(err) {
+				scope = append(scope, line)
+			} else {
+				refused = append(refused, line)
 			}
 		}
 	}
 
+	for _, group := range []struct {
+		heading string
+		lines   []string
+	}{
+		{"Refused snapshots and lifecycles, with the planner's or the admission's reason:", refused},
+		{"Outside the live harness's scope, the trial's acceptance and not a product rule:", scope},
+	} {
+		if len(group.lines) > 0 {
+			page.WriteString("\n" + group.heading + "\n\n" + strings.Join(group.lines, ""))
+		}
+	}
+
 	return page.String()
+}
+
+// harnessScope is whether a lifecycle refusal is the live harness's scope,
+// a demo the service development trial does not judge (serviceSnapshotScope
+// and a demo without a root Containerfile), rather than the planner's.
+func harnessScope(err error) bool {
+	return errors.Is(err, errServiceDeclaration) || errors.Is(err, errNoDevelopmentRoute)
 }
 
 // perForge writes a flow's Forgejo, GitLab and GitHub cells.

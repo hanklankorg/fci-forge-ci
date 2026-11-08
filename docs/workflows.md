@@ -415,8 +415,10 @@ and copies the package's files by their package paths: `COPY dist/ /app/`, and
 checkout files of the same path, `package.json` among them, as in a release;
 an image takes one npm package, since two would both carry `package.json`.
 
-Container build secrets, binary extraction and explicit snapshot OCI
-signing/provenance requests remain unsupported and fail explicitly. See the
+Container build secrets and explicit snapshot OCI signing/provenance requests
+remain unsupported and fail explicitly. A container's `extract.binary` is a
+release's output: a snapshot builds and publishes the container's runtime
+image and extracts no binaries. See the
 [container snapshot example](../examples/container-snapshot/).
 
 ```mermaid

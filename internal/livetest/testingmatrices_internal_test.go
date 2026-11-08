@@ -35,8 +35,10 @@ func TestReadMatrixEvidenceRefusesMalformedLines(t *testing.T) {
 // The matrices are read from the tree, so the shipped tree decides them: the
 // service demos have lifecycle lines on both lab forges, the npm service is
 // admitted on GitHub without a fixture for its development build, a GitHub
-// line is the fixture workflow a demo ships, and a refusal carries the
-// planner's or the admission's reason.
+// line is the fixture workflow a demo ships, a refusal carries the planner's
+// or the admission's reason, the harness's scope listed apart, and a GitLab
+// lifecycle without the demo's release build is not applicable. The Go
+// service extracts its binaries, yet its snapshot is container-first.
 func TestRenderTestingMatricesReadsTheShippedTree(t *testing.T) {
 	t.Parallel()
 
@@ -53,7 +55,10 @@ func TestRenderTestingMatricesReadsTheShippedTree(t *testing.T) {
 		"| hello-ios (xcode-ios · no container · no image) | ⬚ / ⬚ / 📝 |",
 		"- hello-monorepo, github: the demo has no root Containerfile",
 		"| hello-go-cli (go · no container · no image) |",
-		"- hello-go-service, gitlab: .forge-ci/artifacts.yml is not a service snapshot's declaration",
+		"| hello-go-service (go · container-first · one image) |",
+		"| — | 📝 lifecycle / — / admitted |",
+		"| 📝 / — / ⬚ (admitted, no line) |",
+		"Outside the live harness's scope, the trial's acceptance and not a product rule:\n\n- hello-cargo-workspace, forgejo:",
 		"|  | container-first | 📝 hello-cargo-container | 📝 hello-cargo-container | ⬚ hello-cargo-container (admitted, no line) |",
 		"| architecture | amd64 |",
 	} {

@@ -626,6 +626,7 @@ to do where it degrades.
 - **No release-isolation gate** over the consumer's workflow.
 - **npm publishing targets GitHub Packages**; `NPM_TOKEN` is reserved and does
   not enable npmjs.org.
-- **Snapshot image features are limited.** Build secrets and binary extraction
-  are unsupported; explicit snapshot OCI signing/provenance is rejected.
+- **Snapshot image features are limited.** Build secrets are unsupported and
+  explicit snapshot OCI signing/provenance is rejected; a snapshot builds the
+  runtime image and runs no `extract.binary`.
 - **Android runtime image is linux/amd64 only.**
