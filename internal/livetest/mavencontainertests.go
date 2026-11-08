@@ -43,7 +43,7 @@ func WithMavenContainerTests(tb TB, source Consumer, image, runnerLabel string) 
 	ctx, cancel := context.WithTimeout(Context(tb), timeoutLayerPush)
 	defer cancel()
 
-	const file = ".forgejo/workflows/release.yml"
+	const file = forgejoReleaseWorkflow
 
 	body, err := githubWorkflow(ctx, source, file)
 	if err != nil {

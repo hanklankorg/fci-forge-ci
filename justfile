@@ -612,7 +612,7 @@ check-engine-binary:
 
 # ▪ Generate the CLI reference and schemas
 [group('documentation')]
-generate: gen-cli-reference gen-artifacts-schema gen-release-images-schema gen-runby
+generate: gen-cli-reference gen-artifacts-schema gen-release-images-schema gen-runby gen-testing-matrices
 
 # Renders the urfave/cli command tree.
 [doc('Generate docs/cli-reference.md')]
@@ -627,6 +627,15 @@ gen-cli-reference:
 gen-runby:
     @go run ./cmd/gen-runby > internal/cli/runby.json.tmp && mv internal/cli/runby.json.tmp internal/cli/runby.json
     @printf "Regenerated internal/cli/runby.json\n"
+
+# Regenerates matrices 1 and 2 of docs/testing-matrices.md from the demos'
+# declarations, the cases files and the live-evidence overlay
+# (test/live/campaigns/evidence.txt); matrix 1b and the prose stay as written.
+[doc('Generate the testing matrices sections')]
+[group('documentation')]
+gen-testing-matrices:
+    @go run ./internal/livetest/preflight testing-matrices . > docs/testing-matrices.md.tmp && mv docs/testing-matrices.md.tmp docs/testing-matrices.md
+    @printf "Regenerated docs/testing-matrices.md\n"
 
 # Writes .forge-ci/artifacts.schema.json from the Go schema declarations.
 [doc('Generate the artifacts.yml JSON schema')]

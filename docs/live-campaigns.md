@@ -277,7 +277,9 @@ route is the Maven service development workflow, which checks the root Maven
 application's JAR after the snapshot, so the demo is also a root Maven
 application and the snapshot's producers, when it has any, are that
 application alone. The campaign refuses a case before anything is created
-(`campaignAdmitLifecycle`), with the planner's reason:
+(`campaignAdmitLifecycle`), with the planner's reason. The generated matrix in
+[Testing matrices](testing-matrices.md) lists every demo's state; the reasons
+behind it:
 
 | Demo | Forgejo | GitLab | Why |
 |---|---|---|---|

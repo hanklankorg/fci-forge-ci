@@ -7,7 +7,9 @@ used.
 > Current testing policy for the Go codebase.
 
 For the dated, evidence-scoped acceptance snapshot, see
-[Testing parity and proof](testing-parity.md). Test layers below describe what
+[Testing parity and proof](testing-parity.md), and for what each project kind
+and variant is proven on per forge, the generated
+[Testing matrices](testing-matrices.md). Test layers below describe what
 can run; they do not establish that a feature has passed on a real forge.
 
 ## Layers
@@ -2132,7 +2134,7 @@ saying what it guards does not compile past CI.
 | `test/archguard` | where code may live: which layer may read the environment, mint a credential, or branch on the platform (import direction, ADR 0004, is the depguard `layer-*` rules in `.golangci.yml`) | Go source under `internal/` |
 | `test/forgejoguard` | the Forgejo layer's signing boundary and consumer contract: secrets per job, signer bootstrap order, coordinate preflight, routing, strict YAML, no organization named, workflows that start only when called, actions that call no sibling by path and take no credential | `.forgejo/`, `containers/signer/`, the Forgejo examples under `examples/` |
 | `test/lexiconguard` | a spelling, regex, or pattern literal is declared once | every file in the repo |
-| `test/syncguard` | a generated file still matches the Go it is generated from | `docs/`, `.forge-ci/` |
+| `test/syncguard` | a generated file still matches the Go it is generated from, or the tree it describes | `docs/`, `.forge-ci/`, `test/live/` |
 | `test/workflowguard` | the workflow contract adopters code against | `.github/workflows/`, `examples/` |
 
 The rule: a guard that reads files outside its own package goes in one of

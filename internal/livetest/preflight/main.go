@@ -41,9 +41,9 @@ func main() {
 		return
 	}
 
-	if len(os.Args) >= 3 && strings.HasPrefix(os.Args[1], "campaign-") {
-		if err := campaign(os.Args[1], os.Args[2:]); err != nil {
-			fmt.Fprintf(os.Stderr, "campaign: %v\n", err)
+	if len(os.Args) >= 3 {
+		if err := withArguments(os.Args[1], os.Args[2:]); err != nil {
+			fmt.Fprintf(os.Stderr, "%s: %v\n", os.Args[1], err)
 			os.Exit(2)
 		}
 
@@ -197,6 +197,45 @@ func campaign(mode string, args []string) error {
 	}
 }
 
+// withArguments runs the modes that take arguments: a testing document is
+// printed, every other mode is a campaign mode.
+func withArguments(mode string, args []string) error {
+	if strings.HasPrefix(mode, "testing-") && len(args) == 1 {
+		document, err := testingDocument(mode, args[0])
+		if err != nil {
+			return err
+		}
+
+		_, err = fmt.Print(document)
+
+		return err
+	}
+
+	return campaign(mode, args)
+}
+
+// testingDocument renders a testing document. `testing-matrices <repository>`
+// prints docs/testing-matrices.md with its generated sections regenerated,
+// for `just gen-testing-matrices`; `testing-evidence <live-runs>` drafts the
+// live-evidence overlay from the verdicts recorded there.
+func testingDocument(mode, path string) (string, error) {
+	switch mode {
+	case "testing-matrices":
+		page, err := os.ReadFile(filepath.Join(path, livetest.TestingMatricesPage)) //nolint:gosec // G304: the repository's own page, named by the recipe.
+		if err != nil {
+			return "", err
+		}
+
+		return livetest.RenderTestingMatrices(path, string(page))
+	case "testing-evidence":
+		return livetest.SeedTestingEvidence(path)
+	default:
+		usage()
+
+		return "", nil
+	}
+}
+
 // preflightFact returns the single fact one preflight mode prints.
 func preflightFact(mode string) (string, error) {
 	switch mode {
@@ -234,6 +273,7 @@ func usage() {
 	fmt.Fprintln(os.Stderr, "       preflight gitlab-consumer-scenario | gitlab-lifecycle-settings (validates FORGE_CI_LIVE_CONSUMER_SETTINGS)")
 	fmt.Fprintln(os.Stderr, "       preflight campaign-plan <dir> <forgejo|gitlab> <cases-file>")
 	fmt.Fprintln(os.Stderr, "       preflight campaign-runtime-targets <repository> <forgejo|gitlab>=<cases-file>... [flavor=<flavor>...]")
+	fmt.Fprintln(os.Stderr, "       preflight testing-matrices <repository> | testing-evidence <live-runs>")
 	fmt.Fprintln(os.Stderr, "usage: preflight [signing-inputs | runner-arch | consumer-trial-layer | host-tools] (signing-inputs checks only FORGE_CI_LIVE_SIGNING_KEY_DIR; host-tools checks only this host; other modes read the forgeci lab contract)")
 	os.Exit(2)
 }
