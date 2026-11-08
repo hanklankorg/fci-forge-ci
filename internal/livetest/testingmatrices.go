@@ -40,13 +40,17 @@ const (
 )
 
 const (
-	matrixCampaignsDir = "test/live/campaigns"
-	matrixGitHub       = "github"
-	matrixDevelopment  = "development"
-	matrixScenario     = "scenario"
-	matrixGPGConfig    = ".forge-ci/artifacts-gpg.yml"
-	matrixEvidenceCols = 4
-	routeNoContainer   = "no container"
+	matrixCampaignsDir  = "test/live/campaigns"
+	matrixGitHub        = "github"
+	matrixDevelopment   = "development"
+	matrixScenario      = "scenario"
+	matrixGPGConfig     = ".forge-ci/artifacts-gpg.yml"
+	matrixEvidenceCols  = 4
+	routeNoContainer    = "no container"
+	routeExtraction     = "extraction image"
+	routeRefused        = "refused snapshot"
+	routeArtifactFirst  = "artifact-first"
+	routeContainerFirst = "container-first"
 )
 
 // The marks the generator writes; the overlay's marks are the legend's.
@@ -78,6 +82,8 @@ type matrixDemo struct {
 	hosted                                          map[string]bool
 	release                                         map[string]bool
 	admission                                       map[string]error
+	// snapshotRefusal is the planner's refusal of the declaration's snapshot.
+	snapshotRefusal error
 }
 
 // matrixLane is one cases file.
@@ -148,7 +154,32 @@ func readMatrices(root string) (matrices, error) {
 		return matrices{}, err
 	}
 
-	return matrices{demos: demos, lanes: lanes, evidence: evidence}, nil
+	data := matrices{demos: demos, lanes: lanes, evidence: evidence}
+
+	return data, data.knownSubjects()
+}
+
+// knownSubjects refuses an overlay mark of a demo that is not shipped or of a
+// scenario no lane runs, which no cell would show.
+func (data matrices) knownSubjects() error {
+	known := map[string]bool{}
+	for _, demo := range data.demos {
+		known[demo.name] = true
+	}
+
+	for _, lane := range data.lanes {
+		for _, scenario := range lane.scenarios {
+			known[strings.TrimSuffix(strings.TrimPrefix(scenario, "^"), "$")] = true
+		}
+	}
+
+	for _, key := range slices.Sorted(maps.Keys(data.evidence)) {
+		if subject := strings.Split(key, "/")[1]; !known[subject] {
+			return fmt.Errorf("%w: %s: %s is no shipped demo and no lane's scenario", errTestingMatrices, TestingMatricesEvidence, subject)
+		}
+	}
+
+	return nil
 }
 
 func readMatrixDemos(root string) ([]matrixDemo, error) {
@@ -217,9 +248,7 @@ func readMatrixDemo(name, consumer string) (matrixDemo, error) {
 		return demo, err
 	}
 
-	demo.describeDeclaration(cfg, artifacts, gpg)
-
-	return demo, nil
+	return demo, demo.describeDeclaration(cfg, artifacts, gpg)
 }
 
 func readMatrixDeclaration(path string) (*config.Config, error) {
@@ -278,36 +307,21 @@ func matrixLifecycleAdmission(provider, consumer string) error {
 
 // describeDeclaration reads the axis values the declarations carry: the
 // images' from the snapshot source, the ecosystem from the artifacts.
-func (demo *matrixDemo) describeDeclaration(cfg, artifacts *config.Config, gpg bool) {
+func (demo *matrixDemo) describeDeclaration(cfg, artifacts *config.Config, gpg bool) error {
+	if err := demo.readRoute(cfg); err != nil {
+		return err
+	}
+
 	typed := pipeline.NewConfigPlan(cfg)
 	demo.ecosystem = matrixEcosystem(pipeline.NewConfigPlan(artifacts).Artifacts.All)
-	demo.route = matrixRoute(cfg, typed)
 	demo.images = matrixImages(typed)
 	demo.signing = cmp.Or(string(cfg.Sign.Method), "default")
 
 	if gpg {
 		demo.signing += ", GPG declaration"
 	}
-}
 
-// matrixArtifacts are the artifacts the images are built from, or every
-// artifact where there is no image.
-func matrixArtifacts(typed pipeline.ConfigPlan) []pipeline.PlannedArtifact {
-	if len(typed.Containers.All) == 0 {
-		return typed.Artifacts.All
-	}
-
-	artifacts := []pipeline.PlannedArtifact{}
-
-	for _, ctr := range typed.Containers.All {
-		for _, artifact := range typed.Artifacts.All {
-			if slices.Contains(ctr.From, artifact.Name) {
-				artifacts = append(artifacts, artifact)
-			}
-		}
-	}
-
-	return artifacts
+	return nil
 }
 
 func matrixEcosystem(artifacts []pipeline.PlannedArtifact) string {
@@ -327,24 +341,41 @@ func matrixEcosystem(artifacts []pipeline.PlannedArtifact) string {
 	return cmp.Or(strings.Join(slices.Compact(families), ", "), "container only")
 }
 
-func matrixRoute(cfg *config.Config, typed pipeline.ConfigPlan) string {
+// readRoute reads the snapshot route the planner takes for the declaration's
+// snapshot view: artifact-first when it plans producers for the images,
+// container-first when the images build alone. An extracting image is named
+// as such, and a snapshot the planner refuses otherwise takes no route and
+// keeps the planner's refusal.
+func (demo *matrixDemo) readRoute(cfg *config.Config) error {
 	if len(cfg.Containers) == 0 {
-		return routeNoContainer
+		demo.route = routeNoContainer
+
+		return nil
 	}
 
-	for _, ctr := range cfg.Containers {
-		if ctr.Extract != nil {
-			return "extraction image"
-		}
+	if slices.ContainsFunc(cfg.Containers, func(ctr config.Container) bool { return ctr.Extract != nil }) {
+		demo.route = routeExtraction
+
+		return nil
 	}
 
-	for _, artifact := range matrixArtifacts(typed) {
-		if artifact.GoBuildMode != config.GoBuildModeContainerFirst && artifact.CargoBuildMode != config.CargoBuildModeContainerFirst {
-			return "artifact-first"
-		}
+	in, err := serviceSnapshotStandInInput()
+	if err != nil {
+		return err
 	}
 
-	return "container-first"
+	plan, refusal := snapshotimage.New(pipeline.NewConfigPlan(snapshotView(cfg)), in)
+
+	switch {
+	case refusal != nil:
+		demo.route, demo.snapshotRefusal = routeRefused, refusal
+	case len(plan.Artifacts) > 0:
+		demo.route = routeArtifactFirst
+	default:
+		demo.route = routeContainerFirst
+	}
+
+	return nil
 }
 
 func matrixImages(typed pipeline.ConfigPlan) string {
@@ -742,6 +773,10 @@ func (data matrices) projectKindsTable() string {
 	page.WriteString("\nRefused snapshots and lifecycles, with the planner's or the admission's reason:\n\n")
 
 	for _, demo := range data.demos {
+		if demo.snapshotRefusal != nil {
+			fmt.Fprintf(&page, "- %s, every forge: the planner refuses its snapshot: %s\n", demo.name, demo.snapshotRefusal)
+		}
+
 		for _, provider := range matrixProviders {
 			if err := demo.admission[provider]; err != nil && demo.route != routeNoContainer {
 				fmt.Fprintf(&page, "- %s, %s: %s\n", demo.name, provider, matrixReason(err))
@@ -771,9 +806,13 @@ func (data matrices) snapshotCells(demo matrixDemo) (string, string) {
 	}
 
 	state := perForge(demo, data.developmentCell)
-	if demo.route == "container-first" {
-		return markNotApply, state
-	}
 
-	return state, markNotApply
+	switch demo.route {
+	case routeArtifactFirst:
+		return state, markNotApply
+	case routeContainerFirst:
+		return markNotApply, state
+	default:
+		return state, state
+	}
 }

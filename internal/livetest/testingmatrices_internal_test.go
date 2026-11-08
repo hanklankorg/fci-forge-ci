@@ -67,40 +67,72 @@ func TestRenderTestingMatricesReadsTheShippedTree(t *testing.T) {
 	}
 }
 
-// The seed keeps each flow's latest run whatever the record order, reads a
-// hosted controller's trial through its line continuations, and leaves an
-// unfinished trial and a run of no demo out.
+// The seed keeps each flow's latest run whatever the record order. It reads a
+// hosted controller's trial, whose exit trap writes the receipt above the
+// trial line, and each case of a batch, whose receipt follows its own line,
+// through line continuations and a consumer named by a variable. An
+// unfinished trial and a run of no demo are left out.
 func TestSeedTestingEvidenceKeepsTheLatestRunOfEachFlow(t *testing.T) {
 	t.Parallel()
 
 	live, hosted := t.TempDir(), t.TempDir()
-	verdict := func(run, started, result string) {
+	verdict := func(run, started, result, consumer string) {
 		writeFile(t, filepath.Join(live, run, "verdict.json"), `{"verdict":"`+result+`","run":{"provider":"gitlab","started_at":"`+started+
-			`","scenario":"^TestGitLabRelease_ConsumerTrial$","inputs":{"forge_ci_live_consumer":"/c/demos/hello-maven/consumer"}}}`)
+			`","scenario":"^TestGitLabRelease_ConsumerTrial$","inputs":{"forge_ci_live_consumer":"`+consumer+`"}}}`)
 	}
-	verdict("b-older", "2026-11-01T10:00:00Z", "failed")
-	verdict("a-newer", "2026-11-02T10:00:00Z", "passed")
-	verdict("c-no-demo", "2026-11-03T10:00:00Z", "passed")
-	writeFile(t, filepath.Join(live, "c-no-demo", "verdict.json"), `{"verdict":"passed","run":{"provider":"gitlab","started_at":"2026-11-03T10:00:00Z","inputs":{"forge_ci_live_consumer":"/c/elsewhere"}}}`)
+	verdict("b-older", "2026-11-01T10:00:00Z", "failed", "/c/demos/hello-maven/consumer")
+	verdict("a-newer", "2026-11-02T10:00:00+01:00", "passed", "/c/demos/hello-maven/consumer")
+	verdict("c-no-demo", "2026-11-03T10:00:00Z", "passed", "/c/elsewhere")
 
-	trial := func(name, event, exit string) {
-		writeFile(t, filepath.Join(hosted, name, "controller.sh"), "just test-live-github-consumer 1 \\\n  /v/rustfix/hello-cargo-workspace \\\n  "+event+" RELEASE_PLATFORMS=linux/amd64 &\n")
+	receipt := func(trial, name, body string) { writeFile(t, filepath.Join(hosted, trial, name), body+"\n") }
 
-		if exit != "" {
-			writeFile(t, filepath.Join(hosted, name, "controller.exit"), exit+"\n")
-			writeFile(t, filepath.Join(hosted, name, "finished-at"), "2026-11-04T07:00:00+00:00\n")
-		}
-	}
-	trial("pr", TrialPullRequest, "0")
-	trial("dev", TrialDevRelease, "1")
-	trial("release", TrialRelease, "")
+	receipt("controller", "controller.sh", `finish() {
+    printf '%s\n' "$?" > "$evidence/controller.exit"
+    date --iso-8601=seconds > "$evidence/finished-at"
+}
+just test-live-github-consumer 1 \
+  /v/rustfix/hello-cargo-workspace \
+  release version=0.2.0 &`)
+	receipt("controller", "controller.exit", "0")
+	receipt("controller", "finished-at", "2026-11-04T07:00:00+00:00")
+
+	receipt("batch", "batch.sh", `consumer=/v/demos/hello-go-cli
+just test-live-github-consumer 1 "$consumer" \
+  pull-request > "$evidence/cli.log"
+printf '%s\n' "$?" > "$evidence/cli.exit"
+date --iso-8601=seconds > "$evidence/cli.finished-at"
+just test-live-github-consumer 1 /v/demos/hello-go-service \
+  dev-release > "$evidence/service.log"
+printf '%s\n' "$?" > "$evidence/service.exit"
+date --iso-8601=seconds > "$evidence/service.finished-at"
+just test-live-github-consumer 1 /v/demos/hello-maven pull-request
+printf '%s\n' "$?" > "$evidence/unfinished.exit"
+date --iso-8601=seconds > "$evidence/unfinished.finished-at"`)
+	receipt("batch", "cli.exit", "0")
+	receipt("batch", "cli.finished-at", "2026-11-04T08:00:00+00:00")
+	receipt("batch", "service.exit", "1")
+	receipt("batch", "service.finished-at", "2026-11-04T09:00:00+00:00")
 
 	seed, err := SeedTestingEvidence(live, hosted)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if want := "github hello-cargo-workspace development ❌ 2026-11-04\ngithub hello-cargo-workspace pull-request ✅ 2026-11-04\ngitlab hello-maven release ✅ 2026-11-02\n"; seed != want {
+	if want := `github hello-cargo-workspace release ✅ 2026-11-04
+github hello-go-cli pull-request ✅ 2026-11-04
+github hello-go-service development ❌ 2026-11-04
+gitlab hello-maven release ✅ 2026-11-02
+`; seed != want {
 		t.Fatalf("seed:\n%s\nwant:\n%s", seed, want)
+	}
+}
+
+// An overlay mark no cell would show is refused, not dropped.
+func TestReadMatricesRefusesAnUnknownSubject(t *testing.T) {
+	t.Parallel()
+
+	data := matrices{demos: []matrixDemo{{name: "hello-maven"}}, evidence: matrixEvidence{"github/hello-mavn/release": {mark: "✅"}}}
+	if err := data.knownSubjects(); err == nil || !strings.Contains(err.Error(), "hello-mavn is no shipped demo") {
+		t.Fatalf("unknown subject: %v, want a refusal naming it", err)
 	}
 }

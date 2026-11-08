@@ -42,7 +42,8 @@ hand-kept overlay keyed by forge, demo and flow, since whether a run proved
 something is a judgement; `go run ./internal/livetest/preflight
 testing-evidence ~/.local/state/forge-ci/live-runs <hosted-runs>` drafts it
 for review from the recorded verdicts and from a root of hosted GitHub trial
-records, one controller script, exit receipt and finish time each. A refusal carries the planner's or the
+records, each trial line of a controller or batch script read with its own
+exit receipt and finish time. A refusal carries the planner's or the
 admission's reason. Matrix 1b is hand-kept. `test/syncguard` fails when the
 committed tables are stale. No campaign lane runs on hosted GitHub. There a
 line is the fixture workflow a demo ships under `test/live/github/workflows`
@@ -64,17 +65,17 @@ the planned artifacts; "container-first" builds from the declared container.
 | Demo (project kind) | PR / MR gate | Artifact-first snapshot | Container-first snapshot | Release | Full lifecycle |
 |---|---|---|---|---|---|
 | hello-android (gradle-android · no container · no image) | ⬚ / 📝 / 📝 | — | — | — / — / — | ⛔ / ⛔ / ⛔ |
-| hello-cargo-container (rust · container-first · one image) | ✅ (2026-11-02) / ✅ (2026-11-02) / 📝 | — | ⛔ (fixture consumer proven, run 520; the demo is refused) / 📝 lifecycle / admitted | ✅ (2026-11-02) / ✅ (2026-11-02) / 📝 | ⛔ / 📝 / ⬚ (admitted, no line) |
+| hello-cargo-container (rust · container-first · one image) | ✅ (2026-11-02) / ✅ (2026-11-02) / ✅ (2026-11-04) | — | ⛔ (fixture consumer proven, run 520; the demo is refused) / 📝 lifecycle / admitted | ✅ (2026-11-02) / ✅ (2026-11-02) / 📝 | ⛔ / 📝 / ⬚ (admitted, no line) |
 | hello-cargo-workspace (rust · container-first · 2 images) | ✅ (2026-11-02) / ✅ (2026-11-02) / ✅ (2026-11-04) | — | ⛔ / ⛔ / ⛔ | ✅ (2026-11-02) / ✅ (2026-11-02) / ✅ (2026-11-04) | ⛔ / ⛔ / ⛔ |
-| hello-go-cli (go · no container · no image) | ✅ (2026-11-02) / ✅ (2026-11-02) / 📝 | — | — | ✅ (2026-11-02) / — / ✅ (GPG, hosted (matrix 1b, C)) | ⛔ / ⛔ / ⛔ |
-| hello-go-service (go · extraction image · one image) | ✅ (2026-11-02) / ✅ (2026-11-02) / 📝 | ⛔ / ⛔ / ⛔ | — | ✅ (2026-11-02) / — / 📝 | ⛔ / ⛔ / ⛔ |
+| hello-go-cli (go · no container · no image) | ✅ (2026-11-02) / ✅ (2026-11-02) / ✅ (2026-11-04) | — | — | ✅ (2026-11-02) / — / ✅ (GPG, hosted (matrix 1b, C)) | ⛔ / ⛔ / ⛔ |
+| hello-go-service (go · extraction image · one image) | ✅ (2026-11-02) / ✅ (2026-11-02) / ✅ (2026-11-04) | ⛔ / ⛔ / ⛔ | ⛔ / ⛔ / ⛔ | ✅ (2026-11-02) / — / 📝 | ⛔ / ⛔ / ⛔ |
 | hello-gradle (java · no container · no image) | ⬚ / ✅ (2026-11-02) / 📝 | — | — | — / — / ✅ (2026-11-04) | ⛔ / ⛔ / ⛔ |
 | hello-ios (xcode-ios · no container · no image) | ⬚ / ⬚ / 📝 | — | — | — / — / — | ⛔ / ⛔ / ⛔ |
 | hello-maven (java · no container · no image) | ✅ (2026-11-02) / ✅ (2026-11-02) / ✅ (2026-11-04) | — | — | ✅ (2026-11-02) / ✅ (2026-11-02) / ✅ (2026-11-04) | ⛔ / ⛔ / ⛔ |
 | hello-maven-service (java · artifact-first · one image) | ✅ (2026-11-02) / ✅ (2026-11-02) / ✅ (2026-11-04) | ✅ (A run 517, the retired published snapshot) / ✅ (lifecycle phase 3, 22ddcfd9) / admitted | — | ✅ (2026-11-02) / ✅ (2026-11-02) / 📝 | ✅ (3c178f94) / ◐ (phases 1–3 22ddcfd9, run 4 ec2380ef queued) / ⬚ (admitted, no line) |
-| hello-monorepo (java, node · artifact-first · nested artifacts (monorepo)) | ⬚ / ✅ (2026-11-02) / ⬚ | ⛔ / ⛔ / ⛔ | — | — / — / — | ⛔ / ⛔ / ⛔ |
-| hello-npm-package (node · no container · no image) | ✅ (2026-11-02) / ✅ (2026-11-02) / 📝 | — | — | ✅ (2026-11-02) / ✅ (2026-11-02) / ✅ (2026-11-04) | ⛔ / ⛔ / ⛔ |
-| hello-npm-service (node · artifact-first · one image) | ✅ (2026-11-02) / ✅ (2026-11-02) / ✅ (2026-11-04) | ⛔ / admitted / admitted | — | ✅ (2026-11-02) / ✅ (2026-11-02) / 📝 | ⛔ / ⬚ (after snapshot-npm-layout merge) / ⬚ (admitted, no line) |
+| hello-monorepo (java, node · refused snapshot · nested artifacts (monorepo)) | ⬚ / ✅ (2026-11-02) / ⬚ | ⛔ / ⛔ / ⛔ | ⛔ / ⛔ / ⛔ | — / — / — | ⛔ / ⛔ / ⛔ |
+| hello-npm-package (node · no container · no image) | ✅ (2026-11-02) / ✅ (2026-11-02) / ✅ (2026-11-04) | — | — | ✅ (2026-11-02) / ✅ (2026-11-02) / ✅ (2026-11-04) | ⛔ / ⛔ / ⛔ |
+| hello-npm-service (node · artifact-first · one image) | ✅ (2026-11-02) / ✅ (2026-11-02) / ✅ (2026-11-04) | ⛔ / admitted / admitted | — | ✅ (2026-11-02) / ✅ (2026-11-02) / 📝 | ⛔ / ⬚ (admitted, no line) / ⬚ (admitted, no line) |
 
 Refused snapshots and lifecycles, with the planner's or the admission's reason:
 
@@ -85,6 +86,7 @@ Refused snapshots and lifecycles, with the planner's or the admission's reason:
 - hello-go-service, forgejo: .forge-ci/artifacts.yml is not a service snapshot's declaration, so the demo has no development route: container my-service: snapshot build secrets, extraction and OCI provenance are unsupported
 - hello-go-service, gitlab: .forge-ci/artifacts.yml is not a service snapshot's declaration, so the demo has no development route: container my-service: snapshot build secrets, extraction and OCI provenance are unsupported
 - hello-go-service, github: .forge-ci/artifacts.yml is not a service snapshot's declaration, so the demo has no development route: container my-service: snapshot build secrets, extraction and OCI provenance are unsupported
+- hello-monorepo, every forge: the planner refuses its snapshot: conflicting snapshot image destination
 - hello-monorepo, forgejo: the demo has no root Containerfile, so no service snapshot and no development route
 - hello-monorepo, gitlab: the demo has no root Containerfile, so no service snapshot and no development route
 - hello-monorepo, github: the demo has no root Containerfile, so no service snapshot and no development route
@@ -117,13 +119,14 @@ marks are the owner's judgements of the evidence roots in `testing-parity.md`.
 | ecosystem | go | ⛔ hello-go-cli | ⛔ hello-go-cli | ⛔ hello-go-cli |
 |  | gradle-android | ⛔ hello-android | ⛔ hello-android | ⛔ hello-android |
 |  | java | ✅ hello-maven-service (3c178f94) | ◐ hello-maven-service (phases 1–3 22ddcfd9, run 4 ec2380ef queued) | ⬚ hello-maven-service (admitted, no line) |
-|  | node | ⛔ hello-monorepo | ⬚ hello-npm-service (after snapshot-npm-layout merge) | ⬚ hello-npm-service (admitted, no line) |
+|  | node | ⛔ hello-monorepo | ⬚ hello-npm-service (admitted, no line) | ⬚ hello-npm-service (admitted, no line) |
 |  | rust | ⛔ hello-cargo-container | 📝 hello-cargo-container | ⬚ hello-cargo-container (admitted, no line) |
 |  | xcode-ios | ⛔ hello-ios | ⛔ hello-ios | ⛔ hello-ios |
 | route | artifact-first | ✅ hello-maven-service (3c178f94) | ◐ hello-maven-service (phases 1–3 22ddcfd9, run 4 ec2380ef queued) | ⬚ hello-maven-service (admitted, no line) |
 |  | container-first | ⛔ hello-cargo-container | 📝 hello-cargo-container | ⬚ hello-cargo-container (admitted, no line) |
 |  | extraction image | ⛔ hello-go-service | ⛔ hello-go-service | ⛔ hello-go-service |
 |  | no container | ⛔ hello-android | ⛔ hello-android | ⛔ hello-android |
+|  | refused snapshot | ⛔ hello-monorepo | ⛔ hello-monorepo | ⛔ hello-monorepo |
 | images | 2 images | ⛔ hello-cargo-workspace | ⛔ hello-cargo-workspace | ⛔ hello-cargo-workspace |
 |  | nested artifacts (monorepo) | ⛔ hello-monorepo | ⛔ hello-monorepo | ⛔ hello-monorepo |
 |  | no image | ⛔ hello-android | ⛔ hello-android | ⛔ hello-android |

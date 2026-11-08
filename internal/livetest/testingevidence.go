@@ -14,6 +14,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"time"
 )
 
 // SeedTestingEvidence drafts TestingMatricesEvidence lines from the runs
@@ -50,15 +51,28 @@ func SeedTestingEvidence(liveRuns, hostedRuns string) (string, error) {
 
 // seededRun is one recorded run: when it started or finished, and its
 // verdict.
-type seededRun struct{ at, verdict string }
+type seededRun struct {
+	at      time.Time
+	verdict string
+}
 
 func (run seededRun) date() string {
-	return run.at[:min(len(run.at), len("2006-01-02"))]
+	return run.at.Format(time.DateOnly)
+}
+
+// newSeededRun reads a run's recorded RFC 3339 time.
+func newSeededRun(at, verdict, record string) (seededRun, error) {
+	parsed, err := time.Parse(time.RFC3339, strings.TrimSpace(at))
+	if err != nil {
+		return seededRun{}, fmt.Errorf("%s: %w", record, err)
+	}
+
+	return seededRun{at: parsed, verdict: verdict}, nil
 }
 
 // keepLatest records run under key unless a later run of it is recorded.
 func keepLatest(latest map[string]seededRun, key string, run seededRun) {
-	if key != "" && latest[key].at <= run.at {
+	if key != "" && !latest[key].at.After(run.at) {
 		latest[key] = run
 	}
 }
@@ -80,68 +94,128 @@ func seedLiveRuns(liveRuns string, latest map[string]seededRun) error {
 			return fmt.Errorf("%s: %w", file, err)
 		}
 
-		keepLatest(latest, evidenceKey(verdict.Run), seededRun{at: verdict.Run.StartedAt, verdict: verdict.Verdict})
+		key := evidenceKey(verdict.Run)
+		if key == "" {
+			continue
+		}
+
+		run, err := newSeededRun(verdict.Run.StartedAt, verdict.Verdict, file)
+		if err != nil {
+			return err
+		}
+
+		keepLatest(latest, key, run)
 	}
 
 	return nil
 }
 
-// hostedTrial is the hosted controller's consumer trial: the recipe, the
-// GitHub repository ID, the consumer checkout and the event.
+// hostedTrial is a hosted consumer trial in a controller or batch script:
+// the recipe, the GitHub repository ID, the consumer checkout and the event.
 var hostedTrial = regexp.MustCompile(`test-live-github-consumer\s+\S+\s+(\S+)\s+(\S+)`)
 
-// seedHostedRuns reads the hosted trials under root. A trial without an exit
-// receipt has not finished and is left out; exit 0 is a pass, any other a
-// failure.
+// hostedReceipt is a file the script writes into its evidence directory: a
+// case's exit receipt or its finish time.
+var hostedReceipt = regexp.MustCompile(`"\$evidence/([A-Za-z0-9._-]*(?:\.exit|finished-at))"`)
+
+// seedHostedRuns reads the hosted trials under root, every trial line of
+// every <trial>/*.sh. A trial's exit receipt is the first one its script
+// writes after it, as a batch writes each case's, or else the last one
+// before it, as a controller's exit trap does; its finish time is the first
+// one written after that receipt. A trial whose receipt is missing has not
+// finished and is left out; exit 0 is a pass, any other a failure.
 func seedHostedRuns(root string, latest map[string]seededRun) error {
-	scripts, err := filepath.Glob(filepath.Join(root, "*", "controller.sh"))
+	scripts, err := filepath.Glob(filepath.Join(root, "*", "*.sh"))
 	if err != nil {
 		return err
 	}
 
 	for _, script := range scripts {
-		dir := filepath.Dir(script)
-
-		exit, err := os.ReadFile(filepath.Join(dir, "controller.exit")) //nolint:gosec // G304: the operator's own trial records, named by the recipe.
-		if errors.Is(err, fs.ErrNotExist) {
-			continue
-		}
-
+		body, err := os.ReadFile(script) //nolint:gosec // G304: the operator's own trial records, named by the recipe.
 		if err != nil {
 			return err
 		}
 
-		finished, err := os.ReadFile(filepath.Join(dir, "finished-at")) //nolint:gosec // G304: as above.
-		if err != nil {
-			return err
-		}
+		text := strings.ReplaceAll(string(body), "\\\n", " ")
+		for _, trial := range hostedTrial.FindAllStringSubmatchIndex(text, -1) {
+			run, finished, err := hostedTrialRun(filepath.Dir(script), text, trial[1])
+			if err != nil {
+				return err
+			}
 
-		body, err := os.ReadFile(script) //nolint:gosec // G304: as above.
-		if err != nil {
-			return err
+			if finished {
+				keepLatest(latest, hostedEvidenceKey(text, text[trial[2]:trial[3]], text[trial[4]:trial[5]]), run)
+			}
 		}
-
-		verdict := liveVerdictFailed
-		if strings.TrimSpace(string(exit)) == "0" {
-			verdict = verdictPassed
-		}
-
-		keepLatest(latest, hostedEvidenceKey(string(body)), seededRun{at: strings.TrimSpace(string(finished)), verdict: verdict})
 	}
 
 	return nil
 }
 
-// hostedEvidenceKey names the overlay row a hosted controller's trial is
-// evidence for: the demo is the consumer checkout's directory name, and a
-// dev-release is the development flow.
-func hostedEvidenceKey(script string) string {
-	match := hostedTrial.FindStringSubmatch(strings.ReplaceAll(script, "\\\n", " "))
-	if match == nil {
-		return ""
+// hostedTrialRun reads the receipts of the trial whose line ends at end.
+func hostedTrialRun(dir, script string, end int) (seededRun, bool, error) {
+	receipts := hostedReceipt.FindAllStringSubmatchIndex(script, -1)
+	exit, finish := -1, ""
+
+	for i, receipt := range receipts {
+		if strings.HasSuffix(script[receipt[2]:receipt[3]], ".exit") && (exit < 0 || receipts[exit][0] < end) {
+			exit = i
+		}
 	}
 
-	demo, flow := path.Base(filepath.ToSlash(match[1])), match[2]
+	if exit < 0 {
+		return seededRun{}, false, nil
+	}
+
+	for _, receipt := range receipts[exit+1:] {
+		if name := script[receipt[2]:receipt[3]]; strings.HasSuffix(name, "finished-at") {
+			finish = name
+
+			break
+		}
+	}
+
+	code, err := os.ReadFile(filepath.Join(dir, script[receipts[exit][2]:receipts[exit][3]])) //nolint:gosec // G304: a receipt the trial's own script names.
+	if errors.Is(err, fs.ErrNotExist) || finish == "" {
+		return seededRun{}, false, nil
+	}
+
+	if err != nil {
+		return seededRun{}, false, err
+	}
+
+	finished, err := os.ReadFile(filepath.Join(dir, finish)) //nolint:gosec // G304: as above.
+	if err != nil {
+		return seededRun{}, false, err
+	}
+
+	verdict := liveVerdictFailed
+	if strings.TrimSpace(string(code)) == "0" {
+		verdict = verdictPassed
+	}
+
+	run, err := newSeededRun(string(finished), verdict, filepath.Join(dir, finish))
+
+	return run, err == nil, err
+}
+
+// hostedEvidenceKey names the overlay row a hosted trial is evidence for: the
+// demo is the consumer checkout's directory name, read through the script's
+// own assignment where the line names a variable, and a dev-release is the
+// development flow.
+func hostedEvidenceKey(script, consumer, flow string) string {
+	consumer = strings.Trim(consumer, `"'`)
+	if name, isVariable := strings.CutPrefix(consumer, "$"); isVariable {
+		assignment := regexp.MustCompile(`(?m)^` + regexp.QuoteMeta(strings.Trim(name, "{}")) + `=(\S+)$`).FindStringSubmatch(script)
+		if assignment == nil {
+			return ""
+		}
+
+		consumer = strings.Trim(assignment[1], `"'`)
+	}
+
+	demo := path.Base(filepath.ToSlash(consumer))
+
 	if flow == TrialDevRelease {
 		flow = matrixDevelopment
 	}
