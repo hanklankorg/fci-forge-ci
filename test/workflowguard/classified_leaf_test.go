@@ -288,7 +288,7 @@ printf '%s\n' "$*" >>"$RUNNER_TEMP/calls"
 // is a legal first character; traversal and absolute paths stay refused.
 func TestClassifiedProducerPathGuard(t *testing.T) {
 	t.Parallel()
-	guard := strings.SplitN(classifiedLeafStep(t, "producer", "Run administrator-selected").Run, "\n", 2)[0]
+	guard, _, _ := strings.Cut(classifiedLeafStep(t, "producer", "Run administrator-selected").Run, "\n")
 	require.Contains(t, guard, `"$PRODUCER_PATH" =~`)
 
 	for path, admitted := range map[string]bool{
@@ -306,6 +306,7 @@ func TestClassifiedProducerPathGuard(t *testing.T) {
 	} {
 		cmd := exec.CommandContext(t.Context(), testBash(t), "-peu", "-o", "pipefail", "-c", guard)
 		cmd.Env = []string{"PATH=/usr/bin:/bin", "PRODUCER_PATH=" + path}
+
 		err := cmd.Run()
 		if admitted {
 			require.NoError(t, err, path)
