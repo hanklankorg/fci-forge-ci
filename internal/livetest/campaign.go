@@ -211,8 +211,75 @@ func PlanCampaignLane(root, dir, provider, casesPath, head string, run CampaignR
 		plan.Cases = append(plan.Cases, CampaignCase{Text: line.text, Args: args})
 	}
 
+	plan.Cases, err = selectCampaignCases(file.cases, plan.Cases, run.Select)
+	if err != nil {
+		return CampaignPlan{}, fmt.Errorf("%s: %w", casesPath, err)
+	}
+
 	return plan, nil
 }
+
+// selectCampaignCases keeps the planned cases a selector names, after every
+// case was planned, so a typo in a case the selector leaves out still costs
+// no run. A selector is <demo>[/<event>[/<KEY=value>]], matching a consumer
+// case of the demo, its event and one word of the case, or <TestName>,
+// matching a scenario case. A selector that matches no case is refused; no
+// selector keeps every case.
+func selectCampaignCases(lines []campaignLine, cases []CampaignCase, selectors []string) ([]CampaignCase, error) {
+	if len(selectors) == 0 {
+		return cases, nil
+	}
+
+	kept := make([]CampaignCase, 0, len(cases))
+	matched := make([]bool, len(selectors))
+
+	for index, line := range lines {
+		selected := false
+
+		for number, selector := range selectors {
+			if campaignCaseSelected(line.words, selector) {
+				selected, matched[number] = true, true
+			}
+		}
+
+		if selected {
+			kept = append(kept, cases[index])
+		}
+	}
+
+	for number, selector := range selectors {
+		if !matched[number] {
+			return nil, fmt.Errorf("the selector %q matches no case; want <demo>[/<event>[/<KEY=value>]] or <TestName>: %w", selector, errs.ErrValidation)
+		}
+	}
+
+	return kept, nil
+}
+
+// campaignCaseSelected reports whether the selector names the case. The word
+// is the rest of the selector after the second slash, since a value such as
+// RELEASE_PLATFORMS=linux/amd64 has slashes of its own.
+func campaignCaseSelected(words []string, selector string) bool {
+	parts := strings.SplitN(selector, "/", campaignSelectorParts)
+
+	if words[0] == settingScenario {
+		return len(parts) == 1 && len(words) > 1 && words[1] == parts[0]
+	}
+
+	switch {
+	case len(words) < 3 || words[1] != parts[0]:
+		return false
+	case len(parts) == 1:
+		return true
+	case words[2] != parts[1]:
+		return false
+	default:
+		return len(parts) == 2 || slices.Contains(words[3:], parts[2])
+	}
+}
+
+// campaignSelectorParts are a selector's demo, event and case word.
+const campaignSelectorParts = 3
 
 // caseConsumer opens a case line that runs a shipped demo through an event.
 const caseConsumer = "consumer"

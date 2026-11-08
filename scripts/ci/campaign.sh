@@ -7,7 +7,8 @@
 # that run against them. docs/live-campaigns.md, Run a campaign, shows the use.
 #
 #   campaign.sh prepare <forge-lab checkout> <dir> <forgejo|gitlab>=<cases file> ... [job-image=<flavor>:<local image> ...]
-#   campaign.sh lane <dir> <forgejo|gitlab> <cases file>
+#   campaign.sh lane <dir> <forgejo|gitlab> <cases file> [<selector> ...]
+#   campaign.sh lane <dir> github <demo>/<event> [setting ...]
 #
 # prepare builds and publishes the images of this checkout's HEAD with the
 # live recipes: the signer and kaniko job images, the Buildah job image
@@ -22,19 +23,27 @@
 # campaign.go, says what a case is and refuses what it is not), in order,
 # past failures. A case sees the campaign's images and what it names: the
 # plan clears the caller's image variables first. Each case appends a line to <dir>/<provider>.results; the
-# lane fails when a case did. Neither file is ever sourced.
+# lane fails when a case did. Neither file is ever sourced. Selectors narrow
+# the lane to the cases they name, after every case is planned:
+# <demo>[/<event>[/<KEY=value>]] or <TestName> (campaign.go). On github the
+# lane is one cell: the demo's event on hosted GitHub from a one-commit
+# checkout of the built-in demo, run inside Forge Lab's hosted session with
+# `just test-live-consumer github` settings (org=<id> and the rest).
 set -euo pipefail
 umask 077
 
 script_dir=$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
 repo_root=$(CDPATH='' cd -- "$script_dir/../.." && pwd -P)
 go_bin=${GO:-go}
-# The lane's plan, and its copy of a case's standard output.
+# The lane's plan, its copy of a case's standard output, and the results
+# file and counts run_case keeps.
 plan=
 case_output=
+results=
+status=0 failed=0 ran=0
 
 usage() {
-  printf 'usage: %s prepare <forge-lab checkout> <dir> <forgejo|gitlab>=<cases file> ... [job-image=<flavor>:<local image> ...]\n       %s lane <dir> <forgejo|gitlab> <cases file>\n' "$0" "$0" >&2
+  printf 'usage: %s prepare <forge-lab checkout> <dir> <forgejo|gitlab>=<cases file> ... [job-image=<flavor>:<local image> ...]\n       %s lane <dir> <forgejo|gitlab> <cases file> [<selector> ...]\n       %s lane <dir> github <demo>/<event> [setting ...]\n' "$0" "$0" "$0" >&2
   exit 2
 }
 
@@ -152,18 +161,64 @@ prepare() {
   printf 'campaign: prepared %s for %s\n' "$dir/campaign.env" "$commit" >&2
 }
 
+# run_case runs one case, its text and the just recipe with its arguments,
+# appends its line to <dir>/<provider>.results and counts it; status is the
+# case's exit status.
+run_case() {
+  local text=$1 started verdict
+  shift
+  printf 'campaign: %s\n' "$text" >&2
+  started=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  # tee ignores an interrupt, so the run's cleanup output still has a reader.
+  set +e
+  just --justfile "$repo_root/justfile" "$@" 3<&- | tee -i -- "$case_output"
+  status=${PIPESTATUS[0]}
+  set -e
+  verdict=$(sed -n 's/^Live verdict: //p' "$case_output" | tail -n 1)
+  printf '%s/%s\t%s\texit=%s\tverdict=%s\n' "$started" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    "$text" "$status" "${verdict:--}" >>"$results"
+  ran=$((ran + 1))
+  [[ "$status" -eq 0 ]] || failed=$((failed + 1))
+}
+
+# github_cell runs one demo's event on hosted GitHub, the demo's fixture
+# workflow there, from a one-commit checkout of the built-in demo: the
+# GitHub cell of a matrix. It runs inside Forge Lab's hosted session, as
+# `just test-live-consumer github` does, and takes its settings.
+github_cell() {
+  local dir=$1 selector=$2 checkout
+  shift 2
+  [[ "$dir" == /* && "$selector" =~ ^[a-z0-9][a-z0-9-]*/[a-z-]+$ ]] ||
+    fail "a GitHub cell is <demo>/<event>, got $(printf '%q' "$selector")"
+  mkdir -p -- "$dir"
+  checkout=$(mktemp -d "${TMPDIR:-/tmp}/forge-ci-campaign-demo.XXXXXXXX")
+  case_output=$(mktemp "${TMPDIR:-/tmp}/forge-ci-campaign.XXXXXXXX")
+  trap 'rm -rf -- "$checkout" "$case_output"' EXIT
+  bash "$script_dir/demo-checkout.sh" "${selector%/*}" "$checkout"
+
+  results=$dir/github.results failed=0 ran=0
+  run_case "consumer $selector $*" test-live-consumer github "$checkout" "${selector#*/}" "$@"
+  exit "$status"
+}
+
 lane() {
   local dir=${1:-} provider=${2:-} cases=${3:-}
-  [[ $# -eq 3 ]] || usage
+  [[ $# -ge 3 ]] || usage
+  shift 3
+  if [[ "$provider" == github ]]; then
+    github_cell "$dir" "$cases" "$@"
+    return
+  fi
   # The preflight runs in the repository; a relative cases file is the caller's.
   [[ "$cases" == /* ]] || cases=$PWD/$cases
 
   plan=$(mktemp "${TMPDIR:-/tmp}/forge-ci-campaign-plan.XXXXXXXX")
   case_output=$(mktemp "${TMPDIR:-/tmp}/forge-ci-campaign.XXXXXXXX")
   trap 'rm -f -- "$plan" "$case_output"' EXIT
-  preflight campaign-plan "$repo_root" "$dir" "$provider" "$cases" >"$plan" || exit 2
+  preflight campaign-plan "$repo_root" "$dir" "$provider" "$cases" "$@" >"$plan" || exit 2
 
-  local results=$dir/$provider.results kind field count text started status verdict failed=0 ran=0
+  results=$dir/$provider.results failed=0 ran=0
+  local kind field count text
   local -a args
   while IFS= read -r -d '' -u 3 kind; do
     IFS= read -r -d '' -u 3 field
@@ -188,18 +243,7 @@ lane() {
       args+=("$field")
     done
 
-    printf 'campaign: %s\n' "$text" >&2
-    started=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-    # tee ignores an interrupt, so the run's cleanup output still has a reader.
-    set +e
-    just --justfile "$repo_root/justfile" "${args[@]}" 3<&- | tee -i -- "$case_output"
-    status=${PIPESTATUS[0]}
-    set -e
-    verdict=$(sed -n 's/^Live verdict: //p' "$case_output" | tail -n 1)
-    printf '%s/%s\t%s\texit=%s\tverdict=%s\n' "$started" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-      "$text" "$status" "${verdict:--}" >>"$results"
-    ran=$((ran + 1))
-    [[ "$status" -eq 0 ]] || failed=$((failed + 1))
+    run_case "$text" "${args[@]}"
     # An interrupted case stops the lane; the operator asked for it.
     if [[ "$status" -eq 130 ]]; then
       printf 'campaign: interrupted; the cases after it are not run\n' >&2

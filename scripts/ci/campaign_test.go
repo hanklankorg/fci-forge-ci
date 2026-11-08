@@ -321,3 +321,66 @@ func TestDemoCheckout_IsOneCommitOfTheDemo(t *testing.T) {
 		}
 	}
 }
+
+// Selectors reach the preflight after the cases file, which plans the lane
+// whole and keeps the cases they name.
+func TestCampaignLane_HandsTheSelectorsToThePlan(t *testing.T) {
+	t.Parallel()
+
+	lane := newCampaignLane(t)
+	planFile := filepath.Join(t.TempDir(), "plan")
+
+	if err := os.WriteFile(planFile, []byte("case\x00scenario TestA\x002\x00test-live\x00^TestA$\x00"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	stderr, status := runScript(t, lane.workDir, append(slices.Clone(lane.env), "FAKE_PLAN="+planFile),
+		"campaign.sh", "lane", lane.dir, "gitlab", "lane.cases", "hello-maven-service/lifecycle", "TestA")
+	if status != 0 {
+		t.Fatalf("status %d\n%s", status, stderr)
+	}
+
+	if got := readLines(t, lane.goArgvFile); len(got) != 1 || !strings.HasSuffix(got[0], " gitlab "+filepath.Join(lane.workDir, "lane.cases")+" hello-maven-service/lifecycle TestA") {
+		t.Fatalf("preflight argv %q, want the selectors after the cases file", got)
+	}
+}
+
+// On github the lane is one cell: a one-commit checkout of the built-in
+// demo, run through test-live-consumer github with the caller's settings,
+// recorded in github.results, with no campaign preflight. A selector that
+// is not <demo>/<event> is refused before anything runs.
+func TestCampaignLane_RunsAGitHubCellFromTheBuiltInDemo(t *testing.T) {
+	t.Parallel()
+
+	lane := newCampaignLane(t)
+	lane.env[0] += string(os.PathListSeparator) + testenv.GNUPath(t, "ls", "cp", "mkdir")
+
+	stderr, status := runScript(t, lane.workDir, lane.env, "campaign.sh", "lane", lane.dir, "github", "hello-go-cli/release", "org=1", "version=0.2.0")
+	if status != 0 {
+		t.Fatalf("status %d\n%s", status, stderr)
+	}
+
+	calls := readLines(t, lane.argvFile)
+	if len(calls) != 1 {
+		t.Fatalf("just calls %q, want one", calls)
+	}
+
+	words := strings.Fields(calls[0])[2:] // --justfile <repository justfile>
+	if len(words) != 6 || words[0] != "test-live-consumer" || words[1] != "github" || words[3] != "release" || words[4] != "org=1" || words[5] != "version=0.2.0" {
+		t.Fatalf("just argv %q, want test-live-consumer github <checkout> release org=1 version=0.2.0", calls[0])
+	}
+
+	if results := readLines(t, filepath.Join(lane.dir, "github.results")); len(results) != 1 || !strings.Contains(results[0], "consumer hello-go-cli/release org=1 version=0.2.0\texit=0\t") {
+		t.Fatalf("results %q, want the cell's line", results)
+	}
+
+	if calls := readLines(t, lane.goArgvFile); calls != nil {
+		t.Fatalf("a GitHub cell ran the campaign preflight: %q", calls)
+	}
+
+	for _, selector := range []string{"hello-go-cli", "../x/release", "hello-go-cli/release/extra"} {
+		if stderr, status := runScript(t, lane.workDir, lane.env, "campaign.sh", "lane", lane.dir, "github", selector, "org=1"); status != 2 {
+			t.Errorf("%q: status %d, want a refusal (2)\n%s", selector, status, stderr)
+		}
+	}
+}
