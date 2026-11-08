@@ -211,7 +211,7 @@ func TestGitHubAdminWrapperUsesItsEngineContract(t *testing.T) {
 	engine := trialEngine
 	engine.admin = testWorkflowAdmin(t)
 	engine.Commit = engine.admin.commit
-	text := "jobs:\n  quality:\n    uses: diggsweden/forge-ci/.github/workflows/pullrequest-orchestrator.yml@" + strings.Repeat("c", 40) + "\n    with:\n      runtime-image: ghcr.io/diggsweden/forge-ci-runtime:tag\n"
+	text := "jobs:\n  quality:\n    uses: diggsweden/forge-ci/.github/workflows/pullrequest-orchestrator.yml@" + strings.Repeat("c", 40) + "\n    with:\n      runtime-image: ghcr.io/diggsweden/forge-ci-runtime-base:tag\n      canonical-builder-image: ghcr.io/diggsweden/forge-ci-runtime-go-1.27:tag\n"
 
 	rendered, _, err := RenderGitHubConsumer("quality.yml", text, engine, nil)
 	if err != nil {

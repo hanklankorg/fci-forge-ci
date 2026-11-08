@@ -6,6 +6,10 @@
         "type": "string",
         "default": ""
       },
+      "canonical-builder-image": {
+        "required": true,
+        "type": "string"
+      },
       "enforce-lint": {
         "required": false,
         "type": "boolean",
@@ -17,9 +21,8 @@
         "default": false
       },
       "forge-ci-binary-ref": {
-        "required": false,
-        "type": "string",
-        "default": ""
+        "required": true,
+        "type": "string"
       },
       "lint-engine": {
         "required": false,
@@ -56,9 +59,8 @@
         "default": "secrets,sast"
       },
       "runtime-image": {
-        "required": false,
-        "type": "string",
-        "default": ""
+        "required": true,
+        "type": "string"
       }
     },
     "secrets": [

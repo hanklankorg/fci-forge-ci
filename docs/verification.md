@@ -642,6 +642,9 @@ attestor    (KMS sign creds ONLY here, ephemeral)  ──signed provenance──
             .github/workflows/slsa-attestor.yml
 ```
 
+- **Runtime:** the job runs in the `runtime-image` digest the caller pins, the
+  forge-ci base runtime image, where forge-ci and the pinned cosign are
+  baked in; the selected runner must run job containers.
 - **Signer:** `forge-ci container attest --method=kms --key <kms-uri>`. Works
   with any cosign KMS (`hashivault://` OpenBao/Vault, `awskms://`, `gcpkms://`,
   `azurekms://`, PKCS#11/HSM). `--builder-id` sets the provenance `builder.id` to

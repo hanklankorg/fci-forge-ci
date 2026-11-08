@@ -123,9 +123,11 @@ func TestSelfPullRequestUsesThePublishedRollingImageTag(t *testing.T) {
 		string(reporoot.ReadFile(t, ".github/workflows/self-runtime-container.yml")))
 	require.Len(t, published, 2, "self-runtime-container.yml publishes no rolling vX.Y.Z-pre tag")
 
-	consumed := regexp.MustCompile(`forge-ci-runtime-base:(v[0-9]+\.[0-9]+\.[0-9]+-pre)\b`).FindAllStringSubmatch(
+	// The route admits digests only, so Self Pull Request resolves the rolling
+	// tag's base and Go builder images to the digests the registry serves.
+	consumed := regexp.MustCompile(`forge-ci-runtime-[a-z0-9.-]+:(v[0-9]+\.[0-9]+\.[0-9]+-pre)\b`).FindAllStringSubmatch(
 		string(reporoot.ReadFile(t, ".github/workflows/self-pullrequest.yml")), -1)
-	require.NotEmpty(t, consumed, "self-pullrequest.yml consumes no rolling runtime image")
+	require.Len(t, consumed, 2, "self-pullrequest.yml resolves the rolling base and Go builder images")
 
 	for _, match := range consumed {
 		require.Equal(t, published[1], match[1], "Self Pull Request must use the rolling tag Self Runtime Container publishes")

@@ -113,8 +113,8 @@ GitLab components require `runtime-image`. A guard test refuses a
 
 | Workflow | Image | Notes |
 |---|---|---|
-| `lint-nanolinter` | nanolinter flavour image (external, `ghcr.io/itiquette/nanolinter:<flavour>`; verify publication and pin the served digest as described in [components](components.md#lint-nanolinteryml-default)) | Runs `nanolinter verify` against the consumer's `nanolinter.toml`, in the `nanolinter-image` the caller pins by digest. The image bakes nanolinter + its check toolchain (opengrep, osv-scanner, …). forge-ci is installed at runtime, cosign-verified, for SARIF enrich/upload only |
-| `lint-megalinter` | MegaLinter image (external, `oxsecurity/megalinter`) | Runs MegaLinter against the consumer's `.mega-linter.yml` on a standard runner; the alternative `lint-engine` |
+| `lint-nanolinter` | nanolinter flavour image (external, `ghcr.io/itiquette/nanolinter:<flavour>`; verify publication and pin the served digest as described in [components](components.md#lint-nanolinteryml-default)) | Runs `nanolinter verify` against the consumer's `nanolinter.toml`, in the `nanolinter-image` the caller pins by digest. The image bakes nanolinter + its check toolchain (opengrep, osv-scanner, …). forge-ci is the canonical CLI of the run, received before the checkout (`consume-canonical-cli`, profile `host`), for the checkout, policy and SARIF commands |
+| `lint-megalinter` | MegaLinter image (external, `oxsecurity/megalinter`) | Runs MegaLinter against the consumer's `.mega-linter.yml` on a standard runner; the alternative `lint-engine`. forge-ci is the canonical CLI of the run, received before the checkout, for the SARIF commands |
 | Orchestrator/stage planning and summary jobs | `runtime-base` | Run the Go CLI's config, plan and report commands; dispatched build/publish jobs select their own toolchain images |
 | `release-create-github`, `release-snapshot-publish-stage`'s `generate-snapshot-sboms` | `runtime` (full) | Needs syft for SBOM aggregation |
 | `generate-changelog`, `validate-release-prerequisites` | `runtime-base` normally; `runtime-rust-stable` when Cargo artifacts are present | git-cliff / gh + gpg are in base; Cargo prerequisite validation also checks `cargo --version` |
@@ -127,7 +127,8 @@ GitLab components require `runtime-image`. A guard test refuses a
 | `publish-maven-github` | `runtime-java-25` for maven, gradle and gradle-android; `runtime-node-24` for npm | The caller selects the image by package type; the publication runs with the image's JDK/Maven/Gradle or Node |
 | `publish-container` | `runtime-base` (prep, publish-images, merge: cosign baked), `runtime` full (scan-layouts: Trivy; image-evidence: syft and cosign); host build legs | Buildah needs the host, so each build leg is a host job that receives the canonical CLI built in the run from the approved engine commit (`consume-canonical-cli`, profile `host`); the other jobs run in the admitted digests and install nothing |
 | `snapshot-images` | `runtime-base` (plan, prepare-context, collect), `runtime` full (publish: Trivy and syft), the toolchain image of each producer's project type; host build legs | The same shape as `publish-container`: the Buildah legs receive the canonical CLI of the run (`consume-canonical-cli`, profile `host`), every other job runs the forge-ci baked into its image |
-| `security-openssf-scorecard` | host + third-party Docker action | The workflow selects a hosted runner for the Scorecard action |
+| `security-openssf-scorecard` | host + third-party Docker action (analysis); `runtime-base` (publish-sarif) | The Scorecard action needs a hosted runner; the SARIF upload runs in the admitted base image with its baked forge-ci |
+| `slsa-attestor` | `runtime-base` | forge-ci and the pinned cosign are baked in; the caller-selected runner must run job containers |
 | `build-xcode-ios`, `publish-apple-appstore` | macOS host + bootstrap installer from `forge-ci-binary-ref` | Tagged releases use verified archives; branch/full commit refs build from a [detached source checkout](DEVELOPMENT.md#source-checkout) |
 
 ## Forgejo runtime publication

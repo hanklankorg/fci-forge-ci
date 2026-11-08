@@ -22,9 +22,8 @@ on:
         required: true
         type: string
       runtime-image:
-        description: "forge-ci runtime image for the status/summary jobs (base is sufficient)"
-        required: false
-        default: ""
+        description: "Administrator-pinned forge-ci base runtime image@sha256 digest for the status/summary jobs and the lint jobs' canonical admission; the orchestrator passes the digest its delivery admitted"
+        required: true
         type: string
       required-lints:
         description: "Mandated lint floor passed to `nanolinter verify --require` (comma-separated check ids forced to run + block)."
@@ -37,10 +36,18 @@ on:
         default: ""
         type: string
       forge-ci-binary-ref:
-        description: "forge-ci version the lint job installs (cosign-verified) for SARIF tooling"
-        required: false
-        default: ""
+        description: "Full approved engine commit the canonical CLI of this run was built from; the lint jobs receive that build"
+        required: true
         type: string
+      # Canonical delivery of the same run, forwarded to the lint jobs that
+      # run on the runner.
+      canonical-artifact-id: {type: string, required: true}
+      canonical-artifact-name: {type: string, required: true}
+      canonical-producer-run-id: {type: string, required: true}
+      canonical-producer-run-attempt: {type: string, required: true}
+      canonical-producer-engine-repository: {type: string, required: true}
+      canonical-producer-engine-commit: {type: string, required: true}
+      canonical-producer-result: {type: string, required: true}
     # Aggregator: forwards CODE_SCANNING_TOKEN to the nanolinter job for
     # its security-SARIF upload; other lint jobs use the auto GITHUB_TOKEN.
     secrets:
@@ -73,6 +80,14 @@ jobs:
       nanolinter-image: ${{ fromJson(inputs['pr-plan-json']).policy.nanolinter_image }}
       required-lints: ${{ inputs['required-lints'] }}
       forge-ci-binary-ref: ${{ needs.resolve-bootstrap.outputs.forge-ci-binary-ref }}
+      runtime-image: ${{ inputs['runtime-image'] }}
+      canonical-artifact-id: ${{ inputs['canonical-artifact-id'] }}
+      canonical-artifact-name: ${{ inputs['canonical-artifact-name'] }}
+      canonical-producer-run-id: ${{ inputs['canonical-producer-run-id'] }}
+      canonical-producer-run-attempt: ${{ inputs['canonical-producer-run-attempt'] }}
+      canonical-producer-engine-repository: ${{ inputs['canonical-producer-engine-repository'] }}
+      canonical-producer-engine-commit: ${{ inputs['canonical-producer-engine-commit'] }}
+      canonical-producer-result: ${{ inputs['canonical-producer-result'] }}
   megalinter:
     needs: [resolve-bootstrap]
     name: "Check: lint (MegaLinter)"
@@ -85,6 +100,14 @@ jobs:
     with:
       megalinter-image: ${{ inputs['megalinter-image'] }}
       forge-ci-binary-ref: ${{ needs.resolve-bootstrap.outputs.forge-ci-binary-ref }}
+      runtime-image: ${{ inputs['runtime-image'] }}
+      canonical-artifact-id: ${{ inputs['canonical-artifact-id'] }}
+      canonical-artifact-name: ${{ inputs['canonical-artifact-name'] }}
+      canonical-producer-run-id: ${{ inputs['canonical-producer-run-id'] }}
+      canonical-producer-run-attempt: ${{ inputs['canonical-producer-run-attempt'] }}
+      canonical-producer-engine-repository: ${{ inputs['canonical-producer-engine-repository'] }}
+      canonical-producer-engine-commit: ${{ inputs['canonical-producer-engine-commit'] }}
+      canonical-producer-result: ${{ inputs['canonical-producer-result'] }}
   swift:
     needs: [resolve-bootstrap]
     name: "Check: lint (Swift)"
@@ -97,12 +120,12 @@ jobs:
       forge-ci-binary-ref: ${{ needs.resolve-bootstrap.outputs.forge-ci-binary-ref }}
       enable-swiftformat: ${{ fromJson(inputs['pr-plan-json']).policy.swift_format }}
       enable-swiftlint: ${{ fromJson(inputs['pr-plan-json']).policy.swift_lint }}
-      runtime-image: ${{ inputs['runtime-image'] || needs.resolve-bootstrap.outputs['runtime-image'] }}
+      runtime-image: ${{ inputs['runtime-image'] }}
   quality-status:
     name: "Check: status"
     runs-on: ubuntu-26.04
     container:
-      image: ${{ inputs['runtime-image'] || needs.resolve-bootstrap.outputs['runtime-image'] }}
+      image: ${{ inputs['runtime-image'] }}
     if: always() && needs.resolve-bootstrap.result == 'success'
     needs: [resolve-bootstrap, nanolinter, megalinter, swift]
     steps:
@@ -122,7 +145,7 @@ jobs:
     if: always() && needs.resolve-bootstrap.result == 'success'
     runs-on: ubuntu-26.04
     container:
-      image: ${{ inputs['runtime-image'] || needs.resolve-bootstrap.outputs['runtime-image'] }}
+      image: ${{ inputs['runtime-image'] }}
     permissions:
       actions: read
       contents: read

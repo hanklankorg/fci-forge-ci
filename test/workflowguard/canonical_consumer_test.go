@@ -118,6 +118,9 @@ func TestCanonicalConsumerWorkflowGraph(t *testing.T) {
 		"publish-container.yml":              {"build-arch"},
 		"snapshot-images.yml":                {"build"},
 		"release-snapshot-orchestrator.yml":  {"setup-snapshot", "snapshot-release-summary"},
+		"pullrequest-orchestrator.yml":       {"compose-pr-plan", "pr-summary"},
+		"lint-nanolinter.yml":                {"nanolinter-lint"},
+		"lint-megalinter.yml":                {"megalinter-lint"},
 	} {
 		workflow := readCanonicalConsumerWorkflow(t, file)
 		for _, name := range jobs {
@@ -144,6 +147,16 @@ func TestCanonicalConsumerWorkflowGraph(t *testing.T) {
 				offset = 1
 
 				require.Equal(t, "Harden GitHub runner", job.Steps[0].Name)
+			}
+
+			// The lint image is refused as a tag before anything is fetched,
+			// the canonical receive included; the step runs no engine.
+			if file == "lint-nanolinter.yml" || file == "lint-megalinter.yml" {
+				offset = 1
+
+				require.Contains(t, job.Steps[0].Name, "image digest")
+				require.Contains(t, job.Steps[0].Run, "@sha256:[0-9a-f]{64}$")
+				require.Empty(t, job.Steps[0].Uses)
 			}
 
 			if file == "release-create-github.yml" {
@@ -232,6 +245,25 @@ func TestCanonicalConsumerWorkflowGraph(t *testing.T) {
 	for _, input := range []string{"runtime-image", "canonical-builder-image", "forge-ci-binary-ref"} {
 		spec, _ := snapshot.On.Call.Inputs[input].(map[string]any)
 		require.Equal(t, true, spec["required"], "snapshot route: %s is an administrator pin", input)
+	}
+
+	// The pull-request route admits the same pins; the quality stage relays
+	// the delivery to the lint jobs, which run on the runner and receive it.
+	pr := readCanonicalConsumerWorkflow(t, "pullrequest-orchestrator.yml")
+	require.Contains(t, pr.Jobs["execute-quality-stage"].Needs, "canonical-cli")
+	require.Equal(t, "${{ needs.canonical-cli.result }}", pr.Jobs["execute-quality-stage"].With["canonical-producer-result"])
+	require.Equal(t, "${{ needs.canonical-cli.outputs.artifact-id }}", pr.Jobs["execute-quality-stage"].With["canonical-artifact-id"])
+
+	for _, input := range []string{"runtime-image", "canonical-builder-image", "forge-ci-binary-ref"} {
+		spec, _ := pr.On.Call.Inputs[input].(map[string]any)
+		require.Equal(t, true, spec["required"], "pull-request route: %s is an administrator pin", input)
+	}
+
+	quality := readCanonicalConsumerWorkflow(t, "pullrequest-quality-stage.yml")
+	for _, lint := range []string{"nanolinter", "megalinter"} {
+		require.Equal(t, "${{ inputs['canonical-producer-result'] }}", quality.Jobs[lint].With["canonical-producer-result"], lint)
+		require.Equal(t, "${{ inputs['canonical-artifact-id'] }}", quality.Jobs[lint].With["canonical-artifact-id"], lint)
+		require.Equal(t, "${{ inputs['runtime-image'] }}", quality.Jobs[lint].With["runtime-image"], lint)
 	}
 }
 

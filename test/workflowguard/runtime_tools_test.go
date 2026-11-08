@@ -85,7 +85,7 @@ func TestTrustedRuntimeToolOwners(t *testing.T) {
 	// the key-free version-file preparation.
 	profiles := map[string]string{}
 
-	for _, file := range []string{"release-orchestrator.yml", "validate-release-prerequisites.yml", "release-prepare-stage.yml", "generate-changelog.yml", "release-classified-files.yml", "release-create-github.yml", "publish-container.yml", "snapshot-images.yml", "release-snapshot-orchestrator.yml"} {
+	for _, file := range []string{"release-orchestrator.yml", "validate-release-prerequisites.yml", "release-prepare-stage.yml", "generate-changelog.yml", "release-classified-files.yml", "release-create-github.yml", "publish-container.yml", "snapshot-images.yml", "release-snapshot-orchestrator.yml", "pullrequest-orchestrator.yml", "lint-nanolinter.yml", "lint-megalinter.yml"} {
 		var receivers struct {
 			Jobs map[string]struct {
 				Container any `yaml:"container"`

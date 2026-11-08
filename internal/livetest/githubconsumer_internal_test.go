@@ -227,6 +227,7 @@ const fixturePullRequest = `jobs:
     with:
       forge-ci-binary-ref: v0.90.0
       runtime-image: ghcr.io/diggsweden/forge-ci-runtime-base:v0.90.0
+      canonical-builder-image: ghcr.io/diggsweden/forge-ci-runtime-go-1.27:v0.90.0
       runtime-image-go: "ghcr.io/diggsweden/forge-ci-runtime-go-1.27:v0.90.0"
       nanolinter-image: ghcr.io/itiquette/nanolinter:go
   test:
@@ -235,9 +236,9 @@ const fixturePullRequest = `jobs:
 `
 
 // The fixture's pins are the published engine's; rendered, every one names
-// the engine under test: its workflows at the commit, the rolling pre-release
-// binary, and the runtime images built for the commit, in lowercase GHCR, by
-// digest where the engine resolved one.
+// the engine under test: its workflows and binary at the commit, and the
+// runtime images built for the commit, in lowercase GHCR, by digest where
+// the engine resolved one.
 func TestRenderGitHubConsumer_PinsTheEngineUnderTest(t *testing.T) {
 	t.Parallel()
 
@@ -248,8 +249,9 @@ func TestRenderGitHubConsumer_PinsTheEngineUnderTest(t *testing.T) {
 
 	for _, want := range []string{
 		"uses: Example-Org/fc-forge-ci/.github/workflows/pullrequest-orchestrator.yml@" + trialEngine.Commit,
-		"forge-ci-binary-ref: v0.90.0-pre",
+		"forge-ci-binary-ref: " + trialEngine.Commit,
 		"runtime-image: ghcr.io/example-org/forge-ci-runtime-base@sha256:" + strings.Repeat("b", 64),
+		"canonical-builder-image: ghcr.io/example-org/forge-ci-runtime-go-1.27@sha256:" + strings.Repeat("c", 64),
 		`"ghcr.io/example-org/forge-ci-runtime-go-1.27@sha256:` + strings.Repeat("c", 64) + `"`,
 		"nanolinter-image: ghcr.io/itiquette/nanolinter:go",
 		"uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10",
@@ -278,6 +280,7 @@ func TestRenderGitHubConsumer_CargoLintImageOverride(t *testing.T) {
     with:
       forge-ci-binary-ref: v0.90.0
       runtime-image: ghcr.io/diggsweden/forge-ci-runtime-base:v0.90.0
+      canonical-builder-image: ghcr.io/diggsweden/forge-ci-runtime-go-1.27:v0.90.0
       project-type: cargo
       lint-engine: nanolinter
       nanolinter-image: codefloe.com/itiquette/nanolinter:go

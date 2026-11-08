@@ -7,11 +7,13 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"fmt"
+	"maps"
 	"regexp"
 	"slices"
 	"strings"
 
 	"golang.org/x/crypto/nacl/box"
+	"gopkg.in/yaml.v3"
 
 	"github.com/diggsweden/forge-ci/internal/domain/container"
 	"github.com/diggsweden/forge-ci/internal/domain/errs"
@@ -74,21 +76,13 @@ var (
 	githubBinaryRef   = regexp.MustCompile(`(?m)^([ \t]*forge-ci-binary-ref:[ \t]*).*$`)
 	githubRuntimeRef  = regexp.MustCompile(`ghcr\.io/[A-Za-z0-9_.-]+/(forge-ci-runtime[a-z0-9.-]*)(?::[A-Za-z0-9._-]+|@sha256:[0-9a-f]{64})`)
 	githubLeftover    = regexp.MustCompile(`uses:[ \t]*['"]?([^\s'"#]+/\.github/workflows/[^\s'"#]+)`)
-	// githubReleaseOrchestratorUse is a call of the release orchestrator, whose
-	// plain-runner jobs run the canonical CLI built from the full engine commit
-	// and whose control-plane images must be digest-pinned.
-	githubReleaseOrchestratorUse = regexp.MustCompile(`uses:[ \t]*['"]?[A-Za-z0-9_.-]+/forge-ci/\.github/workflows/release-orchestrator\.yml@`)
-	// githubAdmittedImageInput is a release-route input the orchestrator admits
-	// only as image@sha256 digest, with its rendered value.
-	githubAdmittedImageInput = regexp.MustCompile(`(?m)^[ \t]+(runtime-image|canonical-builder-image):[ \t]*['"]?([^\s'"#]*)`)
 )
 
 // RenderGitHubConsumer puts the engine where a fixture names the published
 // one: its reusable workflows at the commit, the binary (the full engine
-// commit for a release call, whose plain-runner jobs run the canonical CLI
-// built from it; the rolling pre-release otherwise), and the runtime images
-// Self Runtime Container built for the commit, by digest where the engine
-// knows one.
+// commit: every route runs the canonical CLI built from it, or the engine
+// baked into its images), and the runtime images Self Runtime Container
+// built for the commit, by digest where the engine knows one.
 // Overrides are further `input: value` lines the caller sets, such as a
 // mirrored nanolinter image. Each replaces the line wherever this workflow
 // writes it; the inputs it replaced are returned, so the caller can refuse a
@@ -108,19 +102,12 @@ func RenderGitHubConsumer(name, text string, engine GitHubEngine, overrides map[
 		return "", nil, err
 	}
 
-	release := githubReleaseOrchestratorUse.MatchString(text)
-
-	binaryRef := GitHubPrerelease
-	if release {
-		binaryRef = engine.Commit
-	}
-
 	rendered := githubWorkflowUse.ReplaceAllString(text, "${1}"+engine.Owner+"/"+engine.Repository+"${2}@"+engine.Commit)
-	rendered = githubBinaryRef.ReplaceAllString(rendered, "${1}"+binaryRef)
+	rendered = githubBinaryRef.ReplaceAllString(rendered, "${1}"+engine.Commit)
 	rendered = githubRuntimeRef.ReplaceAllStringFunc(rendered, engine.renderRuntimeImage)
 
-	if release {
-		if err := requireAdmittedReleaseImages(name, rendered); err != nil {
+	if githubOrchestratorUse.MatchString(text) {
+		if err := requireAdmittedImages(name, rendered); err != nil {
 			return "", nil, err
 		}
 	}
@@ -176,10 +163,9 @@ func (engine GitHubEngine) renderRuntimeImage(reference string) string {
 }
 
 // requireOrchestratorImages refuses a fixture that calls an orchestrator
-// without passing runtime-image, and a release call without the canonical
-// builder image. An orchestrator's image inputs default to the released
-// images, which an unreleased engine has not built; only an image a fixture
-// names can be pointed at the organization's build of it.
+// without passing runtime-image and the canonical builder image. Only an
+// image a fixture names can be pointed at the organization's build of it,
+// and every orchestrator admits both as digests.
 func requireOrchestratorImages(name, text string) error {
 	if !githubOrchestratorUse.MatchString(text) {
 		return nil
@@ -191,8 +177,8 @@ func requireOrchestratorImages(name, text string) error {
 			"or @sha256:<digest>, so the trial can point them at the engine under test: %w", name, errs.ErrValidation)
 	}
 
-	if githubReleaseOrchestratorUse.MatchString(text) && !githubCanonicalBuilderInput.MatchString(text) {
-		return fmt.Errorf("%s calls the release orchestrator without passing canonical-builder-image; pass it as "+
+	if !githubCanonicalBuilderInput.MatchString(text) {
+		return fmt.Errorf("%s calls a forge-ci orchestrator without passing canonical-builder-image; pass it as "+
 			"ghcr.io/diggsweden/forge-ci-runtime-go-1.27@sha256:<digest>, so the trial can point it at the engine under test: %w",
 			name, errs.ErrValidation)
 	}
@@ -200,14 +186,35 @@ func requireOrchestratorImages(name, text string) error {
 	return nil
 }
 
-// requireAdmittedReleaseImages refuses a rendered release call whose admitted
+// requireAdmittedImages refuses a rendered orchestrator call whose admitted
 // images are not digest-pinned: the orchestrator's canonical admission would
-// refuse them in its first job, after the push.
-func requireAdmittedReleaseImages(name, rendered string) error {
-	for _, match := range githubAdmittedImageInput.FindAllStringSubmatch(rendered, -1) {
-		if !pinnedImage.MatchString(match[2]) {
-			return fmt.Errorf("%s renders %s as %q, which the release route admits only as image@sha256 digest; "+
-				"the engine under test must resolve the digest of that image: %w", name, match[1], match[2], errs.ErrValidation)
+// refuse them in its first job, after the push. A leaf call beside it may
+// still name its toolchain image by tag.
+func requireAdmittedImages(name, rendered string) error {
+	var workflow struct {
+		Jobs map[string]struct {
+			Uses string            `yaml:"uses"`
+			With map[string]string `yaml:"with"`
+		} `yaml:"jobs"`
+	}
+
+	if err := yaml.Unmarshal([]byte(rendered), &workflow); err != nil {
+		return fmt.Errorf("%s: %w", name, err)
+	}
+
+	for _, job := range slices.Sorted(maps.Keys(workflow.Jobs)) {
+		call := workflow.Jobs[job]
+		workflowPath, _, _ := strings.Cut(call.Uses, "@")
+
+		if !strings.Contains(workflowPath, "/.github/workflows/") || !strings.HasSuffix(workflowPath, "-orchestrator.yml") {
+			continue
+		}
+
+		for _, input := range []string{"runtime-image", "canonical-builder-image"} {
+			if value := call.With[input]; !pinnedImage.MatchString(value) {
+				return fmt.Errorf("%s renders %s of job %s as %q, which the orchestrator admits only as image@sha256 digest; "+
+					"the engine under test must resolve the digest of that image: %w", name, input, job, value, errs.ErrValidation)
+			}
 		}
 	}
 
@@ -220,7 +227,7 @@ var (
 	githubOrchestratorUse = regexp.MustCompile(`uses:[ \t]*['"]?[A-Za-z0-9_.-]+/forge-ci/\.github/workflows/[a-z-]+-orchestrator\.yml@`)
 	// githubRuntimeImageInput is the base runtime image passed as an input.
 	githubRuntimeImageInput = regexp.MustCompile(`(?m)^[ \t]+runtime-image:[ \t]*\S`)
-	// githubCanonicalBuilderInput is the Go builder image the release route
+	// githubCanonicalBuilderInput is the Go builder image an orchestrator
 	// builds its canonical CLI in, passed as an input.
 	githubCanonicalBuilderInput = regexp.MustCompile(`(?m)^[ \t]+canonical-builder-image:[ \t]*\S`)
 )

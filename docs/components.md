@@ -444,8 +444,11 @@ Usually called by `release-orchestrator.yml`, but can also be used directly by a
 Orchestrates all quality checks for pull requests. Composes a control-plane interface, delegates to the quality stage, and produces a top-level summary.
 
 ```yaml
-uses: diggsweden/forge-ci/.github/workflows/pullrequest-orchestrator.yml@v0.90.0
+uses: diggsweden/forge-ci/.github/workflows/pullrequest-orchestrator.yml@84180b5ac07af63d33917bec306e7f838aa8e366 # v0.90.0
 with:
+  forge-ci-binary-ref: 84180b5ac07af63d33917bec306e7f838aa8e366 # the full commit the uses: ref names; every job runs the CLI built from it
+  runtime-image: ghcr.io/diggsweden/forge-ci-runtime-base@sha256:0000000000000000000000000000000000000000000000000000000000000000 # FIXME v0.90.0 digest: control-plane and summary jobs
+  canonical-builder-image: ghcr.io/diggsweden/forge-ci-runtime-go-1.27@sha256:0000000000000000000000000000000000000000000000000000000000000000 # FIXME v0.90.0 digest: builds the canonical CLI
   project-type: maven              # Required: maven, npm, gradle, gradle-android, xcode-ios, cargo, or go
   base-branch: ""                  # Optional: auto-detects PR target
   lint-engine: nanolinter          # General lint engine: nanolinter (default) | megalinter | none — mutually exclusive
@@ -454,7 +457,6 @@ with:
   megalinter-image: ""             # Required for megalinter; see the digest-pinned example below
   linters.swiftformat: false       # Swift format for iOS/macOS (separate macOS job, orthogonal to the engine)
   linters.swiftlint: false         # SwiftLint for iOS/macOS
-  forge-ci-binary-ref: v0.90.0   # Match the pinned workflow release
 ```
 
 **Behavior:** The orchestrator remains the supported entrypoint. Internally it delegates to the quality stage, which writes a normalized manifest consumed by the top-level PR summary. See [Stage Result Contract](workflows.md#stage-result-contract) for the internal schema.
@@ -484,10 +486,20 @@ inside the nanolinter flavour image (which bakes nanolinter and its check
 toolchain, so no `just`/`justfile` is required). Fast, node-less. Security findings
 upload to GitHub Code Scanning as SARIF.
 ```yaml
-uses: diggsweden/forge-ci/.github/workflows/lint-nanolinter.yml@v0.90.0
+uses: diggsweden/forge-ci/.github/workflows/lint-nanolinter.yml@84180b5ac07af63d33917bec306e7f838aa8e366 # v0.90.0
 with:
   nanolinter-image: ghcr.io/itiquette/nanolinter:java@sha256:PIN_DIGEST
+  forge-ci-binary-ref: 84180b5ac07af63d33917bec306e7f838aa8e366
+  runtime-image: ghcr.io/diggsweden/forge-ci-runtime-base@sha256:0000000000000000000000000000000000000000000000000000000000000000 # FIXME v0.90.0 digest
+  canonical-artifact-id: ${{ needs.canonical-cli.outputs.artifact-id }}
+  # ... the other six canonical-* inputs, as in the publish-container example
 ```
+
+A direct call is a canonical receiver like `publish-container.yml`: a
+`canonical-cli` job in your workflow builds the CLI of the run from the engine
+commit (`canonical-cli-bootstrap.yml`), and the lint job receives it before
+the checkout. The [GHCR example in publishing.md](publishing.md#github-container-registry)
+shows the `canonical-cli` job and the seven `canonical-*` inputs it feeds.
 
 **Flavour image.** The configured repository is `ghcr.io/itiquette/nanolinter`.
 The GHCR migration must be published and verified before activating these
@@ -555,9 +567,13 @@ For a direct call, replace `REVIEWED_SHA256` below with the reviewed image
 digest's 64 lowercase hexadecimal characters:
 
 ```yaml
-uses: diggsweden/forge-ci/.github/workflows/lint-megalinter.yml@v0.90.0
+uses: diggsweden/forge-ci/.github/workflows/lint-megalinter.yml@84180b5ac07af63d33917bec306e7f838aa8e366 # v0.90.0
 with:
   megalinter-image: oxsecurity/megalinter@sha256:REVIEWED_SHA256
+  forge-ci-binary-ref: 84180b5ac07af63d33917bec306e7f838aa8e366
+  runtime-image: ghcr.io/diggsweden/forge-ci-runtime-base@sha256:0000000000000000000000000000000000000000000000000000000000000000 # FIXME v0.90.0 digest
+  canonical-artifact-id: ${{ needs.canonical-cli.outputs.artifact-id }}
+  # ... the other six canonical-* inputs; the job is a canonical receiver like lint-nanolinter.yml
 ```
 
 ### Security Workflows
@@ -583,7 +599,10 @@ Generates an OpenSSF security scorecard for the repository. Invoke it explicitly
 from your caller workflow and define `on.schedule` there for scheduled analysis.
 
 ```yaml
-uses: diggsweden/forge-ci/.github/workflows/security-openssf-scorecard.yml@v0.90.0
+uses: diggsweden/forge-ci/.github/workflows/security-openssf-scorecard.yml@84180b5ac07af63d33917bec306e7f838aa8e366 # v0.90.0
+with:
+  # The SARIF upload job runs in this image with its baked forge-ci.
+  runtime-image: ghcr.io/diggsweden/forge-ci-runtime-base@sha256:0000000000000000000000000000000000000000000000000000000000000000 # FIXME v0.90.0 digest
 ```
 
 ---
