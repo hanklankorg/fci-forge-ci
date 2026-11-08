@@ -1489,6 +1489,11 @@ What it does, in order:
    `release.yml`. After it succeeds, `main` must be one signed commit ahead, the
    final tag and a release with assets must exist, and every `*.bundle` asset
    must verify with `cosign verify-blob` against the engine's keyless identity.
+   An orphan `.bundle` without its offered subject now fails acceptance; the
+   hosted trial previously skipped it. This is an intentional strengthening,
+   independent of the unchanged requirement that every nonsignature subject
+   have a verified Cosign bundle or a signature by the trial's GPG key. Signature
+   sidecars (`.bundle`, `.asc`, `.sig`, `.pem`) are not subjects themselves.
    A fixture whose `release.yml` pins `cosign-public-key-sha256` signs with a
    Cosign key instead: the trial makes a passphrase-protected key pair, sets
    `RELEASE_COSIGN_PRIVATE_KEY`, `RELEASE_COSIGN_PASSPHRASE` and the

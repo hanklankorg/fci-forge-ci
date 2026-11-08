@@ -7,6 +7,7 @@
 package conformance_test
 
 import (
+	"fmt"
 	"maps"
 	"os"
 	"path/filepath"
@@ -14,6 +15,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/diggsweden/forge-ci/internal/domain/errs"
 	"github.com/diggsweden/forge-ci/internal/domain/provider"
 	"github.com/diggsweden/forge-ci/internal/livetest"
 )
@@ -594,8 +596,6 @@ func requireSignedRelease(t *testing.T, target livetest.Target, repo string, key
 		size += asset.Size
 	}
 
-	verified := 0
-
 	names := make([]string, 0, len(found[0].Assets))
 	for _, asset := range found[0].Assets {
 		names = append(names, asset.Name)
@@ -618,26 +618,17 @@ func requireSignedRelease(t *testing.T, target livetest.Target, repo string, key
 		return body
 	}
 
-	for name := range assets {
-		signed, isBundle := strings.CutSuffix(name, bundleSuffix)
-		if !isBundle {
-			continue
+	verified, err := livetest.VerifyReleaseBundles(slices.Collect(maps.Keys(assets)), func(subject, bundle string) error {
+		if assets[subject] == "" {
+			return fmt.Errorf("the release offers %s and not the file it signs: %w", bundle, errs.ErrValidation)
 		}
 
-		if assets[signed] == "" {
-			t.Errorf("the release offers %s and not the file it signs", name)
+		blob := read(subject)
 
-			continue
-		}
-
-		blob := read(signed)
-		if err := livetest.VerifyBlob(t, target, keys.cosignPublicPath, blob, read(name)); err != nil {
-			t.Errorf("the bundle of %s does not verify against the trial's public key: %v", signed, err)
-
-			continue
-		}
-
-		verified++
+		return livetest.VerifyBlob(t, target, keys.cosignPublicPath, blob, read(bundle))
+	})
+	if err != nil {
+		t.Error(err)
 	}
 
 	if evidence.Enabled() {
@@ -648,14 +639,14 @@ func requireSignedRelease(t *testing.T, target livetest.Target, repo string, key
 		}
 	}
 
-	if verified == 0 {
+	if len(verified) == 0 {
 		t.Errorf("the release of %s offers no Cosign bundle that verifies, among %d files", tag, len(assets))
 	}
 
 	// The size is what one release adds to the owner's storage quota; the
 	// trial deletes its repository afterwards, so it is measured here.
 	t.Logf("release %s: draft %t, %d files (%.1f MB), %d Cosign bundles verified with the trial's key",
-		tag, found[0].Draft, len(assets), float64(size)/1e6, verified)
+		tag, found[0].Draft, len(assets), float64(size)/1e6, len(verified))
 }
 
 func releaseEvidenceSecrets(keys releaseKeys) map[string]string {
