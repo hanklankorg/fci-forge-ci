@@ -53,6 +53,18 @@ import (
 // from it, install the executor.
 const DefaultExecutor = "/kaniko/executor"
 
+// Log markers the live image-plan oracle counts to tell a real build from a
+// reused architecture cache. Referencing them here keeps the oracle and the
+// producer in one place: a wording change fails to compile instead of
+// failing a lab run.
+const (
+	// LayoutBuildNoticeSuffix follows the local image name when a build is
+	// staged until its layout is exported.
+	LayoutBuildNoticeSuffix = " builds when its layout is exported"
+	// ExecutionNotice is printed once per executed kaniko build.
+	ExecutionNotice = "kaniko replaces this container's root filesystem with the image's and deletes it after the build; mounts, the layout, the context and /kaniko are kept."
+)
+
 // Adapter wraps the kaniko executor. Executor is overridable for tests and
 // for an installation that places the binary elsewhere.
 type Adapter struct {
@@ -142,7 +154,7 @@ func (a *Adapter) BuildSignerImage(_ context.Context, req container.SignerImageB
 	}
 
 	a.staged[req.LocalImage] = req
-	_, _ = fmt.Fprintf(out, "kaniko: %s builds when its layout is exported\n", req.LocalImage)
+	_, _ = fmt.Fprintf(out, "kaniko: %s"+LayoutBuildNoticeSuffix+"\n", req.LocalImage)
 
 	return nil
 }
@@ -267,7 +279,7 @@ func (a *Adapter) run(ctx context.Context, spec build, layoutDir string, out io.
 	// replaced /etc/ssl. Go loads the system roots once; load them now.
 	_, _ = x509.SystemCertPool()
 
-	_, _ = fmt.Fprintln(out, "kaniko replaces this container's root filesystem with the image's and deletes it after the build; mounts, the layout, the context and /kaniko are kept.")
+	_, _ = fmt.Fprintln(out, ExecutionNotice)
 
 	cmd := safeexec.Command(ctx, a.executor(), args...)
 	cmd.Stdout = out

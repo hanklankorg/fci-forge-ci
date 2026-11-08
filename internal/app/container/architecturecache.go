@@ -15,6 +15,10 @@ import (
 	"github.com/diggsweden/forge-ci/internal/retry"
 )
 
+// CacheReusePrefix precedes the reused architecture image reference in the
+// signer output; the live image-plan oracle counts it as reuse evidence.
+const CacheReusePrefix = "Architecture cache reused by digest: "
+
 // ArchitectureCache is read-only. A cache slot is not release authority: its
 // immutable bytes still pass the normal complete-set scan/publication barrier.
 type ArchitectureCache interface {
@@ -145,7 +149,7 @@ func stageCachedArchitecture(ctx context.Context, inspector LayoutInspector, out
 		return nil, writeErr
 	}
 
-	_, _ = fmt.Fprintf(out, "Architecture cache reused by digest: %s\n", meta.Ref)
+	_, _ = fmt.Fprintf(out, "%s%s\n", CacheReusePrefix, meta.Ref)
 
 	return meta, nil
 }
