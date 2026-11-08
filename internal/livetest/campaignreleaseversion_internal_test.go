@@ -25,7 +25,8 @@ var workflowVersionBump = regexp.MustCompile(`(?m)^[ \t]+version-bump:[ \t]*\S`)
 // bumps to: the release refuses a commit that does not carry the version it
 // is asked for, and that costs a live run to learn. So every release case of
 // the checked-in campaigns either bumps or requests, explicitly or by
-// default, the version its demo's manifest declares.
+// default, the version its demo's manifest declares. A Forgejo release that
+// bumps refuses a bump that changes nothing, so its case requests another.
 func TestCampaignReleaseCases_RequestWhatTheirDemoDeclaresOrBump(t *testing.T) {
 	t.Parallel()
 
@@ -54,9 +55,15 @@ func TestCampaignReleaseCases_RequestWhatTheirDemoDeclaresOrBump(t *testing.T) {
 			consumer := filepath.Join(repo, "test", "live", "demos", words[1], "consumer")
 			requested, bumps := releaseCaseVersion(t, provider, consumer, words[3:])
 
-			if declared := declaredDemoVersion(t, consumer); declared != "" && !bumps && requested != declared {
+			declared := declaredDemoVersion(t, consumer)
+			if declared != "" && !bumps && requested != declared {
 				t.Errorf("%s:%d: the %s release requests %s, but the demo declares %s and its release does not bump; give the case version=%s",
 					filepath.Base(lane), number, words[1], requested, declared, declared)
+			}
+
+			if provider == campaignForgejo && bumps && requested == declared {
+				t.Errorf("%s:%d: the %s release bumps to %s, which the demo already declares; Forgejo refuses a bump that changes nothing, so request another version",
+					filepath.Base(lane), number, words[1], requested)
 			}
 
 			return nil

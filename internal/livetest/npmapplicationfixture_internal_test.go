@@ -17,6 +17,7 @@ import (
 
 	"github.com/diggsweden/forge-ci/internal/domain/errs"
 	domainpublish "github.com/diggsweden/forge-ci/internal/domain/publish"
+	"github.com/diggsweden/forge-ci/internal/testutil/reporoot"
 )
 
 func TestNPMApplicationFixtureSourceBoundary(t *testing.T) {
@@ -310,5 +311,36 @@ func TestNPMApplicationActualSourceRenderer(t *testing.T) {
 		}
 
 		t.Logf("admitted source %s; development=%t private fixture %s; CI-only diff:\n%s", source.Commit, development, fixture.Commit, diff)
+	}
+}
+
+// The stable fixture keeps the recipe's npm version bump and runs it in the
+// trial's Node image, as it runs the build.
+func TestNPMStableReleaseWorkflowBumpsInTheTrialImage(t *testing.T) {
+	t.Parallel()
+
+	recipe, err := os.ReadFile(filepath.Join(reporoot.Path(t), "test/live/demos/hello-npm-service/consumer/.forgejo/workflows/release.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	pin, err := ReadConsumerPin(map[string]string{trialReleaseWorkflow: string(recipe)})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	image := "registry.invalid/node@sha256:" + strings.Repeat("a", 64)
+
+	workflow, err := npmStableReleaseWorkflow(string(recipe), pin, image)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !strings.Contains(workflow, "      version-bump: npm\n") || !strings.Contains(workflow, "      version-bump-image: "+image+"\n") {
+		t.Fatalf("the stable fixture does not bump package.json in the trial's image:\n%s", workflow)
+	}
+
+	if _, err = npmStableReleaseWorkflow(npmVersionBumpImage.ReplaceAllLiteralString(string(recipe), ""), pin, image); !errors.Is(err, errNPMRecipeStructure) {
+		t.Fatalf("a recipe without a version-bump image was accepted: %v", err)
 	}
 }

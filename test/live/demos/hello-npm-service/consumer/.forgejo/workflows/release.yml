@@ -26,9 +26,11 @@ jobs:
       release-git-host-key-fingerprint: ${{ vars.RELEASE_GIT_HOST_KEY_FINGERPRINT }}
       verify-release-request-signature: 'true'
       release-request-allowed-signers: .forgejo/release-allowed-signers
-      # No version bump: a release requests the version package.json declares
-      # (version=0.1.0). Select version-bump and a pinned Node bump image
-      # explicitly for a version-increment trial.
+      # The release commit carries the version: a key-free job runs
+      # `npm version` in the pinned Node image and the signing job checks
+      # and applies its patch.
+      version-bump: npm
+      version-bump-image: docker.io/library/node:24.17.0-trixie@sha256:61db8992b5c481488fe236ea69fe94035ba73df76a474051ed2e9713f3a15e5a
       sign-distro-packages: 'false'
       publish-container-images: 'true'
     secrets:

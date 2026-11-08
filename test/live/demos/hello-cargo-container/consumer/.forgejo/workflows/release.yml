@@ -26,6 +26,11 @@ jobs:
       release-git-host-key-fingerprint: ${{ vars.RELEASE_GIT_HOST_KEY_FINGERPRINT }}
       verify-release-request-signature: 'false'
       release-request-allowed-signers: .forgejo/release-allowed-signers
+      # The release commit carries the version: a key-free job sets it in
+      # Cargo.toml and refreshes Cargo.lock in the pinned Rust image, and
+      # the signing job checks and applies its patch.
+      version-bump: cargo
+      version-bump-image: docker.io/library/rust:1.99.1-trixie@sha256:8a4e90c7946b74626488b1446f712c0fe0ed1a596cbd3d871684bc9c5433ae07
       sign-distro-packages: 'false'
       publish-container-images: 'true'
     secrets:
