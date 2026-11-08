@@ -60,6 +60,9 @@ snapshot_gitlab_publish() {
   snapshot_publish "${name}" snapshot-layouts
 }
 
+# The administrator's enforce-* settings are the root's flags, and
+# snapshot_engine passes them to every engine call; a root flag given again
+# after the subcommand is a duplicate the engine refuses.
 snapshot_gitlab_generate() {
   snapshot_engine plan gitlab-snapshot-pipeline --plan "$1" --output "$2" \
     --project "${SNAPSHOT_LAYER_PROJECT:?}" --engine-sha "${SNAPSHOT_ENGINE_SHA:?}" \
@@ -70,6 +73,5 @@ snapshot_gitlab_generate() {
     --runtime-image-java "${SNAPSHOT_ARTIFACT_IMAGE_JAVA:-${SNAPSHOT_JOB_IMAGE}}" \
     --runtime-image-node "${SNAPSHOT_ARTIFACT_IMAGE_NODE:-${SNAPSHOT_JOB_IMAGE}}" \
     --runtime-image-rust "${SNAPSHOT_ARTIFACT_IMAGE_RUST:-${SNAPSHOT_JOB_IMAGE}}" \
-    --runner-tags "${SNAPSHOT_RUNNER_TAGS:-[]}" --amd64-tags "${SNAPSHOT_AMD64_TAGS:-[]}" --arm64-tags "${SNAPSHOT_ARM64_TAGS:-[]}" \
-    --enforce-application-tests="${SNAPSHOT_ADMIN_APPLICATION_TESTS:?}" --enforce-vulnerabilities="${SNAPSHOT_ADMIN_VULNERABILITIES:?}"
+    --runner-tags "${SNAPSHOT_RUNNER_TAGS:-[]}" --amd64-tags "${SNAPSHOT_AMD64_TAGS:-[]}" --arm64-tags "${SNAPSHOT_ARM64_TAGS:-[]}"
 }
