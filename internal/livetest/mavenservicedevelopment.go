@@ -12,13 +12,13 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"slices"
 	"strconv"
 	"strings"
 
 	"github.com/diggsweden/forge-ci/internal/domain/config"
 	"github.com/diggsweden/forge-ci/internal/domain/container"
 	"github.com/diggsweden/forge-ci/internal/domain/projecttype"
+	"github.com/diggsweden/forge-ci/internal/domain/snapshotimage"
 )
 
 var (
@@ -28,7 +28,7 @@ var (
 	errServiceSourceBranch      = errors.New("select a valid source branch different from policy main")
 	errServiceFixtureRelative   = errors.New("fixture must be an absolute CI script path")
 	errServiceFixtureNotRegular = errors.New("fixture must be a regular CI script")
-	errMavenServiceProducer     = errors.New("the Maven service development workflow checks a root Maven application, so its snapshot's producers are Maven")
+	errMavenServiceProducer     = errors.New("the Maven service development workflow checks the root Maven application, so its snapshot's producers are that application alone")
 )
 
 // MavenServiceDevelopmentConfig supplies trusted trial infrastructure. Fixture
@@ -76,7 +76,7 @@ func mavenServiceDevelopmentFixture(ctx context.Context, source Consumer, config
 		return source, err
 	}
 
-	if err = mavenServiceProducers(service.config); err != nil {
+	if err = mavenServiceProducers(service.plan); err != nil {
 		return source, err
 	}
 
@@ -115,14 +115,15 @@ func mavenServiceDevelopmentFixture(ctx context.Context, source Consumer, config
 	return staged.Consumer, err
 }
 
-// mavenServiceProducers holds an admitted service snapshot's declaration to
-// the Maven service development workflow, the one development route Forgejo
-// has: the producers its container is built from, when it has any, are Maven
-// applications, which the workflow's check job builds again as the root
-// Maven application. A container-first service has none.
-func mavenServiceProducers(cfg *config.Config) error {
-	for _, artifact := range cfg.Artifacts {
-		if slices.Contains(cfg.Containers[0].From, artifact.Name) && artifact.ProjectType != projecttype.Maven {
+// mavenServiceProducers is the Maven service development workflow's rule,
+// the harness's and not the planner's: the workflow checks the JAR of the
+// root Maven application again after the snapshot, so the producers the
+// snapshot builds the container from, when it has any, are that root Maven
+// application and nothing else. The snapshot itself builds a root producer
+// of any family it has an image for, as the GitLab route does.
+func mavenServiceProducers(plan snapshotimage.Plan) error {
+	for _, artifact := range plan.Artifacts {
+		if artifact.ProjectType != projecttype.Maven || artifact.WorkingDirectory != "." || artifact.BuildType != config.BuildTypeApplication {
 			return errMavenServiceProducer
 		}
 	}

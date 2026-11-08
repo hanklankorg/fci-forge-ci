@@ -13,8 +13,8 @@ import (
 	"github.com/diggsweden/forge-ci/internal/domain/build"
 	"github.com/diggsweden/forge-ci/internal/domain/config"
 	"github.com/diggsweden/forge-ci/internal/domain/pipeline"
-	"github.com/diggsweden/forge-ci/internal/domain/projecttype"
 	"github.com/diggsweden/forge-ci/internal/domain/snapshotimage"
+	"github.com/diggsweden/forge-ci/internal/domain/version"
 	"gopkg.in/yaml.v3"
 )
 
@@ -23,10 +23,13 @@ import (
 // component on GitLab, over the consumer's own declaration of one container.
 // The trial overlays that declaration, native linux/amd64 and unsigned, into
 // ServiceSnapshotDeclarationFile and judges the snapshot by the frozen plan
-// and the receipts the route leaves. A consumer whose declaration the snapshot
-// cannot build has no development route, and a lifecycle refuses it.
+// and the receipts the route leaves. What a snapshot builds is the planner's
+// rule (snapshotimage.New), and the harness keeps no copy of it: a
+// declaration is admitted by planning it. The harness adds its own acceptance
+// scope alone, serviceSnapshotScope. A consumer whose declaration the planner
+// refuses has no development route, and a lifecycle refuses it.
 
-var errServiceDeclaration = errors.New("a service snapshot requires one container of the root Containerfile and context, native amd64, without image name, tag suffix, build secrets, extraction or provenance, from at most one root artifact of a snapshot family, an application where the family has libraries")
+var errServiceDeclaration = errors.New("the trial judges one container of the root Containerfile and context, declaring native amd64, without image name, tag suffix or provenance, from at most one artifact")
 
 // ServiceSnapshotDeclarationFile is the consumer path of the service
 // snapshot's declaration: the consumer's own declaration, overlaid for the
@@ -47,18 +50,16 @@ func ServiceSnapshotSource(consumerRoot string) (string, error) {
 }
 
 // serviceSnapshot is a consumer admitted for a service snapshot: its
-// declaration overlaid for the trial, parsed, and the toolchain families of
-// the producers the snapshot builds its container from.
+// declaration overlaid for the trial, and the plan the planner makes of it.
 type serviceSnapshot struct {
 	Consumer
 
 	declaration string
-	config      *config.Config
-	families    []string
+	plan        snapshotimage.Plan
 }
 
 // serviceSnapshotDeclaration admits the consumer for a service snapshot: a
-// root Containerfile, and at source a declaration the overlay accepts.
+// root Containerfile, and at source a declaration the planner plans.
 func serviceSnapshotDeclaration(ctx context.Context, consumer Consumer, source string) (serviceSnapshot, error) {
 	if _, err := githubWorkflow(ctx, consumer, "Containerfile"); err != nil {
 		return serviceSnapshot{}, err
@@ -69,12 +70,12 @@ func serviceSnapshotDeclaration(ctx context.Context, consumer Consumer, source s
 		return serviceSnapshot{}, err
 	}
 
-	declaration, cfg, err := serviceSnapshotDeclarationOverlay(declared)
+	declaration, plan, err := serviceSnapshotDeclarationOverlay(declared)
 	if err != nil {
 		return serviceSnapshot{}, err
 	}
 
-	return serviceSnapshot{Consumer: consumer, declaration: declaration, config: cfg, families: serviceSnapshotFamilies(cfg)}, nil
+	return serviceSnapshot{Consumer: consumer, declaration: declaration, plan: plan}, nil
 }
 
 // stageFiles commits the files onto the admitted tree, in the consumer's
@@ -130,25 +131,18 @@ func (consumer Consumer) WithServiceSnapshotDeclaration(tb TB, source string) Co
 func ServiceSnapshotFamilies(ctx context.Context, tb TB, consumer Consumer) []string {
 	tb.Helper()
 
-	return serviceSnapshotFamilies(readServiceSnapshotDeclaration(ctx, tb, consumer))
+	in, err := serviceSnapshotStandInInput()
+	if err != nil {
+		tb.Fatalf("service plan input: %v", err)
+	}
+
+	return serviceSnapshotFamilies(ServiceSnapshotPlan(ctx, tb, consumer, in))
 }
 
 // ServiceSnapshotPlan reads the staged declaration through the same Git
 // reader as the fixtures, then plans it with the shared planner. Acceptance
 // must not assume that every service is container-first.
 func ServiceSnapshotPlan(ctx context.Context, tb TB, consumer Consumer, in snapshotimage.Input) snapshotimage.Plan {
-	tb.Helper()
-
-	plan, err := snapshotimage.New(pipeline.NewConfigPlan(readServiceSnapshotDeclaration(ctx, tb, consumer)), in)
-	if err != nil {
-		tb.Fatalf("service plan: %v", err)
-	}
-
-	return plan
-}
-
-// readServiceSnapshotDeclaration parses the consumer's staged declaration.
-func readServiceSnapshotDeclaration(ctx context.Context, tb TB, consumer Consumer) *config.Config {
 	tb.Helper()
 
 	body, err := githubWorkflow(ctx, consumer, ServiceSnapshotDeclarationFile)
@@ -161,21 +155,48 @@ func readServiceSnapshotDeclaration(ctx context.Context, tb TB, consumer Consume
 		tb.Fatalf("service declaration: %v", err)
 	}
 
-	return cfg
+	plan, err := snapshotimage.New(pipeline.NewConfigPlan(cfg), in)
+	if err != nil {
+		tb.Fatalf("service plan: %v", err)
+	}
+
+	return plan
+}
+
+// serviceSnapshotStandInInput is the planner input a declaration is admitted
+// with before the trial has a source: the planner's rules on a declaration do
+// not depend on the source identity, so a stand-in one plans it.
+func serviceSnapshotStandInInput() (snapshotimage.Input, error) {
+	const (
+		shortSHA = "aaaaaaa"
+		branch   = "development"
+	)
+
+	tag, err := version.ComposeSnapshotContainerTag("0.0.0", branch, shortSHA)
+	if err != nil {
+		return snapshotimage.Input{}, err
+	}
+
+	return snapshotimage.Input{
+		SourceSHA: shortSHA + strings.Repeat("a", 33), SourceBranch: branch, Tag: tag,
+		ImageRepository: "registry.invalid/service/snapshot", SourceDateEpoch: "1", Publish: true,
+	}, nil
 }
 
 // serviceSnapshotDeclarationOverlay preserves the declared build graph and
 // raw ecosystem settings. Only the trial's native platform and unsigned
 // policy are overlaid; release signing settings remain in the original
-// declaration. It returns the overlay and the parsed original.
-func serviceSnapshotDeclarationOverlay(body string) (string, *config.Config, error) {
+// declaration. The overlay is then planned as the snapshot will plan it, and
+// the planner's refusal is the declaration's. It returns the overlay and its
+// plan.
+func serviceSnapshotDeclarationOverlay(body string) (string, snapshotimage.Plan, error) {
 	cfg, err := parseServiceDeclaration(body)
 	if err != nil {
-		return "", nil, err
+		return "", snapshotimage.Plan{}, err
 	}
 
-	if err = validateServiceSnapshot(cfg); err != nil {
-		return "", nil, err
+	if err = serviceSnapshotScope(cfg); err != nil {
+		return "", snapshotimage.Plan{}, err
 	}
 
 	ctr := &cfg.Containers[0]
@@ -187,70 +208,62 @@ func serviceSnapshotDeclarationOverlay(body string) (string, *config.Config, err
 		Artifacts yaml.Node `yaml:"artifacts,omitempty"`
 	}
 	if err = yaml.Unmarshal([]byte(body), &raw); err != nil {
-		return "", nil, err
+		return "", snapshotimage.Plan{}, err
 	}
 
-	overlay, err := yaml.Marshal(struct {
+	overlay, err := encodeYAML(struct {
 		Artifacts  yaml.Node          `yaml:"artifacts,omitempty"`
 		Containers []config.Container `yaml:"containers"`
 	}{raw.Artifacts, cfg.Containers})
 	if err != nil {
-		return "", nil, err
+		return "", snapshotimage.Plan{}, err
 	}
 	// An alias whose anchor lived in an omitted release-policy block must not
 	// leave an invalid private declaration behind.
-	if _, err = parseServiceDeclaration(string(overlay)); err != nil {
-		return "", nil, err
+	overlaid, err := parseServiceDeclaration(overlay)
+	if err != nil {
+		return "", snapshotimage.Plan{}, err
 	}
 
-	return string(overlay), cfg, nil
+	in, err := serviceSnapshotStandInInput()
+	if err != nil {
+		return "", snapshotimage.Plan{}, err
+	}
+
+	plan, err := snapshotimage.New(pipeline.NewConfigPlan(overlaid), in)
+	if err != nil {
+		return "", snapshotimage.Plan{}, err
+	}
+
+	return overlay, plan, nil
 }
 
-// validateServiceSnapshot holds a declaration to what a service snapshot
-// builds: one container, built from the root Containerfile and context on
-// native amd64, plain, from producers the snapshot has.
-func validateServiceSnapshot(cfg *config.Config) error {
+// serviceSnapshotScope is the trial's acceptance scope, not a product rule:
+// the planner decides what a snapshot builds; the trial judges one image,
+// built from the root Containerfile and context, under the repository and
+// tag it derives, so it takes one container without image name or tag suffix,
+// from at most one artifact. The overlay narrows the declared platforms to
+// native amd64 and must not widen or alter them, so amd64 is declared and
+// every declared platform is native. Declared provenance is refused before
+// the overlay drops it, so an unsupported request is not silently turned into
+// a supported one.
+func serviceSnapshotScope(cfg *config.Config) error {
 	if len(cfg.Containers) != 1 {
 		return errServiceDeclaration
 	}
 
-	typed := pipeline.NewConfigPlan(cfg)
-	if !serviceSnapshotContainer(cfg.Containers[0], typed.Containers.All[0]) {
-		return errServiceDeclaration
-	}
+	ctr := cfg.Containers[0]
+	selected := pipeline.NewConfigPlan(cfg).Containers.All[0]
 
-	for _, artifact := range serviceSnapshotProducers(typed, cfg.Containers[0].From) {
-		if !serviceSnapshotProducer(artifact) {
-			return errServiceDeclaration
-		}
+	if ctr.ImageName != "" || ctr.TagSuffix != "" || len(ctr.From) > 1 || (ctr.EnableSLSA != nil && *ctr.EnableSLSA) ||
+		selected.ContainerFile != "Containerfile" || selected.Context != "." || !serviceSnapshotDeclaresAMD64(selected.Platforms) {
+		return errServiceDeclaration
 	}
 
 	return nil
 }
 
-// serviceSnapshotContainer reports whether the declared container is one a
-// service snapshot builds: the root Containerfile and context, native amd64,
-// plain, from at most one artifact. Unsupported provenance is not silently
-// turned into a supported request.
-func serviceSnapshotContainer(ctr config.Container, selected pipeline.PlannedContainer) bool {
-	plain := ctr.ImageName == "" && ctr.TagSuffix == "" && len(ctr.From) <= 1 && len(ctr.BuildSecrets) == 0 && ctr.Extract == nil &&
-		(ctr.EnableSLSA == nil || !*ctr.EnableSLSA)
-
-	return plain && selected.ContainerFile == "Containerfile" && selected.Context == "." && serviceSnapshotSupportsAMD64(selected.Platforms)
-}
-
-// serviceSnapshotProducer reports whether an artifact is one a service
-// snapshot builds first: a root artifact of a snapshot family, an application
-// where the family has libraries.
-func serviceSnapshotProducer(artifact pipeline.PlannedArtifact) bool {
-	if _, err := snapshotimage.ToolchainFamily(artifact.ProjectType); err != nil || artifact.WorkingDirectory != "." {
-		return false
-	}
-
-	return !projecttype.IsIn(artifact.ProjectType, []projecttype.Type{projecttype.Maven, projecttype.Gradle}) || artifact.BuildType == config.BuildTypeApplication
-}
-
-func serviceSnapshotSupportsAMD64(platforms string) bool {
+func serviceSnapshotDeclaresAMD64(platforms string) bool {
 	hasAMD64 := false
 	seen := map[string]bool{}
 
@@ -266,32 +279,13 @@ func serviceSnapshotSupportsAMD64(platforms string) bool {
 	return hasAMD64
 }
 
-// serviceSnapshotProducers are the artifacts the container is built from
-// that the snapshot builds first: as the planner, a container-first Go or
-// Cargo artifact is built by the Containerfile and is no producer.
-func serviceSnapshotProducers(typed pipeline.ConfigPlan, from []string) []pipeline.PlannedArtifact {
-	producers := []pipeline.PlannedArtifact{}
-
-	for _, name := range from {
-		for _, artifact := range typed.Artifacts.All {
-			containerFirst := (artifact.ProjectType == projecttype.Go && artifact.GoBuildMode == config.GoBuildModeContainerFirst) ||
-				(artifact.ProjectType == projecttype.Cargo && artifact.CargoBuildMode == config.CargoBuildModeContainerFirst)
-			if artifact.Name == name && !containerFirst {
-				producers = append(producers, artifact)
-			}
-		}
-	}
-
-	return producers
-}
-
-// serviceSnapshotFamilies lists the toolchain families of an admitted
-// declaration's producers, each once, sorted.
-func serviceSnapshotFamilies(cfg *config.Config) []string {
-	typed := pipeline.NewConfigPlan(cfg)
+// serviceSnapshotFamilies lists the toolchain families of a plan's producers,
+// each once, sorted.
+func serviceSnapshotFamilies(plan snapshotimage.Plan) []string {
 	families := []string{}
 
-	for _, artifact := range serviceSnapshotProducers(typed, cfg.Containers[0].From) {
+	for _, artifact := range plan.Artifacts {
+		// The planner admitted every producer by this mapping.
 		if family, err := snapshotimage.ToolchainFamily(artifact.ProjectType); err == nil {
 			families = append(families, family)
 		}

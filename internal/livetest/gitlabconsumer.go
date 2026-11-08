@@ -237,7 +237,7 @@ func renderGitLabAdminPolicy(body []byte, layer Layer, images GitLabGateImages) 
 		}
 	}
 
-	return encodeAdminYAML(document)
+	return encodeYAML(document)
 }
 
 // GitLabDevelopmentPolicy preserves root workflow admission and development
@@ -325,7 +325,7 @@ func renderGitLabDevelopmentPolicy(root, gate []byte, layer Layer, images GitLab
 		return "", "", fmt.Errorf("development root pipeline must include %s: %w", GitLabGateFile, errs.ErrValidation)
 	}
 
-	pipeline, err := encodeAdminYAML(&document)
+	pipeline, err := encodeYAML(&document)
 
 	return pipeline, renderedGate, err
 }
@@ -369,13 +369,7 @@ func renderGitLabConsumer(body []byte, layer Layer, images GitLabGateImages) (st
 		}
 	}
 
-	var encoded bytes.Buffer
-
-	encoder := yaml.NewEncoder(&encoded)
-	encoder.SetIndent(2)
-	err = encoder.Encode(document)
-
-	return encoded.String(), err
+	return encodeYAML(document)
 }
 
 // gitlabYAMLString is a string scalar the trial adds to a consumer's YAML.

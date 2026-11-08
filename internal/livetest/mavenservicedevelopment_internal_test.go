@@ -242,43 +242,55 @@ func TestServiceSnapshotDeclarationStagesOnlyTheDeclaration(t *testing.T) {
 }
 
 // The Maven service development workflow builds the root Maven application
-// again in its check job, so a snapshot whose producer is of another family,
-// which the snapshot itself would build, is not this route's.
+// again in its check job, so a snapshot whose producer is another family's,
+// nested, or a library, all of which the snapshot itself builds, is not this
+// route's: the rule is the workflow's, and the same declaration is a service
+// snapshot on a forge whose policy builds the producer itself.
 func TestMavenServiceDevelopmentRefusesOtherProducers(t *testing.T) {
-	root, git := stageTestRepo(t, "sha1")
-	for path, body := range map[string]string{
-		".forge-ci/artifacts.yml": "artifacts:\n  - name: app\n    project-type: npm\n    working-directory: .\ncontainers:\n  - name: service\n    from: [app]\n    container-file: Containerfile\n    context: .\n    platforms: linux/amd64\n",
-		"pom.xml":                 "<project><artifactId>service</artifactId><version>1.0.0</version></project>",
-		"package.json":            "{\"name\": \"app\", \"version\": \"1.0.0\"}",
-		"Containerfile":           "FROM example.invalid/node\nCOPY . /src\n",
+	for name, artifact := range map[string]string{
+		"npm producer":            "{name: app, project-type: npm}",
+		"nested Maven producer":   "{name: app, project-type: maven, working-directory: web, build-type: application}",
+		"Maven library producer":  "{name: app, project-type: maven, build-type: library}",
+		"Gradle library producer": "{name: app, project-type: gradle, build-type: library}",
 	} {
-		stageTestWrite(t, root, path, body, 0644)
-	}
+		t.Run(name, func(t *testing.T) {
+			declaration := "artifacts: [" + artifact + "]\ncontainers: [{name: service, from: [app], container-file: Containerfile, context: ., platforms: linux/amd64}]\n"
 
-	stageTestCommit(t, git, root)
+			root, git := stageTestRepo(t, "sha1")
+			for path, body := range map[string]string{
+				".forge-ci/artifacts.yml": declaration,
+				"pom.xml":                 "<project><artifactId>service</artifactId><version>1.0.0</version></project>",
+				"web/pom.xml":             "<project><artifactId>web</artifactId><version>1.0.0</version></project>",
+				"package.json":            "{\"name\": \"app\", \"version\": \"1.0.0\"}",
+				"Containerfile":           "FROM example.invalid/base\nCOPY . /src\n",
+			} {
+				stageTestWrite(t, root, path, body, 0644)
+			}
 
-	source, err := openConsumer(t.Context(), git, root, t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
+			stageTestCommit(t, git, root)
 
-	recipe, err := filepath.Abs("../../test/live/demos/hello-maven-service/consumer")
-	if err != nil {
-		t.Fatal(err)
-	}
+			source, err := openConsumer(t.Context(), git, root, t.TempDir())
+			if err != nil {
+				t.Fatal(err)
+			}
 
-	_, err = mavenServiceDevelopmentFixture(t.Context(), source, MavenServiceDevelopmentConfig{
-		RecipeDirectory: recipe, JavaImage: "registry.invalid/java@sha256:" + strings.Repeat("a", 64),
-		Branch: "development", ReadinessURL: "http://127.0.0.1:8080/health",
-	})
-	if !errors.Is(err, errMavenServiceProducer) {
-		t.Fatalf("an npm producer: %v, want %v", err, errMavenServiceProducer)
-	}
+			recipe, err := filepath.Abs("../../test/live/demos/hello-maven-service/consumer")
+			if err != nil {
+				t.Fatal(err)
+			}
 
-	// The same declaration is a service snapshot on a forge whose policy
-	// builds the producer itself.
-	if _, _, err = serviceSnapshotDeclarationOverlay("artifacts:\n  - name: app\n    project-type: npm\n    working-directory: .\ncontainers:\n  - name: service\n    from: [app]\n"); err != nil {
-		t.Fatal(err)
+			_, err = mavenServiceDevelopmentFixture(t.Context(), source, MavenServiceDevelopmentConfig{
+				RecipeDirectory: recipe, JavaImage: "registry.invalid/java@sha256:" + strings.Repeat("a", 64),
+				Branch: "development", ReadinessURL: "http://127.0.0.1:8080/health",
+			})
+			if !errors.Is(err, errMavenServiceProducer) {
+				t.Fatalf("%s: %v, want %v", name, err, errMavenServiceProducer)
+			}
+
+			if _, _, err = serviceSnapshotDeclarationOverlay(declaration); err != nil {
+				t.Fatalf("%s is not a service snapshot's declaration: %v", name, err)
+			}
+		})
 	}
 }
 

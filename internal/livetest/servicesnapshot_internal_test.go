@@ -14,7 +14,6 @@ import (
 	"github.com/diggsweden/forge-ci/internal/domain/pipeline"
 	"github.com/diggsweden/forge-ci/internal/domain/projecttype"
 	"github.com/diggsweden/forge-ci/internal/domain/snapshotimage"
-	"github.com/diggsweden/forge-ci/internal/domain/version"
 	"github.com/diggsweden/forge-ci/internal/testutil/reporoot"
 )
 
@@ -39,12 +38,12 @@ containers:
     scan-severity: HIGH
 `
 
-	overlay, cfg, err := serviceSnapshotDeclarationOverlay(body)
+	overlay, plan, err := serviceSnapshotDeclarationOverlay(body)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if families := serviceSnapshotFamilies(cfg); !slices.Equal(families, []string{snapshotimage.FamilyJava}) {
+	if families := serviceSnapshotFamilies(plan); !slices.Equal(families, []string{snapshotimage.FamilyJava}) {
 		t.Fatalf("families %v, want the Maven application's java", families)
 	}
 
@@ -61,37 +60,29 @@ containers:
 	if !reflect.DeepEqual(before.Containers, after.Containers) {
 		t.Fatalf("container build settings changed: %s", overlay)
 	}
+	// The consumer's own yamlfmt, two-space, lints the staged declaration.
+	if strings.Contains(overlay, "\n    - ") || !strings.Contains(overlay, "\n  - name: service\n") {
+		t.Fatalf("overlay is not two-space indented YAML:\n%s", overlay)
+	}
 }
 
+// The plan is the planner's: even a declared artifact is not a producer
+// unless the image depends on it, and a container-first artifact is built by
+// the Containerfile. Container-first consumers must not acquire an eager
+// extra build.
 func TestServiceSnapshotDeclarationContainerOnlyHasNoProducer(t *testing.T) {
-	// Even a declared artifact is not a producer unless the image depends on
-	// it, and a container-first artifact is built by the Containerfile.
-	// Container-first consumers must not acquire an eager extra build.
 	for _, declaration := range []string{
 		"containers: [{name: service}]\n",
 		"artifacts: [{name: unused, project-type: maven, build-type: application}]\ncontainers: [{name: service}]\n",
 		"artifacts: [{name: service, project-type: cargo, config: {build-mode: container-first}}]\ncontainers: [{name: service, from: [service]}]\n",
 	} {
-		overlay, cfg, err := serviceSnapshotDeclarationOverlay(declaration)
+		_, plan, err := serviceSnapshotDeclarationOverlay(declaration)
 		if err != nil {
 			t.Fatal(err)
 		}
 
-		if families := serviceSnapshotFamilies(cfg); len(families) != 0 {
-			t.Fatalf("container-first declaration has producer families %v", families)
-		}
-
-		tag, err := version.ComposeSnapshotContainerTag("1.0.0", "development", "aaaaaaa")
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		plan, err := snapshotimage.New(serviceTestConfigPlan(t, overlay), snapshotimage.Input{
-			SourceSHA: strings.Repeat("a", 40), SourceBranch: "development", Tag: tag,
-			ImageRepository: "registry.invalid/owner/service", SourceDateEpoch: "1", Publish: true,
-		})
-		if err != nil || len(plan.Artifacts) != 0 || len(plan.Builds) != 1 || len(plan.Builds[0].RequiredArtifacts) != 0 {
-			t.Fatalf("container-first acquired an artifact producer: %+v %v", plan, err)
+		if families := serviceSnapshotFamilies(plan); len(families) != 0 || len(plan.Artifacts) != 0 || len(plan.Builds) != 1 || len(plan.Builds[0].RequiredArtifacts) != 0 {
+			t.Fatalf("container-first acquired an artifact producer: %v %+v", families, plan)
 		}
 	}
 }
@@ -107,41 +98,44 @@ func TestServiceSnapshotDeclarationAdmitsEveryProducerFamily(t *testing.T) {
 		snapshotimage.FamilyRust: "{name: app, project-type: cargo, config: {build-mode: artifact-first}}",
 	} {
 		t.Run(family, func(t *testing.T) {
-			_, cfg, err := serviceSnapshotDeclarationOverlay("artifacts: [" + artifact + "]\ncontainers: [{name: service, from: [app]}]\n")
+			_, plan, err := serviceSnapshotDeclarationOverlay("artifacts: [" + artifact + "]\ncontainers: [{name: service, from: [app]}]\n")
 			if err != nil {
 				t.Fatal(err)
 			}
 
-			if families := serviceSnapshotFamilies(cfg); !slices.Equal(families, []string{family}) {
+			if families := serviceSnapshotFamilies(plan); !slices.Equal(families, []string{family}) {
 				t.Fatalf("families %v, want %s", families, family)
 			}
 		})
 	}
 }
 
+// A refusal is the planner's where the planner has the rule, and the trial's
+// acceptance scope's where the trial has it; neither falls back to another
+// route.
 func TestServiceSnapshotDeclarationRefusesUnsupportedInputs(t *testing.T) {
-	for name, body := range map[string]string{
-		"missing declaration":      "",
-		"no container":             "artifacts: [{name: app, project-type: maven}]",
-		"unknown dependency":       "containers: [{name: service, from: [missing]}]",
-		"unknown setting":          "containers: [{name: service, bogus: true}]",
-		"multiple services":        "containers: [{name: a}, {name: b}]",
-		"no native amd64":          "containers: [{name: service, platforms: linux/arm64}]",
-		"unsupported architecture": "containers: [{name: service, platforms: 'linux/amd64,linux/arm/v7'}]",
-		"other context":            "containers: [{name: service, context: subdir}]",
-		"other file":               "containers: [{name: service, container-file: Otherfile}]",
-		"other image":              "containers: [{name: service, image-name: other/image}]",
-		"provenance":               "containers: [{name: service, enable-slsa: true}]",
-		"build secret":             "containers: [{name: service, build-secrets: [TOKEN]}]",
-		"extraction":               "containers: [{name: service, extract: {binary: {target: export, names: [app]}}}]",
-		"two producers":            "artifacts: [{name: a, project-type: maven, build-type: application}, {name: b, project-type: npm}]\ncontainers: [{name: service, from: [a, b]}]",
-		"nested producer":          "artifacts: [{name: app, project-type: npm, working-directory: web}]\ncontainers: [{name: service, from: [app]}]",
-		"library producer":         "artifacts: [{name: app, project-type: maven, build-type: library}]\ncontainers: [{name: service, from: [app]}]",
-		"gradle library producer":  "artifacts: [{name: app, project-type: gradle, build-type: library}]\ncontainers: [{name: service, from: [app]}]",
+	const scope = "the trial judges one container"
+
+	for name, test := range map[string]struct{ body, want string }{
+		"missing declaration":      {"", "empty input"},
+		"no container":             {"artifacts: [{name: app, project-type: maven}]", scope},
+		"unknown dependency":       {"containers: [{name: service, from: [missing]}]", "missing"},
+		"unknown setting":          {"containers: [{name: service, bogus: true}]", "bogus"},
+		"multiple services":        {"containers: [{name: a}, {name: b}]", scope},
+		"no native amd64":          {"containers: [{name: service, platforms: linux/arm64}]", scope},
+		"unsupported architecture": {"containers: [{name: service, platforms: 'linux/amd64,linux/arm/v7'}]", scope},
+		"other context":            {"containers: [{name: service, context: subdir}]", scope},
+		"other file":               {"containers: [{name: service, container-file: Otherfile}]", scope},
+		"other image":              {"containers: [{name: service, image-name: other/image}]", scope},
+		"two producers":            {"artifacts: [{name: a, project-type: maven, build-type: application}, {name: b, project-type: npm}]\ncontainers: [{name: service, from: [a, b]}]", scope},
+		"provenance":               {"containers: [{name: service, enable-slsa: true}]", scope},
+		"build secret":             {"containers: [{name: service, build-secrets: [TOKEN]}]", "build secrets, extraction and OCI provenance are unsupported"},
+		"extraction":               {"containers: [{name: service, extract: {binary: {target: export, names: [app]}}}]", "build secrets, extraction and OCI provenance are unsupported"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			if overlay, _, err := serviceSnapshotDeclarationOverlay(body); err == nil || overlay != "" {
-				t.Fatalf("unsupported declaration fell back to another route: %q, %v", overlay, err)
+			overlay, _, err := serviceSnapshotDeclarationOverlay(test.body)
+			if err == nil || overlay != "" || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("unsupported declaration: %q, %v; want a refusal naming %q", overlay, err, test.want)
 			}
 		})
 	}
@@ -155,19 +149,19 @@ func TestServiceSnapshotSourceOfTheDemos(t *testing.T) {
 	for demo, want := range map[string]struct {
 		source   string
 		families []string
-		refused  bool
+		refused  string
 	}{
 		"hello-maven-service":   {source: GitLabDefaultArtifactsConfig, families: []string{snapshotimage.FamilyJava}},
 		"hello-npm-service":     {source: GitLabDefaultArtifactsConfig, families: []string{snapshotimage.FamilyNode}},
 		"hello-cargo-container": {source: GitLabDedicatedReleaseImagesConfig, families: []string{}},
-		// Two runtime images: a service snapshot is of one container.
-		"hello-cargo-workspace": {source: GitLabDedicatedReleaseImagesConfig, refused: true},
-		// Extraction, which the snapshot planner refuses.
-		"hello-go-service": {source: GitLabDefaultArtifactsConfig, refused: true},
+		// Two runtime images: the trial judges one container.
+		"hello-cargo-workspace": {source: GitLabDedicatedReleaseImagesConfig, refused: "one container"},
+		// Extraction, which the planner refuses.
+		"hello-go-service": {source: GitLabDefaultArtifactsConfig, refused: "extraction"},
 		// No container, so no snapshot.
-		"hello-go-cli":      {source: GitLabDefaultArtifactsConfig, refused: true},
-		"hello-maven":       {source: GitLabDefaultArtifactsConfig, refused: true},
-		"hello-npm-package": {source: GitLabDefaultArtifactsConfig, refused: true},
+		"hello-go-cli":      {source: GitLabDefaultArtifactsConfig, refused: "one container"},
+		"hello-maven":       {source: GitLabDefaultArtifactsConfig, refused: "one container"},
+		"hello-npm-package": {source: GitLabDefaultArtifactsConfig, refused: "one container"},
 	} {
 		t.Run(demo, func(t *testing.T) {
 			consumer := filepath.Join(reporoot.Path(t), "test/live/demos", demo, "consumer")
@@ -177,10 +171,10 @@ func TestServiceSnapshotSourceOfTheDemos(t *testing.T) {
 				t.Fatalf("ServiceSnapshotSource() = %q, %v, want %q", source, err, want.source)
 			}
 
-			_, cfg, err := serviceSnapshotDeclarationOverlay(string(reporoot.ReadFile(t, "test/live/demos/"+demo+"/consumer/"+source)))
-			if want.refused {
-				if err == nil {
-					t.Fatalf("%s of %s is a service snapshot's declaration; the demo's development route is not refused", source, demo)
+			_, plan, err := serviceSnapshotDeclarationOverlay(string(reporoot.ReadFile(t, "test/live/demos/"+demo+"/consumer/"+source)))
+			if want.refused != "" {
+				if err == nil || !strings.Contains(err.Error(), want.refused) {
+					t.Fatalf("%s of %s: %v, want the development route refused for %q", source, demo, err, want.refused)
 				}
 
 				return
@@ -190,7 +184,7 @@ func TestServiceSnapshotSourceOfTheDemos(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			if families := serviceSnapshotFamilies(cfg); !slices.Equal(families, want.families) {
+			if families := serviceSnapshotFamilies(plan); !slices.Equal(families, want.families) {
 				t.Fatalf("families %v, want %v", families, want.families)
 			}
 		})

@@ -50,7 +50,7 @@ func campaignAdmitLifecycle(provider, checkout string) error {
 		return fmt.Errorf("%s: the demo has no %s, so no service snapshot and no development route: %w", TrialLifecycle, source, errs.ErrValidation)
 	}
 
-	_, cfg, err := serviceSnapshotDeclarationOverlay(string(body))
+	_, plan, err := serviceSnapshotDeclarationOverlay(string(body))
 	if err != nil {
 		return fmt.Errorf("%s: %s is not a service snapshot's declaration, so the demo has no development route: %w: %w", TrialLifecycle, source, err, errs.ErrValidation)
 	}
@@ -63,7 +63,7 @@ func campaignAdmitLifecycle(provider, checkout string) error {
 		return fmt.Errorf("%s on %s runs the Maven service development workflow, the one Forgejo development route, and the demo has no root pom.xml: %w", TrialLifecycle, campaignForgejo, errs.ErrValidation)
 	}
 
-	if err := mavenServiceProducers(cfg); err != nil {
+	if err := mavenServiceProducers(plan); err != nil {
 		return fmt.Errorf("%s on %s: %w: %w", TrialLifecycle, campaignForgejo, err, errs.ErrValidation)
 	}
 
