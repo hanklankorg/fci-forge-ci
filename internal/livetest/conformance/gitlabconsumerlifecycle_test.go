@@ -56,8 +56,9 @@ const gitlabMainPushRule = `$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_REF_NAME
 //  4. a signed release request at the merged main, judged as a release
 //     trial's: main advanced by one signed release commit, signed tag, a
 //     release with Cosign bundles that verify, signed packages and images;
-//  5. the project holds those three pipelines, two tags, one release and the
-//     bot's deploy key, and nothing else.
+//  5. the project holds those three pipelines, the two skipped pipelines
+//     GitLab records for the release commit's "[skip ci]" pushes, two tags,
+//     one release and the bot's deploy key, and nothing else.
 //
 // Each phase ends the lifecycle when it fails, and says which phase it was.
 // The release requester's trust is the policy's request-allowed-signers input,
@@ -301,7 +302,7 @@ func runGitLabConsumerLifecycle(t *testing.T, root string, private bool) {
 
 	// Phase 5: the project holds the lifecycle and nothing else.
 	requireBranches(t, target, repo, map[string]string{layerMain: released, lifecycleBranch: head})
-	requireGitLabPipelineIDs(t, ctx, client, project, review.ID, development.ID, run.ID)
+	requireGitLabLifecyclePipelines(t, ctx, client, project, released, []int64{review.ID, development.ID, run.ID}, layerMain, profile.finalTag)
 
 	tags, _, err := client.Tags.ListTags(project, nil, gitlabapi.WithContext(ctx))
 	if err != nil {
@@ -371,6 +372,54 @@ func requireGitLabPipelineIDs(t *testing.T, ctx context.Context, client *gitlaba
 
 	if !slices.Equal(got, want) {
 		t.Fatalf("the project has pipelines %v, want exactly %v", got, want)
+	}
+}
+
+// requireGitLabLifecyclePipelines holds the project, after the release, to
+// the lifecycle's pipelines and the records GitLab keeps of the release
+// engine's own pushes. The engine pushes the release commit to the main
+// branch and the final tag with "[skip ci]" in the commit message; GitLab
+// persists an empty pipeline in status "skipped" for each such push (its
+// "Skip a pipeline" documentation: the pipeline is still created and reports
+// skipped), where Forgejo records no run. Those two are the only pipelines
+// allowed beyond the lifecycle's own, and they must be the release commit's
+// on exactly those two refs.
+func requireGitLabLifecyclePipelines(t *testing.T, ctx context.Context, client *gitlabapi.Client, project, released string, lifecycle []int64, skippedRefs ...string) {
+	t.Helper()
+
+	pipelines, _, err := client.Pipelines.ListProjectPipelines(project, &gitlabapi.ListProjectPipelinesOptions{ListOptions: gitlabapi.ListOptions{PerPage: 100}}, gitlabapi.WithContext(ctx))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	wantLifecycle := slices.Sorted(slices.Values(lifecycle))
+	wantSkipped := slices.Sorted(slices.Values(skippedRefs))
+
+	var gotLifecycle []int64
+
+	var gotSkipped []string
+
+	for _, pipeline := range pipelines {
+		switch {
+		case slices.Contains(wantLifecycle, pipeline.ID):
+			gotLifecycle = append(gotLifecycle, pipeline.ID)
+		case pipeline.Status == "skipped" && pipeline.Source == string(gitlabapi.PipelineSourcePush) && pipeline.SHA == released:
+			gotSkipped = append(gotSkipped, pipeline.Ref)
+		default:
+			t.Fatalf("the project has pipeline %d (%s %s on %s at %s), want only the lifecycle's %v and the release commit's skipped pushes on %v",
+				pipeline.ID, pipeline.Status, pipeline.Source, pipeline.Ref, pipeline.SHA, wantLifecycle, wantSkipped)
+		}
+	}
+
+	slices.Sort(gotLifecycle)
+	slices.Sort(gotSkipped)
+
+	if !slices.Equal(gotLifecycle, wantLifecycle) {
+		t.Fatalf("the project has lifecycle pipelines %v, want exactly %v", gotLifecycle, wantLifecycle)
+	}
+
+	if !slices.Equal(gotSkipped, wantSkipped) {
+		t.Fatalf("the project has skipped push pipelines for release commit %s on %v, want exactly %v", released, gotSkipped, wantSkipped)
 	}
 }
 
