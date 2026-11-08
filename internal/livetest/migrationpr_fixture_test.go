@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: The Forge CI Authors
+// SPDX-FileCopyrightText: 2026 Digg - Agency for Digital Government
 // SPDX-License-Identifier: EUPL-1.2 OR GPL-3.0-or-later
 
 package livetest
@@ -156,7 +156,7 @@ func consumerPRWorkflow(fixture consumerPRFixture) (string, error) {
 		return "          " + strings.ReplaceAll(strings.TrimSuffix(s, "\n"), "\n", "\n          ")
 	}
 
-	return fmt.Sprintf(`# SPDX-FileCopyrightText: The Forge CI Authors
+	return fmt.Sprintf(`# SPDX-FileCopyrightText: 2026 Digg - Agency for Digital Government
 # SPDX-License-Identifier: CC0-1.0
 
 name: Consumer PR unit checks

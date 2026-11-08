@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: The Forge CI Authors
+// SPDX-FileCopyrightText: 2026 Digg - Agency for Digital Government
 // SPDX-License-Identifier: EUPL-1.2 OR GPL-3.0-or-later
 
 package livetest
@@ -52,7 +52,7 @@ func (consumer Consumer) withPreseededGitLabProvenance(ctx context.Context) (Con
 		return Consumer{}, err
 	}
 
-	wrapper := "#!/usr/bin/env bash\n# SPDX-FileCopyrightText" + ": The Forge CI Authors\n# SPDX-License-Identifier" + ": CC0-1.0\nset -euo pipefail\nbash " + gitlabPreseedOriginalBuild + " \"$@\"\ntest ! -L dist\nmkdir -p dist\nprintf '%s\\n' '{\"fixture\":\"untrusted-provenance\"}' > dist/slsa-provenance.intoto.json\n"
+	wrapper := "#!/usr/bin/env bash\n# SPDX-FileCopyrightText" + ": 2026 Digg - Agency for Digital Government\n# SPDX-License-Identifier" + ": CC0-1.0\nset -euo pipefail\nbash " + gitlabPreseedOriginalBuild + " \"$@\"\ntest ! -L dist\nmkdir -p dist\nprintf '%s\\n' '{\"fixture\":\"untrusted-provenance\"}' > dist/slsa-provenance.intoto.json\n"
 	if err := consumer.stageFile(ctx, "100644", GitLabConsumerBuildScript, wrapper); err != nil {
 		return Consumer{}, err
 	}

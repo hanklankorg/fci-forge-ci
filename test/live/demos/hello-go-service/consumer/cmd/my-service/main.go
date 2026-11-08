@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Digg - Agency for Digital Government
+// SPDX-License-Identifier: CC0-1.0
+
 // Command my-service answers GET / with a greeting and GET /health with ok,
 // on port 8080.
 package main

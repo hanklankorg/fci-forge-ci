@@ -1,4 +1,4 @@
-<!-- SPDX-FileCopyrightText: The Forge CI Authors -->
+<!-- SPDX-FileCopyrightText: 2026 Digg - Agency for Digital Government -->
 <!-- SPDX-License-Identifier: CC0-1.0 -->
 
 # Fixed tools for an independently selected canonical CLI

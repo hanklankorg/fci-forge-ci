@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: The Forge CI Authors
+# SPDX-FileCopyrightText: 2026 Digg - Agency for Digital Government
 # SPDX-License-Identifier: CC0-1.0
 # workflow-call-secrets-contract: RELEASE_REGISTRY_TOKEN RELEASE_COSIGN_PRIVATE_KEY RELEASE_COSIGN_PASSPHRASE CI_RUNNER_LENDER_TOKEN
 # Callable publication for the Forge CI runtime roster. The trusted layer SHA

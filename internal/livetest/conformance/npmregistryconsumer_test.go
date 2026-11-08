@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: The Forge CI Authors
+// SPDX-FileCopyrightText: 2026 Digg - Agency for Digital Government
 // SPDX-License-Identifier: EUPL-1.2 OR GPL-3.0-or-later
 
 //go:build live
@@ -55,7 +55,7 @@ func TestForgejoNPMLibrary_RegistryConsumer(t *testing.T) {
 	}
 
 	registry := strings.TrimRight(target.BaseURL(), "/") + "/api/packages/" + target.Owner + "/npm/"
-	workflow := fmt.Sprintf(`# SPDX-FileCopyrightText: The Forge CI Authors
+	workflow := fmt.Sprintf(`# SPDX-FileCopyrightText: 2026 Digg - Agency for Digital Government
 # SPDX-License-Identifier: CC0-1.0
 name: Published npm library consumer
 on: [push]

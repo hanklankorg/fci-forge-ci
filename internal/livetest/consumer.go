@@ -46,7 +46,7 @@ const (
 	// is written in two parts, so that a licence scanner reading this file
 	// does not take the canary's header for this file's own.
 	consumerCanary     = ".forge-ci-consumer-trial.txt"
-	consumerCanaryText = "# SPDX-FileCopyrightText" + ": The Forge CI Authors\n#\n" +
+	consumerCanaryText = "# SPDX-FileCopyrightText" + ": 2026 Digg - Agency for Digital Government\n#\n" +
 		"# SPDX-License-Identifier" + ": CC0-1.0\n\nA consumer trial of the forge-ci live tier adds this file.\n"
 
 	// The messages of the two commits a trial writes. A consumer lints its

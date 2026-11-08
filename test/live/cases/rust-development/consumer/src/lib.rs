@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Digg - Agency for Digital Government
+// SPDX-License-Identifier: CC0-1.0
+
 //! Small deterministic executables for build, extraction and publication tests.
 
 pub fn version_line(role: &str) -> String {
