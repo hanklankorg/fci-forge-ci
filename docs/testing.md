@@ -1465,8 +1465,9 @@ snapshot image package the run published to the repository, and a signed
 release request at the merged `main`, judged as `release` is, with the
 release secrets set only then. The repository must then hold exactly those
 three runs, two tags and one release. It takes `version=` and `image=`, not
-`workflow=`; the development workflow must take a `source-branch` input, as
-the demo's does. The `hello-maven-service` demo is the consumer it was built
+`workflow=`; the development workflow must take a `source-branch` input and
+run on dispatch only, as the demo's does, so pushing `development` starts no
+run. The `hello-maven-service` demo is the consumer it was built
 for; docs/live-campaigns.md, Lifecycle, describes the phases on every forge.
 
 By default the controller checkout's `HEAD` is also the engine under test.

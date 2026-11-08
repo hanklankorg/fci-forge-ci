@@ -4,7 +4,7 @@
 # A development snapshot of a branch: Forge CI's snapshot orchestrator builds
 # the jar, builds the service image from it and publishes the image to this
 # repository's container package, without a release, a tag or a change to the
-# branch. Dispatched by hand, or on a push to development.
+# branch. Dispatched by hand, named the branch to snapshot.
 name: Development Snapshot
 
 on:
@@ -15,9 +15,6 @@ on:
         required: false
         default: ""
         type: string
-  push:
-    branches:
-      - development
 
 concurrency:
   group: snapshot-${{ inputs.source-branch || github.ref_name }}
@@ -37,6 +34,9 @@ jobs:
       branch: ${{ inputs.source-branch || github.ref_name }}
       forge-ci-binary-ref: v0.90.0
       artifacts-config: .forge-ci/artifacts.yml
+      # The trial renders runtime-image and canonical-builder-image by digest,
+      # as the orchestrator admits them.
       runtime-image: ghcr.io/diggsweden/forge-ci-runtime-base:v0.90.0
+      canonical-builder-image: ghcr.io/diggsweden/forge-ci-runtime-go-1.27:v0.90.0
       runtime-image-full: ghcr.io/diggsweden/forge-ci-runtime:v0.90.0
       runtime-image-java: ghcr.io/diggsweden/forge-ci-runtime-java-25:v0.90.0
