@@ -32,6 +32,13 @@ var admissionExempt = map[string]string{
 
 var containerImageInput = regexp.MustCompile(`inputs(?:\['([a-z0-9-]+)'\]|\.([a-z0-9-]+))`)
 
+// statusOverride matches the status functions that run a job although one
+// of its needs failed, such as a resolver that refused an image.
+var (
+	statusOverride  = regexp.MustCompile(`always\(\)|cancelled\(\)|failure\(\)`)
+	requiredSuccess = regexp.MustCompile(`needs\.([a-z0-9-]+)\.result == 'success'`)
+)
+
 type admissionWorkflow struct {
 	On struct {
 		WorkflowCall *struct {
@@ -43,6 +50,7 @@ type admissionWorkflow struct {
 	} `yaml:"on"`
 	Jobs map[string]struct {
 		Uses      string            `yaml:"uses"`
+		If        string            `yaml:"if"`
 		Needs     yaml.Node         `yaml:"needs"`
 		With      map[string]string `yaml:"with"`
 		Container yaml.Node         `yaml:"container"`
@@ -58,7 +66,8 @@ type admissionStep struct {
 // before any of its steps, and an empty image runs the job on the runner
 // itself, so every image a reusable workflow's container job runs is named in
 // that workflow's resolver call, which refuses anything but a digest before
-// the job starts. The line is required unless the job picks the image from its
+// the job starts. A job whose if overrides the needs status must still
+// require the resolver's success. The line is required unless the job picks the image from its
 // plan's matrix; then the plan job refuses a planned family that was not
 // passed.
 func TestEveryContainerImageIsAdmittedByTheResolver(t *testing.T) {
@@ -112,6 +121,10 @@ func TestEveryContainerImageIsAdmittedByTheResolver(t *testing.T) {
 			require.NotEmptyf(t, refs, "%s/%s runs a container image that is not a caller input: %s", name, jobName, image)
 			require.Truef(t, needsTransitively(workflow, jobName, "resolve-bootstrap"),
 				"%s/%s starts its container without needing resolve-bootstrap, which admits it", name, jobName)
+
+			require.Truef(t, runImpliesResolverSuccess(workflow, jobName),
+				"%s/%s overrides the needs status in its if, so its container starts after the resolver refused its image; "+
+					"add needs.resolve-bootstrap.result == 'success'", name, jobName)
 
 			for _, ref := range refs {
 				input := ref[1] + ref[2]
@@ -224,6 +237,37 @@ func needsTransitively(workflow admissionWorkflow, job, want string) bool {
 	}
 
 	return false
+}
+
+// runImpliesResolverSuccess reports whether the job can only run once
+// resolve-bootstrap succeeded. Without a status function in its if, a job
+// runs only when all its needs succeeded. With one, its if must exclude a
+// failed ancestor (!failure()) or require the success of the resolver or of
+// a job whose own run implies it. GitHub refuses cyclic needs, so the
+// recursion ends.
+func runImpliesResolverSuccess(workflow admissionWorkflow, job string) bool {
+	if job == "resolve-bootstrap" {
+		return true
+	}
+
+	spec := workflow.Jobs[job]
+
+	var candidates []string
+
+	switch {
+	case !statusOverride.MatchString(spec.If):
+		candidates = needsList(&spec.Needs)
+	case strings.Contains(strings.ReplaceAll(spec.If, " ", ""), "!failure()"):
+		return needsTransitively(workflow, job, "resolve-bootstrap")
+	default:
+		for _, match := range requiredSuccess.FindAllStringSubmatch(spec.If, -1) {
+			candidates = append(candidates, match[1])
+		}
+	}
+
+	return slices.ContainsFunc(candidates, func(need string) bool {
+		return runImpliesResolverSuccess(workflow, need)
+	})
 }
 
 func planRefusesMissingFamilies(workflow admissionWorkflow) bool {
