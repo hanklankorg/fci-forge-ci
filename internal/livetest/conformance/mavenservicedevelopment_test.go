@@ -120,16 +120,34 @@ func runForgejoMavenServiceCase(t *testing.T, root string, private bool) {
 
 	livetest.SetRepoSecret(t, target, repo, "DEVELOPMENT_REGISTRY_TOKEN", target.Token)
 	livetest.DispatchConsumerDevelopment(t, target, repo)
-	run := livetest.WaitForConsumerRun(t, target, repo, "development.yml", "workflow_dispatch", "")
+	run := livetest.WaitForConsumerRun(t, target, repo, developmentWorkflow, "workflow_dispatch", "")
 	jobs := livetest.RunJobs(t, target, repo, run.ID)
 	scenario.logJobs(t, jobs)
 
-	if run.Status != jobSuccess || (run.Event != "" && run.Event != "workflow_dispatch") || run.TriggerEvent != "workflow_dispatch" || run.WorkflowID != "development.yml" {
-		t.Fatalf("service development run %d: %s; original Containerfile/POM failures are CI integration failures, not permission to alter source", run.ID, run.Status)
-	}
-
 	if runs := livetest.WorkflowRuns(t, target, repo); len(runs) != 1 || runs[0].ID != run.ID {
 		t.Fatalf("want exactly the policy dispatch, got %+v", runs)
+	}
+
+	receipt, jars, producers := requireMavenServiceDevelopment(t, target, repo, run, consumer, config, head, image)
+
+	t.Logf("admitted=%s policy=%s selected=%s branch=%s engine=%s image=%s readiness=%s; checked JARs=%d producers=%d; declared build route preserved, no checked-JAR/image byte-equality claim", admitted, main, head, config.Branch, layer.Commit, receipt.Ref, config.ReadinessURL, jars, producers)
+}
+
+// developmentWorkflow is the workflow file a consumer's development run is
+// dispatched from.
+const developmentWorkflow = "development.yml"
+
+// requireMavenServiceDevelopment reads what a dispatched service development
+// run of the Maven service fixture left: the frozen snapshot plan bound to the
+// selected source head and branch, one amd64 image receipt with its readiness
+// evidence, the registry's digest and tag with no stable alias, and the
+// checked JARs. It returns the image receipt, the count of checked JARs and
+// of the declared producers.
+func requireMavenServiceDevelopment(t *testing.T, target livetest.Target, repo string, run livetest.WorkflowRun, consumer livetest.Consumer, config livetest.MavenServiceDevelopmentConfig, head, image string) (snapshotimage.Receipt, int, int) {
+	t.Helper()
+
+	if run.Status != jobSuccess || (run.Event != "" && run.Event != "workflow_dispatch") || run.TriggerEvent != "workflow_dispatch" || run.WorkflowID != developmentWorkflow {
+		t.Fatalf("service development run %d: %s; original Containerfile/POM failures are CI integration failures, not permission to alter source", run.ID, run.Status)
 	}
 
 	artifacts := map[string]map[string][]byte{}
@@ -154,7 +172,9 @@ func runForgejoMavenServiceCase(t *testing.T, root string, private bool) {
 	}
 
 	var frozen snapshotimage.Plan
-	if err = json.Unmarshal(artifacts["snapshot-images-plan"]["snapshot-plan.json"], &frozen); err != nil {
+
+	err := json.Unmarshal(artifacts["snapshot-images-plan"]["snapshot-plan.json"], &frozen)
+	if err != nil {
 		t.Fatal(err)
 	}
 
@@ -225,5 +245,5 @@ func runForgejoMavenServiceCase(t *testing.T, root string, private bool) {
 		t.Fatal("no actual checked source JAR")
 	}
 
-	t.Logf("admitted=%s policy=%s selected=%s branch=%s engine=%s image=%s readiness=%s; checked JARs=%d producers=%d; declared build route preserved, no checked-JAR/image byte-equality claim", admitted, main, head, config.Branch, layer.Commit, receipt.Ref, config.ReadinessURL, count, len(expected.Artifacts))
+	return receipt, count, len(expected.Artifacts)
 }

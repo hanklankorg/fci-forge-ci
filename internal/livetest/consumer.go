@@ -60,16 +60,23 @@ const (
 	consumerChangeMessage = "test: add the consumer trial canary\n\n" + consumerSignOff
 )
 
-// The two events a trial can start a consumer's workflow with.
+// The events a trial can start a consumer's workflows with: one workflow
+// each, or lifecycle, the linked flow of a pull request merged natively, a
+// development run on the merged main and a signed release request from it.
 const (
 	TrialPullRequest = "pull-request"
 	TrialRelease     = "release"
+	TrialLifecycle   = "lifecycle"
 )
 
 // ConsumerTrial is the scenario name of a Forgejo consumer trial's scratch
 // repositories: the consumer's copy, and LayerScenario of it for the layer
-// under test that its workflows call.
-const ConsumerTrial = "consumer-trial"
+// under test that its workflows call. ConsumerLifecycle is the same for a
+// lifecycle.
+const (
+	ConsumerTrial     = "consumer-trial"
+	ConsumerLifecycle = "consumer-lifecycle"
+)
 
 // LayerScenario is the scenario name of the scratch repository a scenario
 // pushes the layer under test to, beside its own.
@@ -109,7 +116,8 @@ const (
 // TrialSettings is what the caller of a trial decides.
 type TrialSettings struct {
 	Event string
-	// Workflow is the file under .forgejo/workflows whose run is judged.
+	// Workflow is the file under .forgejo/workflows whose run is judged: for
+	// a lifecycle the release workflow, the last of its three.
 	Workflow string
 	// Version is what a release trial requests, as release-request/v<Version>.
 	Version string
@@ -161,6 +169,10 @@ const (
 // version, next-version, token, image and interrupt-after; any other key is the name of a repository
 // variable, in capitals as Forgejo stores it.
 //
+// A lifecycle's three workflows are fixed, so it takes no workflow=; it
+// requests one release, so it takes version= and image= but no next-version=
+// or interrupt-after=.
+//
 // No word carries a secret. A caller can ask for the lab account's token, by
 // naming the repository secret that receives it, and for a token from one of
 // its own files, by secret-file=<SECRET_NAME>:<absolute path> (owner-only file,
@@ -172,17 +184,17 @@ func ParseTrialSettings(event string, words []string) (TrialSettings, error) {
 	switch event {
 	case TrialPullRequest:
 		settings.Workflow = trialPullRequestWorkflow
-	case TrialRelease:
+	case TrialRelease, TrialLifecycle:
 		settings.Workflow, settings.Version = trialReleaseWorkflow, "0.0.1"
 	default:
-		return TrialSettings{}, fmt.Errorf("the event is %q, want %s or %s: %w", event, TrialPullRequest, TrialRelease, errs.ErrValidation)
+		return TrialSettings{}, fmt.Errorf("the event is %q, want %s, %s or %s: %w", event, TrialPullRequest, TrialRelease, TrialLifecycle, errs.ErrValidation)
 	}
 
 	for _, word := range words {
 		if key, value, _ := strings.Cut(word, "="); value == "" || !settings.set(key, value) {
-			return TrialSettings{}, fmt.Errorf("setting %q is none of %s=<file>.yml, %s=<X.Y.Z> (release only), %s=<X.Y.Z> (second release), %s=<SECRET_NAME>, "+
+			return TrialSettings{}, fmt.Errorf("setting %q is none of %s=<file>.yml (not lifecycle), %s=<X.Y.Z> (release or lifecycle), %s=<X.Y.Z> (second release), %s=<SECRET_NAME>, "+
 				settingSecretFile+"=<SECRET_NAME>:<absolute file>, "+
-				"%s=<registry>/<repository>[:<tag>] (release only), %s=<job name> (release only) or <VARIABLE_NAME>=<value>, "+
+				"%s=<registry>/<repository>[:<tag>] (release or lifecycle), %s=<job name> (release only) or <VARIABLE_NAME>=<value>, "+
 				"each name once, where a value starting with @ is %s or %s: %w",
 				word, settingWorkflow, settingVersion, settingNextVersion, settingToken, settingImage, settingInterrupt, trialLayerCommit, trialRequestCommit, errs.ErrValidation)
 		}
@@ -221,7 +233,7 @@ func (settings *TrialSettings) set(key, value string) bool {
 	case settingWorkflow:
 		settings.Workflow = value
 
-		return trialWorkflow.MatchString(value)
+		return settings.Event != TrialLifecycle && trialWorkflow.MatchString(value)
 	case settingToken:
 		_, fromFile := settings.FileSecrets[value]
 
@@ -237,14 +249,16 @@ func (settings *TrialSettings) set(key, value string) bool {
 		settings.FileSecrets[name] = path
 
 		return true
-	case settingVersion, settingNextVersion, settingImage, settingInterrupt:
+	case settingVersion, settingImage:
+		return settings.Event != TrialPullRequest && settings.setReleaseOnly(key, value)
+	case settingNextVersion, settingInterrupt:
 		return settings.Event == TrialRelease && settings.setReleaseOnly(key, value)
 	}
 
 	return settings.setVariable(key, value)
 }
 
-// setReleaseOnly takes one of the settings only a release trial has.
+// setReleaseOnly takes one of the settings only a trial that releases has.
 func (settings *TrialSettings) setReleaseOnly(key, value string) bool {
 	switch key {
 	case settingVersion:

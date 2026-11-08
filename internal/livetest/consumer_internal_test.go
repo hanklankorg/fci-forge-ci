@@ -100,6 +100,19 @@ func TestParseTrialSettings_ReadsTheCallersWords(t *testing.T) {
 	if defaults, _ := ParseTrialSettings(TrialRelease, nil); defaults.Workflow != trialReleaseWorkflow || defaults.Version != "0.0.1" {
 		t.Errorf("a release trial without settings = %+v", defaults)
 	}
+
+	// A lifecycle judges the release workflow last, requests one version and
+	// takes the release's image=, token and variables.
+	lifecycle, err := ParseTrialSettings(TrialLifecycle, []string{"version=0.2.0", "image=ghcr.io/owner/app", "token=PACKAGES_TOKEN", "CI_JOB_IMAGE=forge.example/forgeci/java@sha256:1"})
+	if err != nil || lifecycle.Event != TrialLifecycle || lifecycle.Workflow != trialReleaseWorkflow || lifecycle.Version != "0.2.0" ||
+		!slices.Equal(lifecycle.Images, []string{"ghcr.io/owner/app"}) || !slices.Equal(lifecycle.TokenSecrets, []string{"PACKAGES_TOKEN"}) ||
+		!maps.Equal(lifecycle.Variables, map[string]string{"CI_JOB_IMAGE": "forge.example/forgeci/java@sha256:1"}) {
+		t.Errorf("a lifecycle = %+v, %v", lifecycle, err)
+	}
+
+	if defaults, _ := ParseTrialSettings(TrialLifecycle, nil); defaults.Workflow != trialReleaseWorkflow || defaults.Version != "0.0.1" {
+		t.Errorf("a lifecycle without settings = %+v", defaults)
+	}
 }
 
 func TestConsumerTrialLayerURL_IsTheForgejoScratchLayer(t *testing.T) {
@@ -156,6 +169,9 @@ func TestParseTrialSettings_RefusesWhatItCannotMean(t *testing.T) {
 		"second version goes backwards":    {event: TrialRelease, words: []string{"version=1.2.3", "next-version=1.2.2"}},
 		"second version named twice":       {event: TrialRelease, words: []string{"next-version=1.2.3", "next-version=1.2.4"}},
 		"second version with interruption": {event: TrialRelease, words: []string{"next-version=1.2.3", "interrupt-after=Build"}},
+		"workflow of a lifecycle":          {event: TrialLifecycle, words: []string{"workflow=release.yml"}},
+		"second version of a lifecycle":    {event: TrialLifecycle, words: []string{"next-version=1.2.3"}},
+		"interrupt of a lifecycle":         {event: TrialLifecycle, words: []string{"interrupt-after=Build"}},
 	} {
 		if settings, err := ParseTrialSettings(test.event, test.words); !errors.Is(err, errs.ErrValidation) {
 			t.Errorf("%s: ParseTrialSettings = %+v, %v; want a validation refusal", name, settings, err)

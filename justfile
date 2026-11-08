@@ -906,7 +906,8 @@ test-live-image kind forge_lab:
 # and verifies anonymous reads are refused. On the lab, the lock, the preflight
 # and the log are those of `just test-live`.
 #
-# forgejo, events pull-request and release, on the lab. A setting is key=value:
+# forgejo, events pull-request, release and lifecycle, on the lab. A setting
+# is key=value:
 #
 #   <VARIABLE>=<value>   a repository variable, name in capitals. The values
 #                        @layer-commit and @request-commit stand for the
@@ -929,6 +930,16 @@ test-live-image kind forge_lab:
 #
 # A Forgejo release also needs FORGE_CI_LIVE_SIGNER_IMAGE from
 # `just test-live-image signer`, ssh-keygen and gpg.
+#
+# lifecycle is the linked flow in one repository, for the hello-maven-service
+# demo alone: a pull request on branch development, its native merge, the
+# service development snapshot dispatched on the merged main, and a signed
+# release request from it. It takes the release's settings but workflow=,
+# next-version= and interrupt-after=, needs what a release needs, and
+# CI_JOB_IMAGE, pinned by digest, is also the Java image the snapshot builds
+# the service with. docs/live-campaigns.md, Lifecycle, has the rest.
+#
+#   just test-live-consumer forgejo /absolute/hello-maven-service/consumer lifecycle CI_JOB_IMAGE=<digest reference> RELEASE_PLATFORMS=linux/amd64
 #
 # gitlab, on the lab, with prepared Docker image archives as settings, as for
 # `just demo gitlab`. pull-request runs the consumer's own MR gate and takes
@@ -956,7 +967,7 @@ test-live-image kind forge_lab:
 # docs/testing.md, Trying a consumer on GitHub, has the prerequisites.
 [arg('repo', help='Absolute path to a clean consumer checkout, for example /absolute/myapp')]
 [arg('forge', help='forgejo, gitlab or github')]
-[arg('event', help='pull-request or release; github also dev-release')]
+[arg('event', help='pull-request or release; forgejo also lifecycle, github also dev-release')]
 [arg('settings', help='key=value settings; gitlab: job-archive=, build-archive=, signer-archive=, lint-archive=; github: org=<id>; see docs/testing.md')]
 [doc('Live; run a consumer against this engine')]
 [group('live')]
@@ -985,6 +996,12 @@ test-live-consumer forge repo event *settings:
     FORGE_CI_LIVE_CONSUMER_SETTINGS="$(printf '%s\n' "${settings[@]}")"
     export FORGE_CI_LIVE_CONSUMER_SETTINGS
     case "$forge:$event" in
+    forgejo:lifecycle)
+        # The development phase is the Maven service's, with the demo's
+        # readiness probe and no runtime fixture, as test-live-forgejo-snapshot.
+        export FORGE_CI_LIVE_SERVICE_READINESS_URL=http://127.0.0.1:8080/health FORGE_CI_LIVE_SERVICE_FIXTURE=''
+        exec bash scripts/ci/run-live-tests.sh focused '^TestForgejoLayer_ConsumerLifecycle$'
+        ;;
     forgejo:*)
         exec bash scripts/ci/run-live-tests.sh focused '^TestForgejoLayer_ConsumerTrial$'
         ;;

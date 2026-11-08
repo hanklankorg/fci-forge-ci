@@ -82,8 +82,8 @@ func TestCampaignPublishedSnapshotSupportedRoadAndDiagnostics(t *testing.T) {
 		advertise                bool
 		diagnostic               string
 	}{
-		{campaignForgejo, "hello-maven-service", "unknown", true, "a consumer event is pull-request or release or published-unsigned-snapshot"},
-		{campaignForgejo, "hello-maven-service", "", true, "want consumer <demo> <pull-request or release or published-unsigned-snapshot> [key=value ...]"},
+		{campaignForgejo, "hello-maven-service", "unknown", true, "a consumer event is pull-request or release, published-unsigned-snapshot or lifecycle"},
+		{campaignForgejo, "hello-maven-service", "", true, "want consumer <demo> <pull-request or release, published-unsigned-snapshot or lifecycle> [key=value ...]"},
 		{campaignForgejo, "hello-go-cli", "unknown", false, "a consumer event is pull-request or release"},
 		{campaignGitLab, "hello-maven-service", "unknown", false, "a consumer event is pull-request or release"},
 		{campaignForgejo, "hello-go-cli", campaignPublishedSnapshot, false, "published unsigned snapshot supports only the Forgejo hello-maven-service native trial"},

@@ -228,6 +228,50 @@ Forge CI owns these CI consumer scenarios. Forge Lab owns its CLI/infrastructure
 tests and provides the existing contract/SDK guards; its destructive live TestMain
 is not a validation entry point for this profile. No scenario is duplicated there.
 
+### Lifecycle (Forgejo Maven service only)
+
+`test/live/campaigns/lifecycle-forgejo.cases` runs the linked flow of one
+consumer in one scratch repository, the `lifecycle` event:
+
+```text
+consumer hello-maven-service lifecycle CI_JOB_IMAGE=@JOB_IMAGE_JAVA CI_IMAGE_BUILDER=buildah RELEASE_PLATFORMS=linux/amd64
+```
+
+The same reader, `key=value` words and `@NAME` expansion as the other consumer
+events; only the event word is new. The phases, each ending the lifecycle when
+it fails, with their acceptance owners unchanged:
+
+1. **Pull request.** The consumer is rendered once, with the release's public
+   facts and the release requester's public allowed-signers staged in the
+   private index before the base commit, so every commit of the flow carries
+   the trust. Base to `main`, the change to `development`, a pull request
+   judged by the consumer's own `pullrequest.yml`. No tag, release or other run.
+2. **Merge.** The pull request is merged natively with a merge commit, the forge
+   told which head commit is meant. A mirror then shows `main` at a commit whose
+   parents are the base and the change and whose tree is the change's.
+3. **Development.** `development.yml` is dispatched on the merged `main` and
+   snapshots `development`; the acceptance is the published snapshot's (frozen
+   plan, one amd64 image receipt and readiness, digest and tag, checked JARs).
+   Only the development registry credential is set for it.
+4. **Release.** The deploy key and the release secrets are set now, a signed
+   `release-request/v<version>` is pushed at the merged `main`, and the release
+   is judged as a release trial's: one signed release commit on `main`, signed
+   tag, a release whose Cosign bundles verify against the trial's key.
+5. **Final.** The repository holds exactly those three runs, two tags, one
+   release and the bot's deploy key; `development` still points at the change.
+
+The event takes the release's settings but `workflow=`, `next-version=` and
+`interrupt-after=`; `CI_JOB_IMAGE`, pinned by digest, is also the Java image the
+snapshot builds the service with. It is admitted for the Forgejo
+`hello-maven-service` demo alone, the one demo with a development route; a demo
+without one is refused rather than run as a shorter flow, and GitLab and hosted
+GitHub refuse the event. It needs what the published snapshot and a Forgejo
+release need: the contract's container/readiness runner, `FORGE_CI_LIVE_SIGNER_IMAGE`,
+ssh-keygen and gpg. amd64 runners only for now. Standalone
+`test-live-consumer forgejo <checkout> lifecycle …` runs the same test outside a
+campaign. The standalone pull-request, release and snapshot trials remain the
+single-phase entrypoints; the lifecycle calls their extracted checks.
+
 ### Explicit-input GitLab regressions
 
 The normal consumer release recipe also selects these exact scenarios with

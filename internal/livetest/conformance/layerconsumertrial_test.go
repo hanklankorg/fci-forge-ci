@@ -74,10 +74,9 @@ func TestForgejoLayer_ConsumerTrial(t *testing.T) {
 	}
 }
 
-func runForgejoConsumerTrial(t *testing.T, root string, private bool) {
-	t.Helper()
-
-	// One setting per line, so a variable's value may hold a space.
+// consumerSettingsWords reads the caller's settings, one per line so a
+// variable's value may hold a space.
+func consumerSettingsWords() []string {
 	var words []string
 
 	for word := range strings.SplitSeq(os.Getenv(consumerSettingsEnv), "\n") {
@@ -86,7 +85,13 @@ func runForgejoConsumerTrial(t *testing.T, root string, private bool) {
 		}
 	}
 
-	settings, err := livetest.ParseTrialSettings(os.Getenv(consumerEventEnv), words)
+	return words
+}
+
+func runForgejoConsumerTrial(t *testing.T, root string, private bool) {
+	t.Helper()
+
+	settings, err := livetest.ParseTrialSettings(os.Getenv(consumerEventEnv), consumerSettingsWords())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -217,37 +222,8 @@ func runForgejoConsumerTrial(t *testing.T, root string, private bool) {
 		variables[layerRegistryUserVariable] = registryUser(target, external)
 	}
 
-	for _, more := range []map[string]string{plan.Variables, settings.ResolvedVariables(scenario.layer.Commit, main)} {
-		for variable, value := range more {
-			if _, set := variables[variable]; set {
-				t.Fatalf("variable %s is set by the trial itself, from the contract or the layer under test, so it cannot be given a second value", variable)
-			}
-
-			variables[variable] = value
-		}
-	}
-
-	// The consumer builds for the lab's runners, and only for them.
-	variables, err = livetest.NativeReleasePlatforms(variables, livetest.RunnerArch(t, target))
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	for _, secret := range settings.TokenSecrets {
-		if _, set := plan.Secrets[secret]; set {
-			t.Fatalf("secret %s is set by the trial itself, from the consumer's own workflow; leave it out", secret)
-		}
-
-		plan.Secrets[secret] = target.Token
-	}
-
-	for _, secret := range slices.Sorted(maps.Keys(settings.FileSecrets)) {
-		if _, set := plan.Secrets[secret]; set {
-			t.Fatalf("secret %s is set by the trial itself, from the consumer's own workflow; leave it out", secret)
-		}
-
-		plan.Secrets[secret] = livetest.ReadSecretFile(t, secret, settings.FileSecrets[secret])
-	}
+	variables = trialVariables(t, target, variables, plan.Variables, settings.ResolvedVariables(scenario.layer.Commit, main))
+	maps.Copy(plan.Secrets, callerSecrets(t, target, settings, plan.Secrets))
 
 	if release {
 		livetest.AddDeployKey(t, target, repo, "livetest release bot", keys.sshPublic)
@@ -348,6 +324,59 @@ func runForgejoConsumerTrial(t *testing.T, root string, private bool) {
 	if demo != "" {
 		runDemoPullRequest(t, scenario, consumer, main, facts.Secrets, plan.Secrets)
 	}
+}
+
+// trialVariables adds the layer's and the caller's variables to the trial's
+// own and binds the release platforms to the lab's runners. One name has one
+// source.
+func trialVariables(t *testing.T, target livetest.Target, variables map[string]string, more ...map[string]string) map[string]string {
+	t.Helper()
+
+	for _, source := range more {
+		for variable, value := range source {
+			if _, set := variables[variable]; set {
+				t.Fatalf("variable %s is set by the trial itself, from the contract or the layer under test, so it cannot be given a second value", variable)
+			}
+
+			variables[variable] = value
+		}
+	}
+
+	// The consumer builds for the lab's runners, and only for them.
+	variables, err := livetest.NativeReleasePlatforms(variables, livetest.RunnerArch(t, target))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	return variables
+}
+
+// callerSecrets is the secrets the caller asked for: the lab account's token
+// under the names of token=, and the caller's own files under those of
+// secret-file=. None may be one the trial sets itself, from the consumer's own
+// workflow.
+func callerSecrets(t *testing.T, target livetest.Target, settings livetest.TrialSettings, reserved map[string]string) map[string]string {
+	t.Helper()
+
+	secrets := map[string]string{}
+
+	for _, secret := range settings.TokenSecrets {
+		if _, set := reserved[secret]; set {
+			t.Fatalf("secret %s is set by the trial itself, from the consumer's own workflow; leave it out", secret)
+		}
+
+		secrets[secret] = target.Token
+	}
+
+	for _, secret := range slices.Sorted(maps.Keys(settings.FileSecrets)) {
+		if _, set := reserved[secret]; set {
+			t.Fatalf("secret %s is set by the trial itself, from the consumer's own workflow; leave it out", secret)
+		}
+
+		secrets[secret] = livetest.ReadSecretFile(t, secret, settings.FileSecrets[secret])
+	}
+
+	return secrets
 }
 
 // newConsumerRepos makes the layer's and the consumer's repositories: fixed

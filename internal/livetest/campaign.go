@@ -237,7 +237,7 @@ func campaignCaseArgs(dir, provider string, env map[string]string, words []strin
 
 	events := "pull-request or release"
 	if len(words) > 1 && campaignSupportsPublishedSnapshot(provider, words[1]) {
-		events += " or " + campaignPublishedSnapshot
+		events += ", " + campaignPublishedSnapshot + " or " + TrialLifecycle
 	}
 
 	if len(words) < 3 {
@@ -252,7 +252,7 @@ func campaignCaseArgs(dir, provider string, env map[string]string, words []strin
 		return campaignSnapshotRecipe(dir, provider, env, words)
 	}
 
-	if words[2] != "pull-request" && words[2] != "release" {
+	if !slices.Contains([]string{TrialPullRequest, TrialRelease, TrialLifecycle}, words[2]) {
 		return nil, fmt.Errorf("a consumer event is %s: %w", events, errs.ErrValidation)
 	}
 
@@ -261,13 +261,26 @@ func campaignCaseArgs(dir, provider string, env map[string]string, words []strin
 		return nil, err
 	}
 
-	if provider == campaignGitLab {
-		if err := campaignAdmitGitLabConsumer(filepath.Join(dir, "demos", words[1]), words[2], words[3:], settings, env); err != nil {
-			return nil, err
-		}
+	if err := campaignAdmitConsumer(filepath.Join(dir, "demos", words[1]), provider, words[1], words[2], words[3:], settings, env); err != nil {
+		return nil, err
 	}
 
 	return consumerRecipe(provider, words[2], filepath.Join(dir, "demos", words[1]), archives, settings)
+}
+
+// campaignAdmitConsumer refuses a consumer case the lane could not run: a
+// lifecycle outside its one demo and provider, or a GitLab consumer without
+// what its gate and release need.
+func campaignAdmitConsumer(checkout, provider, demo, event string, words, settings []string, env map[string]string) error {
+	if event == TrialLifecycle {
+		return campaignAdmitLifecycle(provider, demo, settings)
+	}
+
+	if provider == campaignGitLab {
+		return campaignAdmitGitLabConsumer(checkout, event, words, settings, env)
+	}
+
+	return nil
 }
 
 func campaignScenarioRecipe(provider string, env map[string]string, words []string) ([]string, error) {

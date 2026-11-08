@@ -34,7 +34,7 @@ must not be collapsed into a single all-features provider tick.
 | --- | --- | --- | --- |
 | Full Gommitlint release inventory and Cosign readback | ✅ Live-proven · FORGE-LAB: 81 names, 26 bundles [E1](#e1-forgejo-full-release) | ✅ Live-proven · FORGE-LAB: 81 names, 26 bundles [E2](#e2-gitlab-full-release) | ⏳ Pending/unproven for this full profile; reduced case below is different |
 | Package GPG, final images and negative verification in that GitLab release | ⏳ Not qualified by this row | ✅ Live-proven · FORGE-LAB: 9 GPG sidecars, 2 images/attestations; changed content/signature and wrong key refused [E2](#e2-gitlab-full-release) | ⏳ Not qualified by this row |
-| Reduced Gommitlint release | ⏳ Not qualified by this row | ⏳ Not qualified by this row | ✅ Live-proven · HOSTED: 8 assets, 4 Cosign bundles, **0 GPG**; 745.19 s [E3](#e3-github-reduced-release) |
+| Reduced Gommitlint release | n/a — GitHub-only reduced profile; Forgejo is covered by the full campaign row | n/a — GitHub-only reduced profile; GitLab is covered by the full campaign row | ✅ Live-proven · HOSTED: 8 assets, 4 Cosign bundles, **0 GPG**; 745.19 s [E3](#e3-github-reduced-release) |
 | Classified first-profile release: exact 11 public assets, real package and signatures, original producer/signer authority through publication | ⏳ Pending/unproven | ⏳ Pending/unproven | ◐ Partial proof · LOCAL/OFFLINE only; **HOSTED unproven** [E4](#e4-local-source517-qualification) |
 
 The two full releases have matching **name inventories**, not cross-forge
@@ -67,7 +67,7 @@ production trust, Cargo, ARM runtime or full 81-file/image parity.
 | A: artifact-first snapshot image/service | ✅ Live-proven · FORGE-LAB: public Linux/amd64 Buildah unsigned snapshot, run **517**, controller `063a49d9` / demo `3d5108ad`; native case PASS in 290 s [E6](#e6-e2e-a-native-pass-and-retained-failures). Earlier failures remain failed; the previous `image=true` cause is unresolved. |
 | B: development acceptance | ◐ Reviewed source integrated locally at `3c5be102`; representative Forgejo generic/Cargo native proofs are still pending. A's PASS satisfies the prerequisite, not B acceptance [E7](#e7-b-source-integration-and-c-hold). |
 | C: release-bundle checks | ◐ Source-only reviewed candidate on `34894e69`, **HOLD / unmerged** as a separate milestone. No C live acceptance [E7](#e7-b-source-integration-and-c-hold). |
-| D: linked flow | ⏳ Plan only; ordered A → B → C → D gates remain. Whole-file deletion: **NONE**. |
+| D: linked flow | ◐ Source only: `TestForgejoLayer_ConsumerLifecycle` and `test/live/campaigns/lifecycle-forgejo.cases` (pull request → native merge → service development snapshot → signed release, Forgejo `hello-maven-service`, amd64 only; see docs/live-campaigns.md, Lifecycle). No live pass yet; ordered A → B → C → D gates remain. Whole-file deletion: **NONE**. |
 
 A's latest native cleanup completed without a reported error; no standalone
 per-object absence proof was emitted. Its acceptance is the actual run-517 native

@@ -1,0 +1,21 @@
+# SPDX-FileCopyrightText: 2026 Digg - Agency for Digital Government
+# SPDX-License-Identifier: CC0-1.0
+
+# The lifecycle of the Maven service demo in one scratch repository: a pull
+# request on branch development, its native merge, the service development
+# snapshot dispatched on the merged main, then a signed release request from
+# it. The profile is the published snapshot's: public, Buildah, native
+# linux/amd64, the contract's container/readiness runner. Prepare with
+# forgejo=<this file> and job-image=java:<reviewed local image>; CI_JOB_IMAGE
+# is also the Java image the snapshot builds the service with. amd64 runners
+# only for now.
+#
+#   just campaign-lane <dir> forgejo test/live/campaigns/lifecycle-forgejo.cases
+setting visibility=public
+setting image-builder=buildah
+setting admin-lint=false
+setting admin-vulnerabilities=false
+setting admin-application-tests=false
+setting admin-reproducible-builds=false
+
+consumer hello-maven-service lifecycle CI_JOB_IMAGE=@JOB_IMAGE_JAVA CI_IMAGE_BUILDER=buildah RELEASE_PLATFORMS=linux/amd64

@@ -150,8 +150,10 @@ type PullRequest struct {
 	Number int64  `json:"number"`
 	State  string `json:"state"`
 	Merged bool   `json:"merged"`
-	Head   GitRef `json:"head"`
-	Base   GitRef `json:"base"`
+	// MergeCommitSHA is the merge commit, once Merged.
+	MergeCommitSHA string `json:"merge_commit_sha"`
+	Head           GitRef `json:"head"`
+	Base           GitRef `json:"base"`
 }
 
 // GitRef is one side of a pull request.
@@ -177,6 +179,35 @@ func OpenPullRequest(tb TB, target Target, repo, head, base, title string) PullR
 	}
 
 	return opened
+}
+
+// MergePullRequest merges a pull request natively with a merge commit, as a
+// reviewer's button does. The forge is told which head commit is meant and
+// refuses when the branch moved; it takes no base commit, so whether the
+// merge built on the base the caller saw is for the caller to read in Git.
+// It returns the pull request read back, merged and closed, with the merge
+// commit.
+func MergePullRequest(tb TB, target Target, repo string, number int64, head string) PullRequest {
+	tb.Helper()
+	requireForgejoActions(tb, target)
+
+	ctx, cancel := context.WithTimeout(Context(tb), timeoutAPI)
+	defer cancel()
+
+	body := map[string]any{
+		"Do": "merge", "head_commit_id": head,
+		"delete_branch_after_merge": false, "force_merge": false, "merge_when_checks_succeed": false,
+	}
+	if err := discard(ctx, target, http.MethodPost, actionsURL(target, repo, "/pulls/"+strconv.FormatInt(number, 10)+"/merge"), body, http.StatusOK); err != nil {
+		tb.Fatalf("livetest: merge pull request #%d at %s: %v", number, head, err)
+	}
+
+	merged := ReadPullRequest(tb, target, repo, number)
+	if !merged.Merged || merged.State != "closed" || !fixtureObjectID(merged.MergeCommitSHA) {
+		tb.Fatalf("livetest: pull request #%d after the merge is %+v, want it merged and closed with a merge commit", number, merged)
+	}
+
+	return merged
 }
 
 // ReadPullRequest reads a pull request back.
