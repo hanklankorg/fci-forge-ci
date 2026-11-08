@@ -13,13 +13,16 @@ import (
 	"net/url"
 	"slices"
 	"strconv"
+
+	"github.com/diggsweden/forge-ci/internal/domain/provider"
 )
 
 // A scenario about the layer builds a small consumer repository around it: a
 // few source files, a branch, a pull request, a tag. And much of what the
 // layer promises is about what a run did not do, so the same repository is
 // read back afterwards: its branches, tags, releases, keys and secrets, and
-// the packages of its owner. All of it is Forgejo's API, spoken directly.
+// the packages of its owner. All of it is Forgejo's API, spoken directly;
+// the branches, the one reading the GitLab lifecycle shares, GitLab's too.
 
 // listLimit is one page of a listing here. A scratch repository holds a
 // handful of anything, so a full page means the listing was cut short and
@@ -221,7 +224,8 @@ func ReadPullRequest(tb TB, target Target, repo string, number int64) PullReques
 	return found
 }
 
-// Branches maps each branch of the scratch repository to the commit it is at.
+// Branches maps each branch of the scratch repository to the commit it is at,
+// on Forgejo or GitLab, whose listings share the shape.
 func Branches(tb TB, target Target, repo string) map[string]string {
 	tb.Helper()
 
@@ -232,7 +236,21 @@ func Branches(tb TB, target Target, repo string) map[string]string {
 		} `json:"commit"`
 	}
 
-	readList(tb, target, repo, "/branches", &listed, func() int { return len(listed) })
+	if target.Forge == provider.ForgeGitLab {
+		ctx, cancel := context.WithTimeout(Context(tb), timeoutAPI)
+		defer cancel()
+
+		endpoint := target.BaseURL() + "/api/v4/projects/" + url.PathEscape(target.Owner+"/"+repo) + "/repository/branches?per_page=" + strconv.Itoa(listLimit)
+		if _, err := decode(ctx, target, http.MethodGet, endpoint, nil, &listed, http.StatusOK); err != nil {
+			tb.Fatalf("livetest: read the branches of %s/%s: %v", target.Owner, repo, err)
+		}
+
+		if len(listed) >= listLimit {
+			tb.Fatalf("livetest: the branches of %s/%s fill a page of %d, so the listing may be cut short", target.Owner, repo, listLimit)
+		}
+	} else {
+		readList(tb, target, repo, "/branches", &listed, func() int { return len(listed) })
+	}
 
 	branches := make(map[string]string, len(listed))
 	for _, branch := range listed {

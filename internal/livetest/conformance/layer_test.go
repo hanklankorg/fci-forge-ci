@@ -226,12 +226,19 @@ func (s layerScenario) logJobs(t *testing.T, jobs []livetest.RunJob, secrets ...
 	livetest.StopOnInfrastructure(t, livetest.ForgejoJobFailures(jobs))
 }
 
-// requireBranches holds the repository to exactly the named branches, each at
-// the named commit: a run that pushed, or left a branch behind, differs.
+// requireBranches holds the scenario's repository to exactly the named
+// branches, each at the named commit.
 func (s layerScenario) requireBranches(t *testing.T, want map[string]string) {
 	t.Helper()
+	requireBranches(t, s.target, s.repo, want)
+}
 
-	got := livetest.Branches(t, s.target, s.repo)
+// requireBranches holds the repository to exactly the named branches, each at
+// the named commit: a run that pushed, or left a branch behind, differs.
+func requireBranches(t *testing.T, target livetest.Target, repo string, want map[string]string) {
+	t.Helper()
+
+	got := livetest.Branches(t, target, repo)
 	if len(got) != len(want) {
 		t.Errorf("the repository has branches %v, want exactly %v", got, want)
 

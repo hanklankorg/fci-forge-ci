@@ -8,7 +8,6 @@ package conformance_test
 import (
 	"context"
 	"fmt"
-	"maps"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -103,35 +102,15 @@ func runGitLabConsumerLifecycle(t *testing.T, root string, private bool) {
 		t.Fatal(err)
 	}
 
-	settings, buildCommand := gitlabConsumerBuild(t, root, parsed)
-	kaniko := livetest.GitLabKaniko(t)
-
 	// The development phase snapshots the consumer's one container; the
 	// release phase releases what the consumer declares, as a release does.
-	releaseImages, releaseImagesConfig, err := livetest.GitLabReleaseImages(root)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if gitlabConsumerBuildRunsAContainerBuild(t, root) {
-		t.Fatalf("%s runs a container build, which the build job would run with Buildah whatever image-builder says; move it to %s", livetest.GitLabConsumerBuildScript, livetest.GitLabConsumerExportScript)
-	}
-
-	exportCommand, err := livetest.GitLabConsumerExportCommands(root, settings.Variables)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	requestTag, finalTag := releaseRequestTag, releaseFinalTag
-	if settings.Version != "" {
-		requestTag, finalTag = "release-request/v"+settings.Version, "v"+settings.Version
-	}
+	settings, profile := gitlabConsumerProfileOf(t, root, parsed)
 
 	// The snapshot's image build and the release's image jobs run in the
 	// selected builder's job image; the consumer's Maven build, in the
 	// snapshot's producer job as in the release's build job, in the build
 	// image.
-	archives := gitlabReleaseArchiveInputs(t, true, true, kaniko)
+	archives := gitlabReleaseArchiveInputs(t, true, true, profile.kaniko)
 	if !livetest.Requires(t, provider.ForgeGitLab, livetest.NeedsInRunner) {
 		livetest.NotCoveredf(t, "a lifecycle needs a GitLab runner")
 	}
@@ -208,24 +187,16 @@ func runGitLabConsumerLifecycle(t *testing.T, root string, private bool) {
 
 	image := registry + "/" + strings.ToLower(project)
 
-	imageBuilder, builderJobImage := livetest.ImageBuilderBuildah, images.buildah
-	if images.kaniko != "" {
-		imageBuilder, builderJobImage = livetest.ImageBuilderKaniko, images.kaniko
-	}
-
-	artifactsConfig := ""
-	if releaseImages {
-		artifactsConfig = releaseImagesConfig
-	}
+	imageBuilder, builderJobImage := gitlabImageBuilder(images)
 
 	releasePolicy := gitlabReleasePolicy{
 		project: project, publication: livetest.RepoSlug(target, publication), registry: registry,
 		images: images, keys: keys, gitURL: gitURL, hostKey: hostKey, requestPublic: requestPublic,
 		settings: settings, distro: true,
 		checks: []string{"bash .gitlab/check-release.sh"}, checksRunnerTags: checksRunnerTags,
-		build: []string{buildCommand}, buildRunnerTags: builder.RunnerLabels,
-		releaseImages: releaseImages, artifactsConfig: artifactsConfig, releasePlatforms: "linux/amd64",
-		imageBuilder: imageBuilder, builderJobImage: builderJobImage, export: exportCommand,
+		build: []string{profile.build}, buildRunnerTags: builder.RunnerLabels,
+		releaseImages: profile.releaseImages, artifactsConfig: profile.artifactsConfig(), releasePlatforms: "linux/amd64",
+		imageBuilder: imageBuilder, builderJobImage: builderJobImage, export: profile.export,
 	}
 
 	// The snapshot component takes the development phase: the consumer's
@@ -297,19 +268,14 @@ func runGitLabConsumerLifecycle(t *testing.T, root string, private bool) {
 	}
 
 	request := merged.MergeCommitSHA
-	requireGitLabBranches(t, target, repo, map[string]string{layerMain: request, lifecycleBranch: head})
+	requireBranches(t, target, repo, map[string]string{layerMain: request, lifecycleBranch: head})
 	livetest.MirrorRepo(t, target, repo).RequireMergeOf(t, request, base, head)
 	t.Logf("lifecycle phase 2 merge: !%d merged natively, %s at %s with parents %s and %s", mr.IID, layerMain, request, base, head)
 
 	// Phase 3: the service development snapshot, on the push the merge made.
 	development := waitGitLabPushPipeline(t, ctx, client, project, layerMain, request)
 	snapshot := requireGitLabChildPipeline(t, ctx, client, project, development)
-
-	if development.Status != "success" {
-		logGitLabTrace(t, gitlabTrialTrace(t, ctx, client, project, development.ID, gitlabSnapshotPlanJob))
-		logGitLabTrace(t, gitlabTrialTrace(t, ctx, client, project, snapshot))
-		t.Fatalf("lifecycle phase 3 development: pipeline %d of %s@%s ended %q, want success", development.ID, layerMain, request, development.Status)
-	}
+	requireGitLabLifecyclePipeline(t, ctx, client, project, "3 development", development, snapshot)
 
 	receipt, expected := requireGitLabServiceSnapshot(t, ctx, client, target, repo, consumer, development.ID, snapshot, head, image)
 	requireGitLabPipelineIDs(t, ctx, client, project, review.ID, development.ID)
@@ -319,22 +285,22 @@ func runGitLabConsumerLifecycle(t *testing.T, root string, private bool) {
 	// Phase 4: the signed release request at the merged main. The release's
 	// authority is given now and not before.
 	configureGitLabReleaseVariables(t, target, client, project, keys, true)
-	livetest.SignGitLabRequest(t, target, repo, request, requestTag, filepath.Join(requestKeyDir, "lab-ssh"))
+	livetest.SignGitLabRequest(t, target, repo, request, profile.requestTag, filepath.Join(requestKeyDir, "lab-ssh"))
 
-	run := waitGitLabTagPipeline(t, ctx, client, project, requestTag, request)
+	run := waitGitLabTagPipeline(t, ctx, client, project, profile.requestTag, request)
 	child := requireGitLabReleaseChild(t, ctx, client, project, run)
 	logGitLabReleaseInventory(t, ctx, client, project, child)
 
-	released := requireReleaseGit(t, target, repo, keys, request, requestTag, finalTag)
-	verified := requireGitLabReleaseBundles(t, client, target, repo, child, run.SHA, keys, finalTag, releaseImages)
+	released := requireReleaseGit(t, target, repo, keys, request, profile.requestTag, profile.finalTag)
+	verified := requireGitLabReleaseBundles(t, client, target, repo, child, run.SHA, keys, profile.finalTag, profile.releaseImages)
 	requireGitLabReleaseRunnerRouting(t, ctx, client, project, child,
-		gitLabReleaseRunnerRoles(builder.RunnerLabels, checksRunnerTags, imageBuilder, releaseImages, len(exportCommand) != 0))
-	requireGitLabPackageSignatures(t, target, repo, keys, finalTag)
+		gitLabReleaseRunnerRoles(builder.RunnerLabels, checksRunnerTags, imageBuilder, profile.releaseImages, len(profile.export) != 0))
+	requireGitLabPackageSignatures(t, target, repo, keys, profile.finalTag)
 	requireGitLabPublishedImages(t, client, target, repo, publication, child, keys)
-	t.Logf("lifecycle phase 4 release: %s requested at %s, release commit %s, pipeline %d, child %d, %d verified bundles", finalTag, request, released, run.ID, child, verified)
+	t.Logf("lifecycle phase 4 release: %s requested at %s, release commit %s, pipeline %d, child %d, %d verified bundles", profile.finalTag, request, released, run.ID, child, verified)
 
 	// Phase 5: the project holds the lifecycle and nothing else.
-	requireGitLabBranches(t, target, repo, map[string]string{layerMain: released, lifecycleBranch: head})
+	requireBranches(t, target, repo, map[string]string{layerMain: released, lifecycleBranch: head})
 	requireGitLabPipelineIDs(t, ctx, client, project, review.ID, development.ID, run.ID)
 
 	tags, _, err := client.Tags.ListTags(project, nil, gitlabapi.WithContext(ctx))
@@ -368,14 +334,20 @@ func runGitLabConsumerLifecycle(t *testing.T, root string, private bool) {
 }
 
 // requireGitLabLifecyclePipeline ends the lifecycle at the phase whose
-// pipeline did not succeed, with the failed jobs' traces.
-func requireGitLabLifecyclePipeline(t *testing.T, ctx context.Context, client *gitlabapi.Client, project, phase string, pipeline *gitlabapi.Pipeline) {
+// pipeline did not succeed, with the failed jobs' traces, the pipeline's and
+// its child pipelines'.
+func requireGitLabLifecyclePipeline(t *testing.T, ctx context.Context, client *gitlabapi.Client, project, phase string, pipeline *gitlabapi.Pipeline, children ...int64) {
 	t.Helper()
 
-	if pipeline.Status != "success" {
-		logGitLabTrace(t, gitlabTrialTrace(t, ctx, client, project, pipeline.ID))
-		t.Fatalf("lifecycle phase %s: pipeline %d ended %q, want success", phase, pipeline.ID, pipeline.Status)
+	if pipeline.Status == "success" {
+		return
 	}
+
+	for _, id := range append([]int64{pipeline.ID}, children...) {
+		logGitLabTrace(t, gitlabTrialTrace(t, ctx, client, project, id))
+	}
+
+	t.Fatalf("lifecycle phase %s: pipeline %d ended %q, want success", phase, pipeline.ID, pipeline.Status)
 }
 
 // requireGitLabPipelineIDs holds the project to exactly the pipelines the
@@ -395,7 +367,7 @@ func requireGitLabPipelineIDs(t *testing.T, ctx context.Context, client *gitlaba
 	}
 
 	slices.Sort(got)
-	slices.Sort(want)
+	want = slices.Sorted(slices.Values(want))
 
 	if !slices.Equal(got, want) {
 		t.Fatalf("the project has pipelines %v, want exactly %v", got, want)
@@ -419,17 +391,6 @@ func requireGitLabNoReleases(t *testing.T, ctx context.Context, client *gitlabap
 
 	if len(tags) != 0 || len(releases) != 0 {
 		t.Fatalf("the project has %d tags and %d releases before the release phase", len(tags), len(releases))
-	}
-}
-
-// requireGitLabBranches asks the forge where each branch is.
-func requireGitLabBranches(t *testing.T, target livetest.Target, repo string, want map[string]string) {
-	t.Helper()
-
-	for _, branch := range slices.Sorted(maps.Keys(want)) {
-		if got := livetest.BranchCommitSHA(t, target, repo, branch); got != want[branch] {
-			t.Fatalf("branch %s is at %s, want %s", branch, got, want[branch])
-		}
 	}
 }
 

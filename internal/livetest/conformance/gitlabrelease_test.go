@@ -196,9 +196,8 @@ const (
 	gitlabPreseededProvenanceRelease
 )
 
-// gitlabConsumerSettings returns the caller's settings and the consumer's build
-// command, with its variables scoped to the build.
-func gitlabConsumerSettings(t *testing.T, consumerRoot string) (livetest.GitLabReleaseSettings, string) {
+// gitlabConsumerSettings returns the caller's settings for a release trial.
+func gitlabConsumerSettings(t *testing.T, consumerRoot string) livetest.GitLabReleaseSettings {
 	t.Helper()
 
 	settings, err := livetest.ParseGitLabReleaseSettings(os.Getenv(consumerSettingsEnv))
@@ -210,12 +209,29 @@ func gitlabConsumerSettings(t *testing.T, consumerRoot string) (livetest.GitLabR
 		t.Fatal("consumer settings require a consumer release trial")
 	}
 
-	return gitlabConsumerBuild(t, consumerRoot, settings)
+	return settings
 }
 
-// gitlabConsumerBuild binds the settings to the lab's runners and returns
-// them with the consumer's build command, its variables scoped to the build.
-func gitlabConsumerBuild(t *testing.T, consumerRoot string, settings livetest.GitLabReleaseSettings) (livetest.GitLabReleaseSettings, string) {
+// gitlabConsumerProfile is what a GitLab consumer's release and lifecycle
+// derive from the checkout and the settings before anything is created: the
+// build command, the selected builder, the release images the consumer
+// declares, its export commands and the tags of the requested version.
+type gitlabConsumerProfile struct {
+	build                string
+	kaniko               bool
+	releaseImages        bool
+	releaseImagesConfig  string
+	export               []string
+	requestTag, finalTag string
+}
+
+// gitlabConsumerProfileOf binds the settings to the lab's runners and reads
+// the consumer's build, release images and export. Only a consumer that
+// declares release images builds them, in the release's image jobs with the
+// selected builder. A container build belongs to the export jobs, which
+// build with the selected builder; the build job has none to select, so a
+// build script that runs one is refused.
+func gitlabConsumerProfileOf(t *testing.T, consumerRoot string, settings livetest.GitLabReleaseSettings) (livetest.GitLabReleaseSettings, gitlabConsumerProfile) {
 	t.Helper()
 
 	// A consumer's release builds for the lab's runners, and only for them.
@@ -230,12 +246,50 @@ func gitlabConsumerBuild(t *testing.T, consumerRoot string, settings livetest.Gi
 		}
 	}
 
-	buildCommand, err := livetest.GitLabConsumerBuildCommand(settings.Variables)
-	if err != nil {
+	profile := gitlabConsumerProfile{kaniko: livetest.GitLabKaniko(t), requestTag: releaseRequestTag, finalTag: releaseFinalTag}
+
+	var err error
+	if profile.build, err = livetest.GitLabConsumerBuildCommand(settings.Variables); err != nil {
 		t.Fatal(err)
 	}
 
-	return settings, buildCommand
+	if profile.releaseImages, profile.releaseImagesConfig, err = livetest.GitLabReleaseImages(consumerRoot); err != nil {
+		t.Fatal(err)
+	}
+
+	if consumerRoot != "" && gitlabConsumerBuildRunsAContainerBuild(t, consumerRoot) {
+		t.Fatalf("%s runs a container build, which the build job would run with Buildah whatever image-builder says; move it to %s", livetest.GitLabConsumerBuildScript, livetest.GitLabConsumerExportScript)
+	}
+
+	if profile.export, err = livetest.GitLabConsumerExportCommands(consumerRoot, settings.Variables); err != nil {
+		t.Fatal(err)
+	}
+
+	if settings.Version != "" {
+		profile.requestTag, profile.finalTag = "release-request/v"+settings.Version, "v"+settings.Version
+	}
+
+	return settings, profile
+}
+
+// artifactsConfig is the consumer's release images declaration, when it
+// declares any.
+func (profile gitlabConsumerProfile) artifactsConfig() string {
+	if profile.releaseImages {
+		return profile.releaseImagesConfig
+	}
+
+	return ""
+}
+
+// gitlabImageBuilder names the builder the pushed images select and its job
+// image: Buildah, unless the run selected kaniko.
+func gitlabImageBuilder(images gitlabReleaseImages) (string, string) {
+	if images.kaniko != "" {
+		return livetest.ImageBuilderKaniko, images.kaniko
+	}
+
+	return livetest.ImageBuilderBuildah, images.buildah
 }
 
 // withGitChglog keeps the fixtures and the demo rendering with git-chglog from
@@ -304,34 +358,13 @@ func useGitLabAdminPolicy(ctx context.Context, t *testing.T, client *gitlabapi.C
 func runGitLabReleaseScenario(t *testing.T, consumerRoot string, scenario gitlabReleaseCase, private bool) {
 	t.Helper()
 
-	settings, buildCommand := gitlabConsumerSettings(t, consumerRoot)
+	settings, profile := gitlabConsumerProfileOf(t, consumerRoot, gitlabConsumerSettings(t, consumerRoot))
 	bases := scenario == gitlabBaseRelease
-
-	// Only a consumer that declares release images builds them, in the
-	// release's image jobs with the selected builder; the minimal release
-	// builds none.
-	kaniko := livetest.GitLabKaniko(t)
-
-	releaseImages, releaseImagesConfig, err := livetest.GitLabReleaseImages(consumerRoot)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// A container build belongs to the export jobs, which build with the
-	// selected builder; the build job has none to select.
-	if consumerRoot != "" && gitlabConsumerBuildRunsAContainerBuild(t, consumerRoot) {
-		t.Fatalf("%s runs a container build, which the build job would run with Buildah whatever image-builder says; move it to %s", livetest.GitLabConsumerBuildScript, livetest.GitLabConsumerExportScript)
-	}
-
-	exportCommand, err := livetest.GitLabConsumerExportCommands(consumerRoot, settings.Variables)
-	if err != nil {
-		t.Fatal(err)
-	}
 
 	// The base fixture builds in the export jobs, with the selected builder;
 	// the build job only publishes what they staged.
 	if bases {
-		exportCommand = gitlabBaseExport
+		profile.export = gitlabBaseExport
 	}
 
 	recovery := scenario == gitlabInterruptedConsumerRelease
@@ -345,17 +378,14 @@ func runGitLabReleaseScenario(t *testing.T, consumerRoot string, scenario gitlab
 		t.Fatal("consumer recovery requires one explicit nonzero version and no next-version")
 	}
 
-	if recovery && !releaseImages {
+	if recovery && !profile.releaseImages {
 		t.Fatal("consumer recovery requires policy-owned release-images")
 	}
 
-	requestTag, finalTag := releaseRequestTag, releaseFinalTag
-	if settings.Version != "" {
-		requestTag, finalTag = "release-request/v"+settings.Version, "v"+settings.Version
-	}
+	requestTag, finalTag := profile.requestTag, profile.finalTag
 
 	// The export jobs, like the image jobs, run in the builder's job image.
-	archives := gitlabReleaseArchiveInputs(t, consumerRoot != "" || bases, releaseImages || len(exportCommand) != 0, kaniko)
+	archives := gitlabReleaseArchiveInputs(t, consumerRoot != "" || bases, profile.releaseImages || len(profile.export) != 0, profile.kaniko)
 	if !livetest.Requires(t, provider.ForgeGitLab, livetest.NeedsInRunner) {
 		livetest.NotCoveredf(t, "signed GitLab release requires a deployed runner")
 	}
@@ -381,7 +411,7 @@ func runGitLabReleaseScenario(t *testing.T, consumerRoot string, scenario gitlab
 		consumer = &opened
 		if opened.GitLabChecksNeedBuildah(t) {
 			label := livetest.PrivilegedRunnerLabel(t, target)
-			if label == "" && kaniko {
+			if label == "" && profile.kaniko {
 				livetest.NotCoveredf(t, "the Go CLI integration fixture's checks run Buildah themselves, whatever builds the images; they need runner.privileged_label")
 			}
 
@@ -456,7 +486,7 @@ func runGitLabReleaseScenario(t *testing.T, consumerRoot string, scenario gitlab
 	checks, build := []string{"go test ./..."}, []string{gitlabMinimalBuild}
 	if consumer != nil {
 		checks = []string{"bash .gitlab/check-release.sh"}
-		build = []string{buildCommand}
+		build = []string{profile.build}
 	}
 
 	if bases {
@@ -469,23 +499,18 @@ func runGitLabReleaseScenario(t *testing.T, consumerRoot string, scenario gitlab
 	// The builder's jobs, image and export alike, resolve the selection, and
 	// a lab that cannot run it reports the scenario not covered.
 	buildRunnerTags := []string{}
-	if releaseImages || len(exportCommand) != 0 {
+	if profile.releaseImages || len(profile.export) != 0 {
 		buildRunnerTags = livetest.ChooseImageBuilder(t, target).RunnerLabels
-	} else if label := livetest.PrivilegedRunnerLabel(t, target); label != "" && consumer != nil && !kaniko {
+	} else if label := livetest.PrivilegedRunnerLabel(t, target); label != "" && consumer != nil && !profile.kaniko {
 		buildRunnerTags = append(buildRunnerTags, label)
 	}
 
-	// The image jobs run in the builder's job image, the Buildah one unless
-	// the run selects kaniko.
-	imageBuilder, builderJobImage := livetest.ImageBuilderBuildah, images.buildah
-	if images.kaniko != "" {
-		imageBuilder, builderJobImage = livetest.ImageBuilderKaniko, images.kaniko
-	}
+	imageBuilder, builderJobImage := gitlabImageBuilder(images)
 
 	// The lab's runners are of one architecture, and only amd64 has an image
 	// or export job without tags of its own.
-	releasePlatforms, artifactsConfig := "", ""
-	if releaseImages || len(exportCommand) != 0 {
+	releasePlatforms := ""
+	if profile.releaseImages || len(profile.export) != 0 {
 		releasePlatforms = settings.Variables["RELEASE_PLATFORMS"]
 		// The base fixture takes no consumer settings: empty is amd64.
 		if bases && releasePlatforms == "" {
@@ -497,17 +522,13 @@ func runGitLabReleaseScenario(t *testing.T, consumerRoot string, scenario gitlab
 		}
 	}
 
-	if releaseImages {
-		artifactsConfig = releaseImagesConfig
-	}
-
 	releasePolicy := gitlabReleasePolicy{
 		project: project, publication: livetest.RepoSlug(target, publication), registry: registry,
 		images: images, keys: keys, gitURL: gitURL, hostKey: hostKey, requestPublic: requestPublic,
 		settings: settings, distro: consumer != nil, bases: bases,
 		checks: checks, checksRunnerTags: checksRunnerTags, build: build, buildRunnerTags: buildRunnerTags,
-		releaseImages: releaseImages, artifactsConfig: artifactsConfig, releasePlatforms: releasePlatforms,
-		imageBuilder: imageBuilder, builderJobImage: builderJobImage, export: exportCommand,
+		releaseImages: profile.releaseImages, artifactsConfig: profile.artifactsConfig(), releasePlatforms: releasePlatforms,
+		imageBuilder: imageBuilder, builderJobImage: builderJobImage, export: profile.export,
 	}
 	policyIncludes := []any{releasePolicy.include(t, target, layer)}
 	if recovery {
@@ -629,13 +650,13 @@ func runGitLabReleaseScenario(t *testing.T, consumerRoot string, scenario gitlab
 	}
 
 	requireReleaseGit(t, target, repo, keys, request, requestTag, finalTag)
-	verified := requireGitLabReleaseBundles(t, client, target, repo, child, run.SHA, keys, finalTag, releaseImages)
+	verified := requireGitLabReleaseBundles(t, client, target, repo, child, run.SHA, keys, finalTag, profile.releaseImages)
 	t.Logf("verified %d published Cosign bundles", verified)
 
 	// Read back and retain the public payloads before an independent routing
 	// assertion can end the trial and run its disposable-resource cleanup.
 	requireGitLabReleaseRunnerRouting(t, ctx, client, project, child,
-		gitLabReleaseRunnerRoles(buildRunnerTags, checksRunnerTags, imageBuilder, releaseImages, len(exportCommand) != 0))
+		gitLabReleaseRunnerRoles(buildRunnerTags, checksRunnerTags, imageBuilder, profile.releaseImages, len(profile.export) != 0))
 
 	if consumer != nil {
 		requireGitLabPackageSignatures(t, target, repo, keys, finalTag)
@@ -656,7 +677,7 @@ func runGitLabReleaseScenario(t *testing.T, consumerRoot string, scenario gitlab
 		child := requireGitLabReleaseChild(t, ctx, client, project, next)
 		requireReleaseGit(t, target, repo, keys, parent, requestTag, finalTag)
 
-		bundles := requireGitLabReleaseBundles(t, client, target, repo, child, next.SHA, keys, finalTag, releaseImages)
+		bundles := requireGitLabReleaseBundles(t, client, target, repo, child, next.SHA, keys, finalTag, profile.releaseImages)
 		if consumer != nil {
 			requireGitLabPackageSignatures(t, target, repo, keys, finalTag)
 			requireGitLabPublishedImages(t, client, target, repo, publication, child, keys)
