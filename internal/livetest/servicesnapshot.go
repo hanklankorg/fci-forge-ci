@@ -29,7 +29,7 @@ import (
 // scope alone, serviceSnapshotScope. A consumer whose declaration the planner
 // refuses has no development route, and a lifecycle refuses it.
 
-var errServiceDeclaration = errors.New("the trial judges one container of the root Containerfile and context, declaring native amd64, without image name, tag suffix or provenance, from at most one artifact")
+var errServiceDeclaration = errors.New("the trial judges one container of the root Containerfile and context, planned for amd64, without image name, tag suffix or declared provenance, from at most one artifact")
 
 // ServiceSnapshotDeclarationFile is the consumer path of the service
 // snapshot's declaration: the consumer's own declaration, overlaid for the
@@ -199,9 +199,24 @@ func serviceSnapshotDeclarationOverlay(body string) (string, snapshotimage.Plan,
 		return "", snapshotimage.Plan{}, err
 	}
 
-	ctr := &cfg.Containers[0]
-	ctr.Platforms = build.DefaultPlatform
-	ctr.EnableSLSA = new(bool)
+	in, err := serviceSnapshotStandInInput()
+	if err != nil {
+		return "", snapshotimage.Plan{}, err
+	}
+
+	// The planner judges the declaration's snapshot, with the platforms as
+	// declared, before the overlay narrows them.
+	original, err := snapshotimage.New(pipeline.NewConfigPlan(snapshotView(cfg)), in)
+	if err != nil {
+		return "", snapshotimage.Plan{}, err
+	}
+
+	if len(original.Images) != 1 || !slices.Contains(original.Images[0].Platforms, build.DefaultPlatform) {
+		return "", snapshotimage.Plan{}, errServiceDeclaration
+	}
+
+	cfg.Containers[0].Platforms = build.DefaultPlatform
+	cfg = snapshotView(cfg)
 	// Artifact's typed ecosystem fields are not YAML-marshallable. Keep their
 	// original nodes after the strict shared parser has admitted the whole input.
 	var raw struct {
@@ -225,11 +240,6 @@ func serviceSnapshotDeclarationOverlay(body string) (string, snapshotimage.Plan,
 		return "", snapshotimage.Plan{}, err
 	}
 
-	in, err := serviceSnapshotStandInInput()
-	if err != nil {
-		return "", snapshotimage.Plan{}, err
-	}
-
 	plan, err := snapshotimage.New(pipeline.NewConfigPlan(overlaid), in)
 	if err != nil {
 		return "", snapshotimage.Plan{}, err
@@ -238,15 +248,29 @@ func serviceSnapshotDeclarationOverlay(body string) (string, snapshotimage.Plan,
 	return overlay, plan, nil
 }
 
+// snapshotView is the declaration as an unsigned snapshot builds it: no
+// container requests OCI provenance, which a snapshot never carries. The
+// declaration itself is left as it is.
+func snapshotView(cfg *config.Config) *config.Config {
+	view := *cfg
+	view.Containers = slices.Clone(cfg.Containers)
+
+	for i := range view.Containers {
+		view.Containers[i].EnableSLSA = new(bool)
+	}
+
+	return &view
+}
+
 // serviceSnapshotScope is the trial's acceptance scope, not a product rule:
 // the planner decides what a snapshot builds; the trial judges one image,
 // built from the root Containerfile and context, under the repository and
 // tag it derives, so it takes one container without image name or tag suffix,
-// from at most one artifact. The overlay narrows the declared platforms to
-// native amd64 and must not widen or alter them, so amd64 is declared and
-// every declared platform is native. Declared provenance is refused before
-// the overlay drops it, so an unsupported request is not silently turned into
-// a supported one.
+// from at most one artifact. The overlay narrows the platforms to native
+// amd64, which the planned declaration must therefore include. A snapshot
+// carries no provenance, so the overlay turns a release's default provenance
+// off; a declared request for provenance is refused instead, so it is not
+// silently dropped.
 func serviceSnapshotScope(cfg *config.Config) error {
 	if len(cfg.Containers) != 1 {
 		return errServiceDeclaration
@@ -256,27 +280,11 @@ func serviceSnapshotScope(cfg *config.Config) error {
 	selected := pipeline.NewConfigPlan(cfg).Containers.All[0]
 
 	if ctr.ImageName != "" || ctr.TagSuffix != "" || len(ctr.From) > 1 || (ctr.EnableSLSA != nil && *ctr.EnableSLSA) ||
-		selected.ContainerFile != "Containerfile" || selected.Context != "." || !serviceSnapshotDeclaresAMD64(selected.Platforms) {
+		selected.ContainerFile != "Containerfile" || selected.Context != "." {
 		return errServiceDeclaration
 	}
 
 	return nil
-}
-
-func serviceSnapshotDeclaresAMD64(platforms string) bool {
-	hasAMD64 := false
-	seen := map[string]bool{}
-
-	for _, platform := range strings.FieldsFunc(platforms, func(r rune) bool { return r == ',' || r == ' ' || r == '\n' || r == '\t' }) {
-		if seen[platform] || (platform != build.DefaultPlatform && platform != "linux/arm64") {
-			return false
-		}
-
-		seen[platform] = true
-		hasAMD64 = hasAMD64 || platform == build.DefaultPlatform
-	}
-
-	return hasAMD64
 }
 
 // serviceSnapshotFamilies lists the toolchain families of a plan's producers,
