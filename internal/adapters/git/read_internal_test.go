@@ -252,3 +252,37 @@ func TestSplitSignedTag_CutsAtTheLastSignatureLine(t *testing.T) {
 		})
 	}
 }
+
+// stripCompatibilitySignature removes what git's remove_signature removes,
+// as measured against git 2.53: the last gpgsig or gpgsig-sha256 header
+// with its continuation lines, and nothing in the message.
+func TestStripCompatibilitySignature_RemovesWhatGitRemoves(t *testing.T) {
+	t.Parallel()
+
+	const (
+		head = "object 0123456789abcdef0123456789abcdef01234567\ntype commit\ntag v1.0.0\ntagger A <a@example.invalid> 1700000000 +0000\n"
+		sig  = " -----BEGIN PGP SIGNATURE-----\n \n AAAA\n -----END PGP SIGNATURE-----\n"
+		body = "\nRelease\n"
+	)
+
+	for _, test := range []struct {
+		name, payload, want string
+	}{
+		{"no header", head + body, head + body},
+		{"gpgsig", head + "gpgsig" + sig + body, head + body},
+		{"gpgsig-sha256", head + "gpgsig-sha256" + sig + body, head + body},
+		{"only the last of two", head + "gpgsig" + sig + "gpgsig-sha256" + sig + body, head + "gpgsig" + sig + body},
+		{"another algorithm's name", head + "gpgsig-sha1" + sig + body, head + "gpgsig-sha1" + sig + body},
+		{"no space after the name", head + "gpgsig\n a\n" + body, head + "gpgsig\n a\n" + body},
+		{"in the message", head + body + "gpgsig" + sig, head + body + "gpgsig" + sig},
+		{"continuation of another header", head + "foo bar\n cont\n" + body, head + "foo bar\n cont\n" + body},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := string(stripCompatibilitySignature([]byte(test.payload))); got != test.want {
+				t.Fatalf("strip = %q, want %q", got, test.want)
+			}
+		})
+	}
+}

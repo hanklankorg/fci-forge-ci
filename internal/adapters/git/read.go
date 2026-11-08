@@ -745,7 +745,7 @@ func (r *Repo) CatFileTag(ctx context.Context, tag string) (string, error) {
 		return renderTagObject(tagObj), nil
 	}
 
-	return r.Output(ctx, "cat-file", "tag", tag)
+	return r.Output(ctx, "--no-replace-objects", "cat-file", "tag", tag)
 }
 
 // VerifyTagSignature verifies the PGP signature on an annotated tag
@@ -759,7 +759,11 @@ func (r *Repo) CatFileTag(ctx context.Context, tag string) (string, error) {
 // a release verifies its final tag in, a correctly signed tag was
 // refused. Every other go-git reader here falls back to git; a
 // signature check has nothing to fall back to, so it reads with git
-// only, and verifies the bytes git signs, as `git verify-tag` does.
+// only, and verifies the bytes git signs, as `git verify-tag` does: the
+// object up to its signature, without the compatibility signature
+// header git strips (see signedTagPayload). The object must name the
+// tag it is read under, so a signed release cannot be replayed as
+// another one.
 //
 // Returns:
 //   - signer: the signing entity's primary User ID ("Name <email>"),
@@ -767,7 +771,7 @@ func (r *Repo) CatFileTag(ctx context.Context, tag string) (string, error) {
 //   - ok: true when the signature verifies; false when verification
 //     fails (wrong key, corrupted signature, etc.).
 //   - err: non-nil only for hard structural failures — tag not found,
-//     not annotated, malformed keyring. A tag without a PGP signature,
+//     not annotated, naming another tag, malformed keyring. A tag without a PGP signature,
 //     or a failed verification with intact inputs, returns ok=false,
 //     err=nil.
 //
@@ -790,7 +794,7 @@ func (r *Repo) VerifyTagSignature(ctx context.Context, tag string, armoredKeyrin
 		return "", "", false, err
 	}
 
-	payload, signature := splitSignedTag(body)
+	payload, signature := signedTagPayload(body)
 	if !bytes.HasPrefix(signature, []byte("-----BEGIN PGP SIGNATURE-----")) {
 		return "", "", false, nil
 	}
@@ -818,8 +822,10 @@ func (r *Repo) VerifyTagSignature(ctx context.Context, tag string, armoredKeyrin
 }
 
 // annotatedTagObject returns the exact bytes of the annotated tag object
-// refs/tags/<tag> names. Both reads use one object ID and ignore
-// replacement refs, so what is verified is the object the ref names.
+// refs/tags/<tag> names, and refuses one whose own `tag` header names
+// another tag. Both reads use one object ID and ignore replacement refs,
+// so what is verified is the object the ref names, and the name is read
+// from the bytes that are verified.
 func (r *Repo) annotatedTagObject(ctx context.Context, tag string) ([]byte, error) {
 	ref := refsTagsPrefix + tagRefName(tag)
 
@@ -833,6 +839,10 @@ func (r *Repo) annotatedTagObject(ctx context.Context, tag string) ([]byte, erro
 		return nil, fmt.Errorf("read tag %q: %w", tag, err)
 	}
 
+	if name, ok := domaingit.TagObjectName(body); !ok || name != tagRefName(tag) {
+		return nil, fmt.Errorf("tag %q points at a tag object named %q: %w", tag, name, errs.ErrValidation)
+	}
+
 	return []byte(body), nil
 }
 
@@ -843,6 +853,58 @@ var signatureStarts = [][]byte{
 	[]byte("-----BEGIN PGP MESSAGE-----"),
 	[]byte("-----BEGIN SIGNED MESSAGE-----"),
 	[]byte("-----BEGIN SSH SIGNATURE-----"),
+}
+
+// signedTagPayload returns the payload a tag object's signature covers,
+// and the signature: splitSignedTag, then the compatibility signature
+// header removed, which is what `git verify-tag` checks.
+func signedTagPayload(body []byte) ([]byte, []byte) {
+	payload, signature := splitSignedTag(body)
+
+	return stripCompatibilitySignature(payload), signature
+}
+
+// stripCompatibilitySignature removes a `gpgsig` or `gpgsig-sha256` header,
+// with its continuation lines, from a tag payload, as git's
+// remove_signature does before verifying. A tag in a repository using
+// both hash algorithms carries its signature over the other algorithm's
+// object in such a header, and its own signature excludes it.
+//
+// Measured against git 2.53 rather than assumed: only headers count, not
+// the message; the name must be followed by a space; and git removes only
+// the LAST such header, so a payload with two keeps the first. Removing
+// more would verify a payload git does not.
+func stripCompatibilitySignature(payload []byte) []byte {
+	start, end := -1, -1
+	inHeader := false
+
+	for at := 0; at < len(payload); {
+		line := payload[at:]
+
+		next := len(payload)
+		if newline := bytes.IndexByte(line, '\n'); newline >= 0 {
+			next = at + newline + 1
+		}
+
+		switch {
+		case inHeader && line[0] == ' ':
+			end = next
+		case bytes.HasPrefix(line, []byte("gpgsig ")) || bytes.HasPrefix(line, []byte("gpgsig-sha256 ")):
+			start, end, inHeader = at, next, true
+		case line[0] == '\n':
+			next = len(payload)
+		default:
+			inHeader = false
+		}
+
+		at = next
+	}
+
+	if start < 0 {
+		return payload
+	}
+
+	return append(append(make([]byte, 0, len(payload)-(end-start)), payload[:start]...), payload[end:]...)
 }
 
 // splitSignedTag splits a tag object the way git's parse_signed_buffer
