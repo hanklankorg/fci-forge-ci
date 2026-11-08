@@ -168,7 +168,7 @@ func TestGitHubConsumerReleaseCredentialWiring(t *testing.T) {
 		t.Fatal("release file must be admitted before any hosted trial")
 	}
 
-	if !strings.Contains(source, `settings.Event == livetest.TrialRelease && os.Getenv("FORGE_CI_LIVE_ENGINE_MODE") != "prepare"`) {
-		t.Fatal("non-release and SDK-only preparation must not require release authority")
+	if !strings.Contains(source, `(settings.Event == livetest.TrialRelease || settings.Event == livetest.TrialLifecycle) && os.Getenv("FORGE_CI_LIVE_ENGINE_MODE") != "prepare"`) {
+		t.Fatal("non-releasing events and SDK-only preparation must not require release authority")
 	}
 }

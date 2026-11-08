@@ -220,6 +220,10 @@ func TestDevelopmentDispatchIsSentOnceAndReturnsIdentity(t *testing.T) {
 			t.Error("invalid development dispatch")
 		}
 
+		if body.Inputs["source-branch"] != "development" || len(body.Inputs) != 1 {
+			t.Errorf("dispatch inputs %v, want the source branch alone", body.Inputs)
+		}
+
 		response.Header().Set("Content-Type", "application/json")
 		_, _ = response.Write([]byte(`{"workflow_run_id":7,"html_url":"https://github.com/example-org/fc-development/actions/runs/7"}`))
 	}))
@@ -231,7 +235,7 @@ func TestDevelopmentDispatchIsSentOnceAndReturnsIdentity(t *testing.T) {
 	}
 
 	trial := &GitHubTrial{tb: t, api: client, org: "example-org"}
-	if id := trial.DispatchDevelopment("fc-development", "release-dev.yml"); id != 7 || calls.Load() != 1 {
+	if id := trial.DispatchDevelopment("fc-development", GitHubDevelopmentWorkflow, map[string]any{"source-branch": "development"}); id != 7 || calls.Load() != 1 {
 		t.Fatalf("dispatch id=%d calls=%d", id, calls.Load())
 	}
 }

@@ -961,7 +961,7 @@ test-live-image kind forge_lab:
 #
 #   just test-live-consumer gitlab /absolute/hello-maven-service/consumer lifecycle job-archive=<path> build-archive=<path> signer-archive=<path> lint-archive=<path> version=0.2.0 version-bump=maven job-user=65532:65532
 #
-# github, events pull-request, dev-release and release, on hosted GitHub. Runs
+# github, events pull-request, dev-release, release and lifecycle, on hosted GitHub. Runs
 # inside Forge Lab's hosted session (`just github run --org ... --prefix ...
 # --fixtures none` there), which writes the private context
 # FORGE_LAB_GITHUB_CONTEXT names. org=<id> (required) is the numeric
@@ -970,13 +970,15 @@ test-live-image kind forge_lab:
 # its runtime images and moves v0.90.0-pre. The consumer's GitHub fixture
 # workflows, pinned to that engine, then run in a disposable
 # <prefix><name>-<visibility>-<session> repository, deleted afterwards. Other
-# settings: workflow=<file>, fixtures=<dir>, version=X.Y.Z and image=<name>
-# (release), RELEASE_PLATFORMS=<linux/amd64 and/or linux/arm64> (default
-# linux/amd64), nanolinter-image= and megalinter-image=<reference>.
+# settings: workflow=<file> (not lifecycle), fixtures=<dir>, version=X.Y.Z and
+# image=<name> (release and lifecycle), RELEASE_PLATFORMS=<linux/amd64 and/or
+# linux/arm64> (default linux/amd64), nanolinter-image= and
+# megalinter-image=<reference>. The lifecycle runs the consumer's
+# pullrequest.yml, release-dev.yml and release.yml fixtures in one repository.
 # docs/testing.md, Trying a consumer on GitHub, has the prerequisites.
 [arg('repo', help='Absolute path to a clean consumer checkout, for example /absolute/myapp')]
 [arg('forge', help='forgejo, gitlab or github')]
-[arg('event', help='pull-request or release; forgejo and gitlab also lifecycle, github also dev-release')]
+[arg('event', help='pull-request, release or lifecycle; github also dev-release')]
 [arg('settings', help='key=value settings; gitlab: job-archive=, build-archive=, signer-archive=, lint-archive=; github: org=<id>; see docs/testing.md')]
 [doc('Live; run a consumer against this engine')]
 [group('live')]
@@ -1042,8 +1044,10 @@ test-live-consumer forge repo event *settings:
         if [[ -n "${FORGE_LAB_GITHUB_CONTEXT:-}" && "$FORGE_LAB_GITHUB_CONTEXT" != /* ]]; then
             export FORGE_LAB_GITHUB_CONTEXT="{{ invocation_directory() }}/$FORGE_LAB_GITHUB_CONTEXT"
         fi
+        scenario=TestGitHubLayer_ConsumerTrial
+        [[ $event != lifecycle ]] || scenario=TestGitHubLayer_ConsumerLifecycle
         GOTOOLCHAIN=local GOPROXY=off GOSUMDB=off exec go test -tags=live -count=1 -buildvcs=false -timeout=5h -v \
-            -run='^TestGitHubLayer_ConsumerTrial$' ./internal/livetest/githubconsumer/
+            -run="^${scenario}$" ./internal/livetest/githubconsumer/
         ;;
     gitlab:*)
         printf 'a GitLab trial event is pull-request, release or lifecycle, got %q\n' "$event" >&2

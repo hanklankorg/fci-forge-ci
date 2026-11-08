@@ -5,24 +5,28 @@ package livetest
 
 import (
 	"archive/zip"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"io"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	githubapi "github.com/google/go-github/v91/github"
 )
 
-// DispatchDevelopment sends exactly one dispatch to the new disposable
-// consumer. An uncertain response fails the trial; it is never dispatched again.
-func (trial *GitHubTrial) DispatchDevelopment(repo, workflow string) int64 {
+// DispatchDevelopment sends exactly one dispatch of workflow on main to the
+// new disposable consumer, with the workflow's inputs, if any. An uncertain
+// response fails the trial; it is never dispatched again.
+func (trial *GitHubTrial) DispatchDevelopment(repo, workflow string, inputs map[string]any) int64 {
 	trial.tb.Helper()
 
 	details, _, err := trial.api.Actions.CreateWorkflowDispatchEventByFileName(trial.tb.Context(), trial.org, repo, workflow,
-		githubapi.CreateWorkflowDispatchEventRequest{Ref: defaultBranch, ReturnRunDetails: new(true)})
+		githubapi.CreateWorkflowDispatchEventRequest{Ref: defaultBranch, Inputs: inputs, ReturnRunDetails: new(true)})
 	if err != nil {
 		trial.tb.Fatalf("dispatch development workflow %s: %v", workflow, err)
 	}
@@ -34,6 +38,67 @@ func (trial *GitHubTrial) DispatchDevelopment(repo, workflow string) int64 {
 	}
 
 	return 0
+}
+
+// RepositoryID reads the ID of repo, the binding a container package of the
+// repository carries.
+func (trial *GitHubTrial) RepositoryID(repo string) int64 {
+	trial.tb.Helper()
+
+	repository, _, err := trial.api.Repositories.Get(trial.tb.Context(), trial.org, repo)
+	if err != nil || repository.GetID() <= 0 {
+		trial.tb.Fatalf("livetest: read %s: %v", repo, err)
+	}
+
+	return repository.GetID()
+}
+
+// RemoveSnapshotPackageAfter removes, when the test ends, the snapshot image a
+// development run publishes to repo's container package, the snapshot
+// orchestrator's default image repository, whether or not the run got that
+// far: the identity is read then, a package never published is nothing to
+// remove, and an identity that cannot be read is not deleted. Deleting the
+// repository does not delete its packages, so this is registered before the
+// dispatch.
+func (trial *GitHubTrial) RemoveSnapshotPackageAfter(repo string, repositoryID int64) {
+	trial.tb.Helper()
+
+	trial.tb.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(trial.tb.Context()), 2*time.Minute)
+		defer cancel()
+
+		identity, err := trial.ReadContainerPackageIdentity(ctx, strings.ToLower(repo), repositoryID)
+		if errors.Is(err, os.ErrNotExist) {
+			return
+		}
+
+		if err != nil {
+			trial.tb.Errorf("livetest: snapshot package %s of %s: identity unavailable, refusing deletion: %v", strings.ToLower(repo), repo, err)
+
+			return
+		}
+
+		if err := trial.DeleteContainerPackage(ctx, identity); err != nil {
+			trial.tb.Errorf("livetest: delete the snapshot package %s (id %d): %v", identity.Name, identity.ID, err)
+
+			return
+		}
+
+		trial.tb.Logf("snapshot package deletion confirmed: package=%s id=%d acknowledged-repository=%d", identity.Name, identity.ID, repositoryID)
+	})
+}
+
+// CheckSnapshotPackage checks that a development run published the consumer's
+// snapshot image as a container package of its own repository.
+func (trial *GitHubTrial) CheckSnapshotPackage(repo string, repositoryID int64) GitHubPackageIdentity {
+	trial.tb.Helper()
+
+	identity, err := trial.ReadContainerPackageIdentity(trial.tb.Context(), strings.ToLower(repo), repositoryID)
+	if err != nil {
+		trial.tb.Fatalf("livetest: the development run published no snapshot image package %s of %s: %v", strings.ToLower(repo), repo, err)
+	}
+
+	return identity
 }
 
 // CheckDevelopmentRelease proves artifact transport and that a branch build

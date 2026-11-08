@@ -465,7 +465,16 @@ func (mirror RepoMirror) Git(tb TB, args ...string) (string, error) {
 }
 
 func (mirror RepoMirror) mergeOf(ctx context.Context, merge, base, head string) error {
-	parents, err := mirror.git.run(ctx, mirror.dir, "rev-list", "--parents", "-n", "1", merge)
+	return gitMergeOf(ctx, func(ctx context.Context, args ...string) (string, error) {
+		return mirror.git.run(ctx, mirror.dir, args...)
+	}, merge, base, head)
+}
+
+// gitMergeOf is RequireMergeOf's check on any clone that holds the three
+// commits, read with git, whose runner returns trimmed output: the lab
+// mirror's, or the hosted trial's working copy.
+func gitMergeOf(ctx context.Context, git func(context.Context, ...string) (string, error), merge, base, head string) error {
+	parents, err := git(ctx, "rev-list", "--parents", "-n", "1", merge)
 	if err != nil {
 		return err
 	}
@@ -474,12 +483,12 @@ func (mirror RepoMirror) mergeOf(ctx context.Context, merge, base, head string) 
 		return fmt.Errorf("is %q, want the parents %s and %s: %w", parents, base, head, errs.ErrValidation)
 	}
 
-	mergeTree, err := mirror.git.run(ctx, mirror.dir, "rev-parse", merge+"^{tree}")
+	mergeTree, err := git(ctx, "rev-parse", merge+"^{tree}")
 	if err != nil {
 		return err
 	}
 
-	headTree, err := mirror.git.run(ctx, mirror.dir, "rev-parse", head+"^{tree}")
+	headTree, err := git(ctx, "rev-parse", head+"^{tree}")
 	if err != nil {
 		return err
 	}
