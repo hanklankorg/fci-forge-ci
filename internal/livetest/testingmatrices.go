@@ -285,7 +285,7 @@ func (demo *matrixDemo) readHosted(consumer, source string) error {
 	demo.hosted[TrialLifecycle] = lifecycle && err == nil
 	demo.release[matrixGitHub] = demo.hosted[TrialRelease]
 
-	_, demo.admission[matrixGitHub] = serviceSnapshotAdmission(consumer, source)
+	demo.admission[matrixGitHub] = serviceSnapshotAdmission(consumer, source)
 
 	return nil
 }

@@ -4,6 +4,7 @@
 package livetest
 
 import (
+	"cmp"
 	"context"
 	_ "embed"
 	"errors"
@@ -15,54 +16,62 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/diggsweden/forge-ci/internal/domain/config"
 	"github.com/diggsweden/forge-ci/internal/domain/container"
-	"github.com/diggsweden/forge-ci/internal/domain/projecttype"
-	"github.com/diggsweden/forge-ci/internal/domain/snapshotimage"
 )
 
+// A service development is a service snapshot's route on Forgejo, where the
+// consumer's own workflow calls the snapshot-images policy: the harness writes
+// that workflow, for a consumer of any snapshot family, over the staged
+// declaration (servicesnapshot.go), then runs the published image for
+// readiness. The producers the declaration names are built by the snapshot
+// itself, in the family's image, which the repository's
+// SNAPSHOT_ARTIFACT_JOB_IMAGE_<FAMILY> variable names
+// (ServiceSnapshotJobImageVariables); a container-first service has none.
+
 var (
-	errServiceRecipeOrImage     = errors.New("name an absolute native recipe directory and a full digest-pinned Java job image")
+	errServiceRecipeOrImage     = errors.New("name an absolute native recipe directory and a full digest-pinned job image")
 	errServiceReadinessURL      = errors.New("readiness must be an explicit http://127.0.0.1:<port>/<project-endpoint> URL")
 	errServiceReadinessPort     = errors.New("readiness requires a valid container port")
 	errServiceSourceBranch      = errors.New("select a valid source branch different from policy main")
 	errServiceFixtureRelative   = errors.New("fixture must be an absolute CI script path")
 	errServiceFixtureNotRegular = errors.New("fixture must be a regular CI script")
-	errMavenServiceProducer     = errors.New("the Maven service development workflow checks the root Maven application, so its snapshot's producers are that application alone")
 )
 
-// MavenServiceDevelopmentConfig supplies trusted trial infrastructure. Fixture
-// is a CI-side script producing trial-runtime/runtime.env and optional files;
-// it runs in the Java job, never on the controller or in the source checkout.
-type MavenServiceDevelopmentConfig struct {
-	RecipeDirectory, JavaImage, Branch, ReadinessURL, Fixture string
+// ServiceDevelopmentConfig supplies trusted trial infrastructure: the demo
+// recipe whose release workflow names the layer pin; the declaration the
+// snapshot is taken from, ServiceSnapshotSource's, the default declaration
+// when empty; the job image the snapshot builds the declaration's producers
+// in; the source branch; the readiness URL; and Fixture, an optional CI-side
+// script producing trial-runtime/runtime.env and optional files, run at the
+// selected source on the container runner, never on the controller or in the
+// source checkout.
+type ServiceDevelopmentConfig struct {
+	RecipeDirectory, Declaration, JobImage, Branch, ReadinessURL, Fixture string
 }
 
-//go:embed testdata/maven-service-development.yml.tmpl
-var mavenServiceDevelopmentRecipe string
+//go:embed testdata/service-development.yml.tmpl
+var serviceDevelopmentRecipe string
 
-// NewMavenServiceDevelopmentFixture reuses the native Maven and snapshot layer
-// recipes, overlaying CI only in Consumer's private index: the service
-// snapshot's declaration, the Maven service development workflow that takes
-// it and checks the root Maven application's JAR and the published image's
-// readiness, and the fixture script. The original declaration selects
-// artifact-first or container-first; checked JAR/image byte equality is NOT
-// claimed.
-func NewMavenServiceDevelopmentFixture(tb TB, source Consumer, config MavenServiceDevelopmentConfig) Consumer {
+// NewServiceDevelopmentFixture overlays the service development route in
+// Consumer's private index alone: the service snapshot's declaration, the
+// development workflow that takes it and checks the published image's
+// readiness, and the fixture script. The declaration selects artifact-first
+// or container-first; no byte equality of the image's content is claimed.
+func NewServiceDevelopmentFixture(tb TB, source Consumer, config ServiceDevelopmentConfig) Consumer {
 	tb.Helper()
 
 	ctx, cancel := context.WithTimeout(Context(tb), timeoutLayerPush)
 	defer cancel()
 
-	fixture, err := mavenServiceDevelopmentFixture(ctx, source, config)
+	fixture, err := serviceDevelopmentFixture(ctx, source, config)
 	if err != nil {
-		tb.Fatalf("Maven service development fixture: %v", err)
+		tb.Fatalf("service development fixture: %v", err)
 	}
 
 	return fixture
 }
 
-func mavenServiceDevelopmentFixture(ctx context.Context, source Consumer, config MavenServiceDevelopmentConfig) (Consumer, error) {
+func serviceDevelopmentFixture(ctx context.Context, source Consumer, config ServiceDevelopmentConfig) (Consumer, error) {
 	if err := config.validateInfrastructure(); err != nil {
 		return source, err
 	}
@@ -71,21 +80,12 @@ func mavenServiceDevelopmentFixture(ctx context.Context, source Consumer, config
 		return source, errServiceSourceBranch
 	}
 
-	service, err := serviceSnapshotDeclaration(ctx, source, GitLabDefaultArtifactsConfig)
+	service, err := serviceSnapshotDeclaration(ctx, source, cmp.Or(config.Declaration, GitLabDefaultArtifactsConfig))
 	if err != nil {
 		return source, err
 	}
 
-	if err = mavenServiceProducers(service.plan); err != nil {
-		return source, err
-	}
-
-	artifact, err := mavenLibraryArtifact(ctx, source)
-	if err != nil {
-		return source, err
-	}
-
-	fixture, err := readMavenServiceFixture(config.Fixture)
+	fixture, err := readServiceFixture(config.Fixture)
 	if err != nil {
 		return source, err
 	}
@@ -102,9 +102,8 @@ func mavenServiceDevelopmentFixture(ctx context.Context, source Consumer, config
 	// YAML quoting prevents branch/endpoint metadata becoming syntax.
 	quote := func(value string) string { return "'" + strings.ReplaceAll(value, "'", "''") + "'" }
 
-	workflow := strings.NewReplacer("@ACTIONS@", pin.Actions, "@WORKFLOWS@", pin.Workflows,
-		"@PIN@", pin.Commit, "@IMAGE@", config.JavaImage, "@BRANCH@", quote(config.Branch),
-		"@URL@", quote(config.ReadinessURL), "@ARTIFACT@", artifact).Replace(mavenServiceDevelopmentRecipe)
+	workflow := strings.NewReplacer("@ACTIONS@", pin.Actions, "@WORKFLOWS@", pin.Workflows, "@PIN@", pin.Commit,
+		"@BRANCH@", quote(config.Branch), "@URL@", quote(config.ReadinessURL)).Replace(serviceDevelopmentRecipe)
 
 	staged, err := service.stageFiles(ctx, map[string]string{
 		forgejoDevelopmentWorkflow:     workflow,
@@ -115,26 +114,28 @@ func mavenServiceDevelopmentFixture(ctx context.Context, source Consumer, config
 	return staged.Consumer, err
 }
 
-// mavenServiceProducers is the Maven service development workflow's rule,
-// the harness's and not the planner's: the workflow checks the JAR of the
-// root Maven application again after the snapshot, so the producers the
-// snapshot builds the container from, when it has any, are that root Maven
-// application and nothing else. The snapshot itself builds a root producer
-// of any family it has an image for, as the GitLab route does.
-func mavenServiceProducers(plan snapshotimage.Plan) error {
-	for _, artifact := range plan.Artifacts {
-		if artifact.ProjectType != projecttype.Maven || artifact.WorkingDirectory != "." || artifact.BuildType != config.BuildTypeApplication {
-			return errMavenServiceProducer
-		}
+// ServiceSnapshotJobImageVariables names the image the snapshot builds the
+// consumer's producers in: one repository variable per family of the staged
+// declaration's producers, SNAPSHOT_ARTIFACT_JOB_IMAGE_<FAMILY>, which the
+// snapshot-images workflow reads where its caller passes no
+// artifact-job-image-<family> input (docs/forgejo.md, Snapshots). A
+// container-first service has no producer and takes none.
+func ServiceSnapshotJobImageVariables(ctx context.Context, tb TB, consumer Consumer, image string) map[string]string {
+	tb.Helper()
+
+	variables := map[string]string{}
+
+	for _, family := range ServiceSnapshotFamilies(ctx, tb, consumer) {
+		variables["SNAPSHOT_ARTIFACT_JOB_IMAGE_"+strings.ToUpper(family)] = image
 	}
 
-	return nil
+	return variables
 }
 
 // validateInfrastructure checks the recipe directory, the job image and the
 // readiness endpoint before any Git work.
-func (c MavenServiceDevelopmentConfig) validateInfrastructure() error {
-	if !filepath.IsAbs(c.RecipeDirectory) || !container.ValidDigestReference(c.JavaImage) {
+func (c ServiceDevelopmentConfig) validateInfrastructure() error {
+	if !filepath.IsAbs(c.RecipeDirectory) || !container.ValidDigestReference(c.JobImage) {
 		return errServiceRecipeOrImage
 	}
 
@@ -150,9 +151,9 @@ func (c MavenServiceDevelopmentConfig) validateInfrastructure() error {
 	return nil
 }
 
-// readMavenServiceFixture reads the optional operator-supplied CI script; an
+// readServiceFixture reads the optional operator-supplied CI script; an
 // empty path yields an empty script.
-func readMavenServiceFixture(path string) (string, error) {
+func readServiceFixture(path string) (string, error) {
 	if path == "" {
 		return "", nil
 	}

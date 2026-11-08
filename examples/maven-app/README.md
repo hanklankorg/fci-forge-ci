@@ -17,7 +17,10 @@ Simple Maven application with container build.
   (`version-bump: maven`) and verifies the bump before committing it, and
   `build-maven` checks the version it builds. An image
   is added to the build job as in the
-  [Go service example](../go-service/forgejo/release.yml). See the
+  [Go service example](../go-service/forgejo/release.yml).
+  [`forgejo/snapshot.yml`](forgejo/snapshot.yml) publishes a development
+  image of `main` through the shared snapshot workflow, the jar built first
+  in a digest-pinned Java toolchain image. See the
   [Forgejo guide](../../docs/forgejo.md#getting-started).
 
 The rest of this page describes the GitHub configuration.

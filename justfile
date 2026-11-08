@@ -940,19 +940,21 @@ test-live-image kind forge_lab:
 # A Forgejo release also needs FORGE_CI_LIVE_SIGNER_IMAGE from
 # `just test-live-image signer`, ssh-keygen and gpg.
 #
-# lifecycle is the linked flow in one repository, for the hello-maven-service
-# demo alone: a pull request on branch development, its native merge, the
-# service development snapshot dispatched on the merged main, and a signed
-# release request from it. It takes the release's settings but workflow=,
-# next-version= and interrupt-after=, needs what a release needs and the
-# container/readiness runner, and selects its builder with CI_IMAGE_BUILDER
-# as the other events do. CI_JOB_IMAGE, pinned by digest, is a nanolinter
-# image of the java flavour (nanolinter, its check tools, a JDK and Maven):
-# the demo's lint and build jobs run in it, and the snapshot builds the
-# service with it. A plain Java runtime image fails the lint job on the
-# forge. docs/live-campaigns.md, Lifecycle, has the rest.
+# lifecycle is the linked flow in one repository, for a demo with a
+# development route (a service snapshot of its one container): a pull request
+# on branch development, its native merge, the service development snapshot
+# dispatched on the merged main, and a signed release request from it. It
+# takes the release's settings but workflow=, next-version= and
+# interrupt-after=, needs what a release needs and the container/readiness
+# runner, and selects its builder with CI_IMAGE_BUILDER as the other events
+# do. CI_JOB_IMAGE, pinned by digest, is a nanolinter image of the demo's
+# toolchain flavour (nanolinter, its check tools and the toolchain): the
+# demo's lint and build jobs run in it, and the snapshot builds the demo's
+# producers in it. A plain runtime image fails the lint job on the forge.
+# docs/live-campaigns.md, Lifecycle, has the rest.
 #
 #   just test-live-consumer forgejo /absolute/hello-maven-service/consumer lifecycle CI_JOB_IMAGE=<nanolinter java image, digest reference> RELEASE_PLATFORMS=linux/amd64
+#   just test-live-consumer forgejo /absolute/hello-cargo-container/consumer lifecycle CI_JOB_IMAGE=<nanolinter rust image, digest reference> RELEASE_PLATFORMS=linux/amd64
 #
 # gitlab, on the lab, with prepared Docker image archives as settings, as for
 # `just demo gitlab`. pull-request runs the consumer's own MR gate and takes
@@ -1022,7 +1024,7 @@ test-live-consumer forge repo event *settings:
     export FORGE_CI_LIVE_CONSUMER_SETTINGS
     case "$forge:$event" in
     forgejo:lifecycle)
-        # The development phase is the Maven service's, with the demo's
+        # The development phase is the demo's service snapshot, with the demo's
         # readiness probe and no runtime fixture.
         export FORGE_CI_LIVE_SERVICE_READINESS_URL=http://127.0.0.1:8080/health FORGE_CI_LIVE_SERVICE_FIXTURE=''
         exec bash scripts/ci/run-live-tests.sh focused '^TestForgejoLayer_ConsumerLifecycle$'

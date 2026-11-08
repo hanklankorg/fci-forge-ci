@@ -194,6 +194,7 @@ a development route on the provider:
 ```text
 consumer hello-maven-service lifecycle CI_JOB_IMAGE=@JOB_IMAGE_JAVA CI_IMAGE_BUILDER=buildah RELEASE_PLATFORMS=linux/amd64
 consumer hello-maven-service lifecycle CI_JOB_IMAGE=@JOB_IMAGE_JAVA CI_IMAGE_BUILDER=kaniko CI_IMAGE_BUILDER_JOB_IMAGE=@KANIKO_JOB_IMAGE RELEASE_PLATFORMS=linux/amd64
+consumer hello-cargo-container lifecycle CI_JOB_IMAGE=@JOB_IMAGE_RUST CI_IMAGE_BUILDER=buildah RELEASE_PLATFORMS=linux/amd64
 consumer hello-maven-service lifecycle job-archive=@FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_JAVA build-archive=@FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_JAVA signer-archive=@FORGE_CI_LIVE_SIGNER_IMAGE_ARCHIVE lint-archive=@LINT_IMAGE_ARCHIVE_JAVA version=0.2.0 version-bump=maven job-user=65532:65532
 consumer hello-cargo-container lifecycle job-archive=@FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_RUST build-archive=@FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_RUST signer-archive=@FORGE_CI_LIVE_SIGNER_IMAGE_ARCHIVE lint-archive=@LINT_IMAGE_ARCHIVE_RUST version=0.2.0 version-bump=cargo job-user=65532:65532
 ```
@@ -221,10 +222,13 @@ lifecycle when it fails, with their acceptance owners unchanged:
 2. **Merge.** The pull request is merged natively with a merge commit, the forge
    told which head commit is meant. A mirror then shows `main` at a commit whose
    parents are the base and the change and whose tree is the change's.
-3. **Development.** `development.yml` is dispatched on the merged `main` and
-   snapshots `development`; the acceptance is the published snapshot's (frozen
-   plan, one amd64 image receipt and readiness, digest and tag, checked JARs).
-   Only the development registry credential is set for it.
+3. **Development.** `development.yml`, the harness's service development
+   workflow (`internal/livetest/testdata/service-development.yml.tmpl`), is
+   dispatched on the merged `main` and snapshots `development`: the
+   snapshot-images workflow over the staged declaration, then a readiness job
+   that runs the published digest with Podman. The acceptance is the frozen
+   plan, one amd64 image receipt, digest and tag with no alias, and the
+   readiness evidence. Only the development registry credential is set for it.
 4. **Release.** The deploy key and the release secrets are set now, a signed
    `release-request/v<version>` is pushed at the merged `main`, and the release
    is judged as a release trial's: one signed release commit on `main`, signed
@@ -234,20 +238,22 @@ lifecycle when it fails, with their acceptance owners unchanged:
 
 On Forgejo the event takes the release's settings but `workflow=`,
 `next-version=` and `interrupt-after=`; `CI_JOB_IMAGE`, pinned by digest, is a
-nanolinter image of the java flavour, the `job-image=java:` the campaign
-publishes: the demo's lint and build jobs run in it, and the snapshot builds
-the service with it. A plain Java runtime image fails the lint job on the
-forge, "nanolinter is not on PATH". It selects its builder as the other
-events do, with the consumer's `CI_IMAGE_BUILDER`, and runs in the consumer
-trial's layer repository (`fci-consumer-trial-layer`, beside its own
-`fci-consumer-lifecycle`): a run admits a kaniko job image only for the
-repository its source label names, and the campaign's is labelled for that
-one, so one prepared image serves every event; under kaniko,
-`CI_IMAGE_BUILDER_JOB_IMAGE` pinned by digest is required before anything is
-created, as the run admits it by digest and label in the development phase.
-It needs what the published snapshot and a Forgejo release need: the
-contract's container/readiness runner, whichever builder builds the image,
-`FORGE_CI_LIVE_SIGNER_IMAGE`, ssh-keygen and gpg.
+nanolinter image of the demo's toolchain flavour, the `job-image=<flavour>:`
+the campaign publishes: the demo's lint and build jobs run in it, and the
+snapshot builds the demo's producers in it, through the repository variable
+the snapshot-images workflow reads for each producer family,
+`SNAPSHOT_ARTIFACT_JOB_IMAGE_<FAMILY>` (none for a container-first service). A
+plain runtime image fails the lint job on the forge, "nanolinter is not on
+PATH". It selects its builder as the other events do, with the consumer's
+`CI_IMAGE_BUILDER`, and runs in the consumer trial's layer repository
+(`fci-consumer-trial-layer`, beside its own `fci-consumer-lifecycle`): a run
+admits a kaniko job image only for the repository its source label names, and
+the campaign's is labelled for that one, so one prepared image serves every
+event; under kaniko, `CI_IMAGE_BUILDER_JOB_IMAGE` pinned by digest is required
+before anything is created, as the run admits it by digest and label in the
+development phase. It needs what the published snapshot and a Forgejo release
+need: the contract's container/readiness runner, whichever builder builds the
+image, `FORGE_CI_LIVE_SIGNER_IMAGE`, ssh-keygen and gpg.
 
 On GitLab (`TestGitLabLayer_ConsumerLifecycle`) the same five phases run in
 one project under one pinned policy file, whose includes serve the three
@@ -315,24 +321,27 @@ trial as native linux/amd64 and unsigned into
 and keeps no copy of the planner's rules. The trial's own scope is one
 container of the root Containerfile and context with native amd64 declared,
 without image name, tag suffix or declared provenance, from at most one
-artifact, since that is the one image it judges. On GitLab the declaration is
-the one the demo's release builds its images from,
+artifact, since that is the one image it judges. On both forges the
+declaration is the one the demo's release builds its images from,
 `.forge-ci/release-images.yml` when the demo has one (its `artifacts.yml` then
 serves another forge's flow in a shape the snapshot refuses too), else
-`.forge-ci/artifacts.yml` (`livetest.ServiceSnapshotSource`), and the demo must
-ship the GitLab release build, `.gitlab/build-release.sh`. On Forgejo the one
-route is the Maven service development workflow, which checks the root Maven
-application's JAR after the snapshot, so the demo is also a root Maven
-application and the snapshot's producers, when it has any, are that
-application alone. The campaign refuses a case before anything is created
+`.forge-ci/artifacts.yml` (`livetest.ServiceSnapshotSource`); on GitLab the
+demo must also ship the GitLab release build, `.gitlab/build-release.sh`. On
+Forgejo the harness writes the consumer-side development workflow, one for
+every family (`internal/livetest/testdata/service-development.yml.tmpl`): the
+snapshot-images workflow builds the producers in the image the repository's
+`SNAPSHOT_ARTIFACT_JOB_IMAGE_<FAMILY>` variable names, the lifecycle's
+`CI_JOB_IMAGE`, then the image; a readiness job runs the published digest.
+The campaign refuses a case before anything is created
 (`campaignAdmitLifecycle`), with the planner's reason. The generated matrix in
 [Testing matrices](testing-matrices.md) lists every demo's state; the reasons
 behind it:
+
 | Demo | Forgejo | GitLab | Why |
 |---|---|---|---|
 | hello-maven-service | lifecycle | lifecycle | artifact-first Maven application and its runtime image |
-| hello-cargo-container | — | lifecycle | GitLab: container-first from `release-images.yml`. Forgejo reads `artifacts.yml`, whose container extracts, which the planner refuses |
-| hello-npm-service | — | admitted, no line | `artifacts.yml` is a service snapshot's (one npm producer) and the demo ships its GitLab release build, so the planner admits the GitLab lifecycle; the lane line follows the snapshot-npm-layout merge, which makes the npm snapshot's layout match the release's on every forge. Forgejo: no root Maven application |
+| hello-cargo-container | lifecycle | lifecycle | container-first from `release-images.yml`, no producer |
+| hello-npm-service | admitted, no line | admitted, no line | `artifacts.yml` is a service snapshot's (one npm producer) and the demo ships its GitLab release build, so the planner admits the lifecycle on both forges; the lane lines follow the snapshot-npm-layout merge, which makes the npm snapshot's layout match the release's on every forge, and wait for a live run |
 | hello-cargo-workspace | — | — | two runtime images; the trial judges one container |
 | hello-go-service | — | — | extraction, which the planner refuses; no GitLab release build either |
 | hello-go-cli, hello-maven, hello-npm-package | — | — | no container, so no snapshot; hello-maven's library development route publishes a SNAPSHOT package, another shape |

@@ -87,9 +87,8 @@ func TestServiceSnapshotDeclarationContainerOnlyHasNoProducer(t *testing.T) {
 	}
 }
 
-// The snapshot builds a root producer of any family it has an image for; the
-// Maven service development workflow's Maven-only rule is the fixture's
-// (TestMavenServiceDevelopmentRefusesOtherProducers).
+// The snapshot builds a root producer of any family it has an image for, on
+// both forges' routes.
 func TestServiceSnapshotDeclarationAdmitsEveryProducerFamily(t *testing.T) {
 	for family, artifact := range map[string]string{
 		snapshotimage.FamilyJava: "{name: app, project-type: maven, build-type: application}",

@@ -1587,35 +1587,37 @@ Two opt-in Maven cases extend the Forgejo consumer scenarios. Both are native
 linux/amd64 Forgejo lanes; neither claims GitLab or GitHub parity, and neither
 proves that a deployed service works.
 
-##### Java service development
+##### Service development
 
-The Maven service's development snapshot is phase 3 of the Forgejo lifecycle
+A demo's development snapshot is phase 3 of the Forgejo lifecycle
 (`TestForgejoLayer_ConsumerLifecycle`; docs/live-campaigns.md, Lifecycle): the
-Maven service development workflow dispatched on the merged `main`, snapshotting
-`development` with the shared `snapshot-images.yml`. The standalone
+harness's service development workflow
+(`internal/livetest/testdata/service-development.yml.tmpl`) dispatched on the
+merged `main`, snapshotting `development` with the shared
+`snapshot-images.yml`, which builds the declaration's producers in the image
+the harness sets for each producer family. The standalone
 `published-unsigned-snapshot` event and its `test-live-forgejo-snapshot` recipe
 retired into it; the lifecycle's acceptance is the one they had.
 
-The service snapshot's declaration is the consumer's validated
+The service snapshot's declaration is the one the consumer's release builds
+its images from, `.forge-ci/release-images.yml` when it has one, else
 `.forge-ci/artifacts.yml`, overlaid for the trial: platforms narrowed to
 `linux/amd64`, unsigned snapshot policy, nothing else changed; the original
 release declaration and signing inputs stay where they are. What the snapshot
 builds is the planner's rule, read by planning the overlay
 (`snapshotimage.New`); the trial's own scope is one container of the root
-Containerfile and context with native amd64 declared, and the Maven service
-workflow's is a root Maven application whose producers are that application
-alone, since its check job builds it again. A declaration either refuses is
-refused before anything is created, never silently reduced.
+Containerfile and context with native amd64 declared. A declaration either
+refuses is refused before anything is created, never silently reduced.
 
 For the artifact-first service (`hello-maven-service`), the shared snapshot
 workflow builds the declared Maven application in the reviewed Java job image
-(`artifact-job-image-java`, the lifecycle's `CI_JOB_IMAGE`), gathers its bound
+(the `SNAPSHOT_ARTIFACT_JOB_IMAGE_JAVA` repository variable, which the harness
+sets to the lifecycle's `CI_JOB_IMAGE`), gathers its bound
 `target` JAR input and only then builds the original jar-wrapping Containerfile;
 `context-artifact` stays empty. For a container-only declaration, compilation
 belongs in the original Containerfile and no unused artifact producer is
-scheduled. A separate Maven `app` job after snapshot publication keeps its
-normal checks and tests and copies the actual `target/<artifactId>-*.jar`
-outputs; **the checked JAR is not asserted to be the JAR inside the image**.
+scheduled. The snapshot's own producer build is the build; nothing is built a
+second time.
 
 The readiness job runs the published digest with Podman on the contract's
 container/readiness runner: it needs the Buildah setup helper and apt, trust
@@ -1623,18 +1625,19 @@ in the lab registry configured in the fixture, and rootless port forwarding;
 the readiness URL names the container port and Podman maps it to a random
 loopback host port. For a private consumer the job logs in with the
 development registry credential into a job-local auth file, pulls the digest
-and deletes the file before the service starts. An optional runtime fixture
-script (`FORGE_CI_LIVE_SERVICE_FIXTURE`, an absolute regular CI script) runs
-inside the Java job and writes `trial-runtime/runtime.env` plus optional
-files, mounted read-only at `/trial` and passed with `--env-file`; only
-disposable, nonsecret trial material belongs there. Readiness makes at most 60
+and deletes the file before any later step runs. An optional runtime fixture
+script (`FORGE_CI_LIVE_SERVICE_FIXTURE`, an absolute regular CI script) then
+runs in the readiness job at the selected source, holding no secret, and
+writes `trial-runtime/runtime.env` plus optional files, mounted read-only at
+`/trial` and passed with `--env-file`; only disposable, nonsecret trial
+material belongs there. Readiness makes at most 60
 HTTP requests, each bounded to two seconds with two-second retries.
 
 The offline guard for source preservation and the declaration's admission is:
 
 ```sh
 env GOTOOLCHAIN=local GOPROXY=off GOSUMDB=off go test ./internal/livetest \
-  -run '^Test(MavenServiceDevelopment|ServiceSnapshot)' -count=1
+  -run '^TestService(Development|Snapshot)' -count=1
 ```
 
 The bundled fixture `test/live/cases/maven-issuer-service/service-fixture.sh`
@@ -1962,7 +1965,7 @@ project, and build on the ordinary runner; under Buildah they need
 reports them not covered. A Forgejo consumer trial selects its builder with
 `CI_IMAGE_BUILDER` and refuses a different Forgejo setting.
 
-The Forgejo container, Rust, npm application and Maven service development
+The Forgejo container, Rust and npm application development
 trials also use `FORGE_CI_LIVE_FORGEJO_IMAGE_BUILDER` (Buildah by default).
 Kaniko uses `FORGE_CI_LIVE_KANIKO_JOB_IMAGE_ARCHIVE`, labelled for and served
 from the trial's existing public scratch layer. The consumer keeps its selected

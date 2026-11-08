@@ -21,9 +21,14 @@ const snapshotJobImage = "registry.invalid/java@sha256:aaaaaaaaaaaaaaaaaaaaaaaaa
 // the consumer trial's layer repository, as the lifecycle's layer is.
 const lifecycleKanikoJobImage = "forgejo.compose.forgelab:8443/forgeci/forge-ci-live-kaniko-job@sha256:1111111111111111111111111111111111111111111111111111111111111111"
 
-// lifecycleCampaignEnv is a campaign with the Java and kaniko job images of
-// the Forgejo lifecycle and the archives of the GitLab one.
-const lifecycleCampaignEnv = "CAMPAIGN_COMMIT=" + campaignHead + "\nJOB_IMAGE_JAVA=" + snapshotJobImage + "\nKANIKO_JOB_IMAGE=" + lifecycleKanikoJobImage + "\n" +
+// lifecycleRustJobImage is the campaign's nanolinter image of the rust
+// flavour, the Cargo container's lifecycle job image.
+const lifecycleRustJobImage = "registry.invalid/rust@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+
+// lifecycleCampaignEnv is a campaign with the Java, Rust and kaniko job
+// images of the Forgejo lifecycle and the archives of the GitLab one.
+const lifecycleCampaignEnv = "CAMPAIGN_COMMIT=" + campaignHead + "\nJOB_IMAGE_JAVA=" + snapshotJobImage + "\nJOB_IMAGE_RUST=" + lifecycleRustJobImage +
+	"\nKANIKO_JOB_IMAGE=" + lifecycleKanikoJobImage + "\n" +
 	"FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_JAVA=/c/java.tar\nFORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_RUST=/c/rust.tar\nFORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_NODE=/c/node.tar\n" +
 	"FORGE_CI_LIVE_SIGNER_IMAGE_ARCHIVE=/c/signer.tar\nLINT_IMAGE_ARCHIVE_JAVA=/c/lint-java.tar\nLINT_IMAGE_ARCHIVE_RUST=/c/lint-rust.tar\nLINT_IMAGE_ARCHIVE_JAVASCRIPT_TYPESCRIPT=/c/lint-js.tar\n"
 
@@ -35,9 +40,9 @@ const lifecycleCampaignEnv = "CAMPAIGN_COMMIT=" + campaignHead + "\nJOB_IMAGE_JA
 var lifecycleDemos = []string{"hello-maven-service", "hello-cargo-container", "hello-npm-service", "hello-go-service", "hello-go-cli"}
 
 // shippedDemoFiles are the files a demo's admission reads for their presence,
-// not their content: the lifecycle's root Containerfile and pom.xml, and the
-// GitLab release build.
-var shippedDemoFiles = []string{"Containerfile", "pom.xml", GitLabConsumerBuildScript}
+// not their content: the lifecycle's root Containerfile and the GitLab
+// release build.
+var shippedDemoFiles = []string{"Containerfile", GitLabConsumerBuildScript}
 
 // writeShippedDemoStubs lays stubs of shippedDemoFiles out for a demo under
 // the campaign's demos directory, each where test/live/demos/<demo>/consumer
@@ -117,12 +122,15 @@ func planCheckedInLifecycle(t *testing.T, provider, casesFile, visibility, build
 	return dir, plan
 }
 
-// The shipped Forgejo lifecycle file declares neither visibility nor
-// builder: the visibility is the run's selector, both by default, and the
-// builder each line's CI_IMAGE_BUILDER, Buildah or the campaign's kaniko job
-// image, labelled for the layer repository the lifecycle runs from, with the
-// Forgejo selector left unset.
-func TestCampaignLifecycle_RunsTheMavenServiceDemoOnForgejo(t *testing.T) {
+// On Forgejo the lifecycle runs every demo with a service snapshot, each in
+// the nanolinter image of its toolchain flavour: the Maven service,
+// artifact-first, whose producer the snapshot builds in that image, under
+// both builders, and the Cargo container, container-first. The shipped file
+// declares neither visibility nor builder: the visibility is the run's
+// selector, both by default, and the builder each line's CI_IMAGE_BUILDER,
+// Buildah or the campaign's kaniko job image, labelled for the layer
+// repository the lifecycle runs from, with the Forgejo selector left unset.
+func TestCampaignLifecycle_RunsTheServiceDemosOnForgejo(t *testing.T) {
 	t.Parallel()
 
 	dir, plan := planCheckedInLifecycle(t, campaignForgejo, "test/live/campaigns/lifecycle-forgejo.cases", "both", "")
@@ -132,9 +140,20 @@ func TestCampaignLifecycle_RunsTheMavenServiceDemoOnForgejo(t *testing.T) {
 	want := [][]string{
 		append(slices.Clone(recipe), "CI_IMAGE_BUILDER=buildah", "RELEASE_PLATFORMS=linux/amd64"),
 		append(slices.Clone(recipe), "CI_IMAGE_BUILDER=kaniko", "CI_IMAGE_BUILDER_JOB_IMAGE="+lifecycleKanikoJobImage, "RELEASE_PLATFORMS=linux/amd64"),
+		{
+			campaignConsumerRecipe, campaignForgejo, filepath.Join(dir, "demos/hello-cargo-container"), TrialLifecycle,
+			"CI_JOB_IMAGE=" + lifecycleRustJobImage, "CI_IMAGE_BUILDER=buildah", "RELEASE_PLATFORMS=linux/amd64",
+		},
 	}
-	if len(plan.Cases) != 2 || !slices.Equal(plan.Cases[0].Args, want[0]) || !slices.Equal(plan.Cases[1].Args, want[1]) {
+
+	if len(plan.Cases) != len(want) {
 		t.Fatalf("lifecycle recipes %+v, want %v", plan.Cases, want)
+	}
+
+	for index, recipe := range want {
+		if !slices.Equal(plan.Cases[index].Args, recipe) {
+			t.Fatalf("lifecycle recipe %d %+v, want %v", index, plan.Cases[index], recipe)
+		}
 	}
 }
 
@@ -216,21 +235,19 @@ func TestCampaignLifecycle_RefusesWhatItCannotRun(t *testing.T) {
 	for name, test := range map[string]struct {
 		provider, line, want string
 	}{
-		"demo without a container":         {campaignForgejo, "consumer hello-go-cli lifecycle CI_JOB_IMAGE=" + snapshotJobImage, "no root Containerfile"},
-		"forgejo demo without a Maven app": {campaignForgejo, "consumer hello-npm-service lifecycle CI_JOB_IMAGE=" + snapshotJobImage, "no root pom.xml"},
-		"forgejo demo with extraction":     {campaignForgejo, "consumer hello-cargo-container lifecycle CI_JOB_IMAGE=" + snapshotJobImage, "extraction and OCI provenance are unsupported"},
-		"an event the demo lacks":          {campaignForgejo, "consumer hello-maven-service dev-release", "pull-request, release or lifecycle"},
-		"an event a demo without a route":  {campaignForgejo, "consumer hello-go-cli dev-release", "pull-request or release:"},
-		"no job image":                     {campaignForgejo, "consumer hello-maven-service lifecycle RELEASE_PLATFORMS=linux/amd64", "CI_JOB_IMAGE=<digest reference>"},
-		"floating job image":               {campaignForgejo, "consumer hello-maven-service lifecycle CI_JOB_IMAGE=registry.invalid/java:latest", "CI_JOB_IMAGE=<digest reference>"},
-		"workflow":                         {campaignForgejo, "consumer hello-maven-service lifecycle CI_JOB_IMAGE=" + snapshotJobImage + " workflow=release.yml", "workflow="},
-		"interruption":                     {campaignForgejo, "consumer hello-maven-service lifecycle CI_JOB_IMAGE=" + snapshotJobImage + " interrupt-after=Build", "interrupt-after="},
-		"kaniko without its job image":     {campaignForgejo, "consumer hello-maven-service lifecycle CI_JOB_IMAGE=" + snapshotJobImage + " CI_IMAGE_BUILDER=kaniko", "CI_IMAGE_BUILDER_JOB_IMAGE=<digest reference>"},
-		"gitlab demo without a container":  {campaignGitLab, "consumer hello-go-cli lifecycle" + gitlabArchives, "no root Containerfile"},
-		"gitlab without the lint archive":  {campaignGitLab, "consumer hello-maven-service lifecycle job-archive=/a.tar build-archive=/b.tar signer-archive=/s.tar", "nanolinter flavor's archive"},
-		"gitlab without the signer":        {campaignGitLab, "consumer hello-maven-service lifecycle job-archive=/a.tar build-archive=/b.tar lint-archive=/l.tar", "signer-archive="},
-		"gitlab second case":               {campaignGitLab, "consumer hello-maven-service lifecycle" + gitlabArchives + " scenario=TestGitLabRelease_ConsumerTrial", "no scenario="},
-		"gitlab second release":            {campaignGitLab, "consumer hello-maven-service lifecycle" + gitlabArchives + " version=0.2.0 version-bump=maven next-version=0.3.0", "no scenario= or next-version="},
+		"demo without a container":        {campaignForgejo, "consumer hello-go-cli lifecycle CI_JOB_IMAGE=" + snapshotJobImage, "no root Containerfile"},
+		"an event the demo lacks":         {campaignForgejo, "consumer hello-maven-service dev-release", "pull-request, release or lifecycle"},
+		"an event a demo without a route": {campaignForgejo, "consumer hello-go-cli dev-release", "pull-request or release:"},
+		"no job image":                    {campaignForgejo, "consumer hello-maven-service lifecycle RELEASE_PLATFORMS=linux/amd64", "CI_JOB_IMAGE=<digest reference>"},
+		"floating job image":              {campaignForgejo, "consumer hello-maven-service lifecycle CI_JOB_IMAGE=registry.invalid/java:latest", "CI_JOB_IMAGE=<digest reference>"},
+		"workflow":                        {campaignForgejo, "consumer hello-maven-service lifecycle CI_JOB_IMAGE=" + snapshotJobImage + " workflow=release.yml", "workflow="},
+		"interruption":                    {campaignForgejo, "consumer hello-maven-service lifecycle CI_JOB_IMAGE=" + snapshotJobImage + " interrupt-after=Build", "interrupt-after="},
+		"kaniko without its job image":    {campaignForgejo, "consumer hello-maven-service lifecycle CI_JOB_IMAGE=" + snapshotJobImage + " CI_IMAGE_BUILDER=kaniko", "CI_IMAGE_BUILDER_JOB_IMAGE=<digest reference>"},
+		"gitlab demo without a container": {campaignGitLab, "consumer hello-go-cli lifecycle" + gitlabArchives, "no root Containerfile"},
+		"gitlab without the lint archive": {campaignGitLab, "consumer hello-maven-service lifecycle job-archive=/a.tar build-archive=/b.tar signer-archive=/s.tar", "nanolinter flavor's archive"},
+		"gitlab without the signer":       {campaignGitLab, "consumer hello-maven-service lifecycle job-archive=/a.tar build-archive=/b.tar lint-archive=/l.tar", "signer-archive="},
+		"gitlab second case":              {campaignGitLab, "consumer hello-maven-service lifecycle" + gitlabArchives + " scenario=TestGitLabRelease_ConsumerTrial", "no scenario="},
+		"gitlab second release":           {campaignGitLab, "consumer hello-maven-service lifecycle" + gitlabArchives + " version=0.2.0 version-bump=maven next-version=0.3.0", "no scenario= or next-version="},
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()

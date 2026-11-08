@@ -49,12 +49,12 @@ func TestRenderTestingMatricesReadsTheShippedTree(t *testing.T) {
 		"| hello-maven-service (java · artifact-first · one image) |",
 		"| hello-cargo-container (rust · container-first · one image) |",
 		"| hello-npm-service (node · artifact-first · one image) |",
-		"| ⛔ / admitted / admitted |",
+		"| admitted / admitted / admitted |",
 		"| hello-ios (xcode-ios · no container · no image) | ⬚ / ⬚ / 📝 |",
 		"- hello-monorepo, github: the demo has no root Containerfile",
 		"| hello-go-cli (go · no container · no image) |",
 		"- hello-go-service, gitlab: .forge-ci/artifacts.yml is not a service snapshot's declaration",
-		"|  | container-first | ⛔ hello-cargo-container | 📝 hello-cargo-container | ⬚ hello-cargo-container (admitted, no line) |",
+		"|  | container-first | 📝 hello-cargo-container | 📝 hello-cargo-container | ⬚ hello-cargo-container (admitted, no line) |",
 		"| architecture | amd64 |",
 	} {
 		if !strings.Contains(page, want) {

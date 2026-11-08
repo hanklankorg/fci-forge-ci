@@ -6,14 +6,10 @@
 package conformance_test
 
 import (
-	"archive/zip"
-	"bytes"
 	"context"
-	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"reflect"
-	"strings"
 	"testing"
 
 	"github.com/diggsweden/forge-ci/internal/domain/snapshotimage"
@@ -24,23 +20,23 @@ import (
 // dispatched from.
 const developmentWorkflow = "development.yml"
 
-// requireMavenServiceDevelopment reads what a dispatched service development
-// run of the Maven service fixture left: the frozen snapshot plan bound to the
-// selected source head and branch, one amd64 image receipt with its readiness
-// evidence, the registry's digest and tag with no stable alias, and the
-// checked JARs. It returns the image receipt, the count of checked JARs and
-// of the declared producers.
-func requireMavenServiceDevelopment(t *testing.T, target livetest.Target, repo string, run livetest.WorkflowRun, consumer livetest.Consumer, config livetest.MavenServiceDevelopmentConfig, head, image string) (snapshotimage.Receipt, int, int) {
+// requireServiceDevelopment reads what a dispatched service development run
+// left: the frozen snapshot plan bound to the selected source head and
+// branch, one amd64 image receipt, the registry's digest and tag with no
+// stable alias, and the readiness evidence binding the published digest to
+// that source. It returns the image receipt and the count of the producers
+// the plan built, none for a container-first service.
+func requireServiceDevelopment(t *testing.T, target livetest.Target, repo string, run livetest.WorkflowRun, consumer livetest.Consumer, config livetest.ServiceDevelopmentConfig, head, image string) (snapshotimage.Receipt, int) {
 	t.Helper()
 
 	if run.Status != jobSuccess || (run.Event != "" && run.Event != "workflow_dispatch") || run.TriggerEvent != "workflow_dispatch" || run.WorkflowID != developmentWorkflow {
-		t.Fatalf("service development run %d: %s; original Containerfile/POM failures are CI integration failures, not permission to alter source", run.ID, run.Status)
+		t.Fatalf("service development run %d: %s; a failure of the consumer's own Containerfile or build is a CI integration failure, not permission to alter source", run.ID, run.Status)
 	}
 
 	artifacts := map[string]map[string][]byte{}
 
 	for _, artifact := range livetest.RunArtifacts(t, target, repo, run.ID) {
-		if artifact.Name != "service-jars-"+head && artifact.Name != "service-evidence-"+head && artifact.Name != "snapshot-images-plan" {
+		if artifact.Name != "service-evidence-"+head && artifact.Name != "snapshot-images-plan" {
 			continue
 		}
 
@@ -65,36 +61,7 @@ func requireMavenServiceDevelopment(t *testing.T, target livetest.Target, repo s
 		t.Fatalf("readiness evidence does not bind selected source and published image: %+v", receipt)
 	}
 
-	jars := artifacts["service-jars-"+head]
-	if string(jars["source-sha.txt"]) != head+"\n" {
-		t.Fatal("checked JAR source differs from selected branch")
-	}
-
-	count := 0
-
-	for name, body := range jars {
-		if !strings.HasSuffix(name, ".jar") {
-			continue
-		}
-
-		jar, err := zip.NewReader(bytes.NewReader(body), int64(len(body)))
-		if err != nil || len(jar.File) == 0 {
-			t.Fatalf("not an actual nonempty JAR: %s", name)
-		}
-
-		entry := fmt.Sprintf("%x  checked-jars/%s\n", sha256.Sum256(body), name)
-		if !strings.Contains(string(jars["SHA256SUMS"]), entry) {
-			t.Fatalf("checked JAR checksum differs: %s", name)
-		}
-
-		count++
-	}
-
-	if count == 0 {
-		t.Fatal("no actual checked source JAR")
-	}
-
-	return receipt, count, len(expected.Artifacts)
+	return receipt, len(expected.Artifacts)
 }
 
 // requireServiceSnapshot reads what a service snapshot of a consumer left,

@@ -6,8 +6,8 @@
 package conformance_test
 
 import (
+	"maps"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -20,10 +20,10 @@ import (
 const lifecycleBranch = "development"
 
 // A consumer lifecycle: the linked flow one consumer goes through in one
-// repository, run on the lab against the layer of this checkout. It is the
-// Maven service demo's: its development route, the Maven service development
-// workflow over the service snapshot of its one container, is the one
-// Forgejo has (docs/live-campaigns.md, Lifecycle):
+// repository, run on the lab against the layer of this checkout. It is a
+// demo's with a development route: the harness's service development
+// workflow over the service snapshot of its one container, for a consumer of
+// any snapshot family (docs/live-campaigns.md, Lifecycle):
 //
 //  1. a pull request from development into main, judged by the consumer's
 //     own pull-request workflow;
@@ -91,13 +91,16 @@ func runForgejoConsumerLifecycle(t *testing.T, root string, private bool) {
 	// contract's runner that permits it, whichever builder builds the image.
 	containerLabel := livetest.ContainerRunnerLabel(t, target, "service readiness runs the published image with Podman")
 
-	recipe, err := filepath.Abs("../../../test/live/demos/hello-maven-service/consumer")
+	// The development phase snapshots the consumer's one container from the
+	// declaration its release builds its images from; the snapshot builds
+	// the producers that declaration names in the lifecycle's job image.
+	declaration, err := livetest.ServiceSnapshotSource(root)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	config := livetest.MavenServiceDevelopmentConfig{
-		RecipeDirectory: recipe, JavaImage: settings.Variables["CI_JOB_IMAGE"], Branch: lifecycleBranch,
+	config := livetest.ServiceDevelopmentConfig{
+		RecipeDirectory: root, Declaration: declaration, JobImage: settings.Variables["CI_JOB_IMAGE"], Branch: lifecycleBranch,
 		ReadinessURL: os.Getenv("FORGE_CI_LIVE_SERVICE_READINESS_URL"), Fixture: os.Getenv("FORGE_CI_LIVE_SERVICE_FIXTURE"),
 	}
 
@@ -112,7 +115,7 @@ func runForgejoConsumerLifecycle(t *testing.T, root string, private bool) {
 	useLabRegistry(t, target, repoName, external, &facts)
 
 	source := livetest.OpenConsumer(t, target, root)
-	consumer := livetest.NewMavenServiceDevelopmentFixture(t, source, config).WithRequestTrust(t, trialRequestSigners, requester.AllowedSigners)
+	consumer := livetest.NewServiceDevelopmentFixture(t, source, config).WithRequestTrust(t, trialRequestSigners, requester.AllowedSigners)
 	workflows := consumer.Workflows(t)
 
 	for _, workflow := range []string{demoPullRequestWorkflow, developmentWorkflow, settings.Workflow} {
@@ -166,6 +169,8 @@ func runForgejoConsumerLifecycle(t *testing.T, root string, private bool) {
 		t.Fatal(err)
 	}
 
+	maps.Copy(runtime, livetest.ServiceSnapshotJobImageVariables(livetest.Context(t), t, consumer, config.JobImage))
+
 	variables := trialVariables(t, target, runtime, settings.ResolvedVariables(scenario.layer.Commit, base))
 
 	// Nothing has run so far: the pushes arrived with Actions off.
@@ -211,13 +216,13 @@ func runForgejoConsumerLifecycle(t *testing.T, root string, private bool) {
 
 	development := livetest.WaitForConsumerRunAfter(t, target, repo, developmentWorkflow, "workflow_dispatch", review.ID)
 	scenario.logJobs(t, livetest.RunJobs(t, target, repo, development.ID), facts.Secrets, plan.Secrets)
-	receipt, jars, producers := requireMavenServiceDevelopment(t, target, repo, development, consumer, config, head, image)
+	receipt, producers := requireServiceDevelopment(t, target, repo, development, consumer, config, head, image)
 	requireRunIDs(t, target, repo, review.ID, development.ID)
 	scenario.requireNone(t, "/tags", "/releases")
 	// The snapshot moves neither branch: main stays the merge, the source the
 	// reviewed head.
 	scenario.requireBranches(t, map[string]string{layerMain: request, lifecycleBranch: head})
-	t.Logf("lifecycle phase 3 development: run %d dispatched on %s@%s snapshots %s@%s as %s; checked JARs %d, producers %d", development.ID, layerMain, request, lifecycleBranch, head, receipt.Ref, jars, producers)
+	t.Logf("lifecycle phase 3 development: run %d dispatched on %s@%s snapshots %s@%s as %s; producers %d", development.ID, layerMain, request, lifecycleBranch, head, receipt.Ref, producers)
 
 	// Phase 4: the signed release request at the merged main. The release's
 	// authority is given now and not before.

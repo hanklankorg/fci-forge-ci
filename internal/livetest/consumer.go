@@ -245,7 +245,7 @@ func (settings *TrialSettings) ResolvedVariables(layerCommit, requestCommit stri
 }
 
 // lifecycleImages holds a lifecycle to the images its development phase
-// builds with, before anything is created: the Java job image pinned by
+// builds with, before anything is created: the job image pinned by
 // digest, and under kaniko, the consumer's CI_IMAGE_BUILDER as in every
 // consumer trial event, the kaniko job image pinned by digest too. The run
 // then admits that image by its digest and source label in the development
@@ -253,7 +253,7 @@ func (settings *TrialSettings) ResolvedVariables(layerCommit, requestCommit stri
 // two phases before it.
 func (settings *TrialSettings) lifecycleImages() error {
 	if !container.ValidDigestReference(settings.Variables[lifecycleJobImage]) {
-		return fmt.Errorf("%s requires %s=<digest reference>: a nanolinter image of the java flavour, the image the consumer's lint and build jobs run in and its development phase builds the service with: %w", TrialLifecycle, lifecycleJobImage, errs.ErrValidation)
+		return fmt.Errorf("%s requires %s=<digest reference>: a nanolinter image of the consumer's toolchain flavour, the image its lint and build jobs run in and its development phase builds the service's producers in: %w", TrialLifecycle, lifecycleJobImage, errs.ErrValidation)
 	}
 
 	if settings.Variables["CI_IMAGE_BUILDER"] == ImageBuilderKaniko && !container.ValidDigestReference(settings.Variables["CI_IMAGE_BUILDER_JOB_IMAGE"]) {

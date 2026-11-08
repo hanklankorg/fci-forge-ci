@@ -69,7 +69,7 @@ forgejo hello-maven-service development ✅ A run 517, the retired published sna
 forgejo hello-maven-service lifecycle ✅ 3c178f94
 gitlab hello-maven-service development ✅ lifecycle phase 3, 22ddcfd9
 gitlab hello-maven-service lifecycle ◐ phases 1–3 22ddcfd9, run 4 ec2380ef queued
-forgejo hello-cargo-container development ◐ fixture consumer proven, run 520; the demo is refused
+forgejo hello-cargo-container development ◐ fixture consumer proven, run 520; the demo's own lifecycle line awaits a live run
 github hello-go-cli release ✅ GPG, hosted (matrix 1b, C)
 gitlab TestGitLabRelease_MinimalSignedArtifacts scenario ✅ 2026-11-07
 gitlab TestGitLabRelease_MinimalBranchProtection scenario ✅ 2026-11-07
