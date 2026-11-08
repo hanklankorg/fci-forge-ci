@@ -23,7 +23,7 @@ func TestNothingNamesTheRetiredHostInstaller(t *testing.T) {
 	t.Parallel()
 
 	root := reporoot.Path(t)
-	for _, dir := range []string{".github", ".forgejo", "containers", "docs", "examples", "scripts", "templates", "test/live", "internal/livetest", "cmd", "README.md"} {
+	for _, dir := range []string{".github", ".forgejo", ".forge-ci", ".gitlab", ".gitlab-ci.yml", "containers", "development", "docs", "examples", "scripts", "templates", "test/live", "internal/livetest", "cmd", "justfile", "README.md"} {
 		err := filepath.WalkDir(filepath.Join(root, dir), func(path string, entry os.DirEntry, err error) error {
 			if err != nil || entry.IsDir() {
 				return err

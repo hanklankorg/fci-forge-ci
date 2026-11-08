@@ -14,7 +14,9 @@ import (
 )
 
 // declaredJobSecretReferences is, per job of the workflows that hold release
-// signing material or the release token, the exact set of `secrets.*` and
+// signing material, the release token or a registry write credential (the
+// container publisher, snapshot images and promotion), the exact set of
+// `secrets.*`, `secrets['…']` and
 // `github.token` references the job may make anywhere in its text: env, with,
 // if, run, or a `secrets:` block of a nested call.
 //
@@ -78,6 +80,28 @@ func declaredJobSecretReferences() map[string]map[string][]string {
 			"resolve-bootstrap":  nil,
 			"generate-changelog": {"github.token"},
 		},
+		"publish-container.yml": {
+			"resolve-bootstrap": nil,
+			"prep":              {"secrets.RELEASE_COSIGN_PASSPHRASE", "secrets.RELEASE_COSIGN_PRIVATE_KEY"},
+			"build-arch":        {"github.token", "secrets.FORGE_CI_BUILD_SECRETS_JSON", "secrets.GITHUB_TOKEN", "secrets['registry-password']"},
+			"scan-layouts":      {"github.token", "secrets.CODE_SCANNING_TOKEN"},
+			"publish-images":    {"github.token", "secrets.GITHUB_TOKEN", "secrets['registry-password']"},
+			"image-evidence":    {"secrets.GITHUB_TOKEN", "secrets.RELEASE_COSIGN_PASSPHRASE", "secrets.RELEASE_COSIGN_PRIVATE_KEY", "secrets['registry-password']"},
+			"merge":             {"github.token", "secrets.GITHUB_TOKEN", "secrets.RELEASE_COSIGN_PASSPHRASE", "secrets.RELEASE_COSIGN_PRIVATE_KEY", "secrets['registry-password']"},
+		},
+		"snapshot-images.yml": {
+			"resolve-bootstrap": nil,
+			"plan":              nil,
+			"build-artifacts":   nil,
+			"prepare-context":   {"github.token"},
+			"build":             nil,
+			"publish":           {"github.token", "secrets.registry-password"},
+			"collect":           nil,
+		},
+		"promote-stage.yml": {
+			"resolve-bootstrap": nil,
+			"promote":           {"github.token", "secrets.GITHUB_TOKEN", "secrets['registry-password']", "secrets['stage-registry-password']"},
+		},
 		"validate-release-prerequisites.yml": {
 			"resolve-bootstrap": nil,
 			"validate": {
@@ -95,7 +119,7 @@ func declaredJobSecretReferences() map[string]map[string][]string {
 	}
 }
 
-var secretReferencePattern = regexp.MustCompile(`secrets\.[A-Za-z0-9_]+|secrets\[['"][A-Za-z0-9_]+['"]\]|github\.token`)
+var secretReferencePattern = regexp.MustCompile(`secrets\.[A-Za-z0-9_-]+|secrets\[['"][A-Za-z0-9_-]+['"]\]|github\.token`)
 
 func TestJobSecretReferencesAreDeclared(t *testing.T) {
 	t.Parallel()
