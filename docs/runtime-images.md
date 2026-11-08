@@ -125,7 +125,7 @@ GitLab components require `runtime-image`. A guard test refuses a
 | `publish-google-play` | `runtime-base` | Upload action is JS-only; no Android tooling needed |
 | `build-npm`, `publish-snapshot-npm` | `runtime-node-24` | Node + npm + corepack baked |
 | `publish-maven-github` | `runtime-java-25` for maven, gradle and gradle-android; `runtime-node-24` for npm | The caller selects the image by package type; the publication runs with the image's JDK/Maven/Gradle or Node |
-| `publish-container` | `runtime-base` (prep, publish-images, merge: cosign baked), `runtime` full (image-evidence: syft); host build legs | Buildah needs the host, so each build leg is a host job that receives the canonical CLI built in the run from the approved engine commit (`consume-canonical-cli`, profile `host`); the other jobs run in the admitted digests and install nothing |
+| `publish-container` | `runtime-base` (prep, publish-images, merge: cosign baked), `runtime` full (scan-layouts: Trivy; image-evidence: syft and cosign); host build legs | Buildah needs the host, so each build leg is a host job that receives the canonical CLI built in the run from the approved engine commit (`consume-canonical-cli`, profile `host`); the other jobs run in the admitted digests and install nothing |
 | `security-openssf-scorecard` | host + third-party Docker action | The workflow selects a hosted runner for the Scorecard action |
 | `build-xcode-ios`, `publish-apple-appstore` | macOS host + bootstrap installer from `forge-ci-binary-ref` | Tagged releases use verified archives; branch/full commit refs build from a [detached source checkout](DEVELOPMENT.md#source-checkout) |
 

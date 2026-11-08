@@ -1188,6 +1188,7 @@ EXAMPLES:
 | `--digest-key` | OutputSink key for the pushed digest (push-by-digest mode) | string | `"digest"` | `$DIGEST_KEY` |
 | `--scan-severity` | blocking threshold for fixable findings (a level or comma-list whose lowest entry counts); the scan always reports down to HIGH | string | `"CRITICAL"` | `$SCAN_SEVERITY` |
 | `--trivy-version` | version embedded in the GitLab container-scanning report | string | `""` | `$TRIVY_VERSION` |
+| `--defer-scan` | oci mode only: export the layout unscanned for the publication-gating layout scan (security scan container --oci-layout), which runs where Trivy is baked in | bool | `false` | `$BUILD_DEFER_SCAN` |
 | `--image-builder` | image builder type: buildah (default; rootless, needs user namespaces) or kaniko (for a pool that denies them; runs as root in the job image CI_IMAGE_BUILDER_JOB_IMAGE names, builds to a layout, exports a stage's files in local mode, no load mode, no build secrets). Set CI_IMAGE_BUILDER on the repository to select it. | string | `"buildah"` | `$CI_IMAGE_BUILDER` |
 | `--kaniko-executor` | path of the kaniko executor (default /kaniko/executor) | string | `""` | `$KANIKO_EXECUTOR` |
 
@@ -5101,11 +5102,17 @@ EXAMPLES:
    # Write the trivy JSON for a downstream step
    forge-ci security scan container --image-ref ghcr.io/owner/app:v1.2.3 \
      --json-file dist/trivy.json
+
+   # Gate an exported, not yet published layout (a container build --defer-scan)
+   forge-ci security scan container --image-ref ghcr.io/owner/app \
+     --oci-layout "$RUNNER_TEMP/image-layout" --platform linux/arm64
 ```
 
 | Flag | Description | Type | Default | Env vars |
 |------|-------------|------|---------|----------|
 | `--image-ref` | fully-qualified image (registry/owner/name@sha256:…) to scan (required) | string | `""` | `$IMAGE_REF` |
+| `--oci-layout` | local OCI layout directory to scan instead of pulling --image-ref, which stays the report identity | string | `""` | `$CONTAINER_OCI_LAYOUT` |
+| `--platform` | os/arch to select from a multi-platform input, e.g. linux/arm64; empty leaves the choice to Trivy | string | `""` | `$CONTAINER_PLATFORM` |
 | `--json-file` | destination path for the raw trivy JSON findings | string | `"trivy-results.json"` | `$CONTAINER_JSON_FILE` |
 | `--sarif-file` | destination path for the trivy SARIF findings | string | `"trivy-results.sarif"` | `$CONTAINER_SARIF_FILE` |
 | `--gitlab-report-file` | destination path for the GitLab container-scanning report | string | `"gl-container-scanning-report.json"` | `$CONTAINER_GITLAB_REPORT_FILE` |

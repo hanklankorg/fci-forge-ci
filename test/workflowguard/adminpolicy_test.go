@@ -6,6 +6,7 @@ package workflowguard_test
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -24,12 +25,22 @@ func TestPublishedLayoutScanCannotLosePrerequisiteOrReports(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	if strings.Contains(string(body), "install-trivy.sh") || strings.Contains(string(body), "install_trivy") {
+		t.Fatal("the host build legs install a scanner; the scan runs in the full runtime image")
+	}
+
 	var workflow struct {
 		Jobs map[string]struct {
+			If        string   `yaml:"if"`
+			Needs     []string `yaml:"needs"`
+			Container struct {
+				Image string `yaml:"image"`
+			} `yaml:"container"`
 			Steps []struct {
 				Name string            `yaml:"name"`
 				If   string            `yaml:"if"`
 				Env  map[string]string `yaml:"env"`
+				Run  string            `yaml:"run"`
 			} `yaml:"steps"`
 		} `yaml:"jobs"`
 	}
@@ -37,43 +48,65 @@ func TestPublishedLayoutScanCannotLosePrerequisiteOrReports(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	checked := false
+	const exported = "${{ inputs['push-image'] || needs.prep.outputs.builder == 'kaniko' }}"
 
-	for _, job := range workflow.Jobs {
-		install, build := -1, -1
+	build, scan, publish := workflow.Jobs["build-arch"], workflow.Jobs["scan-layouts"], workflow.Jobs["publish-images"]
+	if scan.Container.Image != "${{ inputs['runtime-image-full'] }}" || scan.If != exported {
+		t.Fatalf("the layout scan must run in the full image for every exported layout, with no consumer toggle: image=%q if=%q", scan.Container.Image, scan.If)
+	}
 
-		for index, step := range job.Steps {
-			switch step.Name {
-			case "Install trivy":
-				install = index
+	if !slices.Contains(publish.Needs, "scan-layouts") {
+		t.Fatalf("publication does not wait for the layout scan: %v", publish.Needs)
+	}
 
-				if strings.Contains(step.If, "enable-scan") || !strings.Contains(step.If, "push-image") {
-					t.Fatalf("consumer can disable scan prerequisite: %s", step.If)
-				}
-			case "Write build plan":
-				if _, ok := step.Env["ENABLE_SCAN"]; ok {
-					t.Fatalf("the build plan carries a scan toggle the engine does not read: %v", step.Env)
-				}
-			case "Build and scan retained layout":
-				build = index
-			case "Save container scan SARIF artifact", "Save GitLab container-scanning report", "Upload container scan results to Code Scanning":
-				if !strings.Contains(step.If, "always()") || strings.Contains(step.If, "enable-scan") {
-					t.Fatalf("blocking findings lose reports at %s: %s", step.Name, step.If)
-				}
+	planned, uploaded := false, false
+
+	for _, step := range build.Steps {
+		switch step.Name {
+		case "Write build plan":
+			if _, ok := step.Env["ENABLE_SCAN"]; ok {
+				t.Fatalf("the build plan carries a scan toggle the engine does not read: %v", step.Env)
 			}
-		}
 
-		if build >= 0 {
-			checked = true
-
-			if install < 0 || install >= build {
-				t.Fatal("layout scan runs before its scanner prerequisite")
+			if step.Env["BUILD_DEFER_SCAN"] != "true" || !strings.Contains(step.Run, `--set "defer-scan=${BUILD_DEFER_SCAN}"`) {
+				t.Fatalf("the build must leave its exported layout to the scan job: env=%v run=%s", step.Env, step.Run)
 			}
+
+			planned = true
+		case "Upload staged OCI layout":
+			if step.If != exported {
+				t.Fatalf("a layout the scan job needs is not uploaded for every exported build: %s", step.If)
+			}
+
+			uploaded = true
 		}
 	}
 
-	if !checked {
+	if !planned || !uploaded {
 		t.Fatal("no exported-layout build was checked")
+	}
+
+	scanned, reports := false, 0
+
+	for _, step := range scan.Steps {
+		switch step.Name {
+		case "Scan the staged layout before publication":
+			if !strings.Contains(step.Run, "security scan container") || !strings.Contains(step.Run, "--enforce-vulnerabilities") || step.Env["CONTAINER_OCI_LAYOUT"] == "" || step.If != "" {
+				t.Fatalf("the layout scan is not the gated engine scan of the downloaded layout: if=%q env=%v run=%s", step.If, step.Env, step.Run)
+			}
+
+			scanned = true
+		case "Save container scan SARIF artifact", "Save GitLab container-scanning report", "Upload container scan results to Code Scanning":
+			if !strings.Contains(step.If, "always()") || strings.Contains(step.If, "enable-scan") {
+				t.Fatalf("blocking findings lose reports at %s: %s", step.Name, step.If)
+			}
+
+			reports++
+		}
+	}
+
+	if !scanned || reports != 3 {
+		t.Fatalf("the layout scan job was not checked: scanned=%v reports=%d", scanned, reports)
 	}
 }
 

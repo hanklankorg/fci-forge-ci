@@ -155,6 +155,7 @@
   "security report enrich-sarif": [".github/workflows/lint-megalinter.yml",".github/workflows/lint-nanolinter.yml"],
   "security report to-gitlab-sast": ["templates/megalinter.yml","templates/nanolinter.yml"],
   "security report upload-sarif": [".github/workflows/lint-megalinter.yml",".github/workflows/lint-nanolinter.yml",".github/workflows/publish-container.yml",".github/workflows/security-openssf-scorecard.yml",".github/workflows/self-runtime-container.yml"],
+  "security scan container": [".github/workflows/publish-container.yml"],
   "toolchain cache-discriminator": [".forgejo/actions/setup-toolchain"],
   "toolchain expose-mise-tools": [".forgejo/actions/setup-toolchain"],
   "toolchain install-changelog-renderer": [".forgejo/actions/render-changelog"],
