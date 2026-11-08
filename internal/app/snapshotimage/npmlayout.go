@@ -14,7 +14,10 @@ import (
 	"github.com/diggsweden/forge-ci/internal/pathsafe"
 )
 
-var errFileOutsideDestination = errors.New("snapshot inventory file lies outside its dependency destination")
+var (
+	errFileOutsideDestination    = errors.New("snapshot inventory file lies outside its dependency destination")
+	errNPMFileReplacesBuildInput = errors.New("snapshot npm package file would replace the build's Containerfile or a dependency input")
+)
 
 // layNPMPackage places a build's verified npm package at its context root.
 //
@@ -25,8 +28,9 @@ var errFileOutsideDestination = errors.New("snapshot inventory file lies outside
 // the package under <context>/.forge-ci/snapshot-inputs/<name>, the directory
 // the inventory owns, and this step copies the verified files to the context
 // root with their recorded bytes and modes, through the same confined staging
-// restore-context uses: symlinked or non-regular targets refuse before any
-// write, and an interrupted install rolls back.
+// restore-context uses: a file that would replace the Containerfile or land in
+// a verified dependency destination, and symlinked or non-regular targets,
+// refuse before any write, and an interrupted install rolls back.
 func layNPMPackage(build snapshotimage.Build, inventory snapshotimage.DependencyInventory, inventoryFile string) error {
 	files, sources, err := npmContextFiles(build, inventory, inventoryFile)
 	if err != nil || len(files) == 0 {
@@ -92,6 +96,10 @@ func npmContextFiles(build snapshotimage.Build, inventory snapshotimage.Dependen
 				return nil, nil, err
 			}
 
+			if replacesBuildInput(build, target) {
+				return nil, nil, fmt.Errorf("%w: %s", errNPMFileReplacesBuildInput, target)
+			}
+
 			placed := file
 			placed.Path = target
 			files[target] = placed
@@ -100,4 +108,22 @@ func npmContextFiles(build snapshotimage.Build, inventory snapshotimage.Dependen
 	}
 
 	return files, sources, nil
+}
+
+// replacesBuildInput reports whether a laid-over file would replace the
+// Containerfile the build reads next, or land in a destination the verified
+// inventory owns: a Go or Cargo binary under <context>/dist, or an input
+// directory, the npm package's own included.
+func replacesBuildInput(build snapshotimage.Build, target string) bool {
+	if target == filepath.ToSlash(filepath.Join(build.Context, build.ContainerFile)) {
+		return true
+	}
+
+	for _, dep := range build.RequiredArtifacts {
+		if inside(dep.Destination, target) {
+			return true
+		}
+	}
+
+	return false
 }

@@ -161,6 +161,64 @@ func TestNPMLayoutRefusesSymlinkedTargetsBeforeTheBuilder(t *testing.T) {
 	require.Equal(t, body, manifest, "a refused layout writes nothing to the checkout")
 }
 
+// npmBesideGoFixture plans one image at the checkout root from a Go binary
+// and an npm package, lays both verified inputs by hand where the plan
+// records them, the npm package also carrying the named file, and records the
+// inventory as the context producer does.
+func npmBesideGoFixture(t *testing.T, carried string) snapshotimage.Plan {
+	t.Helper()
+	t.Chdir(t.TempDir())
+	require.NoError(t, os.Mkdir("web", 0o700))
+	require.NoError(t, os.WriteFile("web/package.json", []byte(`{"name":"web","version":"1.2.3"}`), 0o600))
+	in := input(t, "artifacts:\n  - name: server\n    project-type: go\n  - name: web\n    project-type: npm\n    working-directory: web\n    sboms: none\ncontainers:\n  - name: app\n    from: [server, web]\n    platforms: linux/amd64\n")
+	plan, err := appsnapshot.Plan(t.Context(), &git{head: in.SourceSHA}, in)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile("Containerfile", []byte("FROM scratch\nCOPY dist /dist\n"), 0o600))
+	require.NoError(t, os.MkdirAll("dist/linux-amd64", 0o700))
+	require.NoError(t, os.WriteFile("dist/linux-amd64/server-linux-amd64", []byte("producer-built bytes"), 0o700))
+
+	verified := ".forge-ci/snapshot-inputs/web"
+	for path, body := range map[string]string{"package.json": `{"name":"web","version":"1.2.3"}`, carried: "evil"} {
+		require.NoError(t, os.MkdirAll(filepath.Join(verified, filepath.Dir(path)), 0o700))
+		require.NoError(t, os.WriteFile(filepath.Join(verified, path), []byte(body), 0o600))
+	}
+
+	require.NoError(t, appsnapshot.RecordContext(t.Context(), &git{head: plan.SourceSHA}, plan, snapshotimage.DefaultDependenciesFile))
+
+	return plan
+}
+
+func TestNPMLayoutRefusesReplacingBuildInputsBeforeTheBuilder(t *testing.T) {
+	inputs := []string{"Containerfile", "dist/linux-amd64/server-linux-amd64", ".forge-ci/snapshot-inputs/web/package.json"}
+	for _, carried := range inputs {
+		t.Run(carried, func(t *testing.T) {
+			plan := npmBesideGoFixture(t, carried)
+
+			before := map[string][]byte{}
+
+			for _, path := range inputs {
+				body, err := os.ReadFile(path)
+				require.NoError(t, err)
+
+				before[path] = body
+			}
+
+			builder := &countingBuilder{}
+			err := appsnapshot.Build(t.Context(), &git{head: plan.SourceSHA}, builder, ociregistry.NewAnonymous(), io.Discard, output.Annotator{}, plan, appsnapshot.BuildInput{Name: "app", Arch: "amd64", HostArch: "amd64", MetadataDir: "metadata", ServerURL: "https://forge.example", Repository: "team/app"})
+			require.ErrorContains(t, err, "would replace the build's Containerfile or a dependency input: "+carried)
+			require.Zero(t, builder.calls)
+
+			for path, body := range before {
+				after, err := os.ReadFile(path)
+				require.NoError(t, err)
+				require.Equal(t, body, after, "%s keeps its verified bytes", path)
+			}
+
+			require.NoFileExists(t, "package.json", "a refused layout lays none of the package's files")
+		})
+	}
+}
+
 func TestPlanRefusesTwoNPMPackagesInOneImage(t *testing.T) {
 	t.Chdir(t.TempDir())
 
