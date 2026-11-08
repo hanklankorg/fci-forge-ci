@@ -9,6 +9,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"net/url"
 	"os"
 	"os/exec"
@@ -223,6 +224,9 @@ type gitlabConsumerProfile struct {
 	releaseImagesConfig  string
 	export               []string
 	requestTag, finalTag string
+	// changelog are the renderer inputs the consumer's configuration calls
+	// for; empty leaves the component's default.
+	changelog map[string]any
 }
 
 // gitlabConsumerProfileOf binds the settings to the lab's runners and reads
@@ -265,6 +269,10 @@ func gitlabConsumerProfileOf(t *testing.T, consumerRoot string, settings livetes
 		t.Fatal(err)
 	}
 
+	if profile.changelog, err = livetest.GitLabChangelogInputs(consumerRoot); err != nil {
+		t.Fatal(err)
+	}
+
 	if settings.Version != "" {
 		profile.requestTag, profile.finalTag = "release-request/v"+settings.Version, "v"+settings.Version
 	}
@@ -290,16 +298,6 @@ func gitlabImageBuilder(images gitlabReleaseImages) (string, string) {
 	}
 
 	return livetest.ImageBuilderBuildah, images.buildah
-}
-
-// withGitChglog keeps the fixtures and the demo rendering with git-chglog from
-// .chglog/, as the layer did before git-cliff became the default.
-func withGitChglog(inputs map[string]any) map[string]any {
-	inputs["changelog-creator"] = "git-chglog"
-	inputs["changelog-config"] = ".chglog/config-keepachangelog.yml"
-	inputs["commit-body-config"] = ".chglog/config-minimal.yml"
-
-	return inputs
 }
 
 // protectGitLabReleaseTags lets maintainers push release requests and lets
@@ -517,7 +515,7 @@ func runGitLabReleaseScenario(t *testing.T, consumerRoot string, scenario gitlab
 		settings: settings, distro: consumer != nil, bases: bases,
 		checks: checks, checksRunnerTags: checksRunnerTags, build: build, buildRunnerTags: buildRunnerTags,
 		releaseImages: profile.releaseImages, artifactsConfig: profile.artifactsConfig(), releasePlatforms: releasePlatforms,
-		imageBuilder: imageBuilder, builderJobImage: builderJobImage, export: profile.export,
+		imageBuilder: imageBuilder, builderJobImage: builderJobImage, export: profile.export, changelog: profile.changelog,
 	}
 	policyIncludes := []any{releasePolicy.include(t, target, layer)}
 	if recovery {
@@ -845,39 +843,43 @@ type gitlabReleasePolicy struct {
 	releaseImages                     bool
 	artifactsConfig, releasePlatforms string
 	imageBuilder, builderJobImage     string
+	changelog                         map[string]any
 }
 
 // include is the release component's include with the policy's inputs.
 func (policy gitlabReleasePolicy) include(t *testing.T, target livetest.Target, layer livetest.Layer) map[string]any {
 	t.Helper()
 
+	inputs := map[string]any{
+		"forge-ci-repository": layer.Repository, "consumer-project": policy.project,
+		"server-url": target.BaseURL(), "registry": policy.registry,
+		"job-image": policy.images.job, "job-user": policy.settings.JobUser, "build-image": policy.images.build, "signer-image": policy.images.signer,
+		"publication-project":          policy.publication,
+		"publication-image-repository": policy.registry + "/" + policy.publication,
+		"cosign-public-key-sha256":     policy.keys.cosignPublicSHA256,
+		"release-git-url":              policy.gitURL, "release-git-host-key-fingerprint": policy.hostKey,
+		"request-allowed-signers": "livetest@localhost " + policy.requestPublic,
+		"bot-name":                "Layer acceptance", "bot-email": releaseBotEmail,
+		"sign-distro-packages": policy.distro,
+		"version-bump":         policy.settings.VersionBump,
+		"base-images":          policy.bases,
+		"checks":               policy.checks,
+		"checks-runner-tags":   policy.checksRunnerTags,
+		"build":                policy.build,
+		"build-runner-tags":    policy.buildRunnerTags,
+		"release-images":       policy.releaseImages,
+		"artifacts-config":     policy.artifactsConfig,
+		"release-platforms":    policy.releasePlatforms,
+		"image-builder":        policy.imageBuilder,
+		"builder-job-image":    policy.builderJobImage,
+		"export-files":         len(policy.export) != 0,
+		"export":               policy.export,
+	}
+	maps.Copy(inputs, policy.changelog)
+
 	return map[string]any{
 		"component": gitlabComponent(target, layer, "release"),
-		"inputs": livetest.AdminInputs(t, withGitChglog(map[string]any{
-			"forge-ci-repository": layer.Repository, "consumer-project": policy.project,
-			"server-url": target.BaseURL(), "registry": policy.registry,
-			"job-image": policy.images.job, "job-user": policy.settings.JobUser, "build-image": policy.images.build, "signer-image": policy.images.signer,
-			"publication-project":          policy.publication,
-			"publication-image-repository": policy.registry + "/" + policy.publication,
-			"cosign-public-key-sha256":     policy.keys.cosignPublicSHA256,
-			"release-git-url":              policy.gitURL, "release-git-host-key-fingerprint": policy.hostKey,
-			"request-allowed-signers": "livetest@localhost " + policy.requestPublic,
-			"bot-name":                "Layer acceptance", "bot-email": releaseBotEmail,
-			"sign-distro-packages": policy.distro,
-			"version-bump":         policy.settings.VersionBump,
-			"base-images":          policy.bases,
-			"checks":               policy.checks,
-			"checks-runner-tags":   policy.checksRunnerTags,
-			"build":                policy.build,
-			"build-runner-tags":    policy.buildRunnerTags,
-			"release-images":       policy.releaseImages,
-			"artifacts-config":     policy.artifactsConfig,
-			"release-platforms":    policy.releasePlatforms,
-			"image-builder":        policy.imageBuilder,
-			"builder-job-image":    policy.builderJobImage,
-			"export-files":         len(policy.export) != 0,
-			"export":               policy.export,
-		})),
+		"inputs":    livetest.AdminInputs(t, inputs),
 	}
 }
 

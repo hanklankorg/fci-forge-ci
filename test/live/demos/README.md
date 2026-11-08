@@ -87,10 +87,15 @@ Why a flow is missing:
   GitHub renderer requires to point a trial at the engine under test.
 - **The example demos' GitLab releases**: the GitLab examples are the
   merge-request gate; the release policy's commands are the adopter's, and no
-  example ships them. The live release also renders with git-chglog from
-  `.chglog/`, which the examples, on git-cliff, do not carry.
+  example ships them.
 - **hello-gradle and hello-monorepo on Forgejo**: their examples have no
   Forgejo workflows; the Forgejo layer has no Gradle or npm build action.
+
+A GitLab release renders the changelog the way the demo's files call for:
+with the component's default, git-cliff, when the demo carries the
+`.forge-ci/gitcliff/` configuration `forge-ci init` writes (as
+`hello-cargo-workspace` does), and otherwise with git-chglog from `.chglog/`.
+The Forgejo releases name their renderer in their workflow.
 
 The npm package releases on Forgejo and GitLab ship the tarball as a signed
 release file; neither publishes it to a package registry.
