@@ -14,6 +14,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"maps"
 	"net"
 	"net/http"
@@ -29,7 +30,9 @@ import (
 	"codefloe.com/itiquette/forge-lab-contract/githubcontext"
 	"github.com/google/go-github/v91/github"
 
+	"github.com/diggsweden/forge-ci/internal/domain/config"
 	"github.com/diggsweden/forge-ci/internal/domain/errs"
+	domainrelease "github.com/diggsweden/forge-ci/internal/domain/release"
 	"github.com/diggsweden/forge-ci/internal/retry"
 )
 
@@ -1046,12 +1049,18 @@ func (trial *GitHubTrial) PushReleaseRequest(repo string, tree GitHubConsumerTre
 // CheckRelease checks what the engine promises of a GitHub release beyond a
 // green run: main advanced by one signed commit, the final tag exists, the
 // release offers assets, and its signatures verify: each Cosign bundle
-// against trust and each GPG signature (.asc, the default sign method)
-// against the trial's GPG key. At least one signature must verify.
-func (trial *GitHubTrial) CheckRelease(repo string, tree GitHubConsumerTree, final string, trust CosignTrust, key TrialGPGKey) map[string]int64 {
+// against trust and each GPG signature (.asc) against the trial's GPG key.
+// Every subject carries a verified signature of the method the release
+// workflow's artifacts configuration declares (gpg when it declares none).
+func (trial *GitHubTrial) CheckRelease(repo string, tree GitHubConsumerTree, workflow, final string, trust CosignTrust, key TrialGPGKey) map[string]int64 {
 	trial.tb.Helper()
 
 	ctx := trial.tb.Context()
+
+	method, err := githubReleaseSignMethod(tree.Dir, workflow)
+	if err != nil {
+		trial.tb.Fatalf("livetest: %v", err)
+	}
 
 	trial.checkReleaseCommit(repo, tree)
 
@@ -1095,16 +1104,12 @@ func (trial *GitHubTrial) CheckRelease(repo string, tree GitHubConsumerTree, fin
 		}
 	}
 
-	// Every subject carries its own verified signature: one signed file
-	// beside nine unsigned ones is not a signed release.
-	if unsigned := unsignedSubjects(assets, bundles, signatures); len(bundles)+len(signatures) == 0 {
-		trial.tb.Errorf("the release %s offers no Cosign bundle and no GPG signature beside its subject", final)
-	} else if len(unsigned) != 0 {
-		trial.tb.Errorf("the release %s offers %d assets without a verified signature: %v", final, len(unsigned), unsigned)
+	if err := releaseSignatureGaps(method, assets, bundles, signatures); err != nil {
+		trial.tb.Errorf("the release %s: %v", final, err)
 	}
 
-	trial.tb.Logf("release %s: %d assets, %d Cosign bundles verified against %s, %d GPG signatures verified against %s",
-		final, len(assets), len(bundles), trust, len(signatures), key.Fingerprint)
+	trial.tb.Logf("release %s: sign method %s; %d assets, %d Cosign bundles verified against %s, %d GPG signatures verified against %s",
+		final, method, len(assets), len(bundles), trust, len(signatures), key.Fingerprint)
 
 	return assets
 }
@@ -1311,6 +1316,86 @@ func (trial *GitHubTrial) verifyGPGSignatures(repo string, assets map[string]int
 // releaseSignatureSuffixes name the signature files of a release, which
 // sign a subject and are not subjects themselves.
 var releaseSignatureSuffixes = []string{".bundle", ".asc", ".sig", ".pem"}
+
+// githubReleaseSignMethod is the sign method the release workflow's artifacts
+// configuration declares: its sign: block, or gpg, the default, when it has
+// none or the file is absent and the release derives its plan.
+func githubReleaseSignMethod(dir, workflow string) (domainrelease.SignMethod, error) {
+	body, err := os.ReadFile(filepath.Join(dir, ".github", "workflows", filepath.Base(workflow))) //nolint:gosec // the staged consumer's own workflow, named by the trial.
+	if err != nil {
+		return "", fmt.Errorf("release workflow: %w", err)
+	}
+
+	configs, err := githubFixtureConfigs(workflow, string(body))
+	if err != nil {
+		return "", err
+	}
+
+	slices.Sort(configs)
+
+	switch configs = slices.Compact(configs); len(configs) {
+	case 0:
+		configs = []string{githubDefaultArtifactsConfig}
+	case 1:
+	default:
+		return "", fmt.Errorf("release workflow %s selects %d artifacts configurations, %v; the oracle needs one: %w", workflow, len(configs), configs, errs.ErrValidation)
+	}
+
+	declared, err := os.ReadFile(filepath.Join(dir, filepath.FromSlash(configs[0]))) //nolint:gosec // a canonical repo-relative path githubFixtureConfigs admitted.
+	if errors.Is(err, fs.ErrNotExist) {
+		return domainrelease.DefaultSignMethod, nil
+	}
+
+	if err != nil {
+		return "", err
+	}
+
+	parsed, err := config.Parse(declared)
+	if err != nil {
+		return "", fmt.Errorf("%s: %w", configs[0], err)
+	}
+
+	return parsed.Sign.EffectiveMethod(), nil
+}
+
+// githubDefaultArtifactsConfig is the release orchestrator's artifacts-config
+// default.
+const githubDefaultArtifactsConfig = ".forge-ci/artifacts.yml"
+
+// releaseSignatureGaps judges a release's verified signatures against its
+// declared method: every subject needs a verified signature of that method,
+// a Cosign bundle for sigstore and kms and a GPG .asc for gpg. One signed by
+// the other method alone is named as such.
+func releaseSignatureGaps(method domainrelease.SignMethod, assets map[string]int64, bundles, signatures map[string]bool) error {
+	declared, other, otherName := signatures, bundles, "a Cosign bundle"
+	if method != domainrelease.SignMethodGPG {
+		declared, other, otherName = bundles, signatures, "a GPG signature"
+	}
+
+	unsigned := unsignedSubjects(assets, declared, nil)
+	if len(unsigned) == 0 {
+		if len(declared) == 0 {
+			return fmt.Errorf("offers no subject to sign: %w", errReleaseEvidence)
+		}
+
+		return nil
+	}
+
+	var wrong []string
+
+	for _, subject := range unsigned {
+		if other[subject] {
+			wrong = append(wrong, subject)
+		}
+	}
+
+	if len(wrong) != 0 {
+		return fmt.Errorf("declares sign method %s, but %d assets carry only %s: %v (%d without a %s signature: %v): %w",
+			method, len(wrong), otherName, wrong, len(unsigned), method, unsigned, errReleaseEvidence)
+	}
+
+	return fmt.Errorf("offers %d assets without a verified %s signature: %v: %w", len(unsigned), method, unsigned, errReleaseEvidence)
+}
 
 // unsignedSubjects lists, sorted, the assets that are not signatures and have
 // no verified Cosign bundle or GPG signature.

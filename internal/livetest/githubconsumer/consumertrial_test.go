@@ -244,7 +244,7 @@ func runTrial(t *testing.T, trial *livetest.GitHubTrial, engine livetest.GitHubE
 	trial.PushReleaseRequest(repo, tree, key, request, settings.Version)
 	judge(t, trial, repo, settings.Workflow, "push", tree.Main)
 
-	assets := trial.CheckRelease(repo, tree, final, trust, key)
+	assets := trial.CheckRelease(repo, tree, settings.Workflow, final, trust, key)
 	if visibility.Private {
 		trial.CheckPrivateReleaseAssets(repo, assets)
 	}

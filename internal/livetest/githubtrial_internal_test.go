@@ -5,6 +5,8 @@ package livetest
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -16,6 +18,9 @@ import (
 	"time"
 
 	"github.com/google/go-github/v91/github"
+
+	"github.com/diggsweden/forge-ci/internal/domain/errs"
+	domainrelease "github.com/diggsweden/forge-ci/internal/domain/release"
 )
 
 func TestReuseGitHubEngineOnlyReadsPreparedSessionEngine(t *testing.T) {
@@ -514,5 +519,94 @@ func TestUnsignedSubjectsListsEveryAssetWithoutAVerifiedSignature(t *testing.T) 
 
 	if !slices.Equal(got, want) {
 		t.Errorf("unsignedSubjects = %v, want %v", got, want)
+	}
+}
+
+// The oracle verifies the method the release declares: a gpg release's
+// subjects need their .asc and a Cosign release's their bundle, and a subject
+// signed only by the other method fails by name.
+func TestReleaseSignatureGapsFollowTheDeclaredMethod(t *testing.T) {
+	t.Parallel()
+
+	assets := map[string]int64{"app.jar": 1, "app.jar.asc": 2, "app.jar.bundle": 3, "checksums.txt": 4, "checksums.txt.asc": 5}
+
+	for name, tc := range map[string]struct {
+		method              domainrelease.SignMethod
+		bundles, signatures map[string]bool
+		want                string
+	}{
+		"gpg, every .asc":        {domainrelease.SignMethodGPG, nil, map[string]bool{"app.jar": true, "checksums.txt": true}, ""},
+		"sigstore, every bundle": {domainrelease.SignMethodSigstore, map[string]bool{"app.jar": true, "checksums.txt": true}, nil, ""},
+		"gpg, bundle only":       {domainrelease.SignMethodGPG, map[string]bool{"app.jar": true}, map[string]bool{"checksums.txt": true}, "carry only a Cosign bundle: [app.jar]"},
+		"kms, .asc only":         {domainrelease.SignMethodKMS, map[string]bool{"app.jar": true}, map[string]bool{"checksums.txt": true}, "carry only a GPG signature: [checksums.txt]"},
+		"sigstore, one unsigned": {domainrelease.SignMethodSigstore, map[string]bool{"app.jar": true}, nil, "1 assets without a verified sigstore signature: [checksums.txt]"},
+		"gpg, nothing verified":  {domainrelease.SignMethodGPG, nil, nil, "2 assets without a verified gpg signature"},
+	} {
+		err := releaseSignatureGaps(tc.method, assets, tc.bundles, tc.signatures)
+
+		switch {
+		case tc.want == "" && err != nil:
+			t.Errorf("%s: %v", name, err)
+		case tc.want != "" && (!errors.Is(err, errReleaseEvidence) || !strings.Contains(fmt.Sprint(err), tc.want)):
+			t.Errorf("%s: got %v, want %q", name, err, tc.want)
+		}
+	}
+}
+
+// The declared method is the sign: block of the configuration the release
+// workflow names, or of the orchestrator's default path, and gpg without one.
+func TestGitHubReleaseSignMethodReadsTheWorkflowsConfiguration(t *testing.T) {
+	t.Parallel()
+
+	write := func(t *testing.T, dir, file, body string) {
+		t.Helper()
+
+		if err := os.MkdirAll(filepath.Dir(filepath.Join(dir, file)), 0o750); err != nil {
+			t.Fatal(err)
+		}
+
+		if err := os.WriteFile(filepath.Join(dir, file), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	workflow := func(config string) string {
+		with := ""
+		if config != "" {
+			with = "    with:\n      artifacts-config: " + config + "\n"
+		}
+
+		return "jobs:\n  release:\n    uses: owner/forge-ci/.github/workflows/release-orchestrator.yml@v1\n" + with
+	}
+
+	const sigstore = "sign:\n  method: sigstore\nartifacts:\n  - name: app\n    project-type: go\n    working-directory: .\n"
+
+	for name, tc := range map[string]struct {
+		workflow, file, body string
+		want                 domainrelease.SignMethod
+	}{
+		"named config":       {workflow(".forge-ci/artifacts-gpg.yml"), ".forge-ci/artifacts-gpg.yml", "sign:\n  method: gpg\nartifacts:\n  - name: app\n    project-type: go\n    working-directory: .\n", domainrelease.SignMethodGPG},
+		"default path":       {workflow(""), ".forge-ci/artifacts.yml", sigstore, domainrelease.SignMethodSigstore},
+		"no sign block":      {workflow(".forge-ci/artifacts.yml"), ".forge-ci/artifacts.yml", "artifacts:\n  - name: app\n    project-type: go\n    working-directory: .\n", domainrelease.SignMethodGPG},
+		"derived, no config": {workflow(""), "", "", domainrelease.SignMethodGPG},
+	} {
+		dir := t.TempDir()
+		write(t, dir, ".github/workflows/release.yml", tc.workflow)
+
+		if tc.file != "" {
+			write(t, dir, tc.file, tc.body)
+		}
+
+		got, err := githubReleaseSignMethod(dir, "release.yml")
+		if err != nil || got != tc.want {
+			t.Errorf("%s: got %q, %v; want %q", name, got, err, tc.want)
+		}
+	}
+
+	dir := t.TempDir()
+	write(t, dir, ".github/workflows/release.yml", workflow(".forge-ci/a.yml")+"  other:\n    with:\n      artifacts-config: .forge-ci/b.yml\n")
+
+	if _, err := githubReleaseSignMethod(dir, "release.yml"); !errors.Is(err, errs.ErrValidation) {
+		t.Errorf("two configurations accepted: %v", err)
 	}
 }
