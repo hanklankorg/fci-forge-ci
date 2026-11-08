@@ -75,9 +75,8 @@ on:
         default: "macos-26"
         type: string
       forge-ci-binary-ref:
-        description: "forge-ci binary ref/version to install (branch, tag, or SHA). For branch testing, set this to the same forge-ci revision as runtime image overrides on Linux jobs."
-        required: false
-        default: ""
+        description: "Full approved engine commit; the macOS job builds forge-ci from the engine checkout at it (canonical delivery serves Linux only). The release route passes its own."
+        required: true
         type: string
     # All `required: false` — `secrets: inherit` callers unchanged.
     secrets:
@@ -114,21 +113,20 @@ jobs:
         with:
           ref: ${{ inputs.branch }}
           fetch-depth: 1
-      - name: Checkout forge-ci bootstrap installers
-        id: forge-ci-bootstrap
+      # macOS: canonical delivery builds Linux files only, so this lane builds
+      # forge-ci from the approved engine commit with the engine's own darwin
+      # build action, run from that same checkout.
+      - name: Checkout the approved engine
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           repository: ${{ needs.resolve-bootstrap.outputs.forge-ci-repository }}
           ref: ${{ needs.resolve-bootstrap.outputs.forge-ci-binary-ref }}
-          path: .github-shared
-          sparse-checkout: scripts/bootstrap
+          path: _forge_ci_engine
           persist-credentials: false
-      - name: Install forge-ci binary
-        env:
-          FORGE_CI_BINARY_REF: ${{ needs.resolve-bootstrap.outputs.forge-ci-binary-ref }}
-          FORGE_CI_SOURCE_SHA: ${{ steps.forge-ci-bootstrap.outputs.commit }}
-          FORGE_CI_REPOSITORY: ${{ needs.resolve-bootstrap.outputs.forge-ci-repository }}
-        run: bash .github-shared/scripts/bootstrap/install-forge-ci.sh "$FORGE_CI_BINARY_REF"
+      - name: Build forge-ci for macOS from the approved engine
+        uses: ./_forge_ci_engine/.github/actions/build-darwin-cli
+        with:
+          engine-commit: ${{ needs.resolve-bootstrap.outputs.forge-ci-binary-ref }}
 
       # Defense-in-depth: refuse PR-context triggers — App Store Connect
       # credentials in env this job uses must never run with PR-HEAD code.

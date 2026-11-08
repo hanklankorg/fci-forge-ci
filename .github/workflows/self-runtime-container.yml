@@ -28,7 +28,6 @@ on:
       - scripts/bootstrap/install-glab.sh
       - scripts/bootstrap/install-mise.sh
       - scripts/bootstrap/install-publiccode-parser.sh
-      - scripts/bootstrap/install-forge-ci.sh
       - scripts/ci/runtime-smoke.sh
       - scripts/ci/engine-binary.sh
       - .engine/bin/**
@@ -671,9 +670,10 @@ jobs:
   # Publish the CLI tarballs (built once by build-cli) to the rolling pre-release
   # v0.90.0-pre. Tagged releases currently rebuild and publish through
   # release-binary.yml. Runs after publish-merge so
-  # the pre-release CLI and pre-release images advance together. install-forge-ci.sh
-  # resolves `forge-ci-binary-ref: v0.90.0-pre` to these assets (download +
-  # cosign-verify against the build-cli pre-release identity).
+  # the pre-release CLI and pre-release images advance together. The
+  # workflows no longer install from these assets (Linux jobs receive the
+  # canonical CLI of the run, macOS jobs build from the engine checkout); the
+  # channel serves people who download the CLI and verify it with cosign.
   publish-cli:
     name: Publish CLI (pre-release)
     needs: [build-cli, publish-merge]

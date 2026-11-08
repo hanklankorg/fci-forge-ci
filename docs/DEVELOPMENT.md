@@ -41,19 +41,13 @@ temporary storage, but renders a proposal without writing project files.
 Initializer unit tests inject an inert remote and use temporary project trees
 to check generation parity, conflicts, and unchanged files; they need no provider.
 
-The bootstrap installer fetches a detached Git checkout for a branch or full
-40-character SHA-1 or 64-character SHA-256 commit ID
-`forge-ci-binary-ref` and builds from that source, logging the resolved commit;
-release tags install the signed archive instead. Self Release passes the commit
-named by its release-request tag, so advancing the branch cannot change its CLI.
-PR and snapshot orchestrators resolve source branches once for all host jobs;
-standalone host jobs bind the build to their bootstrap checkout using
-`FORGE_CI_SOURCE_SHA`. Release-tag inputs retain signed release-asset installation.
-Use the complete commit ID rather than an abbreviated hash. Git source installs
-select the repository's SHA-1 or SHA-256 object format before fetching.
-`local`/`.` builds use the working copy and reject `FORGE_CI_SOURCE_SHA`; to build
-a bound revision, pass its commit ID instead. Relative `FORGE_CI_INSTALL_DIR`
-values are resolved against the invoking working directory.
+The GitHub workflows take `forge-ci-binary-ref` as the full 40-character
+engine commit and build from it: the canonical delivery of a run for Linux
+jobs (`scripts/ci/canonical-cli-delivery.sh`, in the pinned Go builder
+image) and `.github/actions/build-darwin-cli` for macOS jobs, run from the
+engine checkout at that commit. Self Release passes the commit named by its
+release-request tag, so advancing the branch cannot change its CLI. Release
+tags and branches are not accepted there; to run a branch, pass its commit.
 An omitted binary ref resolves the current published stable release to its
 concrete tag once. GitHub orchestrators, and the reusable workflows a caller
 can also use on its own, use that tag for default runtime images as well,

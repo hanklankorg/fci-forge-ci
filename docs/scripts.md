@@ -38,10 +38,8 @@ called. Renovate-managed pinning lives here where applicable.
 | `scripts/bootstrap/install-common.sh` | Shared helpers (install directory, OS and architecture normalization) sourced by the other installers. |
 | `scripts/bootstrap/install-buildah.sh` | Makes buildah and podman available for `forge-ci container build`; a no-op where they are pre-installed. |
 | `scripts/bootstrap/install-cargo-cyclonedx.sh` | Installs the pinned cargo-cyclonedx, the Cargo Build SBOM generator. |
-| `scripts/bootstrap/install-cosign.sh` | Installs the pinned cosign on host jobs that sign outside the release route (container publish, snapshot images); release artifact signing uses the cosign baked into the runtime image. |
+| `scripts/bootstrap/install-cosign.sh` | The one pin of cosign: the runtime Containerfile bakes it, and the engine's own bootstrap chain, which cannot run in the images it produces (Self Runtime Container, build-cli, release-binary, the self-release and self-pullrequest gates), installs it on the host. Every consumer route runs the cosign baked into the runtime images. |
 | `scripts/bootstrap/install-cyclonedx-gomod.sh` | Installs the pinned cyclonedx-gomod, the Go Build SBOM generator. |
-| `scripts/bootstrap/install-forge-ci.sh` | Installs forge-ci on plain/macOS runners that cannot use the runtime container (PR and snapshot host jobs, container publish, macOS): a verified release archive for tags, a source build otherwise. The release route's host jobs run the canonical CLI delivered in the run instead (`scripts/ci/canonical-cli-delivery.md`). |
-| `scripts/bootstrap/install-forge-ci_test.sh` | Self-contained tests for `install-forge-ci.sh`'s fail-closed cosign verification; run by `installers_test.go` or directly. |
 | `scripts/bootstrap/install-forgejo-runner.sh` | Installs the pinned forgejo-runner for a lent machine. |
 | `scripts/bootstrap/install-gh.sh` | Installs the pinned GitHub CLI. |
 | `scripts/bootstrap/install-git-cliff.sh` | Installs the pinned git-cliff. |

@@ -1332,29 +1332,6 @@ These checks prove provider publication behavior, not runner-driven signing,
 SBOM generation or the full release job graph. Local workflow/handoff tests
 and the full consumer trials cover those separate contracts.
 
-#### Bootstrap-only GitHub acceptance
-
-`TestGitHubBootstrap_SourceAndStableSelection` snapshots the current bootstrap
-scripts and reusable resolver into a guarded scratch repository. It checks
-explicit source installation with VCS build identity, current stable-tag
-selection, matching runtime-reference outputs and release-policy support.
-The test uses the organization admitted by the hosted Forge Lab session and
-requires its explicit numeric ID; no operator organization is built into it.
-
-```text
-just github run --org <test-org> --ack-org <test-org> --token-file /private/github.pat \
-  --prefix fcb- --fixtures none -- \
-  env FORGE_CI_LIVE_GITHUB_ORG_ID=<org-id> \
-  go -C /absolute/forge-ci test -tags=live ./internal/livetest \
-    -run '^TestGitHubBootstrap_SourceAndStableSelection$' -count=1 -timeout=20m
-```
-
-The existing protected PAT needs repository access, `workflow` and `delete_repo`
-for workflow-file pushes and exact-ID cleanup. This native amd64 smoke creates
-no signing keys, release assets or images. It verifies outputs rather than
-pulling runtime images or verifying release-binary signatures. Created scratch
-repositories are deleted by acknowledged ID and checked absent by ID and name.
-
 #### Minimal preparation and retention on GitHub
 
 For the standalone and multi-artifact preparation paths without rebuilding the

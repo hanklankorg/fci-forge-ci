@@ -23,7 +23,7 @@ and installing a local binary does not publish workflow images.
 | Path | Content |
 |---|---|
 | `.github/workflows/` | Three orchestrators a consumer calls, the stages they compose, and the build, publish, lint, security and release leaves. [Components Reference](components.md#workflow-inventory) is the complete inventory. |
-| `.github/actions/install-forge-ci` | The composite installer for plain-runner jobs: verifies a released binary against its Sigstore bundle. See [Installing `forge-ci`](providers.md#installing-forge-ci). |
+| `.github/actions/consume-canonical-cli`, `.github/actions/build-darwin-cli` | How a job that is not a runtime container gets the engine: Linux host jobs receive the canonical CLI built in the run from the pinned engine commit; macOS jobs build it from the engine checkout. See [Installing `forge-ci`](providers.md#installing-forge-ci). |
 | `containers/runtime/Containerfile` | The runtime images the workflow jobs run in, published on `ghcr.io`. See [Runtime Images](runtime-images.md). |
 | `examples/` | A pull-request, release and, where it applies, snapshot workflow per ecosystem under `<ecosystem>/github/`, and the signing backends. See [Examples](../examples/README.md). |
 
@@ -182,8 +182,8 @@ repository; each falls back to the default below. A consumer sets none.
 
 | Variable | Default | Used for |
 |---|---|---|
-| `FORGE_CI_REPOSITORY` | the repository serving the called workflow (`job.workflow_repository`). GitHub Enterprise Server has no such context: there the variable is required, and a job refuses to start without it | bootstrap checkouts and script downloads, binary installs, release URLs, trusted signing identities, and the repository allowed to publish the rolling pre-release CLI |
-| `FORGE_CI_PRERELEASE_BRANCH` | `main` | the branch whose pushes publish runtime images and the pre-release CLI, and the branch the installer trusts for pre-release signatures |
+| `FORGE_CI_REPOSITORY` | the repository serving the called workflow (`job.workflow_repository`). GitHub Enterprise Server has no such context: there the variable is required, and a job refuses to start without it | the engine checkouts and images every job trusts, release URLs, trusted signing identities, and the repository allowed to publish the rolling pre-release CLI |
+| `FORGE_CI_PRERELEASE_BRANCH` | `main` | the branch whose pushes publish runtime images and the pre-release CLI |
 | `RELEASE_PLATFORMS` | `linux/amd64,linux/arm64` | the runtime images' platforms in Self Runtime Container; unset selects both declared architectures, and an explicit value may narrow the selection. An undeclared, duplicated or malformed entry fails before anything is built. Consumers read the same variable for their images with the same meaning, unset building what their configuration declares |
 | `CI_IMAGE_BUILDER` | `buildah` | Linux container and snapshot image builder: `buildah` or `kaniko`. The image leaves' explicit `image-builder` input takes precedence. |
 | `CI_IMAGE_BUILDER_JOB_IMAGE` | unset | Approved digest-pinned Kaniko job image; required when Kaniko is selected. The image leaves' explicit `image-builder-job-image` input takes precedence. |

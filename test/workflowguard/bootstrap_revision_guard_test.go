@@ -41,45 +41,6 @@ func readBootstrapWorkflow(t *testing.T, path string) bootstrapWorkflow {
 	return workflow
 }
 
-func TestHostInstallersBuildTheirBootstrapCheckoutCommit(t *testing.T) {
-	t.Parallel()
-	paths, err := filepath.Glob(filepath.Join(reporoot.Path(t), ".github", "workflows", "*.yml"))
-	require.NoError(t, err)
-
-	installs := 0
-
-	for _, path := range paths {
-		workflow := readBootstrapWorkflow(t, path)
-		for jobName, job := range workflow.Jobs {
-			checkoutFound := false
-
-			for _, step := range job.Steps {
-				if step.ID == "forge-ci-bootstrap" {
-					require.True(t, strings.HasPrefix(step.Uses, "actions/checkout@"), "%s/%s", path, jobName)
-					require.Equal(t, ".github-shared", step.With["path"])
-					require.Equal(t, "${{ needs.resolve-bootstrap.outputs.forge-ci-binary-ref }}", step.With["ref"])
-					require.Equal(t, resolvedForgeCIRepository, step.With["repository"], "%s/%s", path, jobName)
-
-					checkoutFound = true
-				}
-
-				if !strings.Contains(step.Run, ".github-shared/scripts/bootstrap/install-forge-ci.sh") {
-					continue
-				}
-
-				installs++
-
-				require.True(t, checkoutFound, "%s/%s installs without a preceding pinned checkout", path, jobName)
-				require.Equal(t, "${{ needs.resolve-bootstrap.outputs.forge-ci-binary-ref }}", step.Env["FORGE_CI_BINARY_REF"], "%s/%s", path, jobName)
-				require.Equal(t, "${{ steps.forge-ci-bootstrap.outputs.commit }}", step.Env["FORGE_CI_SOURCE_SHA"], "%s/%s", path, jobName)
-				require.Equal(t, resolvedForgeCIRepository, step.Env["FORGE_CI_REPOSITORY"], "%s/%s", path, jobName)
-			}
-		}
-	}
-
-	require.Positive(t, installs)
-}
-
 // resolvedForgeCIRepository is the repository the resolver admitted. Jobs take
 // it from there rather than re-reading job.workflow_repository, which is empty
 // on GitHub Enterprise Server.

@@ -64,7 +64,7 @@ func TestGitHubSelfRelease_BinaryScheduling(t *testing.T) {
 			trial.commit(dir, "test: witness candidate self-release scheduling", "")
 			commit := strings.TrimSpace(trial.git(dir, "rev-parse", "HEAD"))
 
-			t.Cleanup(func() { settleBootstrapRuns(t, trial, repo, commit, "self-release-gating.yml", "push") })
+			t.Cleanup(func() { settleOwnedRuns(t, trial, repo, commit, "self-release-gating.yml", "push") })
 			trial.push(dir, trial.remote(repo), "HEAD:refs/heads/main")
 			run := trial.WaitRun(repo, "self-release-gating.yml", "push", commit, 15*time.Minute)
 			t.Logf("self-release scheduling witness: %s", run.GetHTMLURL())

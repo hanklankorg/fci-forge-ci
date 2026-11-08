@@ -129,7 +129,7 @@ GitLab components require `runtime-image`. A guard test refuses a
 | `snapshot-images` | `runtime-base` (plan, prepare-context, collect), `runtime` full (publish: Trivy and syft), the toolchain image of each producer's project type; host build legs | The same shape as `publish-container`: the Buildah legs receive the canonical CLI of the run (`consume-canonical-cli`, profile `host`), every other job runs the forge-ci baked into its image |
 | `security-openssf-scorecard` | host + third-party Docker action (analysis); `runtime-base` (publish-sarif) | The Scorecard action needs a hosted runner; the SARIF upload runs in the admitted base image with its baked forge-ci |
 | `slsa-attestor` | `runtime-base` | forge-ci and the pinned cosign are baked in; the caller-selected runner must run job containers |
-| `build-xcode-ios`, `publish-apple-appstore` | macOS host + bootstrap installer from `forge-ci-binary-ref` | Tagged releases use verified archives; branch/full commit refs build from a [detached source checkout](DEVELOPMENT.md#source-checkout) |
+| `lint-swift`, `build-xcode-ios`, `publish-apple-appstore` | macOS host; forge-ci built from the engine checkout | Canonical delivery builds Linux files in a Linux builder image with Linux tool profiles, so it serves no darwin job. Each macOS job checks the engine out at the full commit `forge-ci-binary-ref` names and runs `.github/actions/build-darwin-cli` from that checkout: the Go toolchain `go.mod` names through setup-go, then `go build ./cmd/forge-ci`. Nothing else is installed |
 
 ## Forgejo runtime publication
 
