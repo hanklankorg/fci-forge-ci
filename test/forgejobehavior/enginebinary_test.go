@@ -280,7 +280,8 @@ func TestRecordedEngineChecksumIsABuildOfThisTree(t *testing.T) {
 			recorded := recordedChecksum(t, arch)
 			if built := fileSHA256(t, engineBuild(t, arch)); built != recorded {
 				t.Fatalf("%s does not record the build of this tree: recorded %s, built %s.\n"+
-					"A build input changed since it was recorded. Run `just refresh-engine-binary`, or write this line to the file, and commit it:\n%s  bin/forge-ci",
+					"A build input (cmd/, docs/, internal/, go.mod, go.sum) changed since it was recorded; docs/ is embedded, so a docs-only commit counts. "+
+					"Run `just refresh-engine-binary`, or write this line to the file, and commit it:\n%s  bin/forge-ci",
 					trackedChecksum(arch), recorded, built, built)
 			}
 		})

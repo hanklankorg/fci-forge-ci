@@ -239,6 +239,7 @@ check)
       printf '✓ linux/%s checksum matches: %s\n' "$arch" "$built"
     else
       printf '✗ linux/%s checksum is stale: recorded %s, built %s\n' "$arch" "$recorded" "$built"
+      printf '  The build inputs are %s; docs is embedded, so a docs-only\n  change moves the checksum too.\n' "${build_inputs[*]}"
       printf '  Run just refresh-engine-binary and commit the updated files.\n'
       failed=1
     fi
