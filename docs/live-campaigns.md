@@ -152,8 +152,9 @@ preserve their root push workflow and jobs in that policy project, with its loca
 gate include bound to the captured administrator gate. Forgejo and GitHub wrappers
 receive only the settings declared by the called engine workflow/action at its
 exact pinned Git commit, including when local uncommitted files differ.
-The run header and verdict record the controller's four `FORGE_CI_LIVE_ADMIN_*`
-inputs. The embedded engine default stays report-only; no lab-only policy source
+The lane exports the four `FORGE_CI_LIVE_ADMIN_*` inputs it was admitted with
+to every case, `false` where none was set, so each run header and verdict
+records them on both forges. The embedded engine default stays report-only; no lab-only policy source
 edit or checksum rebuild is needed to choose the run's settings.
 
 A cases file then holds one case a line: `consumer <demo>

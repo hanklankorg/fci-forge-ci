@@ -18,6 +18,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/diggsweden/forge-ci/internal/domain/enforcement"
 	"github.com/diggsweden/forge-ci/internal/domain/errs"
 )
 
@@ -188,21 +189,7 @@ func PlanCampaignLane(dir, provider, casesPath, head string, run CampaignRun) (C
 		return CampaignPlan{}, fmt.Errorf("%s: %w", casesPath, err)
 	}
 
-	plan := CampaignPlan{Unset: slices.Clone(campaignCaseNamed), Env: []string{"FORGE_CI_LIVE_PROVIDER=" + provider}}
-
-	for _, key := range campaignExported {
-		if value, found := env[key]; found {
-			plan.Env = append(plan.Env, key+"="+value)
-		} else {
-			plan.Unset = append(plan.Unset, key)
-		}
-	}
-
-	for _, key := range slices.Sorted(maps.Keys(env)) {
-		if strings.HasPrefix(key, GitLabJobImageArchiveEnv) {
-			plan.Env = append(plan.Env, key+"="+env[key])
-		}
-	}
+	plan := campaignLaneEnvironment(provider, env, run)
 
 	for _, line := range file.cases {
 		args, caseErr := campaignCaseArgs(dir, provider, env, line.words)
@@ -234,6 +221,34 @@ const demosDir = "test/live/demos"
 // demoConsumerDir is the consumer checkout a shipped demo is run from.
 func demoConsumerDir(root, demo string) string {
 	return filepath.Join(root, filepath.FromSlash(demosDir), demo, caseConsumer)
+}
+
+// campaignLaneEnvironment is what every case of the lane gets: the
+// provider, campaign.env's exported keys and runtime archives, and the
+// administrator inputs the lane was admitted with, stated where they default
+// to false too, so each case's verdict header records them.
+func campaignLaneEnvironment(provider string, env map[string]string, run CampaignRun) CampaignPlan {
+	plan := CampaignPlan{Unset: slices.Clone(campaignCaseNamed), Env: []string{"FORGE_CI_LIVE_PROVIDER=" + provider}}
+
+	for _, key := range campaignExported {
+		if value, found := env[key]; found {
+			plan.Env = append(plan.Env, key+"="+value)
+		} else {
+			plan.Unset = append(plan.Unset, key)
+		}
+	}
+
+	for _, key := range slices.Sorted(maps.Keys(env)) {
+		if strings.HasPrefix(key, GitLabJobImageArchiveEnv) {
+			plan.Env = append(plan.Env, key+"="+env[key])
+		}
+	}
+
+	for _, check := range enforcement.Checks {
+		plan.Env = append(plan.Env, adminInputEnvironment(check)+"="+run.Settings["admin-"+string(check)])
+	}
+
+	return plan
 }
 
 // campaignCaseArgs maps one case's words to the recipe that runs it.

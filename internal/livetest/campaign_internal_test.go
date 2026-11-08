@@ -73,13 +73,19 @@ consumer hello-go-cli release CI_JOB_IMAGE=@JOB_IMAGE_GO CI_IMAGE_BUILDER_JOB_IM
 scenario TestThird
 `)
 
-	plan, err := PlanCampaignLane(dir, "forgejo", cases, campaignHead, CampaignRun{})
+	plan, err := PlanCampaignLane(dir, "forgejo", cases, campaignHead, operatorCampaignRun(t, "forgejo", nil))
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	// Only the keys the live tier reads are exported; the provider is the lane's.
-	if want := []string{"FORGE_CI_LIVE_PROVIDER=forgejo", "FORGE_CI_LIVE_SIGNER_IMAGE=lab/signer@sha256:aa"}; !slices.Equal(plan.Env, want) {
+	// Only the keys the live tier reads are exported; the provider is the
+	// lane's, and the administrator inputs the lane was admitted with are
+	// stated, false where the operator set none.
+	if want := []string{
+		"FORGE_CI_LIVE_PROVIDER=forgejo", "FORGE_CI_LIVE_SIGNER_IMAGE=lab/signer@sha256:aa",
+		"FORGE_CI_LIVE_ADMIN_LINT=false", "FORGE_CI_LIVE_ADMIN_VULNERABILITIES=false",
+		"FORGE_CI_LIVE_ADMIN_APPLICATION_TESTS=false", "FORGE_CI_LIVE_ADMIN_REPRODUCIBLE_BUILDS=false",
+	}; !slices.Equal(plan.Env, want) {
 		t.Errorf("env %q, want %q", plan.Env, want)
 	}
 
@@ -119,7 +125,7 @@ func TestPlanCampaignLane_MapsAGitLabConsumerToItsRecipes(t *testing.T) {
 			"consumer hello-go-cli pull-request job-archive=@FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_JAVA\n")
 	writeFile(t, filepath.Join(dir, "demos", "hello-maven", filepath.FromSlash(GitLabGateFile)), lintingGate)
 
-	plan, err := PlanCampaignLane(dir, "gitlab", cases, campaignHead, CampaignRun{})
+	plan, err := PlanCampaignLane(dir, "gitlab", cases, campaignHead, operatorCampaignRun(t, "gitlab", map[string]string{"FORGE_CI_LIVE_ADMIN_LINT": "true"}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -129,6 +135,8 @@ func TestPlanCampaignLane_MapsAGitLabConsumerToItsRecipes(t *testing.T) {
 	if want := []string{
 		"FORGE_CI_LIVE_PROVIDER=gitlab", "FORGE_CI_LIVE_SIGNER_IMAGE_ARCHIVE=/c/signer.tar", "FORGE_CI_LIVE_BUILDAH_JOB_IMAGE_ARCHIVE=/c/buildah.tar",
 		"FORGE_CI_LIVE_KANIKO_JOB_IMAGE_ARCHIVE=/c/kaniko.tar", "FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_JAVA=/c/java.tar", "FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_NODE=/c/node.tar",
+		"FORGE_CI_LIVE_ADMIN_LINT=true", "FORGE_CI_LIVE_ADMIN_VULNERABILITIES=false",
+		"FORGE_CI_LIVE_ADMIN_APPLICATION_TESTS=false", "FORGE_CI_LIVE_ADMIN_REPRODUCIBLE_BUILDS=false",
 	}; !slices.Equal(plan.Env, want) {
 		t.Errorf("env %q, want %q", plan.Env, want)
 	}
@@ -359,4 +367,17 @@ func TestPlanCampaignLane_RefusesAGateImageTheCampaignLacks(t *testing.T) {
 	if _, err := PlanCampaignLane(dir, "forgejo", forgejo, campaignHead, CampaignRun{}); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// operatorCampaignRun is the run the campaign script resolves from the
+// operator's environment, here the given variables alone.
+func operatorCampaignRun(t *testing.T, provider string, environment map[string]string) CampaignRun {
+	t.Helper()
+
+	run, err := CampaignRunSettings(provider, func(name string) string { return environment[name] })
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	return run
 }
