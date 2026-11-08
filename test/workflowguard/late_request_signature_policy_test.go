@@ -24,8 +24,8 @@ import (
 
 // The late boundary must reach the prerequisite gate's decision on the
 // request tag, and must still require a valid final-tag signature. Both sides
-// run real code against one repository whose tags carry a GPG signature that
-// no configured key can verify: the gate through Prerequisites, the late
+// run real code against one repository whose tags carry a dummy PGP armor
+// block that no configured key can verify: the gate through Prerequisites, the late
 // boundary by executing the workflow's own signature commands, with the
 // step's own environment, through the actual CLI.
 func TestLateRequestSignatureAgreesWithPrerequisiteGate(t *testing.T) {
@@ -162,8 +162,9 @@ func lateAuthorizationStep(t *testing.T) lateStep {
 }
 
 // unverifiableSignedRelease builds a request commit, its release child on
-// main, and annotated request and final tags that each carry a GPG signature
-// block. No key exists for either, so neither can be verified.
+// main, and annotated request and final tags that each carry a dummy PGP
+// signature armor block, not a real signature. It is detected as a GPG
+// signature, but no key exists for it, so it cannot be verified.
 func unverifiableSignedRelease(t *testing.T) string {
 	t.Helper()
 

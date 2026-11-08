@@ -270,17 +270,17 @@ func TestCanonicalConsumerNativeCommandsSecretsAndReadCaps(t *testing.T) {
 							}
 						}
 
-						// The late boundary's commands, environment and
-						// request-signature policy have their own guards in
-						// late_request_*_test.go; the snapshot predates the fix
-						// that scoped signature validity to the final tag.
+						// The snapshot predates the fix that scoped signature
+						// validity to the final tag. Admit only that delta: the
+						// step-wide REQUIRE_VALID_SIGNATURE is gone, and the
+						// script is pinned by the exact-match stub in
+						// late_request_binding_test.go.
 						if file == "release-create-github.yml" && step.Name == "Revalidate request authority and final source at private boundary" {
-							found = true
-
-							break
+							step.Env = maps.Clone(step.Env)
+							delete(step.Env, "REQUIRE_VALID_SIGNATURE")
+						} else {
+							require.Equal(t, step.Run, candidate.Run)
 						}
-
-						require.Equal(t, step.Run, candidate.Run)
 
 						if file == "release-orchestrator.yml" && step.Name == "Generate Release Summary" {
 							require.Equal(t, "${{ inputs['release-file-mode'] == 'classified-files' && needs.classified-release.result || needs.create-release.result }}", candidate.Env["CREATE_RELEASE_RESULT"])

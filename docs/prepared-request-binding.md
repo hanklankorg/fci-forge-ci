@@ -68,8 +68,9 @@ Immediately before private key setup and immediately before publication, the
 native GPG/SSH signature validator rechecks the request with Q's trust files and
 the configured allowlist requirement: the same policy as the prerequisite gate,
 so a request the gate passed with a warning is not refused here. The final
-signature must verify (GPG uses only the configured public release key). The last command rereads the exact
-remote request object/peeled Q, exact final object/commit P, and supersession via
+signature must verify (GPG uses only the configured public release key). The
+last command rereads the exact remote request object/peeled Q, exact final
+object/commit P, and supersession via
 `release validate-tag --expected-parent Q`. Only the source-read job token and
 public verification material are in scope for these checks.
 
