@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 
 	"github.com/diggsweden/forge-ci/internal/domain/errs"
+	"github.com/diggsweden/forge-ci/internal/domain/snapshotimage"
 )
 
 // campaignSupportsLifecycle reports whether a demo runs the lifecycle event on
@@ -32,10 +33,6 @@ func campaignAdmitLifecycle(provider, checkout string) error {
 		return fmt.Errorf("%s runs on %s and %s: %w", TrialLifecycle, campaignForgejo, campaignGitLab, errs.ErrValidation)
 	}
 
-	if present, err := exists(filepath.Join(checkout, "Containerfile")); err != nil || !present {
-		return fmt.Errorf("%s: the demo has no root Containerfile, so no service snapshot and no development route: %w", TrialLifecycle, errs.ErrValidation)
-	}
-
 	source := GitLabDefaultArtifactsConfig
 
 	if provider == campaignGitLab {
@@ -45,18 +42,9 @@ func campaignAdmitLifecycle(provider, checkout string) error {
 		}
 	}
 
-	body, err := os.ReadFile(filepath.Join(checkout, source)) //nolint:gosec // G304: a fixed file under the demo checkout the harness itself chose.
-	if err != nil {
-		return fmt.Errorf("%s: the demo has no %s, so no service snapshot and no development route: %w", TrialLifecycle, source, errs.ErrValidation)
-	}
-
-	_, plan, err := serviceSnapshotDeclarationOverlay(string(body))
-	if err != nil {
-		return fmt.Errorf("%s: %s is not a service snapshot's declaration, so the demo has no development route: %w: %w", TrialLifecycle, source, err, errs.ErrValidation)
-	}
-
-	if provider != campaignForgejo {
-		return nil
+	plan, err := serviceSnapshotAdmission(checkout, source)
+	if err != nil || provider != campaignForgejo {
+		return err
 	}
 
 	if present, err := exists(filepath.Join(checkout, "pom.xml")); err != nil || !present {
@@ -68,4 +56,25 @@ func campaignAdmitLifecycle(provider, checkout string) error {
 	}
 
 	return nil
+}
+
+// serviceSnapshotAdmission plans the demo's service snapshot from its source
+// declaration, the development route every forge's lifecycle shares; a demo
+// without a root Containerfile or the declaration has none.
+func serviceSnapshotAdmission(checkout, source string) (snapshotimage.Plan, error) {
+	if present, err := exists(filepath.Join(checkout, "Containerfile")); err != nil || !present {
+		return snapshotimage.Plan{}, fmt.Errorf("%s: the demo has no root Containerfile, so no service snapshot and no development route: %w", TrialLifecycle, errs.ErrValidation)
+	}
+
+	body, err := os.ReadFile(filepath.Join(checkout, source)) //nolint:gosec // G304: a fixed file under the demo checkout the harness itself chose.
+	if err != nil {
+		return snapshotimage.Plan{}, fmt.Errorf("%s: the demo has no %s, so no service snapshot and no development route: %w", TrialLifecycle, source, errs.ErrValidation)
+	}
+
+	_, plan, err := serviceSnapshotDeclarationOverlay(string(body))
+	if err != nil {
+		return snapshotimage.Plan{}, fmt.Errorf("%s: %s is not a service snapshot's declaration, so the demo has no development route: %w: %w", TrialLifecycle, source, err, errs.ErrValidation)
+	}
+
+	return plan, nil
 }

@@ -97,10 +97,6 @@ func exampleDemoFiles(example string) map[string]string {
 	return files
 }
 
-// githubDemoWorkflows is where a demo keeps its GitHub workflows, which a
-// GitHub trial renders into .github/workflows.
-const githubDemoWorkflows = "test/live/github/workflows"
-
 // yamlComment is a comment after a value; a FIXME there explains the value
 // and is kept, as an adopter would keep it.
 var yamlComment = regexp.MustCompile(`(?m)[ \t]+#.*$`)

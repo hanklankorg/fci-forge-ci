@@ -40,11 +40,14 @@ planner and the campaign admission read them, the cases files' lines and
 settings, and the live marks of `test/live/campaigns/evidence.txt`, a
 hand-kept overlay keyed by forge, demo and flow, since whether a run proved
 something is a judgement; `go run ./internal/livetest/preflight
-testing-evidence ~/.local/state/forge-ci/live-runs` drafts it from the
-recorded verdicts for review. A refusal carries the planner's or the
+testing-evidence ~/.local/state/forge-ci/live-runs <hosted-runs>` drafts it
+for review from the recorded verdicts and from a root of hosted GitHub trial
+records, one controller script, exit receipt and finish time each. A refusal carries the planner's or the
 admission's reason. Matrix 1b is hand-kept. `test/syncguard` fails when the
-committed tables are stale. No campaign lane runs on hosted GitHub, so its
-cells are the overlay's; no shipped demo carries GitHub workflows today.
+committed tables are stale. No campaign lane runs on hosted GitHub. There a
+line is the fixture workflow a demo ships under `test/live/github/workflows`
+for the event the hosted trial settings name, and the lifecycle has one when
+the demo ships all three and the hosted settings accept the lifecycle.
 
 Legend: ✅ live-proven · ◐ partial · ⏳ running or queued · ❌ failed, root fix
 committed · ⛔ refused by planner admission (reason pinned) · 📝 line exists,
@@ -60,28 +63,31 @@ the planned artifacts; "container-first" builds from the declared container.
 
 | Demo (project kind) | PR / MR gate | Artifact-first snapshot | Container-first snapshot | Release | Full lifecycle |
 |---|---|---|---|---|---|
-| hello-android (gradle-android · no container · no image) | ⬚ / 📝 / — | — | — | — / — / — | ⛔ / ⛔ / — |
-| hello-cargo-container (rust · container-first · one image) | ✅ (2026-11-02) / ✅ (2026-11-02) / — | — | ⛔ (fixture consumer proven, run 520; the demo is refused) / 📝 lifecycle / — | ✅ (2026-11-02) / ✅ (2026-11-02) / — | ⛔ / 📝 / — |
-| hello-cargo-workspace (rust · container-first · 2 images) | ✅ (2026-11-02) / ✅ (2026-11-02) / — | — | ⛔ / ⛔ / — | ✅ (2026-11-02) / ✅ (2026-11-02) / — | ⛔ / ⛔ / — |
-| hello-go-cli (go · no container · no image) | ✅ (2026-11-02) / ✅ (2026-11-02) / — | — | — | ✅ (2026-11-02) / — / ✅ (GPG, hosted (matrix 1b, C)) | ⛔ / ⛔ / — |
-| hello-go-service (go · extraction image · one image) | ✅ (2026-11-02) / ✅ (2026-11-02) / — | ⛔ / ⛔ / — | — | ✅ (2026-11-02) / — / — | ⛔ / ⛔ / — |
-| hello-gradle (java · no container · no image) | ⬚ / ✅ (2026-11-02) / — | — | — | — / — / — | ⛔ / ⛔ / — |
-| hello-ios (xcode-ios · no container · no image) | ⬚ / ⬚ / — | — | — | — / — / — | ⛔ / ⛔ / — |
-| hello-maven (java · no container · no image) | ✅ (2026-11-02) / ✅ (2026-11-02) / — | — | — | ✅ (2026-11-02) / ✅ (2026-11-02) / — | ⛔ / ⛔ / — |
-| hello-maven-service (java · artifact-first · one image) | ✅ (2026-11-02) / ✅ (2026-11-02) / — | ✅ (A run 517, the retired published snapshot) / ✅ (lifecycle phase 3, 22ddcfd9) / — | — | ✅ (2026-11-02) / ✅ (2026-11-02) / — | ✅ (3c178f94) / ◐ (phases 1–3 22ddcfd9, run 4 ec2380ef queued) / — |
-| hello-monorepo (java, node · artifact-first · nested artifacts (monorepo)) | ⬚ / ✅ (2026-11-02) / — | ⛔ / ⛔ / — | — | — / — / — | ⛔ / ⛔ / — |
-| hello-npm-package (node · no container · no image) | ✅ (2026-11-02) / ✅ (2026-11-02) / — | — | — | ✅ (2026-11-02) / ✅ (2026-11-02) / — | ⛔ / ⛔ / — |
-| hello-npm-service (node · artifact-first · one image) | ✅ (2026-11-02) / ✅ (2026-11-02) / — | ⛔ / admitted / — | — | ✅ (2026-11-02) / ✅ (2026-11-02) / — | ⛔ / ⏳ (admitted; the lane waits for the npm snapshot layout) / — |
+| hello-android (gradle-android · no container · no image) | ⬚ / 📝 / 📝 | — | — | — / — / — | ⛔ / ⛔ / ⛔ |
+| hello-cargo-container (rust · container-first · one image) | ✅ (2026-11-02) / ✅ (2026-11-02) / 📝 | — | ⛔ (fixture consumer proven, run 520; the demo is refused) / 📝 lifecycle / admitted | ✅ (2026-11-02) / ✅ (2026-11-02) / 📝 | ⛔ / 📝 / ⬚ (admitted, no line) |
+| hello-cargo-workspace (rust · container-first · 2 images) | ✅ (2026-11-02) / ✅ (2026-11-02) / ✅ (2026-11-04) | — | ⛔ / ⛔ / ⛔ | ✅ (2026-11-02) / ✅ (2026-11-02) / ✅ (2026-11-04) | ⛔ / ⛔ / ⛔ |
+| hello-go-cli (go · no container · no image) | ✅ (2026-11-02) / ✅ (2026-11-02) / 📝 | — | — | ✅ (2026-11-02) / — / ✅ (GPG, hosted (matrix 1b, C)) | ⛔ / ⛔ / ⛔ |
+| hello-go-service (go · extraction image · one image) | ✅ (2026-11-02) / ✅ (2026-11-02) / 📝 | ⛔ / ⛔ / ⛔ | — | ✅ (2026-11-02) / — / 📝 | ⛔ / ⛔ / ⛔ |
+| hello-gradle (java · no container · no image) | ⬚ / ✅ (2026-11-02) / 📝 | — | — | — / — / ✅ (2026-11-04) | ⛔ / ⛔ / ⛔ |
+| hello-ios (xcode-ios · no container · no image) | ⬚ / ⬚ / 📝 | — | — | — / — / — | ⛔ / ⛔ / ⛔ |
+| hello-maven (java · no container · no image) | ✅ (2026-11-02) / ✅ (2026-11-02) / ✅ (2026-11-04) | — | — | ✅ (2026-11-02) / ✅ (2026-11-02) / ✅ (2026-11-04) | ⛔ / ⛔ / ⛔ |
+| hello-maven-service (java · artifact-first · one image) | ✅ (2026-11-02) / ✅ (2026-11-02) / ✅ (2026-11-04) | ✅ (A run 517, the retired published snapshot) / ✅ (lifecycle phase 3, 22ddcfd9) / admitted | — | ✅ (2026-11-02) / ✅ (2026-11-02) / 📝 | ✅ (3c178f94) / ◐ (phases 1–3 22ddcfd9, run 4 ec2380ef queued) / ⬚ (admitted, no line) |
+| hello-monorepo (java, node · artifact-first · nested artifacts (monorepo)) | ⬚ / ✅ (2026-11-02) / ⬚ | ⛔ / ⛔ / ⛔ | — | — / — / — | ⛔ / ⛔ / ⛔ |
+| hello-npm-package (node · no container · no image) | ✅ (2026-11-02) / ✅ (2026-11-02) / 📝 | — | — | ✅ (2026-11-02) / ✅ (2026-11-02) / ✅ (2026-11-04) | ⛔ / ⛔ / ⛔ |
+| hello-npm-service (node · artifact-first · one image) | ✅ (2026-11-02) / ✅ (2026-11-02) / ✅ (2026-11-04) | ⛔ / admitted / admitted | — | ✅ (2026-11-02) / ✅ (2026-11-02) / 📝 | ⛔ / ⬚ (after snapshot-npm-layout merge) / ⬚ (admitted, no line) |
 
 Refused snapshots and lifecycles, with the planner's or the admission's reason:
 
 - hello-cargo-container, forgejo: .forge-ci/artifacts.yml is not a service snapshot's declaration, so the demo has no development route: container hello-cargo-container: snapshot build secrets, extraction and OCI provenance are unsupported
 - hello-cargo-workspace, forgejo: .forge-ci/artifacts.yml is not a service snapshot's declaration, so the demo has no development route: the trial judges one container of the root Containerfile and context, declaring native amd64, without image name, tag suffix or provenance, from at most one artifact
 - hello-cargo-workspace, gitlab: .forge-ci/release-images.yml is not a service snapshot's declaration, so the demo has no development route: the trial judges one container of the root Containerfile and context, declaring native amd64, without image name, tag suffix or provenance, from at most one artifact
+- hello-cargo-workspace, github: .forge-ci/release-images.yml is not a service snapshot's declaration, so the demo has no development route: the trial judges one container of the root Containerfile and context, declaring native amd64, without image name, tag suffix or provenance, from at most one artifact
 - hello-go-service, forgejo: .forge-ci/artifacts.yml is not a service snapshot's declaration, so the demo has no development route: container my-service: snapshot build secrets, extraction and OCI provenance are unsupported
 - hello-go-service, gitlab: .forge-ci/artifacts.yml is not a service snapshot's declaration, so the demo has no development route: container my-service: snapshot build secrets, extraction and OCI provenance are unsupported
+- hello-go-service, github: .forge-ci/artifacts.yml is not a service snapshot's declaration, so the demo has no development route: container my-service: snapshot build secrets, extraction and OCI provenance are unsupported
 - hello-monorepo, forgejo: the demo has no root Containerfile, so no service snapshot and no development route
 - hello-monorepo, gitlab: the demo has no root Containerfile, so no service snapshot and no development route
+- hello-monorepo, github: the demo has no root Containerfile, so no service snapshot and no development route
 - hello-npm-service, forgejo: lifecycle on forgejo runs the Maven service development workflow, the one Forgejo development route, and the demo has no root pom.xml
 
 <!-- /generated:project-kinds -->
@@ -108,33 +114,33 @@ marks are the owner's judgements of the evidence roots in `testing-parity.md`.
 
 | Axis | Variant | Forgejo | GitLab | GitHub |
 |---|---|---|---|---|
-| ecosystem | go | ⛔ hello-go-cli | ⛔ hello-go-cli | — |
-|  | gradle-android | ⛔ hello-android | ⛔ hello-android | — |
-|  | java | ✅ hello-maven-service (3c178f94) | ◐ hello-maven-service (phases 1–3 22ddcfd9, run 4 ec2380ef queued) | — |
-|  | node | ⛔ hello-monorepo | ⏳ hello-npm-service (admitted; the lane waits for the npm snapshot layout) | — |
-|  | rust | ⛔ hello-cargo-container | 📝 hello-cargo-container | — |
-|  | xcode-ios | ⛔ hello-ios | ⛔ hello-ios | — |
-| route | artifact-first | ✅ hello-maven-service (3c178f94) | ◐ hello-maven-service (phases 1–3 22ddcfd9, run 4 ec2380ef queued) | — |
-|  | container-first | ⛔ hello-cargo-container | 📝 hello-cargo-container | — |
-|  | extraction image | ⛔ hello-go-service | ⛔ hello-go-service | — |
-|  | no container | ⛔ hello-android | ⛔ hello-android | — |
-| images | 2 images | ⛔ hello-cargo-workspace | ⛔ hello-cargo-workspace | — |
-|  | nested artifacts (monorepo) | ⛔ hello-monorepo | ⛔ hello-monorepo | — |
-|  | no image | ⛔ hello-android | ⛔ hello-android | — |
-|  | one image | ✅ hello-maven-service (3c178f94) | ◐ hello-maven-service (phases 1–3 22ddcfd9, run 4 ec2380ef queued) | — |
-| signing | GPG declaration | ⛔ hello-go-cli | ⛔ hello-go-cli | — |
-|  | default | ⛔ hello-android | 📝 hello-cargo-container | — |
-|  | sigstore | ✅ hello-maven-service (3c178f94) | ◐ hello-maven-service (phases 1–3 22ddcfd9, run 4 ec2380ef queued) | — |
-| image builder | buildah | ✅ lifecycle-forgejo (3c178f94) | ◐ lifecycle-gitlab (phases 1–3 22ddcfd9, run 4 ec2380ef queued) | — |
-|  | kaniko | ⬚ no lane | ⬚ no lane | — |
-| visibility | public | ✅ lifecycle-forgejo (3c178f94) | ◐ lifecycle-gitlab (phases 1–3 22ddcfd9, run 4 ec2380ef queued) | — |
-|  | private | ⬚ no lane | ⬚ no lane | — |
-| enforcement | admin lint | ⬚ no lane | ⬚ no lane | — |
-|  | admin vulnerabilities | ⬚ no lane | ⬚ no lane | — |
-|  | admin application-tests | ⬚ no lane | ⬚ no lane | — |
-|  | admin reproducible-builds | ⬚ no lane | ⬚ no lane | — |
-|  | none enforced | ✅ lifecycle-forgejo (3c178f94) | ◐ lifecycle-gitlab (phases 1–3 22ddcfd9, run 4 ec2380ef queued) | — |
-| architecture | amd64 | ✅ hello-maven-service (3c178f94) | ◐ hello-maven-service (phases 1–3 22ddcfd9, run 4 ec2380ef queued) | — |
+| ecosystem | go | ⛔ hello-go-cli | ⛔ hello-go-cli | ⛔ hello-go-cli |
+|  | gradle-android | ⛔ hello-android | ⛔ hello-android | ⛔ hello-android |
+|  | java | ✅ hello-maven-service (3c178f94) | ◐ hello-maven-service (phases 1–3 22ddcfd9, run 4 ec2380ef queued) | ⬚ hello-maven-service (admitted, no line) |
+|  | node | ⛔ hello-monorepo | ⬚ hello-npm-service (after snapshot-npm-layout merge) | ⬚ hello-npm-service (admitted, no line) |
+|  | rust | ⛔ hello-cargo-container | 📝 hello-cargo-container | ⬚ hello-cargo-container (admitted, no line) |
+|  | xcode-ios | ⛔ hello-ios | ⛔ hello-ios | ⛔ hello-ios |
+| route | artifact-first | ✅ hello-maven-service (3c178f94) | ◐ hello-maven-service (phases 1–3 22ddcfd9, run 4 ec2380ef queued) | ⬚ hello-maven-service (admitted, no line) |
+|  | container-first | ⛔ hello-cargo-container | 📝 hello-cargo-container | ⬚ hello-cargo-container (admitted, no line) |
+|  | extraction image | ⛔ hello-go-service | ⛔ hello-go-service | ⛔ hello-go-service |
+|  | no container | ⛔ hello-android | ⛔ hello-android | ⛔ hello-android |
+| images | 2 images | ⛔ hello-cargo-workspace | ⛔ hello-cargo-workspace | ⛔ hello-cargo-workspace |
+|  | nested artifacts (monorepo) | ⛔ hello-monorepo | ⛔ hello-monorepo | ⛔ hello-monorepo |
+|  | no image | ⛔ hello-android | ⛔ hello-android | ⛔ hello-android |
+|  | one image | ✅ hello-maven-service (3c178f94) | ◐ hello-maven-service (phases 1–3 22ddcfd9, run 4 ec2380ef queued) | ⬚ hello-cargo-container (admitted, no line) |
+| signing | GPG declaration | ⛔ hello-go-cli | ⛔ hello-go-cli | ⛔ hello-go-cli |
+|  | default | ⛔ hello-android | 📝 hello-cargo-container | ⬚ hello-cargo-container (admitted, no line) |
+|  | sigstore | ✅ hello-maven-service (3c178f94) | ◐ hello-maven-service (phases 1–3 22ddcfd9, run 4 ec2380ef queued) | ⬚ hello-maven-service (admitted, no line) |
+| image builder | buildah | ✅ lifecycle-forgejo (3c178f94) | ◐ lifecycle-gitlab (phases 1–3 22ddcfd9, run 4 ec2380ef queued) | ⬚ no lane |
+|  | kaniko | ⬚ no lane | ⬚ no lane | ⬚ no lane |
+| visibility | public | ✅ lifecycle-forgejo (3c178f94) | ◐ lifecycle-gitlab (phases 1–3 22ddcfd9, run 4 ec2380ef queued) | ⬚ no lane |
+|  | private | ⬚ no lane | ⬚ no lane | ⬚ no lane |
+| enforcement | admin lint | ⬚ no lane | ⬚ no lane | ⬚ no lane |
+|  | admin vulnerabilities | ⬚ no lane | ⬚ no lane | ⬚ no lane |
+|  | admin application-tests | ⬚ no lane | ⬚ no lane | ⬚ no lane |
+|  | admin reproducible-builds | ⬚ no lane | ⬚ no lane | ⬚ no lane |
+|  | none enforced | ✅ lifecycle-forgejo (3c178f94) | ◐ lifecycle-gitlab (phases 1–3 22ddcfd9, run 4 ec2380ef queued) | ⬚ no lane |
+| architecture | amd64 | ✅ hello-maven-service (3c178f94) | ◐ hello-maven-service (phases 1–3 22ddcfd9, run 4 ec2380ef queued) | ⬚ hello-cargo-container (admitted, no line) |
 |  | arm64 | — D-5 | — D-5 | — D-5 |
 
 Kept scenario lines, by lane:

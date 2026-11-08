@@ -286,7 +286,7 @@ behind it:
 |---|---|---|---|
 | hello-maven-service | lifecycle | lifecycle | artifact-first Maven application and its runtime image |
 | hello-cargo-container | — | lifecycle | GitLab: container-first from `release-images.yml`. Forgejo reads `artifacts.yml`, whose container extracts, which the planner refuses |
-| hello-npm-service | — | admitted, no line | `artifacts.yml` is a service snapshot's (one npm producer) and the demo ships its GitLab release build, so the planner admits the GitLab lifecycle; the lane leaves it out until the npm snapshot layout and the demo's Containerfile agree (the snapshot lays the packed tarball at `.forge-ci/snapshot-inputs/<name>`, docs/workflows.md, and the Containerfile copies the unpacked `dist/`; the engine is making the snapshot unpack npm inputs). Forgejo: no root Maven application |
+| hello-npm-service | — | admitted, no line | `artifacts.yml` is a service snapshot's (one npm producer) and the demo ships its GitLab release build, so the planner admits the GitLab lifecycle; the lane line follows the snapshot-npm-layout merge, which makes the npm snapshot's layout match the release's on every forge. Forgejo: no root Maven application |
 | hello-cargo-workspace | — | — | two runtime images; the trial judges one container |
 | hello-go-service | — | — | extraction, which the planner refuses; no GitLab release build either |
 | hello-go-cli, hello-maven, hello-npm-package | — | — | no container, so no snapshot; hello-maven's library development route publishes a SNAPSHOT package, another shape |

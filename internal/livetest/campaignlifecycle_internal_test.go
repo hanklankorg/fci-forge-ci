@@ -156,10 +156,9 @@ func TestCampaignLifecycle_RunsTheServiceDemosOnGitLab(t *testing.T) {
 const npmLifecycleLine = "consumer hello-npm-service lifecycle job-archive=@FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_NODE build-archive=@FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_NODE signer-archive=@FORGE_CI_LIVE_SIGNER_IMAGE_ARCHIVE lint-archive=@LINT_IMAGE_ARCHIVE_JAVASCRIPT_TYPESCRIPT version=0.2.0 version-bump=npm job-user=65532:65532"
 
 // The npm service's declaration is a service snapshot's and the demo ships
-// its GitLab release build, so the planner admits its GitLab lifecycle. The
-// lane leaves it out until the npm snapshot layout and the demo's
-// Containerfile agree (docs/live-campaigns.md, Lifecycle), which is the
-// engine's and the demo's to settle, not an admission rule.
+// its GitLab release build, so the planner admits its GitLab lifecycle. Its
+// lane line follows the snapshot-npm-layout merge (docs/live-campaigns.md,
+// Lifecycle); that is the engine's layout, not an admission rule.
 func TestCampaignLifecycle_AdmitsTheNpmServiceOnGitLab(t *testing.T) {
 	t.Parallel()
 

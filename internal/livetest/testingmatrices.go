@@ -60,14 +60,22 @@ const (
 
 var errTestingMatrices = errors.New("testing matrices")
 
-// matrixProviders are the columns; GitHub has no campaign lane, so its cells
-// are the overlay's or not applicable.
+// matrixProviders are the columns. GitHub has no campaign lane: its line for
+// an event is the demo's fixture workflow the hosted harness runs for it.
 var matrixProviders = []string{campaignForgejo, campaignGitLab, matrixGitHub}
+
+// githubDemoWorkflows is where a demo keeps its GitHub workflows, which a
+// GitHub trial renders into .github/workflows.
+const githubDemoWorkflows = "test/live/github/workflows"
+
+// githubEvents are the hosted harness's events with a fixture workflow each;
+// its lifecycle runs all three.
+var githubEvents = []string{TrialPullRequest, TrialDevRelease, TrialRelease}
 
 // matrixDemo is a shipped demo as the matrices read it.
 type matrixDemo struct {
 	name, source, ecosystem, route, images, signing string
-	github                                          bool
+	hosted                                          map[string]bool
 	release                                         map[string]bool
 	admission                                       map[string]error
 }
@@ -169,7 +177,7 @@ func readMatrixDemos(root string) ([]matrixDemo, error) {
 }
 
 func readMatrixDemo(name, consumer string) (matrixDemo, error) {
-	demo := matrixDemo{name: name, release: map[string]bool{}, admission: map[string]error{}}
+	demo := matrixDemo{name: name, hosted: map[string]bool{}, release: map[string]bool{}, admission: map[string]error{}}
 
 	source, err := ServiceSnapshotSource(consumer)
 	if err != nil {
@@ -205,7 +213,7 @@ func readMatrixDemo(name, consumer string) (matrixDemo, error) {
 		return demo, err
 	}
 
-	if demo.github, err = exists(filepath.Join(consumer, filepath.FromSlash(githubWorkflowDirectory))); err != nil {
+	if err := demo.readHosted(consumer, source); err != nil {
 		return demo, err
 	}
 
@@ -221,6 +229,36 @@ func readMatrixDeclaration(path string) (*config.Config, error) {
 	}
 
 	return parseServiceDeclaration(string(body))
+}
+
+// readHosted reads the demo's flows on hosted GitHub. An event has a line
+// where the demo ships the fixture workflow the hosted settings name for it;
+// the lifecycle has one where all three are shipped and the hosted settings
+// accept the event. Its admission is the service snapshot every forge's
+// lifecycle shares.
+func (demo *matrixDemo) readHosted(consumer, source string) error {
+	lifecycle := true
+
+	for _, event := range githubEvents {
+		settings, err := ParseGitHubTrialSettings(event, nil)
+		if err != nil {
+			return err
+		}
+
+		if demo.hosted[event], err = exists(filepath.Join(consumer, filepath.FromSlash(githubDemoWorkflows), settings.Workflow)); err != nil {
+			return err
+		}
+
+		lifecycle = lifecycle && demo.hosted[event]
+	}
+
+	_, err := ParseGitHubTrialSettings(TrialLifecycle, nil)
+	demo.hosted[TrialLifecycle] = lifecycle && err == nil
+	demo.release[matrixGitHub] = demo.hosted[TrialRelease]
+
+	_, demo.admission[matrixGitHub] = serviceSnapshotAdmission(consumer, source)
+
+	return nil
 }
 
 // matrixLifecycleAdmission is the campaign's admission of a lifecycle of the
@@ -422,10 +460,15 @@ func (mark matrixMark) cell(subject string) string {
 	return text
 }
 
-// hasLine reports whether a lane of the provider runs the demo's event.
-func (data matrices) hasLine(provider, demo, event string) bool {
+// hasLine reports whether a lane of the provider runs the demo's event; on
+// GitHub, whether the hosted harness runs it from the demo's own workflows.
+func (data matrices) hasLine(provider string, demo matrixDemo, event string) bool {
+	if provider == matrixGitHub {
+		return demo.hosted[event]
+	}
+
 	for _, lane := range data.lanes {
-		if lane.provider == provider && slices.Contains(lane.consumers[demo], event) {
+		if lane.provider == provider && slices.Contains(lane.consumers[demo.name], event) {
 			return true
 		}
 	}
@@ -444,7 +487,7 @@ func (data matrices) lifecycleState(provider string, demo matrixDemo) matrixMark
 		return mark
 	}
 
-	if data.hasLine(provider, demo.name, TrialLifecycle) {
+	if data.hasLine(provider, demo, TrialLifecycle) {
 		return matrixMark{mark: markLine}
 	}
 
@@ -460,7 +503,7 @@ func (data matrices) releaseCell(provider string, demo matrixDemo) string {
 		return mark.cell("")
 	}
 
-	if data.hasLine(provider, demo.name, TrialRelease) {
+	if data.hasLine(provider, demo, TrialRelease) {
 		return markLine
 	}
 
@@ -482,8 +525,12 @@ func (data matrices) developmentCell(provider string, demo matrixDemo) string {
 		return mark.cell("")
 	}
 
-	if data.hasLine(provider, demo.name, TrialLifecycle) {
+	if data.hasLine(provider, demo, TrialLifecycle) {
 		return markLine + " lifecycle"
+	}
+
+	if data.hasLine(provider, demo, TrialDevRelease) {
+		return markLine
 	}
 
 	return "admitted"
@@ -495,23 +542,8 @@ func (data matrices) gateCell(provider string, demo matrixDemo) string {
 		return mark.cell("")
 	}
 
-	if data.hasLine(provider, demo.name, TrialPullRequest) || data.hasLine(provider, demo.name, TrialLifecycle) {
+	if data.hasLine(provider, demo, TrialPullRequest) || data.hasLine(provider, demo, TrialLifecycle) {
 		return markLine
-	}
-
-	return markNoLine
-}
-
-// githubCell is a demo's state of a flow on hosted GitHub: no campaign lane
-// runs there, so the cell is the overlay's mark, else no line; a demo without
-// GitHub workflows has no flow there at all.
-func (data matrices) githubCell(demo matrixDemo, flow string) string {
-	if mark, found := data.mark(matrixGitHub, demo.name, flow); found {
-		return mark.cell("")
-	}
-
-	if !demo.github {
-		return markNotApply
 	}
 
 	return markNoLine
@@ -531,10 +563,6 @@ func markRank(mark string) int {
 // bestOf is the best lifecycle state among the demos on the provider, with
 // the demo it is of; no demo carrying the value is a gap of the demos.
 func (data matrices) bestOf(provider string, demos []matrixDemo) string {
-	if provider == matrixGitHub {
-		return markNotApply
-	}
-
 	if len(demos) == 0 {
 		return markNoLine + " no demo"
 	}
@@ -553,10 +581,6 @@ func (data matrices) bestOf(provider string, demos []matrixDemo) string {
 // laneValueCell is the best lifecycle state of the provider's lifecycle lanes
 // whose setting has the value, since cases-line axes are the lane's.
 func (data matrices) laneValueCell(provider, setting, value string) string {
-	if provider == matrixGitHub {
-		return markNotApply
-	}
-
 	best, subject := matrixMark{}, ""
 
 	for _, lane := range data.lanes {
@@ -710,15 +734,15 @@ func (data matrices) projectKindsTable() string {
 	for _, demo := range data.demos {
 		artifact, container := data.snapshotCells(demo)
 		fmt.Fprintf(&page, "| %s (%s · %s · %s) | %s | %s | %s | %s | %s |\n", demo.name, demo.ecosystem, demo.route, demo.images,
-			data.perForge(demo, TrialPullRequest, data.gateCell), artifact, container,
-			data.perForge(demo, TrialRelease, data.releaseCell),
-			data.perForge(demo, TrialLifecycle, func(provider string, demo matrixDemo) string { return data.lifecycleState(provider, demo).cell("") }))
+			perForge(demo, data.gateCell), artifact, container,
+			perForge(demo, data.releaseCell),
+			perForge(demo, func(provider string, demo matrixDemo) string { return data.lifecycleState(provider, demo).cell("") }))
 	}
 
 	page.WriteString("\nRefused snapshots and lifecycles, with the planner's or the admission's reason:\n\n")
 
 	for _, demo := range data.demos {
-		for _, provider := range []string{campaignForgejo, campaignGitLab} {
+		for _, provider := range matrixProviders {
 			if err := demo.admission[provider]; err != nil && demo.route != routeNoContainer {
 				fmt.Fprintf(&page, "- %s, %s: %s\n", demo.name, provider, matrixReason(err))
 			}
@@ -729,8 +753,13 @@ func (data matrices) projectKindsTable() string {
 }
 
 // perForge writes a flow's Forgejo, GitLab and GitHub cells.
-func (data matrices) perForge(demo matrixDemo, flow string, cell func(string, matrixDemo) string) string {
-	return cell(campaignForgejo, demo) + " / " + cell(campaignGitLab, demo) + " / " + data.githubCell(demo, flow)
+func perForge(demo matrixDemo, cell func(string, matrixDemo) string) string {
+	cells := make([]string, 0, len(matrixProviders))
+	for _, provider := range matrixProviders {
+		cells = append(cells, cell(provider, demo))
+	}
+
+	return strings.Join(cells, " / ")
 }
 
 // snapshotCells are the artifact-first and container-first snapshot cells:
@@ -741,7 +770,7 @@ func (data matrices) snapshotCells(demo matrixDemo) (string, string) {
 		return markNotApply, markNotApply
 	}
 
-	state := data.perForge(demo, matrixDevelopment, data.developmentCell)
+	state := perForge(demo, data.developmentCell)
 	if demo.route == "container-first" {
 		return markNotApply, state
 	}
