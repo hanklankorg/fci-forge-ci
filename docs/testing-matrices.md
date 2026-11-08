@@ -68,7 +68,7 @@ the planned artifacts; "container-first" builds from the declared container.
 | hello-cargo-container (rust · container-first · one image) | ✅ (2026-11-02) / ✅ (2026-11-02) / ✅ (2026-11-04) | — | ◐ (fixture consumer proven, run 520; the demo's own lifecycle line awaits a live run) / 📝 lifecycle / admitted | ✅ (2026-11-02) / ✅ (2026-11-02) / 📝 | 📝 / 📝 / ⬚ (admitted, no line) |
 | hello-cargo-workspace (rust · container-first · 2 images) | ✅ (2026-11-02) / ✅ (2026-11-02) / ✅ (2026-11-04) | — | ⛔ / ⛔ / ⛔ | ✅ (2026-11-02) / ✅ (2026-11-02) / ✅ (2026-11-04) | ⛔ / ⛔ / ⛔ |
 | hello-go-cli (go · no container · no image) | ✅ (2026-11-02) / ✅ (2026-11-02) / ✅ (2026-11-04) | — | — | ✅ (2026-11-02) / — / ✅ (GPG, hosted (matrix 1b, C)) | ⛔ / ⛔ / ⛔ |
-| hello-go-service (go · extraction image · one image) | ✅ (2026-11-02) / ✅ (2026-11-02) / ✅ (2026-11-04) | ⛔ / ⛔ / ⛔ | ⛔ / ⛔ / ⛔ | ✅ (2026-11-02) / — / 📝 | ⛔ / ⛔ / ⛔ |
+| hello-go-service (go · extraction image · one image) | ✅ (2026-11-02) / ✅ (2026-11-02) / ✅ (2026-11-04) | 📝 lifecycle / ⛔ / admitted | 📝 lifecycle / ⛔ / admitted | ✅ (2026-11-02) / — / 📝 | 📝 / ⛔ / ⬚ (admitted, no line) |
 | hello-gradle (java · no container · no image) | ⬚ / ✅ (2026-11-02) / 📝 | — | — | — / — / ✅ (2026-11-04) | ⛔ / ⛔ / ⛔ |
 | hello-ios (xcode-ios · no container · no image) | ⬚ / ⬚ / 📝 | — | — | — / — / — | ⛔ / ⛔ / ⛔ |
 | hello-maven (java · no container · no image) | ✅ (2026-11-02) / ✅ (2026-11-02) / ✅ (2026-11-04) | — | — | ✅ (2026-11-02) / ✅ (2026-11-02) / ✅ (2026-11-04) | ⛔ / ⛔ / ⛔ |
@@ -82,9 +82,7 @@ Refused snapshots and lifecycles, with the planner's or the admission's reason:
 - hello-cargo-workspace, forgejo: .forge-ci/release-images.yml is not a service snapshot's declaration, so the demo has no development route: the trial judges one container of the root Containerfile and context, planned for amd64, without image name, tag suffix or declared provenance, from at most one artifact
 - hello-cargo-workspace, gitlab: .forge-ci/release-images.yml is not a service snapshot's declaration, so the demo has no development route: the trial judges one container of the root Containerfile and context, planned for amd64, without image name, tag suffix or declared provenance, from at most one artifact
 - hello-cargo-workspace, github: .forge-ci/release-images.yml is not a service snapshot's declaration, so the demo has no development route: the trial judges one container of the root Containerfile and context, planned for amd64, without image name, tag suffix or declared provenance, from at most one artifact
-- hello-go-service, forgejo: .forge-ci/artifacts.yml is not a service snapshot's declaration, so the demo has no development route: container my-service: snapshot build secrets, extraction and OCI provenance are unsupported
-- hello-go-service, gitlab: .forge-ci/artifacts.yml is not a service snapshot's declaration, so the demo has no development route: container my-service: snapshot build secrets, extraction and OCI provenance are unsupported
-- hello-go-service, github: .forge-ci/artifacts.yml is not a service snapshot's declaration, so the demo has no development route: container my-service: snapshot build secrets, extraction and OCI provenance are unsupported
+- hello-go-service, gitlab: the demo has no .gitlab/build-release.sh, so no GitLab release: its release commands are the adopter's (test/live/demos/README.md)
 - hello-monorepo, forgejo: the demo has no root Containerfile, so no service snapshot and no development route
 - hello-monorepo, gitlab: the demo has no root Containerfile, so no service snapshot and no development route
 - hello-monorepo, github: the demo has no root Containerfile, so no service snapshot and no development route
@@ -113,7 +111,7 @@ marks are the owner's judgements of the evidence roots in `testing-parity.md`.
 
 | Axis | Variant | Forgejo | GitLab | GitHub |
 |---|---|---|---|---|
-| ecosystem | go | ⛔ hello-go-cli | ⛔ hello-go-cli | ⛔ hello-go-cli |
+| ecosystem | go | 📝 hello-go-service | ⛔ hello-go-cli | ⬚ hello-go-service (admitted, no line) |
 |  | gradle-android | ⛔ hello-android | ⛔ hello-android | ⛔ hello-android |
 |  | java | ✅ hello-maven-service (3c178f94) | ◐ hello-maven-service (phases 1–3 22ddcfd9, run 4 ec2380ef queued) | 📝 hello-maven-service |
 |  | node | ⬚ hello-npm-service (admitted, no line) | ⬚ hello-npm-service (admitted, no line) | ⬚ hello-npm-service (admitted, no line) |
@@ -121,7 +119,7 @@ marks are the owner's judgements of the evidence roots in `testing-parity.md`.
 |  | xcode-ios | ⛔ hello-ios | ⛔ hello-ios | ⛔ hello-ios |
 | route | artifact-first | ✅ hello-maven-service (3c178f94) | ◐ hello-maven-service (phases 1–3 22ddcfd9, run 4 ec2380ef queued) | 📝 hello-maven-service |
 |  | container-first | 📝 hello-cargo-container | 📝 hello-cargo-container | ⬚ hello-cargo-container (admitted, no line) |
-|  | extraction image | ⛔ hello-go-service | ⛔ hello-go-service | ⛔ hello-go-service |
+|  | extraction image | 📝 hello-go-service | ⛔ hello-go-service | ⬚ hello-go-service (admitted, no line) |
 |  | no container | ⛔ hello-android | ⛔ hello-android | ⛔ hello-android |
 | images | 2 images | ⛔ hello-cargo-workspace | ⛔ hello-cargo-workspace | ⛔ hello-cargo-workspace |
 |  | nested artifacts (monorepo) | ⛔ hello-monorepo | ⛔ hello-monorepo | ⛔ hello-monorepo |

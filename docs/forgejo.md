@@ -1519,8 +1519,9 @@ An npm package is verified under `<context>/.forge-ci/snapshot-inputs/<name>`
 and laid over the context root by the build, where `release-images.yml` lays
 the unpacked package; see the
 [shared input contract](workflows.md#automatic-artifact-first-inputs).
-Build secrets, binary extraction and explicit snapshot OCI signing/provenance
-requests remain unsupported. Scan severity and image SBOM policy are independent.
+Build secrets and explicit snapshot OCI signing/provenance requests remain
+unsupported; `extract.binary` is a release's output, which a snapshot does not
+run. Scan severity and image SBOM policy are independent.
 
 ## Signing
 

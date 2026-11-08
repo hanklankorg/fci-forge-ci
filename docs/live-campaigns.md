@@ -343,7 +343,7 @@ behind it:
 | hello-cargo-container | lifecycle | lifecycle | container-first from `release-images.yml`, no producer |
 | hello-npm-service | admitted, no line | admitted, no line | `artifacts.yml` is a service snapshot's (one npm producer) and the demo ships its GitLab release build, so the planner admits the lifecycle on both forges; the lane lines follow the snapshot-npm-layout merge, which makes the npm snapshot's layout match the release's on every forge, and wait for a live run |
 | hello-cargo-workspace | — | — | two runtime images; the trial judges one container |
-| hello-go-service | — | — | extraction, which the planner refuses; no GitLab release build either |
+| hello-go-service | lifecycle | — | container-first from `artifacts.yml`, no producer; its `extract.binary` is the release's, which the snapshot does not run; no GitLab release build, as no example demo ships one |
 | hello-go-cli, hello-maven, hello-npm-package | — | — | no container, so no snapshot; hello-maven's library development route publishes a SNAPSHOT package, another shape |
 | hello-gradle, hello-monorepo, hello-android, hello-ios | — | — | no Forgejo flow or no container; the example demos ship no GitLab release build |
 

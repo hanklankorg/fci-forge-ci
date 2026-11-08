@@ -53,7 +53,7 @@ func TestRenderTestingMatricesReadsTheShippedTree(t *testing.T) {
 		"| hello-ios (xcode-ios · no container · no image) | ⬚ / ⬚ / 📝 |",
 		"- hello-monorepo, github: the demo has no root Containerfile",
 		"| hello-go-cli (go · no container · no image) |",
-		"- hello-go-service, gitlab: .forge-ci/artifacts.yml is not a service snapshot's declaration",
+		"- hello-go-service, gitlab: the demo has no .gitlab/build-release.sh, so no GitLab release",
 		"|  | container-first | 📝 hello-cargo-container | 📝 hello-cargo-container | ⬚ hello-cargo-container (admitted, no line) |",
 		"| architecture | amd64 |",
 	} {

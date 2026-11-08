@@ -47,6 +47,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Snapshot a container that declares `extract.binary`: the snapshot builds
+  and publishes its runtime image and extracts nothing, since the binaries
+  are release assets. Build secrets and requested provenance stay refused.
 - Protect the union of consumer digests per GHCR package in retention previews,
   and reuse Go runtime admission for build/assembly target and metadata selection.
 - Classify redacted HTTP transport failures without exposing private causes.

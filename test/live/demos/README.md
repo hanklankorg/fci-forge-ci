@@ -102,8 +102,9 @@ release file; neither publishes it to a package registry.
 
 A demo's **development route**, the `lifecycle` event's development phase,
 is a service snapshot of its one container, read from the declaration its
-release builds its images from: `hello-maven-service` and
-`hello-cargo-container`, on Forgejo and GitLab. docs/live-campaigns.md,
+release builds its images from: `hello-maven-service`, `hello-npm-service`
+and `hello-cargo-container`, on Forgejo and GitLab, and `hello-go-service` on
+Forgejo, which has its release. docs/live-campaigns.md,
 Lifecycle, lists why each other demo has none.
 
 Record live results separately by commit, provider, visibility and flow. Local

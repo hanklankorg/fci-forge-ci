@@ -59,6 +59,33 @@ func TestEveryPlannedImageIsScanned(t *testing.T) {
 	require.ErrorContains(t, plan.Validate(), "without its scan")
 }
 
+// A declared binary extraction is a release's output: the snapshot builds the
+// runtime image of the container and extracts nothing. Build secrets, which
+// the build itself would need, stay refused.
+func TestExtractionBuildsTheRuntimeImageAndSecretsAreRefused(t *testing.T) {
+	tag, err := version.ComposeSnapshotContainerTag("1.2.3", "manual-branch", "aaaaaaa")
+	require.NoError(t, err)
+
+	plan := func(ctr pipeline.PlannedContainer) (snapshotimage.Plan, error) {
+		ctr.Name, ctr.ContainerFile, ctr.Context, ctr.Platforms = "app", "Containerfile", ".", "linux/amd64"
+
+		return snapshotimage.New(pipeline.ConfigPlan{Containers: pipeline.ContainerSets{All: []pipeline.PlannedContainer{ctr}}}, snapshotimage.Input{SourceSHA: strings.Repeat("a", 40), SourceBranch: "manual-branch", Tag: tag, ImageRepository: "registry.example/team/app", Publish: true})
+	}
+
+	for _, ctr := range []pipeline.PlannedContainer{
+		{Target: "runtime", ExtractBinaryTarget: "export-binary", ExtractBinaryNames: []string{"app"}},
+		{Target: "runtime", ExtractBinaryPaths: []string{"/usr/local/bin/app"}},
+	} {
+		p, err := plan(ctr)
+		require.NoError(t, err)
+		require.Len(t, p.Builds, 1)
+		require.Equal(t, "runtime", p.Builds[0].Target)
+	}
+
+	_, err = plan(pipeline.PlannedContainer{BuildSecrets: []string{"TOKEN"}})
+	require.ErrorContains(t, err, "snapshot build secrets and OCI provenance are unsupported")
+}
+
 // The snapshot plan reads scan-severity with the scan's own parser and records
 // the normalised blocking threshold; a frozen plan without one is refused.
 func TestScanSeverityIsTheNormalisedThreshold(t *testing.T) {
