@@ -141,6 +141,8 @@ jobs:
       caller-workflow: release.yml
       forge-ci-repository: examplescope/forge-ci
       forge-ci-sha: ENGINE_SHA
+      # The declaration prepare read: every signer job admits exactly its bump.
+      artifacts-config: ARTIFACTS_CONFIG
       sign-distro-packages: 'false'
       signer-image: fixture.invalid/forge-ci/signer@sha256:0000000000000000000000000000000000000000000000000000000000000000
       cosign-public-key: ${{ vars.COSIGN_PUBLIC_KEY }}

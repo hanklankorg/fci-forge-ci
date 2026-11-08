@@ -24,8 +24,8 @@ const (
 )
 
 // releaseVersionsCmd plans a release's version bump from the declaration for
-// a forge that expands the key-free version jobs as a matrix: Forgejo's
-// prepare-release.yml.
+// a forge that expands the key-free version jobs as a matrix, Forgejo's
+// prepare-release.yml, and for its signer's re-check of the release commit.
 func releaseVersionsCmd() *cli.Command {
 	return &cli.Command{
 		Name:  "release-versions",
@@ -41,7 +41,8 @@ func releaseVersionsCmd() *cli.Command {
                           its --runtime-image-<family>.
    --families-output      the same families' names, one a line, for the job
                           that joins their patches.
-   --prepare-plan-output  the prepare-stage plan JSON, for 'version bump-plan'.
+   --prepare-plan-output  the prepare-stage plan JSON, for 'version bump-plan'
+                          and 'release validate-tag --prepare-plan-file'.
 
    Without --file and without .forge-ci/artifacts.yml the release has no
    planned bump; a file named by --file must exist.

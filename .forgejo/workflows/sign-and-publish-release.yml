@@ -148,6 +148,12 @@ on:
         type: string
         required: false
         default: ""
+      artifacts-config:
+        description: >-
+          The artifacts-config the release's prepare-release.yml call was given. Every job re-checks the release commit against the release plan of that declaration: it may change CHANGELOG.md and the planned version bump, nothing else. Empty reads .forge-ci/artifacts.yml.
+        type: string
+        required: false
+        default: ''
       forge-ci-sha:
         description: Exact forge-ci commit SHA to check the layer's helper files out at. Pass the same SHA used to pin this reusable workflow.
         type: string
@@ -168,6 +174,7 @@ jobs:
     runs-on: ${{ fromJSON(inputs['runner-label']) }}
     timeout-minutes: 5
     outputs:
+      artifacts_config: ${{ steps.validate.outputs.artifacts_config }}
       helpers_repository: ${{ steps.validate.outputs.helpers_repository }}
       signer_image: ${{ steps.validate.outputs.signer_image }}
       transparency_log: ${{ steps.validate.outputs.transparency_log }}
@@ -179,6 +186,7 @@ jobs:
           # the input, or a variable. In a called workflow `vars` reads the
           # CALLING repository and its organization. There is no third source:
           # a default could only name one organization's repository.
+          ARTIFACTS_CONFIG_INPUT: ${{ inputs['artifacts-config'] }}
           HELPERS_REPOSITORY_INPUT: ${{ inputs['forge-ci-repository'] || vars.FORGE_CI_REPOSITORY }}
           SERVER_URL: ${{ forgejo.server_url }}
           SIGNER_IMAGE_INPUT: ${{ inputs['signer-image'] }}
@@ -218,6 +226,12 @@ jobs:
             echo "ERROR: forge-ci-repository must be owner/repository or an HTTPS repository URL without credentials, query, or fragment: ${repository}" >&2
             exit 1
           fi
+          # Empty reads the default declaration and emits nothing.
+          config=${ARTIFACTS_CONFIG_INPUT:-}
+          if [ -n "${config}" ] && [[ ! "${config}" =~ ^[A-Za-z0-9_.][A-Za-z0-9_./-]*$ || "/${config}/" == *'/../'* ]]; then
+            echo "ERROR: artifacts-config must be a repository-relative path: ${config}" >&2
+            exit 1
+          fi
           signer_image=${SIGNER_IMAGE_INPUT}
           if [ -z "${signer_image}" ]; then
             echo "ERROR: signer-image is required: build containers/signer/Containerfile of the forge-ci repository and pass the image by digest" >&2
@@ -238,6 +252,7 @@ jobs:
               ;;
           esac
           {
+            if [ -n "${config}" ]; then printf 'artifacts_config=%s\n' "${config}"; fi
             printf 'helpers_repository=%s\n' "${repository}"
             printf 'signer_image=%s\n' "${signer_image}"
             printf 'transparency_log=%s\n' "${transparency_log}"
@@ -402,15 +417,24 @@ jobs:
         env:
           RELEASE_SHA: ${{ inputs['release-sha'] }}
           RELEASE_REQUEST_SHA: ${{ inputs['release-request-sha'] }}
+          ARTIFACTS_CONFIG: ${{ needs.coordinates.outputs.artifacts_config }}
         run: |
           set -euo pipefail
           cd "${CONSUMER_WORKSPACE:?}"
           # shellcheck source=.engine/bin/lib-forge-ci.sh
           source "${HELPERS_DIR:?}/.engine/bin/lib-forge-ci.sh"
+          # The release plan of the declaration at the release commit, as
+          # prepare read it at the request: the release commit may change
+          # CHANGELOG.md and exactly that plan's version bump.
+          file=()
+          if [ -n "${ARTIFACTS_CONFIG:-}" ]; then file=(--file "${ARTIFACTS_CONFIG}"); fi
+          plan=$(mktemp "${RUNNER_TEMP:?}/prepare-plan.XXXXXX")
+          run_forge_ci plan release-versions "${file[@]}" --prepare-plan-output "${plan}"
           run_forge_ci release validate-tag \
             --release-sha "${RELEASE_SHA:?}" \
             --tag "${RELEASE_TAG:?}" \
             --expected-parent "${RELEASE_REQUEST_SHA:?}" \
+            --changelog-only --prepare-plan-file "${plan}" \
             --repo-url "${FORGEJO_SERVER:?}/${FORGEJO_REPO:?}.git"
 
       - name: Verify dist integrity
@@ -736,15 +760,24 @@ jobs:
         env:
           RELEASE_SHA: ${{ inputs['release-sha'] }}
           RELEASE_REQUEST_SHA: ${{ inputs['release-request-sha'] }}
+          ARTIFACTS_CONFIG: ${{ needs.coordinates.outputs.artifacts_config }}
         run: |
           set -euo pipefail
           cd "${CONSUMER_WORKSPACE:?}"
           # shellcheck source=.engine/bin/lib-forge-ci.sh
           source "${HELPERS_DIR:?}/.engine/bin/lib-forge-ci.sh"
+          # The release plan of the declaration at the release commit, as
+          # prepare read it at the request: the release commit may change
+          # CHANGELOG.md and exactly that plan's version bump.
+          file=()
+          if [ -n "${ARTIFACTS_CONFIG:-}" ]; then file=(--file "${ARTIFACTS_CONFIG}"); fi
+          plan=$(mktemp "${RUNNER_TEMP:?}/prepare-plan.XXXXXX")
+          run_forge_ci plan release-versions "${file[@]}" --prepare-plan-output "${plan}"
           run_forge_ci release validate-tag \
             --release-sha "${RELEASE_SHA:?}" \
             --tag "${RELEASE_TAG:?}" \
             --expected-parent "${RELEASE_REQUEST_SHA:?}" \
+            --changelog-only --prepare-plan-file "${plan}" \
             --repo-url "${FORGEJO_SERVER:?}/${FORGEJO_REPO:?}.git"
 
       - name: Verify dist integrity
@@ -1083,15 +1116,24 @@ jobs:
         env:
           RELEASE_SHA: ${{ inputs['release-sha'] }}
           RELEASE_REQUEST_SHA: ${{ inputs['release-request-sha'] }}
+          ARTIFACTS_CONFIG: ${{ needs.coordinates.outputs.artifacts_config }}
         run: |
           set -euo pipefail
           cd "${CONSUMER_WORKSPACE:?}"
           # shellcheck source=.engine/bin/lib-forge-ci.sh
           source "${HELPERS_DIR:?}/.engine/bin/lib-forge-ci.sh"
+          # The release plan of the declaration at the release commit, as
+          # prepare read it at the request: the release commit may change
+          # CHANGELOG.md and exactly that plan's version bump.
+          file=()
+          if [ -n "${ARTIFACTS_CONFIG:-}" ]; then file=(--file "${ARTIFACTS_CONFIG}"); fi
+          plan=$(mktemp "${RUNNER_TEMP:?}/prepare-plan.XXXXXX")
+          run_forge_ci plan release-versions "${file[@]}" --prepare-plan-output "${plan}"
           run_forge_ci release validate-tag \
             --release-sha "${RELEASE_SHA:?}" \
             --tag "${RELEASE_TAG:?}" \
             --expected-parent "${RELEASE_REQUEST_SHA:?}" \
+            --changelog-only --prepare-plan-file "${plan}" \
             --repo-url "${FORGEJO_SERVER:?}/${FORGEJO_REPO:?}.git"
 
       - name: Publish release assets and signatures

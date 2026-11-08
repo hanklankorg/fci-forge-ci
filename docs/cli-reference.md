@@ -3204,7 +3204,8 @@ Plans the release's version bump from the declaration, as
                           its --runtime-image-<family>.
    --families-output      the same families' names, one a line, for the job
                           that joins their patches.
-   --prepare-plan-output  the prepare-stage plan JSON, for 'version bump-plan'.
+   --prepare-plan-output  the prepare-stage plan JSON, for 'version bump-plan'
+                          and 'release validate-tag --prepare-plan-file'.
 
    Without --file and without .forge-ci/artifacts.yml the release has no
    planned bump; a file named by --file must exist.

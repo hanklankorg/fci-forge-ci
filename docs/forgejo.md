@@ -325,6 +325,8 @@ description. The inputs they share:
 | `skip-signer-image-check` | no, in prepare | `'false'` by default. Set explicitly to `'true'` for a private signer image whose anonymous availability cannot be checked. |
 | `cosign-public-key`, `cosign-public-key-sha256` | yes, in the four signer workflows | Your organization's Cosign public key, and its SHA-256 as `sha256sum cosign.pub` prints it. |
 | `release-branch` | no, in prepare | The branch the release lands on, `main` by default. See [The request is the head of the release branch](#the-request-is-the-head-of-the-release-branch). |
+| `artifacts-config` | no, in prepare and sign/publish | The `artifacts.yml` whose release plan decides the version bump, `.forge-ci/artifacts.yml` by default; pass the same value to both workflows. See [The prepare job](#the-prepare-job). |
+| `runtime-image-java`, `-node`, `-rust` | no, in prepare | Digest-pinned images the plan's version job of each family runs in; a planned family without one is refused at `Prepare: version plan`. |
 | `release-policy` | no, in prepare and sign/publish | `stable` (default) or `stable-prerelease`; pass the same value to both workflows. See [release policy](workflows.md#stable-and-prerelease-policy). |
 | `transparency-log` | no, in the four signer workflows | `none` (the default) or `public`: whether signatures are also written to the public Sigstore transparency log. One value for every workflow of an organization; see [The transparency log](#the-transparency-log). |
 | `release-asset-retention` | no, in `sign-and-publish-release.yml` | How many of the newest releases keep every file; older ones keep their checksums and signatures. Empty, the default, deletes nothing. See [Old releases' files](#old-releases-files). |
@@ -1581,7 +1583,11 @@ reviewed as one set.
 - **The request is bound.** Each privileged job re-validates the release tag
   and, through `release-request-sha` from the caller's event context, its
   lineage: the release commit must be the single child of the commit the
-  request authorized.
+  request authorized. It also re-checks what that commit changes, with
+  `release validate-tag --changelog-only --prepare-plan-file` and the plan of
+  the `artifacts-config` declaration, which the caller passes as it passed
+  it to `prepare-release.yml`: `CHANGELOG.md` and exactly the planned version
+  bump, nothing else.
 - **The hand-off is unsigned.** After the signer has verified the `dist/`
   digest, its first look at the files is `release files validate --unsigned`,
   which refuses a signature, a bundle or a provenance statement that arrived
