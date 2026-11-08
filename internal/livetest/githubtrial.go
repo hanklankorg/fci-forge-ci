@@ -567,35 +567,34 @@ func (trial *GitHubTrial) MergePullRequest(repo string, number int, head string)
 	return result.GetSHA()
 }
 
-// CheckMerge checks what the native merge did: main is at merge, a commit
-// whose parents are the base the pull request was opened on and the change
-// under review, with the change's tree.
-func (trial *GitHubTrial) CheckMerge(repo, merge, base, head string) {
+// CheckMerge checks what the native merge did, as RequireMergeOf does for the
+// lab forges: main is at merge, branch still at head, and the working copy,
+// fetched to main, shows merge to be a merge commit of base and head with
+// head's tree.
+func (trial *GitHubTrial) CheckMerge(repo string, tree GitHubConsumerTree, branch, merge, base, head string) {
 	trial.tb.Helper()
 
 	ctx := trial.tb.Context()
 
-	branch, _, err := trial.api.Repositories.GetBranch(ctx, trial.org, repo, defaultBranch, 0)
-	if err != nil || branch.GetCommit().GetSHA() != merge {
-		trial.tb.Fatalf("livetest: main of %s is %s, want the merge commit %s: %v", repo, branch.GetCommit().GetSHA(), merge, err)
+	for name, want := range map[string]string{defaultBranch: merge, branch: head} {
+		ref, _, err := trial.api.Repositories.GetBranch(ctx, trial.org, repo, name, 0)
+		if err != nil || ref.GetCommit().GetSHA() != want {
+			trial.tb.Fatalf("livetest: %s of %s is %s, want %s: %v", name, repo, ref.GetCommit().GetSHA(), want, err)
+		}
 	}
 
-	commit, _, err := trial.api.Repositories.GetCommit(ctx, trial.org, repo, merge, nil)
-	if err != nil {
-		trial.tb.Fatalf("livetest: read the merge commit %s: %v", merge, err)
+	if tree.Main != merge {
+		trial.tb.Fatalf("livetest: the working copy's main is %s, want the merge %s", tree.Main, merge)
 	}
 
-	if parents := commit.Parents; len(parents) != 2 || parents[0].GetSHA() != base || parents[1].GetSHA() != head {
-		trial.tb.Fatalf("livetest: the merge commit %s has %d parents, want the base %s and the change %s", merge, len(commit.Parents), base, head)
+	git := func(ctx context.Context, args ...string) (string, error) {
+		output, err := trial.outputContext(ctx, tree.Dir, trial.gitEnv(), "git", append([]string{"-C", tree.Dir}, args...)...)
+
+		return strings.TrimSpace(output), err
 	}
 
-	change, _, err := trial.api.Repositories.GetCommit(ctx, trial.org, repo, head, nil)
-	if err != nil {
-		trial.tb.Fatalf("livetest: read the change %s: %v", head, err)
-	}
-
-	if tree := commit.GetCommit().GetTree().GetSHA(); tree == "" || tree != change.GetCommit().GetTree().GetSHA() {
-		trial.tb.Fatalf("livetest: the merge commit's tree %s is not the change's %s", tree, change.GetCommit().GetTree().GetSHA())
+	if err := gitMergeOf(ctx, git, merge, base, head); err != nil {
+		trial.tb.Fatalf("livetest: the merge %s %v", merge, err)
 	}
 }
 
@@ -1609,8 +1608,12 @@ func (trial *GitHubTrial) output(dir, name string, args ...string) (string, erro
 }
 
 func (trial *GitHubTrial) outputEnv(dir string, env []string, name string, args ...string) (string, error) {
+	return trial.outputContext(trial.tb.Context(), dir, env, name, args...)
+}
+
+func (trial *GitHubTrial) outputContext(ctx context.Context, dir string, env []string, name string, args ...string) (string, error) {
 	// nosemgrep: go.lang.security.audit.dangerous-exec-command.dangerous-exec-command
-	command := exec.CommandContext(trial.tb.Context(), name, args...) //nolint:gosec // fixed tools of the trial with its own arguments.
+	command := exec.CommandContext(ctx, name, args...) //nolint:gosec // fixed tools of the trial with its own arguments.
 	command.Dir = dir
 
 	command.Env = append(os.Environ(), env...)

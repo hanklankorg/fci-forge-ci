@@ -97,15 +97,16 @@ func runLifecycle(t *testing.T, trial *livetest.GitHubTrial, engine livetest.Git
 
 	// Phase 2: the native merge.
 	merge := trial.MergePullRequest(repo, number, head)
-	trial.CheckMerge(repo, merge, base, head)
-
-	if tree = trial.FetchMain(repo, tree); tree.Main != merge {
-		t.Fatalf("the working copy's main is %s after the merge %s", tree.Main, merge)
-	}
-
+	tree = trial.FetchMain(repo, tree)
+	trial.CheckMerge(repo, tree, lifecycleBranch, merge, base, head)
 	t.Logf("lifecycle phase 2 merge: #%d merged natively, main at %s with parents %s and %s", number, merge, base, head)
 
 	// Phase 3: the development snapshot on the merged main, of development.
+	// The package it publishes outlives the repository, so its removal is
+	// registered before the dispatch.
+	repositoryID := trial.RepositoryID(repo)
+	trial.RemoveSnapshotPackageAfter(repo, repositoryID)
+
 	dispatched := trial.DispatchDevelopment(repo, livetest.GitHubDevelopmentWorkflow, map[string]any{"source-branch": lifecycleBranch})
 
 	development := judge(t, trial, repo, livetest.GitHubDevelopmentWorkflow, "workflow_dispatch", merge)
@@ -114,7 +115,7 @@ func runLifecycle(t *testing.T, trial *livetest.GitHubTrial, engine livetest.Git
 	}
 
 	trial.CheckDevelopmentRelease(repo, merge, development.GetID())
-	snapshot := trial.CheckSnapshotPackage(repo)
+	snapshot := trial.CheckSnapshotPackage(repo, repositoryID)
 	requireInventory(t, trial, repo, livetest.GitHubInventory{Runs: 2})
 	t.Logf("lifecycle phase 3 development: run %d dispatched on main@%s snapshots %s@%s; package %s (id %d)", development.GetID(), merge, lifecycleBranch, head, snapshot.Name, snapshot.ID)
 

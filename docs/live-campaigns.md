@@ -307,8 +307,10 @@ fixtures call: `pullrequest.yml` for the pull request, `release-dev.yml`, the
 demo's call of the snapshot orchestrator, dispatched on the merged `main` with
 `source-branch: development` for the development phase, and `release.yml`
 for the release. The pull request is merged through the API, told the head
-commit, and the merge commit is read back from the API: `main` at it, its
-parents the base and the change, its tree the change's. The development
+commit, and the merge is read back as on the lab forges: `main` at it and
+`development` still at the change, through the API, then, in the working
+copy fetched to `main`, its parents the base and the change and its tree the
+change's. The development
 phase's acceptance is the development build's (a green run, its artifacts
 delivered, `main`, tags and releases unchanged) and the snapshot image
 published to the repository's container package, which is removed with the
