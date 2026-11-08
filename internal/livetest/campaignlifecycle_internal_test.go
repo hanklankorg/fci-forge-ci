@@ -222,7 +222,7 @@ func TestCampaignLifecycle_SelectsOneCell(t *testing.T) {
 		provider, file, selector, visibility string
 		want                                 func(dir string) []string
 	}{
-		"gitlab maven service, public": {campaignGitLab, "lifecycle-gitlab.cases", "hello-maven-service/lifecycle/visibility=public", visibilityPublic, func(dir string) []string {
+		"gitlab maven service, buildah, public": {campaignGitLab, "lifecycle-gitlab.cases", "hello-maven-service/lifecycle/image-builder=buildah/visibility=public", visibilityPublic, func(dir string) []string {
 			return []string{
 				campaignConsumerRecipe, campaignGitLab, filepath.Join(dir, "demos/hello-maven-service"), TrialLifecycle,
 				"job-archive=/c/java.tar", "build-archive=/c/java.tar", "signer-archive=/c/signer.tar", "lint-archive=/c/lint-java.tar",
@@ -273,6 +273,8 @@ func TestCampaignLane_RefusesASelectorThatMatchesNoCase(t *testing.T) {
 		{"hello-maven-service/release"}, {"hello-mavn"}, {"TestNoSuchScenario"},
 		{"hello-cargo-container/lifecycle/image-builder=kaniko"}, {"hello-maven-service/lifecycle/image-builder=docker"},
 		{"hello-maven-service/lifecycle/visibility=both"}, {"hello-maven-service/lifecycle/visibility=public", "hello-cargo-container/lifecycle/visibility=private"},
+		{"hello-maven-service/lifecycle/kaniko"}, {"hello-maven-service/lifecycle/visibility=public/typo"}, {"hello-maven-service//visibility=public"},
+		{"TestNoSuchScenario/visibility=public"},
 	} {
 		dir, cases := newLifecycleCampaign(t, string(reporoot.ReadFile(t, "test/live/campaigns/lifecycle-forgejo.cases")))
 
@@ -280,6 +282,45 @@ func TestCampaignLane_RefusesASelectorThatMatchesNoCase(t *testing.T) {
 		if plan, err := PlanCampaignLane(reporoot.Path(t), dir, campaignForgejo, cases, campaignHead, run); !errors.Is(err, errs.ErrValidation) || len(plan.Cases) != 0 {
 			t.Fatalf("selectors %q: %+v %v, want a refusal", selectors, plan, err)
 		}
+	}
+}
+
+// A selector whose case runs with another value than it names says which,
+// rather than that nothing matched: here the caller's visibility and the
+// GitLab lane's builder, both inherited from the run.
+func TestCampaignLane_NamesTheInheritedSelectorASelectionConflictsWith(t *testing.T) {
+	t.Parallel()
+
+	for name, test := range map[string]struct {
+		provider, file, visibility, builder, selector, want string
+	}{
+		"inherited visibility": {campaignForgejo, "lifecycle-forgejo.cases", visibilityPrivate, "", "hello-maven-service/lifecycle/image-builder=buildah/visibility=public", "runs with visibility=private"},
+		"inherited builder":    {campaignGitLab, "lifecycle-gitlab.cases", "", ImageBuilderKaniko, "hello-maven-service/lifecycle/image-builder=buildah/visibility=public", "runs with image-builder=kaniko"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			dir, cases := newLifecycleCampaign(t, string(reporoot.ReadFile(t, "test/live/campaigns/"+test.file)))
+
+			run, err := CampaignRunSettings(test.provider, func(key string) string {
+				switch key {
+				case consumerVisibilityEnv:
+					return test.visibility
+				case GitLabImageBuilderEnv:
+					return test.builder
+				}
+
+				return ""
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			run.Select = []string{test.selector}
+			if _, err := PlanCampaignLane(reporoot.Path(t), dir, test.provider, cases, campaignHead, run); !errors.Is(err, errs.ErrValidation) || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("selector %q under %s: %v, want a refusal naming %q", test.selector, name, err, test.want)
+			}
+		})
 	}
 }
 

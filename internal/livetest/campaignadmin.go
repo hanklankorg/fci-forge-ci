@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/diggsweden/forge-ci/internal/domain/enforcement"
@@ -92,26 +93,53 @@ func readLaneCases(root, provider, path string) (campaignCases, error) {
 
 // checkAdminSettings refuses a declared administrator setting that no
 // orchestrator of the lane's provider under root consumes: the declaration
-// would hold the run to a fact nothing on the lane reads. The orchestrators
-// are read only when the file declares an administrator setting.
+// would hold the run to a fact nothing on the lane reads.
 func (file campaignCases) checkAdminSettings(root, provider string) error {
-	var consumed map[string]bool
+	declared := []string{}
 
 	for _, key := range slices.Sorted(maps.Keys(file.settings)) {
-		check, isAdmin := strings.CutPrefix(key, "admin-")
-		if !isAdmin {
-			continue
+		if strings.HasPrefix(key, "admin-") {
+			declared = append(declared, key)
 		}
+	}
 
-		if consumed == nil {
-			var err error
-			if consumed, err = adminSettingsConsumed(root, provider); err != nil {
-				return err
-			}
+	return refuseUnconsumedAdmin(root, provider, declared)
+}
+
+// enforcedAdminSettings are the administrator settings a run enforces,
+// sorted.
+func enforcedAdminSettings(settings map[string]string) []string {
+	enforced := []string{}
+
+	for _, check := range enforcement.Checks {
+		if key := campaignAdminSetting(check); settings[key] == strconv.FormatBool(true) {
+			enforced = append(enforced, key)
 		}
+	}
 
+	return enforced
+}
+
+// refuseUnconsumedAdmin refuses an administrator setting, declared by a
+// cases file or enforced by the run, that no orchestrator of the provider
+// under root consumes: nothing on the lane would read it, and the run's
+// record would claim a check that never ran. The orchestrators are read only
+// when there is a setting to judge.
+func refuseUnconsumedAdmin(root, provider string, keys []string) error {
+	if len(keys) == 0 {
+		return nil
+	}
+
+	consumed, err := adminSettingsConsumed(root, provider)
+	if err != nil {
+		return err
+	}
+
+	for _, key := range keys {
 		if !consumed[key] {
-			return fmt.Errorf("declared setting %s names %s, an input no %s orchestrator declares, so nothing on this lane consumes it; drop the declaration: %w",
+			check, _ := strings.CutPrefix(key, "admin-")
+
+			return fmt.Errorf("setting %s names %s, an input no %s orchestrator declares, so nothing on this lane consumes it; drop it: %w",
 				key, enforcement.Setting(enforcement.Check(check)), provider, errs.ErrValidation)
 		}
 	}

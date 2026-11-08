@@ -116,6 +116,12 @@ const (
 	visibilityBoth      = "both"
 )
 
+// axisValueCovers reports whether a run that had the setting at had ran it
+// at value: the same value, or both visibilities, which runs each.
+func axisValueCovers(setting, had, value string) bool {
+	return had == value || (setting == settingVisibility && had == visibilityBoth)
+}
+
 // matrixAxisValues are the values each qualifying setting takes.
 var matrixAxisValues = func() map[string][]string {
 	axes := map[string][]string{
@@ -536,8 +542,7 @@ func (data matrices) axisMark(provider, subject, event, setting, value string) (
 	best, found := matrixMark{}, false
 
 	for _, mark := range data.evidence[provider+"/"+subject+"/"+event] {
-		had := mark.axes[setting]
-		if setting != "" && had != value && (setting != settingVisibility || had != visibilityBoth) {
+		if setting != "" && !axisValueCovers(setting, mark.axes[setting], value) {
 			continue
 		}
 

@@ -191,6 +191,10 @@ func PlanCampaignLane(root, dir, provider, casesPath, head string, run CampaignR
 		return CampaignPlan{}, fmt.Errorf("%s: %w", casesPath, err)
 	}
 
+	if err := refuseUnconsumedAdmin(root, provider, enforcedAdminSettings(run.Settings)); err != nil {
+		return CampaignPlan{}, fmt.Errorf("%s: the run: %w", casesPath, err)
+	}
+
 	plan := campaignLaneEnvironment(provider, env, run)
 	caseFacts := make([]map[string]string, 0, len(file.cases))
 
@@ -223,8 +227,9 @@ func PlanCampaignLane(root, dir, provider, casesPath, head string, run CampaignR
 // the overlay's words (matrixAxisValues): image-builder= the case's own
 // builder, admin-<check>= the lane's input, and visibility= one visibility
 // of a run of both, which the lane then runs alone. <TestName> is a
-// scenario case. A selector that matches no case, or selectors of two
-// visibilities, are refused; no selector keeps every case.
+// scenario case. A selector that matches no case, one whose case runs with
+// another value than it names, or selectors of two visibilities, are
+// refused; no selector keeps every case.
 func selectCampaignCases(plan CampaignPlan, lines []campaignLine, facts []map[string]string, run CampaignRun) (CampaignPlan, error) {
 	if len(run.Select) == 0 {
 		return plan, nil
@@ -232,13 +237,13 @@ func selectCampaignCases(plan CampaignPlan, lines []campaignLine, facts []map[st
 
 	cases, visibility := []CampaignCase{}, ""
 
-	for _, selector := range run.Select {
-		axes, err := campaignSelectorAxes(selector)
+	for _, text := range run.Select {
+		selector, err := parseCampaignSelector(text)
 		if err != nil {
 			return CampaignPlan{}, err
 		}
 
-		if narrowed := axes[settingVisibility]; narrowed != "" {
+		if narrowed := selector.axes[settingVisibility]; narrowed != "" {
 			if visibility != "" && visibility != narrowed {
 				return CampaignPlan{}, fmt.Errorf("the selectors name two visibilities; a lane runs one: %w", errs.ErrValidation)
 			}
@@ -246,20 +251,19 @@ func selectCampaignCases(plan CampaignPlan, lines []campaignLine, facts []map[st
 			visibility = narrowed
 		}
 
-		matched := false
+		matched, conflict := selector.match(lines, facts, run.Settings)
 
-		for index, line := range lines {
-			if campaignCaseSelected(line.words, selector, axes, facts[index]) {
-				matched = true
-
-				if !slices.ContainsFunc(cases, func(planned CampaignCase) bool { return planned.Text == plan.Cases[index].Text }) {
-					cases = append(cases, plan.Cases[index])
-				}
-			}
+		switch {
+		case len(matched) == 0 && conflict != "":
+			return CampaignPlan{}, fmt.Errorf("the selector %q names a case that runs with %s; select that value, or change the caller's selector where the run inherits it: %w", text, conflict, errs.ErrValidation)
+		case len(matched) == 0:
+			return CampaignPlan{}, fmt.Errorf("the selector %q matches no case; want <demo>[/<event>][/<setting>=<value>...] or <TestName>: %w", text, errs.ErrValidation)
 		}
 
-		if !matched {
-			return CampaignPlan{}, fmt.Errorf("the selector %q matches no case; want <demo>[/<event>][/<setting>=<value>...] or <TestName>: %w", selector, errs.ErrValidation)
+		for _, index := range matched {
+			if !slices.ContainsFunc(cases, func(planned CampaignCase) bool { return planned.Text == plan.Cases[index].Text }) {
+				cases = append(cases, plan.Cases[index])
+			}
 		}
 	}
 
@@ -271,48 +275,90 @@ func selectCampaignCases(plan CampaignPlan, lines []campaignLine, facts []map[st
 	return plan, nil
 }
 
-// campaignSelectorAxes reads a selector's setting=value words, each an axis
-// value the overlay knows, given once.
-func campaignSelectorAxes(selector string) (map[string]string, error) {
-	axes := map[string]string{}
+// campaignSelector is a parsed selector: the demo or scenario it names, the
+// event, and the axis values.
+type campaignSelector struct {
+	name, event string
+	axes        map[string]string
+}
 
-	for _, word := range strings.Split(selector, "/")[1:] {
-		setting, value, isAxis := strings.Cut(word, "=")
-		if !isAxis {
+// match returns the indexes of the lines the selector picks and, when a
+// named line runs with another value, that setting=value, preferring one
+// the run inherits.
+func (selector campaignSelector) match(lines []campaignLine, facts []map[string]string, run map[string]string) ([]int, string) {
+	matched, conflict := []int{}, ""
+
+	for index, line := range lines {
+		if !selector.names(line.words) {
 			continue
 		}
 
-		if values := matrixAxisValues[setting]; !slices.Contains(values, value) || value == visibilityBoth || axes[setting] != "" {
-			return nil, fmt.Errorf("the selector %q: %s takes one of %s, given once: %w", selector, setting, strings.Join(slices.DeleteFunc(slices.Clone(values), func(v string) bool { return v == visibilityBoth }), ", "), errs.ErrValidation)
+		if mismatch, inherited := selector.mismatch(facts[index], run); mismatch != "" {
+			if inherited || conflict == "" {
+				conflict = mismatch
+			}
+
+			continue
 		}
 
-		axes[setting] = value
+		matched = append(matched, index)
 	}
 
-	return axes, nil
+	return matched, conflict
 }
 
-// campaignCaseSelected reports whether the selector names the case: its demo,
-// its event if given, and the axis values the case runs with, a run of both
-// visibilities having each.
-func campaignCaseSelected(words []string, selector string, axes, facts map[string]string) bool {
-	parts := strings.Split(selector, "/")
+// parseCampaignSelector reads <name>[/<event>][/<setting>=<value>...]: a
+// word without = is the event, and only right after the name; every other
+// word is an axis value the overlay knows, given once.
+func parseCampaignSelector(text string) (campaignSelector, error) {
+	words := strings.Split(text, "/")
+	selector := campaignSelector{name: words[0], axes: map[string]string{}}
 
+	for index, word := range words[1:] {
+		setting, value, isAxis := strings.Cut(word, "=")
+
+		switch {
+		case !isAxis && index == 0 && word != "":
+			selector.event = word
+
+			continue
+		case !isAxis:
+			return campaignSelector{}, fmt.Errorf("the selector %q: %q is not <setting>=<value>; only the word after the name is an event: %w", text, word, errs.ErrValidation)
+		}
+
+		values := slices.DeleteFunc(slices.Clone(matrixAxisValues[setting]), func(v string) bool { return v == visibilityBoth })
+		if !slices.Contains(values, value) || selector.axes[setting] != "" {
+			return campaignSelector{}, fmt.Errorf("the selector %q: %s takes one of %s, given once: %w", text, setting, strings.Join(values, ", "), errs.ErrValidation)
+		}
+
+		selector.axes[setting] = value
+	}
+
+	return selector, nil
+}
+
+// names reports whether the selector names the case line, its demo and its
+// event if given, or its scenario.
+func (selector campaignSelector) names(words []string) bool {
 	if words[0] == settingScenario {
-		return len(parts) == 1 && len(words) > 1 && words[1] == parts[0]
+		return selector.event == "" && len(selector.axes) == 0 && len(words) > 1 && words[1] == selector.name
 	}
 
-	if len(words) < 3 || words[1] != parts[0] || (len(parts) > 1 && !strings.Contains(parts[1], "=") && words[2] != parts[1]) {
-		return false
-	}
+	return len(words) >= 3 && words[1] == selector.name && (selector.event == "" || words[2] == selector.event)
+}
 
-	for setting, value := range axes {
-		if had := facts[setting]; had != value && (setting != settingVisibility || had != visibilityBoth) {
-			return false
+// mismatch names the first axis value the case's run has other than the
+// selector's, as setting=value, or nothing when the run has them all, and
+// whether the case has it from the run, the caller's selector, rather than
+// from its own line, as a Forgejo line's builder.
+func (selector campaignSelector) mismatch(facts, run map[string]string) (string, bool) {
+	for _, setting := range slices.Sorted(maps.Keys(selector.axes)) {
+		if had := facts[setting]; !axisValueCovers(setting, had, selector.axes[setting]) {
+			return setting + "=" + had, had == run[setting]
 		}
 	}
 
-	return true
+	return "", false
 }
 
 // caseConsumer opens a case line that runs a shipped demo through an event.

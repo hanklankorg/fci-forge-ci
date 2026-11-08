@@ -98,9 +98,14 @@ func TestCampaignAdminDeclarationsNameConsumedInputsOnly(t *testing.T) {
 		t.Fatalf("GitLab's release component takes enforce-reproducible-builds: %v", err)
 	}
 
+	// A lane that leaves the inputs to the run is held to the same rule: the
+	// run may not enforce a check nothing on the lane consumes.
+	undeclaredDir, undeclared := newCampaign(t, "CAMPAIGN_COMMIT="+campaignHead+"\n", "scenario TestOne\n")
+
 	for name, err := range map[string]error{
 		"lane":        must(PlanCampaignLane(root, dir, "forgejo", path, campaignHead, CampaignRun{Settings: reproducible})),
 		"preparation": must(CampaignRuntimeTargets(root, []string{"forgejo=" + path}, nil)),
+		"run":         must(PlanCampaignLane(root, undeclaredDir, "forgejo", undeclared, campaignHead, CampaignRun{Settings: reproducible})),
 	} {
 		if !errors.Is(err, errs.ErrValidation) || !strings.Contains(err.Error(), "enforce-reproducible-builds") || !strings.Contains(err.Error(), "forgejo") {
 			t.Errorf("%s: a Forgejo lane declaring reproducible builds: %v; want a refusal naming the input nothing consumes", name, err)
@@ -112,6 +117,10 @@ func TestCampaignAdminDeclarationsNameConsumedInputsOnly(t *testing.T) {
 	dir, path = newCampaign(t, "CAMPAIGN_COMMIT="+campaignHead+"\n", "setting admin-lint=false\nsetting admin-vulnerabilities=false\nsetting admin-application-tests=false\nscenario TestOne\n")
 	if _, err := PlanCampaignLane(root, dir, "forgejo", path, campaignHead, CampaignRun{Settings: consumed}); err != nil {
 		t.Fatalf("Forgejo's workflows and actions take the other three inputs: %v", err)
+	}
+
+	if _, err := PlanCampaignLane(root, undeclaredDir, "forgejo", undeclared, campaignHead, CampaignRun{Settings: map[string]string{"admin-lint": "true"}}); err != nil {
+		t.Fatalf("a run may enforce a check a Forgejo orchestrator consumes: %v", err)
 	}
 }
 

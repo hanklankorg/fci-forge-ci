@@ -109,9 +109,8 @@ export FORGE_CI_LIVE_FORGEJO_IMAGE_BUILDER=kaniko
 export FORGE_CI_LIVE_ADMIN_LINT=false
 export FORGE_CI_LIVE_ADMIN_VULNERABILITIES=false
 export FORGE_CI_LIVE_ADMIN_APPLICATION_TESTS=false
-export FORGE_CI_LIVE_ADMIN_REPRODUCIBLE_BUILDS=true
 just campaign-lane ~/campaigns/k3s forgejo test/live/campaigns/k3s-private-forgejo.cases &
-FORGE_CI_LIVE_GITLAB_IMAGE_BUILDER=kaniko \
+FORGE_CI_LIVE_GITLAB_IMAGE_BUILDER=kaniko FORGE_CI_LIVE_ADMIN_REPRODUCIBLE_BUILDS=true \
   just campaign-lane ~/campaigns/k3s gitlab test/live/campaigns/k3s-private-gitlab.cases &
 wait
 ```
@@ -141,12 +140,14 @@ and Kaniko; set the corresponding Forgejo or GitLab image-builder selector.
 The four administrator settings are independent and default to `false`. For these
 lanes the controller sets lint, vulnerabilities and application tests to `false`,
 and for the GitLab lane explicitly enables reproducible builds, as its declaration
-requires. An administrator setting is declared only where an orchestrator of the
-lane's forge declares its input, `enforce-<check>`, read from this checkout's
-`.forgejo/workflows` and `.forgejo/actions` or `templates/`: no Forgejo
-orchestrator takes `enforce-reproducible-builds`, so the Forgejo lanes declare
-none, and a declaration nothing on the lane consumes is refused at preparation
-and before the lane runs. Each controller variable accepts exactly
+requires. An administrator setting is declared, or enforced by the run, only
+where an orchestrator of the lane's forge declares its input,
+`enforce-<check>`, read from this checkout's `.forgejo/workflows` and
+`.forgejo/actions` or `templates/`: no Forgejo orchestrator takes
+`enforce-reproducible-builds`, so the Forgejo lanes declare none. A
+declaration nothing on the lane consumes is refused at preparation and before
+the lane runs, and so is a run that enforces such a check, which its record
+would otherwise claim. Each controller variable accepts exactly
 `true` or `false`; invalid values refuse preflight. Checks still run when their
 findings are nonblocking.
 
@@ -194,10 +195,13 @@ the case's own builder, `admin-<check>=true|false`, the lane's input, and
 `visibility=public|private`, which narrows a run of both visibilities to
 that one and exports it to the case. `<TestName>` is a scenario case. Every
 case is still planned first, so the whole file's typos are caught, and a
-selector that names no case, or selectors of two visibilities, are refused:
+selector that names no case, a word other than the event without `=`, or
+selectors of two visibilities, are refused. A selected case that runs with
+another value, such as a visibility or GitLab builder the run inherits from
+the caller, is refused naming that value:
 
 ```bash
-just campaign-lane ~/campaigns/lc gitlab test/live/campaigns/lifecycle-gitlab.cases hello-maven-service/lifecycle/visibility=public
+just campaign-lane ~/campaigns/lc gitlab test/live/campaigns/lifecycle-gitlab.cases hello-maven-service/lifecycle/image-builder=buildah/visibility=public
 just campaign-lane ~/campaigns/lc forgejo test/live/campaigns/lifecycle-forgejo.cases hello-maven-service/lifecycle/image-builder=buildah/visibility=private
 ```
 
