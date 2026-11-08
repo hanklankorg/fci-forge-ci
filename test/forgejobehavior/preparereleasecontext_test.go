@@ -25,7 +25,7 @@ const (
 const releaseContextFakeGit = `#!/usr/bin/env bash
 set -euo pipefail
 case "$*" in
-  'for-each-ref refs/tags/release-request/v1.2.3 --format=%(taggername) <%(taggeremail)>'|'for-each-ref refs/tags/release-request/v1.2.3-beta.2 --format=%(taggername) <%(taggeremail)>')
+  'for-each-ref refs/tags/release-request/v1.2.3 --format=%(taggername) <%(taggeremail:trim)>'|'for-each-ref refs/tags/release-request/v1.2.3-beta.2 --format=%(taggername) <%(taggeremail:trim)>')
     printf 'Release Administrator <admin@example.test>\n' ;;
   'for-each-ref refs/tags/release-request/v1.2.3 --format=%(taggerdate:iso8601)'|'for-each-ref refs/tags/release-request/v1.2.3-beta.2 --format=%(taggerdate:iso8601)')
     printf '1970-01-01 00:00:00 +0000\n' ;;

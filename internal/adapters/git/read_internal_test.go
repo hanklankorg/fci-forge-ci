@@ -220,3 +220,35 @@ func TestRemoteTagParsers_AcceptWhatARealRemoteSends(t *testing.T) {
 		})
 	}
 }
+
+// splitSignedTag must cut where git does: at the last line that starts a
+// signature. A PGP block quoted earlier in the message is signed payload,
+// so a tag whose real signature is SSH offers no PGP signature to verify,
+// and armor text inside a line is prose.
+func TestSplitSignedTag_CutsAtTheLastSignatureLine(t *testing.T) {
+	t.Parallel()
+
+	const (
+		header = "object 0123456789abcdef0123456789abcdef01234567\ntype commit\ntag v1.0.0\ntagger A <a@example.invalid> 1700000000 +0000\n\n"
+		pgp    = "-----BEGIN PGP SIGNATURE-----\n\nAAAA\n-----END PGP SIGNATURE-----\n"
+		ssh    = "-----BEGIN SSH SIGNATURE-----\nBBBB\n-----END SSH SIGNATURE-----\n"
+		prose  = "Release v1.0.0, not -----BEGIN PGP SIGNATURE----- here\n"
+	)
+
+	for _, test := range []struct {
+		name, body, payload, signature string
+	}{
+		{"pgp", header + prose + pgp, header + prose, pgp},
+		{"quoted pgp then ssh", header + prose + pgp + ssh, header + prose + pgp, ssh},
+		{"unsigned", header + prose, header + prose, ""},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			payload, signature := splitSignedTag([]byte(test.body))
+			if string(payload) != test.payload || string(signature) != test.signature {
+				t.Fatalf("split = (%q, %q), want (%q, %q)", payload, signature, test.payload, test.signature)
+			}
+		})
+	}
+}

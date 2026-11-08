@@ -4,6 +4,7 @@
 package git
 
 import (
+	"bytes"
 	"context"
 	"encoding/hex"
 	"errors"
@@ -744,14 +745,21 @@ func (r *Repo) CatFileTag(ctx context.Context, tag string) (string, error) {
 		return renderTagObject(tagObj), nil
 	}
 
-	return r.Run(ctx, "cat-file", "tag", tag)
+	return r.Output(ctx, "cat-file", "tag", tag)
 }
 
 // VerifyTagSignature verifies the PGP signature on an annotated tag
-// against an armored public-key ring, in-process via go-git +
-// go-crypto/openpgp. Replaces `git tag -v` (which spawned `gpg
-// --verify` against a disk keyring that had to be populated first via
-// `gpg --import`).
+// against an armored public-key ring, in-process via go-crypto/openpgp.
+// Replaces `git tag -v` (which spawned `gpg --verify` against a disk
+// keyring that had to be populated first via `gpg --import`).
+//
+// The tag object is read by git, not go-git: go-git refuses to open a
+// repository that uses any extension, and git's own sparse checkout
+// enables extensions.worktreeConfig, so on the sparse metadata checkout
+// a release verifies its final tag in, a correctly signed tag was
+// refused. Every other go-git reader here falls back to git; a
+// signature check has nothing to fall back to, so it reads with git
+// only, and verifies the bytes git signs, as `git verify-tag` does.
 //
 // Returns:
 //   - signer: the signing entity's primary User ID ("Name <email>"),
@@ -759,14 +767,15 @@ func (r *Repo) CatFileTag(ctx context.Context, tag string) (string, error) {
 //   - ok: true when the signature verifies; false when verification
 //     fails (wrong key, corrupted signature, etc.).
 //   - err: non-nil only for hard structural failures — tag not found,
-//     not annotated, no signature attached, malformed keyring. A
-//     failed verification with intact inputs returns ok=false, err=nil.
+//     not annotated, malformed keyring. A tag without a PGP signature,
+//     or a failed verification with intact inputs, returns ok=false,
+//     err=nil.
 //
 // armoredKeyring must contain at least the public half of the
-// signer's key. An empty keyring returns ok=false, err=nil so callers
-// can render the existing "verification requires signer's public key"
-// hint.
-func (r *Repo) VerifyTagSignature(_ context.Context, tag string, armoredKeyring []byte) (string, string, bool, error) {
+// signer's key; every armor block in it is tried. An empty keyring
+// returns ok=false, err=nil so callers can render the existing
+// "verification requires signer's public key" hint.
+func (r *Repo) VerifyTagSignature(ctx context.Context, tag string, armoredKeyring []byte) (string, string, bool, error) {
 	if len(armoredKeyring) == 0 {
 		return "", "", false, nil
 	}
@@ -776,25 +785,25 @@ func (r *Repo) VerifyTagSignature(_ context.Context, tag string, armoredKeyring 
 		return "", "", false, fmt.Errorf("parse tag verification keyring: %w", errs.ErrMalformedInput)
 	}
 
-	tagObj, found, err := r.lookupTagObject(tag)
+	body, err := r.annotatedTagObject(ctx, tag)
 	if err != nil {
-		return "", "", false, fmt.Errorf("read tag %q: %w", tag, err)
+		return "", "", false, err
 	}
 
-	if !found {
-		return "", "", false, fmt.Errorf("tag %q is not annotated: %w", tag, errs.ErrValidation)
-	}
-
-	if tagObj.PGPSignature == "" {
+	payload, signature := splitSignedTag(body)
+	if !bytes.HasPrefix(signature, []byte("-----BEGIN PGP SIGNATURE-----")) {
 		return "", "", false, nil
 	}
 
-	entity := verifyTagAgainstAnyBlock(tagObj, armoredKeyring)
-	if entity == nil {
-		// Contract: report (signer, fingerprint, verified). A failed
-		// verify is not a function-level error — it's "no Good signer,"
-		// ok=false.
+	entity, err := adapteropenpgp.VerifyDetachedSigner(bytes.NewReader(payload), bytes.NewReader(signature), armoredKeyring)
+	if errors.Is(err, errs.ErrPermissionDenied) {
+		// Contract: a failed verify is not a function-level error —
+		// it's "no Good signer," ok=false.
 		return "", "", false, nil
+	}
+
+	if err != nil {
+		return "", "", false, err
 	}
 
 	fingerprint := strings.ToUpper(hex.EncodeToString(entity.PrimaryKey.Fingerprint))
@@ -806,6 +815,63 @@ func (r *Repo) VerifyTagSignature(_ context.Context, tag string, armoredKeyring 
 	}
 
 	return "", fingerprint, true, nil
+}
+
+// annotatedTagObject returns the exact bytes of the annotated tag object
+// refs/tags/<tag> names. Both reads use one object ID and ignore
+// replacement refs, so what is verified is the object the ref names.
+func (r *Repo) annotatedTagObject(ctx context.Context, tag string) ([]byte, error) {
+	ref := refsTagsPrefix + tagRefName(tag)
+
+	oid, err := r.Run(ctx, "--no-replace-objects", "rev-parse", "--verify", "--quiet", ref+"^{tag}")
+	if err != nil {
+		return nil, fmt.Errorf("tag %q is not an annotated tag: %w: %w", tag, err, errs.ErrValidation)
+	}
+
+	body, err := r.Output(ctx, "--no-replace-objects", "cat-file", "tag", oid)
+	if err != nil {
+		return nil, fmt.Errorf("read tag %q: %w", tag, err)
+	}
+
+	return []byte(body), nil
+}
+
+// signatureStarts are the lines git recognises as the start of an object
+// signature (gpg-interface.c), whichever format made it.
+var signatureStarts = [][]byte{
+	[]byte("-----BEGIN PGP SIGNATURE-----"),
+	[]byte("-----BEGIN PGP MESSAGE-----"),
+	[]byte("-----BEGIN SIGNED MESSAGE-----"),
+	[]byte("-----BEGIN SSH SIGNATURE-----"),
+}
+
+// splitSignedTag splits a tag object the way git's parse_signed_buffer
+// does: the signature starts at the last line that starts a signature,
+// and everything before it is the signed payload. A signature-looking
+// block earlier in the message is part of the payload, as it is to git.
+func splitSignedTag(body []byte) ([]byte, []byte) {
+	cut := len(body)
+
+	for at := 0; at < len(body); {
+		line := body[at:]
+
+		for _, start := range signatureStarts {
+			if bytes.HasPrefix(line, start) {
+				cut = at
+
+				break
+			}
+		}
+
+		next := bytes.IndexByte(line, '\n')
+		if next < 0 {
+			break
+		}
+
+		at += next + 1
+	}
+
+	return body[:cut], body[cut:]
 }
 
 // VerifyTagSSHAgainstAllowedSigners runs `git tag -v` with gpg.format=ssh and
@@ -897,7 +963,7 @@ func (r *Repo) TaggerInfo(ctx context.Context, tag string) (domaingit.TaggerInfo
 	}
 
 	tagger, err := r.Run(ctx, "for-each-ref", refsTagsPrefix+tag,
-		"--format=%(taggername) <%(taggeremail)>")
+		"--format=%(taggername) <%(taggeremail:trim)>")
 	if err != nil {
 		return domaingit.TaggerInfo{}, err
 	}
@@ -977,30 +1043,6 @@ func (r *Repo) TagMessage(ctx context.Context, tag string) (string, error) {
 	return strings.Join(stripped, "\n"), nil
 }
 
-// lookupTagObject resolves tag to a refs/tags/<tag> ref and returns
-// the annotated tag object. found=false when the ref exists but
-// points at a lightweight tag (a commit, not a tag object).
-// verifyTagAgainstAnyBlock tries each armor block in a concatenated bundle and
-// returns the entity of the first that verifies the tag, or nil.
-//
-// go-git's Verify hands the keyring to openpgp.ReadArmoredKeyRing, which
-// decodes exactly ONE block, so passing a bundle silently verifies against only
-// its first key. That is the key-rotation case: docs/verification.md tells
-// operators to add a key with `>>`, so during a rotation the incoming key is
-// the appended block — and a tag signed with it was reported unverified, then
-// refused with EX_NOPERM. Trying each block restores the documented contract
-// ("one or more blocks concatenated") without widening it: a key still has to
-// be committed to the bundle to be used at all.
-func verifyTagAgainstAnyBlock(tagObj *object.Tag, armoredKeyring []byte) *openpgp.Entity {
-	for _, block := range adapteropenpgp.SplitArmorBlocks(armoredKeyring) {
-		if entity, err := tagObj.Verify(string(block)); err == nil && entity != nil {
-			return entity
-		}
-	}
-
-	return nil
-}
-
 // tagRefName accepts either spelling of a tag — the short name ("v1.2.3") or
 // the full ref path ("refs/tags/v1.2.3") — and returns the short name.
 //
@@ -1018,6 +1060,9 @@ func tagRefName(ref string) string {
 	return strings.TrimPrefix(ref, "refs/tags/")
 }
 
+// lookupTagObject resolves tag to a refs/tags/<tag> ref and returns
+// the annotated tag object. found=false when the ref exists but
+// points at a lightweight tag (a commit, not a tag object).
 func (r *Repo) lookupTagObject(tag string) (*object.Tag, bool, error) {
 	var tagObj *object.Tag
 
