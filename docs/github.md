@@ -167,9 +167,9 @@ carries a description. The orchestrator inputs most callers set:
 | `release-asset-retention` | release | How many of the newest releases keep every file; older ones keep their checksums and signatures. Empty, the default, deletes nothing. See [Old releases' files](#old-releases-files). |
 | `promote-staging-environment`, `promote-release-environment`, `promote-release-*` | release | The GitHub Environments that gate the promotion ladder, and an optional separate release registry. |
 | `enforce-lint`, `enforce-vulnerabilities`, `enforce-application-tests`, `enforce-reproducible-builds` | PR, release, snapshot | [Check enforcement](admin-policy.md), default `false`, forwarded to every gate. Checks run and report findings; explicit `true` makes recognized findings block. Organisation-mandated values belong in its ruleset-required workflow. No workflow reads them from `vars` or the environment. |
-| `forge-ci-binary-ref` | all | PR and snapshot: the CLI release plain-runner jobs install. Release: the full engine commit (required) the canonical CLI is built from in the run, for every plain-runner job. |
-| `runtime-image*` | all | The runtime image of each toolchain family. Release: `runtime-image` is required and admitted only as an `@sha256:` digest; it is the control-plane, release-notes and cosign signing container. |
-| `canonical-builder-image` | release | Required: the Go runtime image digest the canonical CLI is built in. |
+| `forge-ci-binary-ref` | all | Required: the full engine commit the canonical CLI is built from in the run, for every plain-runner job of the PR, snapshot and release routes. The macOS lanes build the engine from a checkout of the same commit. |
+| `runtime-image*` | all | The runtime image of each toolchain family. `runtime-image` is required on every orchestrator and admitted only as an `@sha256:` digest; it is the control-plane, release-notes, SARIF-upload and cosign signing container. |
+| `canonical-builder-image` | all | Required: the Go runtime image digest the canonical CLI is built in. |
 
 Configuration of what is built, published and signed lives in
 `.forge-ci/artifacts.yml`, not in inputs; see the
@@ -240,13 +240,16 @@ names.
 Containerized jobs run in the runtime images, which carry the `forge-ci`
 binary and the toolchain of one family (base, full, Java, Node, Rust, Go,
 Android). Each orchestrator has one `runtime-image*` override per family, and
-each build, publish and changelog workflow one `runtime-image`. In the PR and
-snapshot orchestrators an empty `forge-ci-binary-ref` resolves the current
-published stable release to its concrete tag once, such as `v0.93.0`, and empty
-runtime-image overrides select the same tag, under `FORGE_CI_IMAGE_NAMESPACE`
-or the serving repository's owner on `ghcr.io`. No workflow names a fixed image.
-Explicit binary refs and image overrides take precedence; source commits use
-the corresponding `sha-<short>` runtime references. No `latest` image tag is used.
+each build, publish and changelog workflow one `runtime-image`. Every
+orchestrator requires `forge-ci-binary-ref` as the full engine commit and
+`runtime-image` and `canonical-builder-image` as `@sha256:` digests, admitted
+before any job runs; the
+[Advanced Pinning Recipe](runtime-images.md#advanced-pinning-recipe) reads them
+from the release you call. An empty family override (`runtime-image-java` and
+the others) resolves once to that commit's `sha-<short>` image tag, under
+`FORGE_CI_IMAGE_NAMESPACE` or the serving repository's owner on `ghcr.io`; an
+explicit override takes precedence. No workflow names a fixed image, and no
+`latest` image tag is used.
 [Runtime Images](runtime-images.md) has the roster, which workflow uses
 which image, tag and pinning conventions, and mirroring. Android images are
 linux/amd64 only.
