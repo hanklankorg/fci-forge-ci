@@ -8,7 +8,6 @@ package livetest
 import (
 	"context"
 	"crypto/sha256"
-	"errors"
 	"io"
 	"net/http"
 	"os"
@@ -90,7 +89,7 @@ func TestGitHubSnapshotArtifactFirst(t *testing.T) {
 		t.Fatal("snapshot package must be absent before this trial")
 	}
 
-	t.Cleanup(func() { snapshotGitHubPackageCleanup(t, trial, repo, repoID) })
+	trial.RemoveSnapshotPackageAfter(repo, repoID)
 	trial.SetVariable(repo, "FORGE_CI_REPOSITORY", trial.org+"/"+engineRepo)
 	dir := trial.tempDir("snapshot-artifact")
 	snapshotWriteFiles(t, dir, snapshotCanaryFiles(false))
@@ -226,32 +225,6 @@ func snapshotGitHubArtifacts(t *testing.T, trial *GitHubTrial, repo string, run 
 	}
 
 	return out
-}
-
-func snapshotGitHubPackageCleanup(t *testing.T, trial *GitHubTrial, repo string, repoID int64) {
-	t.Helper()
-
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(t.Context()), 2*time.Minute)
-	defer cancel()
-
-	identity, err := trial.ReadContainerPackageIdentity(ctx, repo, repoID)
-	if errors.Is(err, os.ErrNotExist) {
-		return
-	}
-
-	if err != nil {
-		t.Error("snapshot package cleanup identity unavailable; refusing deletion")
-
-		return
-	}
-
-	if err := trial.DeleteContainerPackage(ctx, identity); err != nil {
-		t.Error("exact snapshot package deletion failed")
-
-		return
-	}
-
-	t.Logf("snapshot package deletion confirmed: package=%s id=%d acknowledged-repository=%d", repo, identity.ID, repoID)
 }
 
 func settleSnapshotGitHubRun(t *testing.T, trial *GitHubTrial, repo, source string) {
