@@ -935,12 +935,12 @@ test-live-kaniko-job-image forge_lab:
 # It needs what `just test-live` needs, and a release also FORGE_CI_LIVE_SIGNER_IMAGE
 # from `just test-live-signer-image`, ssh-keygen and gpg. The lock, the
 # preflight and the log are those of `just test-live`.
+[arg('repo', help='Absolute path to a clean consumer checkout, for example /absolute/myapp')]
 [arg('event', help='Consumer workflow kind: pull-request or release')]
-[arg('checkout', help='Absolute path to a clean consumer checkout, for example /absolute/myapp')]
 [arg('settings', help='Optional key=value settings, for example workflow=pullrequest.yml; see docs/testing.md for permitted settings')]
 [doc('Live Forgejo; run a consumer checkout against this engine')]
 [group('live')]
-test-live-forgejo-consumer checkout event *settings:
+test-live-forgejo-consumer repo event *settings:
     @FORGE_CI_LIVE_CONSUMER="$1" FORGE_CI_LIVE_CONSUMER_EVENT="$2" FORGE_CI_LIVE_CONSUMER_SETTINGS="$(shift 2; printf '%s\n' "$@")" \
         exec bash scripts/ci/run-live-tests.sh focused '^TestForgejoLayer_ConsumerTrial$'
 
@@ -948,11 +948,11 @@ test-live-forgejo-consumer checkout event *settings:
 # Reuses the native service trial and the normal launcher/locks/evidence path.
 # No signer is provisioned. Signature/attestation absence and scan readbacks
 # are not independently verified by this trial.
-[arg('checkout', help='Absolute clean Maven-service consumer checkout with its original Containerfile')]
-[arg('job_image', help='Reviewed Java job image pinned by full SHA-256 digest')]
+[arg('repo', help='Absolute clean Maven-service consumer checkout with its original Containerfile')]
+[arg('image', help='Reviewed Java job image pinned by full SHA-256 digest')]
 [doc('Live Forgejo; publish and inspect a development snapshot in unsigned mode')]
 [group('live')]
-test-live-forgejo-consumer-snapshot checkout job_image:
+test-live-forgejo-snapshot repo image:
     @FORGE_CI_LIVE_CONSUMER="$1" FORGE_CI_LIVE_MAVEN_APPLICATION_IMAGE="$2" FORGE_CI_LIVE_PROVIDER=forgejo \
         FORGE_CI_LIVE_CONSUMER_EVENT=published-unsigned-snapshot FORGE_CI_LIVE_CONSUMER_SETTINGS='' \
         FORGE_CI_LIVE_SERVICE_BRANCH=development FORGE_CI_LIVE_SERVICE_READINESS_URL=http://127.0.0.1:8080/health \
@@ -1178,13 +1178,13 @@ demo-delete forge name *settings:
 # image=<name> (release), RELEASE_PLATFORMS=<linux/amd64 and/or linux/arm64>
 # (default linux/amd64), nanolinter-image= and megalinter-image=<reference>.
 # docs/testing.md, Trying a consumer on GitHub, has the prerequisites.
+[arg('org', help='Numeric GitHub organization ID explicitly authorized for this run')]
+[arg('repo', help='Absolute path to a clean consumer checkout with GitHub fixtures')]
 [arg('event', help='Consumer workflow kind: pull-request or dev-release or release')]
-[arg('checkout', help='Absolute path to a clean consumer checkout with GitHub fixtures')]
 [arg('settings', help='Optional key=value settings; see docs/testing.md')]
-[arg('organization_id', help='Numeric GitHub organization ID explicitly authorized for this run')]
 [doc('Live; run a consumer checkout against this engine on hosted GitHub')]
 [group('live')]
-test-live-github-consumer organization_id checkout event *settings:
+test-live-github-consumer org repo event *settings:
     #!/usr/bin/env bash
     set -euo pipefail
     if [[ -n "${FORGE_LAB_GITHUB_CONTEXT:-}" && "$FORGE_LAB_GITHUB_CONTEXT" != /* ]]; then
@@ -1197,11 +1197,11 @@ test-live-github-consumer organization_id checkout event *settings:
 
 # Minimal preparation checks: public test snapshots and a temporary CLI asset,
 # existing toolchain images, throwaway SSH keys and read-only package inspection.
-[arg('organization_id', help='Numeric GitHub organization ID authorized by Forge Lab')]
-[arg('packages_token_file', help='Absolute private Packages PAT path; read-only retention preview only')]
+[arg('org', help='Numeric GitHub organization ID authorized by Forge Lab')]
+[arg('token_file', help='Absolute private Packages PAT path; read-only retention preview only')]
 [doc('Live; minimal hosted preparation and retention checks; disposable repositories')]
 [group('live')]
-test-live-github-minimal organization_id packages_token_file:
+test-live-github-minimal org token_file:
     #!/usr/bin/env bash
     set -euo pipefail
     state=$(mktemp -d "${TMPDIR:-/tmp}/forge-ci-minimal.XXXXXXXX")
@@ -1212,61 +1212,68 @@ test-live-github-minimal organization_id packages_token_file:
         -run='^TestGitHubMinimalPreparation$' ./internal/livetest/
 
 # API-only prerelease admission/retry checks; no engine image build or runner jobs.
-[arg('organization_id', help='Numeric GitHub organization ID explicitly authorized by the Forge Lab session')]
+[arg('org', help='Numeric GitHub organization ID explicitly authorized by the Forge Lab session')]
 [doc('Live; tiny public/private GitHub prerelease API round trips')]
 [group('live')]
-test-live-github-release-api organization_id:
+test-live-github-release-api org:
     FORGE_CI_LIVE_GITHUB_ORG_ID="$1" GOTOOLCHAIN=local GOPROXY=off GOSUMDB=off go test -tags=live -count=1 -timeout=10m -v -run='^TestGitHubRelease_PrereleaseAPI$' ./internal/livetest/githubconsumer/
 
 # Real scheduling semantics plus the actual CLI binary-publication workflow.
 # Uses separate disposable repositories; no engine image build is needed.
-[arg('organization_id', help='Numeric GitHub organization ID explicitly authorized by the Forge Lab session')]
+[arg('org', help='Numeric GitHub organization ID explicitly authorized by the Forge Lab session')]
 [doc('Live; self-release scheduling and signed CLI asset acceptance')]
 [group('live')]
-test-live-github-self-release organization_id:
+test-live-github-self-release org:
     FORGE_CI_LIVE_GITHUB_ORG_ID="$1" GOTOOLCHAIN=local GOPROXY=off GOSUMDB=off go test -tags=live -count=1 -parallel=2 -buildvcs=false -timeout=75m -v -run='^TestGitHubSelfRelease_Binary(Scheduling|Assets)$' ./internal/livetest/
 
 # Run a clean consumer's own GitLab MR gate with a prebuilt Docker image archive.
 # Uses the same lab preflight, serial lock, redacted evidence and scratch cleanup.
-[arg('checkout', help='Absolute path to a clean consumer checkout')]
-[arg('lint_archive', help='Path to the prepared Docker archive of the nanolinter image, for a gate that lints; default FORGE_CI_LIVE_LINT_IMAGE_ARCHIVE')]
-[arg('image_archive', help='Path to the prepared Docker image archive for the consumer MR job')]
+[arg('repo', help='Absolute path to a clean consumer checkout')]
+[arg('lint', help='Path to the prepared Docker archive of the nanolinter image, for a gate that lints; default FORGE_CI_LIVE_LINT_IMAGE_ARCHIVE')]
+[arg('image', help='Path to the prepared Docker image archive for the consumer MR job')]
 [doc('Live GitLab MR; network, destructive')]
 [group('live')]
-test-live-gitlab-consumer checkout image_archive lint_archive="":
+test-live-gitlab-consumer repo image lint="":
     @FORGE_CI_LIVE_CONSUMER="$1" FORGE_CI_LIVE_CONSUMER_IMAGE_ARCHIVE="$2" FORGE_CI_LIVE_LINT_IMAGE_ARCHIVE="${3:-${FORGE_CI_LIVE_LINT_IMAGE_ARCHIVE:-}}" \
         exec bash scripts/ci/run-live-tests.sh focused '^TestGitLabLayer_ConsumerTrial$'
 
 # Exercise signed native GitLab release jobs with caller-prepared image archives.
-[arg('job_image_archive', help='Path to the prepared Docker archive for the release job image')]
-[arg('signer_image_archive', help='Path to the prepared Docker archive for the signer image')]
+[arg('job', help='Path to the prepared Docker archive for the release job image')]
+[arg('signer', help='Path to the prepared Docker archive for the signer image')]
 [doc('Live GitLab release; network, destructive')]
 [group('live')]
-test-live-gitlab-release job_image_archive signer_image_archive:
+test-live-gitlab-release job signer:
     @FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE="$1" FORGE_CI_LIVE_SIGNER_IMAGE_ARCHIVE="$2" \
         exec bash scripts/ci/run-live-tests.sh focused '^TestGitLabRelease_MinimalSignedArtifacts$'
 
 # Run a clean consumer's .gitlab/build-release.sh under the pinned release policy.
 # The consumer trial signs distro packages and needs the guarded full-release profile.
-[arg('checkout', help='Absolute path to a clean consumer checkout with its GitLab check and build scripts')]
-[arg('settings', help='Optional KEY=value build variables, lint-archive=<archive>, or scenario=<exact consumer release test name>; see live-campaigns.md')]
-[arg('job_image_archive', help='Path to the prepared Docker archive for the non-root check image')]
-[arg('build_image_archive', help='Path to the prepared Docker archive for the release builder')]
-[arg('signer_image_archive', help='Path to the prepared Docker archive for the signer image')]
+# The image archives are settings, as for `just demo gitlab`: job-archive= (the
+# non-root check image), build-archive= (the release builder), signer-archive=
+# (the signer image), and lint-archive= when the gate lints.
+[arg('repo', help='Absolute path to a clean consumer checkout with its GitLab check and build scripts')]
+[arg('settings', help='job-archive=, build-archive= and signer-archive= (required), lint-archive=, KEY=value build variables, or scenario=<exact consumer release test name>; see live-campaigns.md')]
 [doc('Live GitLab consumer release; network, destructive')]
 [group('live')]
-test-live-gitlab-consumer-release checkout job_image_archive build_image_archive signer_image_archive *settings:
+test-live-gitlab-consumer-release repo *settings:
     #!/usr/bin/env bash
     set -euo pipefail
-    export FORGE_CI_LIVE_CONSUMER="$1" FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE="$2" FORGE_CI_LIVE_BUILD_IMAGE_ARCHIVE="$3" FORGE_CI_LIVE_SIGNER_IMAGE_ARCHIVE="$4"
-    shift 4
-    # lint-archive= is the trial's image, as for `just demo gitlab`, not a setting.
+    export FORGE_CI_LIVE_CONSUMER="$1"
+    shift
+    # The archives are the trial's images, as for `just demo gitlab`, not settings.
     settings=()
     for word in "$@"; do
         case "$word" in
+        job-archive=*) export FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE="${word#*=}" ;;
+        build-archive=*) export FORGE_CI_LIVE_BUILD_IMAGE_ARCHIVE="${word#*=}" ;;
+        signer-archive=*) export FORGE_CI_LIVE_SIGNER_IMAGE_ARCHIVE="${word#*=}" ;;
         lint-archive=*) export FORGE_CI_LIVE_LINT_IMAGE_ARCHIVE="${word#*=}" ;;
         *) settings+=("$word") ;;
         esac
+    done
+    for name in job build signer; do
+        variable="FORGE_CI_LIVE_${name^^}_IMAGE_ARCHIVE"
+        [[ -n "${!variable:-}" ]] || { printf 'test-live-gitlab-consumer-release needs %s-archive=<path>\n' "$name" >&2; exit 2; }
     done
     FORGE_CI_LIVE_CONSUMER_SETTINGS="$(printf '%s\n' "${settings[@]}")"
     export FORGE_CI_LIVE_CONSUMER_SETTINGS
@@ -1274,17 +1281,17 @@ test-live-gitlab-consumer-release checkout job_image_archive build_image_archive
     exec bash scripts/ci/run-live-tests.sh focused "^${scenario}$"
 
 # Check first-push protection with a real clean consumer; no job images needed.
-[arg('checkout', help='Absolute path to a clean reviewed consumer checkout')]
+[arg('repo', help='Absolute path to a clean reviewed consumer checkout')]
 [doc('Live GitLab consumer branch protection; network, destructive')]
 [group('live')]
-test-live-gitlab-consumer-branch-protection checkout:
+test-live-gitlab-branch-protection repo:
     @FORGE_CI_LIVE_CONSUMER="$1" exec bash scripts/ci/run-live-tests.sh focused '^TestGitLabRelease_ConsumerBranchProtection$'
 
 # This specifically probes Buildah RUN capability on the privileged runner.
-[arg('build_image_archive', help='Prepared Docker archive of the reviewed Buildah-capable build image; requires the privileged runner')]
+[arg('build', help='Prepared Docker archive of the reviewed Buildah-capable build image; requires the privileged runner')]
 [doc('Live GitLab build-image capability; network, destructive')]
 [group('live')]
-test-live-gitlab-build-image-capability build_image_archive:
+test-live-gitlab-build-image-capability build:
     @FORGE_CI_LIVE_BUILD_IMAGE_ARCHIVE="$1" exec bash scripts/ci/run-live-tests.sh focused '^TestGitLabRelease_BuildImageCapability$'
 
 # Observe the ready marker in GitLab's job trace, then interrupt this launcher.
@@ -1294,12 +1301,12 @@ test-live-gitlab-interrupted-job:
     @FORGE_CI_LIVE_INTERRUPT_PROBE=gitlab-workflow exec bash scripts/ci/run-live-tests.sh focused '^TestGitLabWorkflow_InterruptedJob$'
 
 # Exercise one cold base publication and verified warm reuse in native release jobs.
-[arg('job_image_archive', help='Path to the prepared Docker archive for the non-root check image')]
-[arg('build_image_archive', help='Path to the prepared Docker archive for a builder with standalone Cosign')]
-[arg('signer_image_archive', help='Path to the prepared Docker archive for the signer image')]
+[arg('job', help='Path to the prepared Docker archive for the non-root check image')]
+[arg('build', help='Path to the prepared Docker archive for a builder with standalone Cosign')]
+[arg('signer', help='Path to the prepared Docker archive for the signer image')]
 [doc('Live GitLab bases; guarded build profile, network, destructive')]
 [group('live')]
-test-live-gitlab-base-images job_image_archive build_image_archive signer_image_archive:
+test-live-gitlab-base-images job build signer:
     @FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE="$1" FORGE_CI_LIVE_BUILD_IMAGE_ARCHIVE="$2" FORGE_CI_LIVE_SIGNER_IMAGE_ARCHIVE="$3" \
         exec bash scripts/ci/run-live-tests.sh focused '^TestGitLabRelease_BaseImagesColdAndWarm$'
 

@@ -363,7 +363,7 @@ setup, evidence and cleanup.
 |---|---|---|
 | Forgejo PR or release | `just test-live-forgejo-consumer <checkout> <pull-request\|release> [setting ...]` | Local `forgeci` contract and runner; consumer job image; signer image for releases |
 | GitLab MR | `just test-live-gitlab-consumer <checkout> <image-archive>` | Local `forgeci` contract and runner; prepared MR job image archive |
-| GitLab release | `just test-live-gitlab-consumer-release <checkout> <job-archive> <build-archive> <signer-archive> [setting ...]` | Local contract, prepared image archives and guarded full-release runner profile |
+| GitLab release | `just test-live-gitlab-consumer-release <checkout> job-archive=<archive> build-archive=<archive> signer-archive=<archive> [setting ...]` | Local contract, prepared image archives and guarded full-release runner profile |
 | GitHub PR, development build or release | `just test-live-github-consumer <org-id> <checkout> <pull-request\|dev-release\|release> [setting ...]` | Forge Lab's hosted `github run` session, consumer workflow fixtures and public engine images |
 
 See [Forgejo trials](#trying-a-consumer), [GitLab acceptance](#gitlab-live-acceptance)
@@ -1831,13 +1831,19 @@ For a clean committed consumer with `.gitlab/check-release.sh` and
 
 ```sh
 just test-live-gitlab-consumer-release /absolute/clean-consumer \
-  /absolute/check-image.tar /absolute/build-image.tar /absolute/signer-image.tar
+  job-archive=/absolute/check-image.tar build-archive=/absolute/build-image.tar \
+  signer-archive=/absolute/signer-image.tar
 
 # Maven consumer: put the requested version in the prepared release commit.
 just test-live-gitlab-consumer-release /absolute/maven-consumer \
-  /absolute/check-image.tar /absolute/build-image.tar /absolute/signer-image.tar \
-  version=0.2.0 version-bump=maven
+  job-archive=/absolute/check-image.tar build-archive=/absolute/build-image.tar \
+  signer-archive=/absolute/signer-image.tar version=0.2.0 version-bump=maven
 ```
+
+The image archives are settings, as for `just demo gitlab`: `job-archive=`
+(the non-root check image), `build-archive=` (the release builder) and
+`signer-archive=` (the signer image) are required, and `lint-archive=` names
+the lint image when the gate lints.
 
 `version=X.Y.Z` selects the requested stable version (the default is `0.0.1`).
 `version-bump=maven` enables the policy's Maven version bump; without it the
@@ -1940,7 +1946,8 @@ podman save --format docker-archive -o /absolute/images/kaniko-job.tar \
 FORGE_CI_LIVE_GITLAB_IMAGE_BUILDER=kaniko \
 FORGE_CI_LIVE_KANIKO_JOB_IMAGE_ARCHIVE=/absolute/images/kaniko-job.tar \
   just test-live-gitlab-consumer-release /absolute/clean-consumer \
-  /absolute/check-image.tar /absolute/build-image.tar /absolute/signer-image.tar
+  job-archive=/absolute/check-image.tar build-archive=/absolute/build-image.tar \
+  signer-archive=/absolute/signer-image.tar
 ```
 
 The release policy then takes `image-builder: kaniko`, the pushed kaniko job

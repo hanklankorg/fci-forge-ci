@@ -140,7 +140,8 @@ func TestPlanCampaignLane_MapsAGitLabConsumerToItsRecipes(t *testing.T) {
 	if len(plan.Cases) != 3 ||
 		!slices.Equal(plan.Cases[0].Args, []string{"test-live-gitlab-consumer", checkout, "/c/java.tar", "/c/lint-java.tar"}) ||
 		!slices.Equal(plan.Cases[1].Args, []string{
-			"test-live-gitlab-consumer-release", checkout, "/c/java.tar", "/b.tar", "/c/signer.tar",
+			"test-live-gitlab-consumer-release", checkout,
+			"job-archive=/c/java.tar", "build-archive=/b.tar", "signer-archive=/c/signer.tar",
 			"lint-archive=/c/lint-java.tar", "version-bump=maven", "job-user=65532:65532",
 		}) ||
 		!slices.Equal(plan.Cases[2].Args, []string{"test-live-gitlab-consumer", filepath.Join(dir, "demos", "hello-go-cli"), "/c/java.tar"}) {

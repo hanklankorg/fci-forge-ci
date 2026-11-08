@@ -139,7 +139,7 @@ func CampaignRunSettings(provider string, getenv func(string) string) (CampaignR
 }
 
 func (run CampaignRun) caseSettings(args []string) (map[string]string, error) {
-	if len(args) != 0 && args[0] == "test-live-forgejo-consumer-snapshot" {
+	if len(args) != 0 && args[0] == "test-live-forgejo-snapshot" {
 		// Native development chooses directly from the run selector, unlike
 		// the PR/release consumer's CI_IMAGE_BUILDER repository variable.
 		builder, valid := imageBuilderValue(run.BuilderSelector)

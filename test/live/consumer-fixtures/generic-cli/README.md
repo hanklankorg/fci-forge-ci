@@ -183,8 +183,8 @@ From the engine root, the existing SDK command is:
 ```sh
 FORGE_CI_LIVE_CONSUMER_VISIBILITY=public \
 just test-live-gitlab-consumer-release /absolute/prepared-checkout \
-  /absolute/reviewed-job.tar /absolute/reviewed-build.tar /absolute/reviewed-signer.tar \
-  version=0.0.1
+  job-archive=/absolute/reviewed-job.tar build-archive=/absolute/reviewed-build.tar \
+  signer-archive=/absolute/reviewed-signer.tar version=0.0.1
 ```
 
 For Nano use `version=0.8.6 version-bump=cargo` instead. These are example runtime

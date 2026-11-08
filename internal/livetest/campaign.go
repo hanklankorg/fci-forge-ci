@@ -392,7 +392,12 @@ func consumerRecipe(provider, event, checkout string, archives map[string]string
 			return nil, fmt.Errorf("a GitLab release takes job-archive=, build-archive= and signer-archive=: %w", errs.ErrValidation)
 		}
 
-		args := []string{"test-live-gitlab-consumer-release", checkout, archives["job-archive"], archives["build-archive"], archives["signer-archive"]}
+		args := []string{
+			"test-live-gitlab-consumer-release", checkout,
+			"job-archive=" + archives["job-archive"],
+			"build-archive=" + archives["build-archive"],
+			"signer-archive=" + archives["signer-archive"],
+		}
 		if lints {
 			args = append(args, campaignLintArchive+"="+lint)
 		}
