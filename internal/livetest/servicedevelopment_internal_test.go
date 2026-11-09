@@ -4,6 +4,7 @@
 package livetest
 
 import (
+	"errors"
 	"io/fs"
 	"os"
 	"os/exec"
@@ -306,38 +307,7 @@ func TestServiceDevelopmentPreservesDemoRoutes(t *testing.T) {
 		{"hello-cargo-container", GitLabDedicatedReleaseImagesConfig, "", ""},
 	} {
 		t.Run(demo.name, func(t *testing.T) {
-			root, git := stageTestRepo(t, "sha1")
-			recipe := filepath.Join(reporoot.Path(t), "test/live/demos", demo.name, "consumer")
-
-			err := fs.WalkDir(os.DirFS(recipe), ".", func(path string, entry fs.DirEntry, err error) error {
-				if err != nil || entry.IsDir() {
-					return err
-				}
-
-				body, err := os.ReadFile(filepath.Join(recipe, path))
-				if err != nil {
-					return err
-				}
-
-				info, err := entry.Info()
-				if err != nil {
-					return err
-				}
-
-				stageTestWrite(t, root, path, string(body), info.Mode().Perm())
-
-				return nil
-			})
-			if err != nil {
-				t.Fatal(err)
-			}
-
-			stageTestCommit(t, git, root)
-
-			source, err := openConsumer(t.Context(), git, root, t.TempDir())
-			if err != nil {
-				t.Fatal(err)
-			}
+			recipe, root, source, git := stageTestDemo(t, demo.name)
 
 			declaration, err := ServiceSnapshotSource(recipe)
 			if err != nil || declaration != demo.declaration {
@@ -399,5 +369,109 @@ func TestServiceDevelopmentPreservesDemoRoutes(t *testing.T) {
 				t.Fatalf("producer image variables %v, want %v", variables, want)
 			}
 		})
+	}
+}
+
+// stageTestDemo commits a shipped demo's consumer, its bytes and modes, into
+// a local test repository and opens it: the recipe directory, the
+// repository, the consumer and its Git.
+func stageTestDemo(t *testing.T, demo string) (string, string, Consumer, layerGit) {
+	t.Helper()
+
+	root, git := stageTestRepo(t, "sha1")
+	recipe := filepath.Join(reporoot.Path(t), "test/live/demos", demo, "consumer")
+
+	err := fs.WalkDir(os.DirFS(recipe), ".", func(path string, entry fs.DirEntry, err error) error {
+		if err != nil || entry.IsDir() {
+			return err
+		}
+
+		body, err := os.ReadFile(filepath.Join(recipe, path))
+		if err != nil {
+			return err
+		}
+
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+
+		stageTestWrite(t, root, path, string(body), info.Mode().Perm())
+
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	stageTestCommit(t, git, root)
+
+	source, err := openConsumer(t.Context(), git, root, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	return recipe, root, source, git
+}
+
+// The snapshot event takes the Cargo workspace's two images, which the
+// lifecycle's one-service scope refuses: the planner plans both, each native
+// amd64 under its own tag suffix in the one repository, and with no one
+// service to probe the harness writes the snapshot job alone.
+func TestServiceDevelopmentSnapshotsEveryPlannedImage(t *testing.T) {
+	recipe, _, source, _ := stageTestDemo(t, "hello-cargo-workspace")
+
+	declaration, err := ServiceSnapshotSource(recipe)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	config := ServiceDevelopmentConfig{
+		RecipeDirectory: recipe, Declaration: declaration, JobImage: serviceTestJobImage,
+		Branch: "development", ReadinessURL: "http://127.0.0.1:8080/health",
+	}
+
+	if _, err = serviceDevelopmentFixture(t.Context(), source, config); !errors.Is(err, errServiceDeclaration) {
+		t.Fatalf("the lifecycle's scope took two images: %v", err)
+	}
+
+	config.Images = true
+
+	fixture, err := serviceDevelopmentFixture(t.Context(), source, config)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	workflow, err := githubWorkflow(t.Context(), fixture, forgejoDevelopmentWorkflow)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !strings.Contains(workflow, "\n  snapshot:\n") || strings.Contains(workflow, serviceReadinessJob) || strings.Contains(workflow, "podman") {
+		t.Fatalf("a plan of two images probed a readiness:\n%s", workflow)
+	}
+
+	tag, err := version.ComposeSnapshotContainerTag("0.1.0", "development", fixture.Commit[:7])
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	plan := ServiceSnapshotPlan(t.Context(), t, fixture, snapshotimage.Input{
+		SourceSHA: fixture.Commit, SourceBranch: "development", Tag: tag,
+		ImageRepository: "registry.invalid/owner/workspace", SourceDateEpoch: "1", Publish: true,
+	})
+
+	suffixes := make([]string, 0, len(plan.Images))
+
+	for _, image := range plan.Images {
+		if image.ImageRepository != "registry.invalid/owner/workspace" || !slices.Equal(image.Platforms, []string{"linux/amd64"}) {
+			t.Fatalf("an image outside the run's repository or not native amd64: %+v", image)
+		}
+
+		suffixes = append(suffixes, image.TagSuffix)
+	}
+
+	if !slices.Equal(suffixes, []string{"-worker", "-keytool"}) || len(plan.Builds) != 2 || ServiceReadiness(plan) {
+		t.Fatalf("want the worker and keytool images, one amd64 build each, and no readiness: %+v", plan)
 	}
 }

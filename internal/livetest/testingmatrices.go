@@ -82,6 +82,9 @@ type matrixDemo struct {
 	hosted                                          map[string]bool
 	release                                         map[string]bool
 	admission                                       map[string]error
+	// snapshot is the campaign's admission of the snapshot event on each lab
+	// forge, campaignAdmitSnapshot's.
+	snapshot map[string]error
 	// snapshotRefusal is the planner's refusal of the declaration's snapshot.
 	snapshotRefusal error
 }
@@ -242,7 +245,7 @@ func readMatrixDemos(root string) ([]matrixDemo, error) {
 }
 
 func readMatrixDemo(name, consumer string) (matrixDemo, error) {
-	demo := matrixDemo{name: name, hosted: map[string]bool{}, release: map[string]bool{}, admission: map[string]error{}}
+	demo := matrixDemo{name: name, hosted: map[string]bool{}, release: map[string]bool{}, admission: map[string]error{}, snapshot: map[string]error{}}
 
 	source, err := ServiceSnapshotSource(consumer)
 	if err != nil {
@@ -257,6 +260,7 @@ func readMatrixDemo(name, consumer string) (matrixDemo, error) {
 		}
 
 		demo.admission[provider] = matrixLifecycleAdmission(provider, consumer)
+		demo.snapshot[provider] = campaignAdmitSnapshot(provider, consumer)
 	}
 
 	cfg, err := readMatrixDeclaration(filepath.Join(consumer, filepath.FromSlash(source)))
@@ -654,31 +658,34 @@ func (data matrices) releaseCell(provider string, demo matrixDemo) string {
 	return markNoLine
 }
 
-// developmentCell is a demo's snapshot state on a provider: not applicable
-// where the lifecycle is not (lifecycleApplies), the admission's refusal (its
-// reason is footnoted, and the overlay's note kept, as when a fixture of the
-// demo ran), the overlay's mark, a lifecycle line that would run it, or
-// admitted without one.
+// developmentCell is a demo's snapshot state on a provider: the snapshot
+// runs as the lifecycle's development phase where the lifecycle applies
+// (lifecycleApplies) and admits the demo, and alone as the snapshot event
+// where a lab forge's campaign admits that. It is not applicable where
+// neither applies, the admissions' refusal where neither admits (the reasons
+// are footnoted, and the overlay's note kept, as when a fixture of the demo
+// ran), the overlay's mark, a lifecycle or snapshot line that would run it,
+// or admitted without one.
 func (data matrices) developmentCell(provider string, demo matrixDemo) string {
-	if !lifecycleApplies(provider, demo) {
+	lifecycle := lifecycleApplies(provider, demo) && demo.admission[provider] == nil
+	snapshot := provider != matrixGitHub && demo.snapshot[provider] == nil
+
+	if !lifecycleApplies(provider, demo) && !snapshot {
 		return markNotApply
 	}
 
 	mark, found := data.mark(provider, demo.name, matrixDevelopment)
 
-	if demo.admission[provider] != nil {
+	switch {
+	case !lifecycle && !snapshot:
 		return matrixMark{mark: markRefused, note: mark.note}.cell("")
-	}
-
-	if found {
+	case found:
 		return mark.cell("")
-	}
-
-	if data.hasLine(provider, demo, TrialLifecycle) {
+	case lifecycle && data.hasLine(provider, demo, TrialLifecycle):
 		return markLine + " lifecycle"
-	}
-
-	if data.hasLine(provider, demo, TrialDevRelease) {
+	case snapshot && data.hasLine(provider, demo, TrialSnapshot):
+		return markLine + " snapshot"
+	case data.hasLine(provider, demo, TrialDevRelease):
 		return markLine
 	}
 
@@ -700,7 +707,9 @@ func (data matrices) gateCell(provider string, demo matrixDemo) string {
 
 // matrixReason is the admission's refusal without the validation sentinel.
 func matrixReason(err error) string {
-	return strings.TrimPrefix(strings.TrimSuffix(err.Error(), ": "+errs.ErrValidation.Error()), TrialLifecycle+": ")
+	reason := strings.TrimSuffix(err.Error(), ": "+errs.ErrValidation.Error())
+
+	return strings.TrimPrefix(strings.TrimPrefix(reason, TrialLifecycle+": "), TrialSnapshot+": ")
 }
 
 // markRank orders states, the best first: the overlay's live marks, then a
@@ -918,27 +927,7 @@ func (data matrices) projectKindsTable() string {
 			perForge(demo, func(provider string, demo matrixDemo) string { return data.lifecycleState(provider, demo).cell("") }))
 	}
 
-	var refused, scope []string
-
-	for _, demo := range data.demos {
-		if demo.snapshotRefusal != nil {
-			refused = append(refused, fmt.Sprintf("- %s, every forge: the planner refuses its snapshot: %s\n", demo.name, demo.snapshotRefusal))
-		}
-
-		for _, provider := range matrixProviders {
-			err := demo.admission[provider]
-			if err == nil || demo.route == routeNoContainer || !lifecycleApplies(provider, demo) {
-				continue
-			}
-
-			line := fmt.Sprintf("- %s, %s: %s\n", demo.name, provider, matrixReason(err))
-			if harnessScope(err) {
-				scope = append(scope, line)
-			} else {
-				refused = append(refused, line)
-			}
-		}
-	}
+	refused, scope := data.refusalNotes()
 
 	for _, group := range []struct {
 		heading string
@@ -955,11 +944,53 @@ func (data matrices) projectKindsTable() string {
 	return page.String()
 }
 
-// harnessScope is whether a lifecycle refusal is the live harness's scope,
-// a demo the service development trial does not judge (serviceSnapshotScope
-// and a demo without a root Containerfile), rather than the planner's.
+// refusalNotes are the reasons behind matrix 1's refusals: the planner's and
+// the admissions', and apart from them the live harness's scope. A
+// lifecycle's are given where the lifecycle applies, the snapshot event's on
+// the lab forges where the planner's do not already give them.
+func (data matrices) refusalNotes() ([]string, []string) {
+	var refused, scope []string
+
+	note := func(err error, subject string) {
+		line := fmt.Sprintf("- %s: %s\n", subject, matrixReason(err))
+		if harnessScope(err) {
+			scope = append(scope, line)
+		} else {
+			refused = append(refused, line)
+		}
+	}
+
+	for _, demo := range data.demos {
+		if demo.snapshotRefusal != nil {
+			refused = append(refused, fmt.Sprintf("- %s, every forge: the planner refuses its snapshot: %s\n", demo.name, demo.snapshotRefusal))
+		}
+
+		if demo.route == routeNoContainer {
+			continue
+		}
+
+		for _, provider := range matrixProviders {
+			if err := demo.admission[provider]; err != nil && lifecycleApplies(provider, demo) {
+				note(err, demo.name+", "+provider)
+			}
+		}
+
+		for _, provider := range []string{campaignForgejo, campaignGitLab} {
+			if err := demo.snapshot[provider]; err != nil && demo.snapshotRefusal == nil {
+				note(err, demo.name+", "+provider+" "+TrialSnapshot)
+			}
+		}
+	}
+
+	return refused, scope
+}
+
+// harnessScope is whether a lifecycle or snapshot refusal is the live
+// harness's scope, a demo the service development trial does not judge
+// (serviceSnapshotScope, snapshotImagesAdmitted and a demo without the files
+// the route is written from), rather than the planner's.
 func harnessScope(err error) bool {
-	return errors.Is(err, errServiceDeclaration) || errors.Is(err, errNoDevelopmentRoute)
+	return errors.Is(err, errServiceDeclaration) || errors.Is(err, errSnapshotImages) || errors.Is(err, errNoDevelopmentRoute)
 }
 
 // perForge writes a flow's Forgejo, GitLab and GitHub cells.

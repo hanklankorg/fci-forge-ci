@@ -415,6 +415,10 @@ func campaignCaseArgs(dir, provider string, env map[string]string, words []strin
 		events = append(events, TrialLifecycle)
 	}
 
+	if len(words) > 1 && campaignSupportsSnapshot(provider, filepath.Join(dir, "demos", words[1])) {
+		events = append(events, TrialSnapshot)
+	}
+
 	if len(words) < 3 {
 		return nil, fmt.Errorf("want consumer <demo> <%s> [key=value ...]: %w", campaignEventList(events), errs.ErrValidation)
 	}
@@ -423,7 +427,7 @@ func campaignCaseArgs(dir, provider string, env map[string]string, words []strin
 		return nil, fmt.Errorf("no such demo in %s: %w", filepath.Join(dir, "demos"), errs.ErrValidation)
 	}
 
-	if !slices.Contains([]string{TrialPullRequest, TrialRelease, TrialLifecycle}, words[2]) {
+	if !slices.Contains([]string{TrialPullRequest, TrialRelease, TrialLifecycle, TrialSnapshot}, words[2]) {
 		return nil, fmt.Errorf("a consumer event is %s: %w", campaignEventList(events), errs.ErrValidation)
 	}
 
@@ -447,13 +451,24 @@ func campaignEventList(events []string) string {
 }
 
 // campaignAdmitConsumer refuses a consumer case the lane could not run: a
-// lifecycle of a demo without a development route, or a GitLab consumer
-// without what its gate, release or lifecycle need.
+// lifecycle or a snapshot of a demo without a development route, or a GitLab
+// consumer without what its gate, release, lifecycle or snapshot need.
 func campaignAdmitConsumer(checkout, provider, event string, words, settings []string, env map[string]string) error {
-	if event == TrialLifecycle {
+	switch event {
+	case TrialLifecycle:
 		if err := campaignAdmitLifecycle(provider, checkout); err != nil {
 			return err
 		}
+	case TrialSnapshot:
+		if err := campaignAdmitSnapshot(provider, checkout); err != nil {
+			return err
+		}
+
+		if provider == campaignGitLab {
+			return campaignAdmitGitLabSnapshot(checkout, settings, env)
+		}
+
+		return nil
 	}
 
 	if provider == campaignGitLab {
@@ -505,6 +520,49 @@ func campaignAdmitGitLabConsumer(checkout, event string, words, settings []strin
 	}
 
 	return campaignHasGateImages(env, gate)
+}
+
+// campaignAdmitGitLabSnapshot holds a GitLab snapshot case to what the
+// snapshot takes: no settings, since it runs neither the demo's gate nor a
+// release, and in campaign.env the runtime image archive of each toolchain
+// family the planner plans a producer of, GitLabJobImageArchiveEnv<FAMILY>,
+// which that producer builds in.
+func campaignAdmitGitLabSnapshot(checkout string, settings []string, env map[string]string) error {
+	if len(settings) != 0 {
+		return fmt.Errorf("a GitLab %s takes job-archive= alone: %w", TrialSnapshot, errs.ErrValidation)
+	}
+
+	families, err := campaignSnapshotFamilies(checkout)
+	if err != nil {
+		return err
+	}
+
+	for _, family := range families {
+		if name := GitLabSnapshotProducerArchiveEnv(family); env[name] == "" {
+			return fmt.Errorf("the snapshot builds a %s producer in the %s runtime image and campaign.env has no %s; prepare the campaign with this cases file: %w",
+				family, family, name, errs.ErrValidation)
+		}
+	}
+
+	return nil
+}
+
+// campaignSnapshotFamilies lists the toolchain families of the producers the
+// planner plans for the demo's snapshot, each once, sorted.
+func campaignSnapshotFamilies(checkout string) ([]string, error) {
+	plan, err := snapshotImagesAdmission(checkout)
+	if err != nil {
+		return nil, err
+	}
+
+	return serviceSnapshotFamilies(plan), nil
+}
+
+// GitLabSnapshotProducerArchiveEnv names the variable of the runtime image
+// archive a GitLab snapshot builds a producer of the toolchain family in:
+// the family is the runtime target of its toolchain (containers/runtime).
+func GitLabSnapshotProducerArchiveEnv(family string) string {
+	return GitLabJobImageArchiveEnv + strings.ToUpper(family)
 }
 
 // requireGitLabReleaseBuild refuses a GitLab release of a demo without the
@@ -603,6 +661,8 @@ func consumerRecipe(provider, event, checkout string, archives map[string]string
 	switch {
 	case provider == campaignForgejo:
 		return append([]string{campaignConsumerRecipe, campaignForgejo, checkout, event}, settings...), nil
+	case event == TrialSnapshot:
+		return gitlabSnapshotRecipe(checkout, archives, settings)
 	case event == "pull-request":
 		if images != 1 || archives["job-archive"] == "" || len(settings) != 0 {
 			return nil, fmt.Errorf("a GitLab merge request takes job-archive= and lint-archive= alone: %w", errs.ErrValidation)
@@ -633,6 +693,17 @@ func consumerRecipe(provider, event, checkout string, archives map[string]string
 	}
 }
 
+// gitlabSnapshotRecipe is the test-live-consumer invocation of a GitLab
+// snapshot, which takes the component's job image alone.
+func gitlabSnapshotRecipe(checkout string, archives map[string]string, settings []string) ([]string, error) {
+	job, named := archives["job-archive"]
+	if !named || len(archives) != 1 || len(settings) != 0 {
+		return nil, fmt.Errorf("a GitLab %s takes job-archive= alone: %w", TrialSnapshot, errs.ErrValidation)
+	}
+
+	return []string{campaignConsumerRecipe, campaignGitLab, checkout, TrialSnapshot, "job-archive=" + job}, nil
+}
+
 // campaignSettingValue validates one key=value setting and expands a value
 // @NAME, NAME in capitals, to campaign.env's NAME. Other @ values, such as
 // @layer-commit, are the trial's own and pass through.
@@ -659,8 +730,9 @@ func campaignSettingValue(env map[string]string, word string) (string, string, e
 // archives of, from the repository at root, for the lanes it will run, each
 // <forgejo|gitlab>=<cases file>: every archive a case names as
 // @FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE (go) or @GitLabJobImageArchiveEnv<TARGET>,
-// and on GitLab the scenarios' go image and every $CI_JOB_IMAGE_<TARGET> the
-// gate of a named demo checks in. Each must be a target of
+// and on GitLab the scenarios' go image, every $CI_JOB_IMAGE_<TARGET> the
+// gate of a named demo checks in, and for a snapshot the runtime target of
+// each toolchain family its plan builds a producer of. Each must be a target of
 // containers/runtime/images.json. Every nanolinter job image a case names
 // must be of one of flavors, the job-image= flavors the campaign publishes,
 // and a GitLab consumer names lint-archive= when its demo's gate lints.
@@ -746,23 +818,49 @@ func campaignCaseTargets(root, provider string, words []string, prepared, target
 		}
 	}
 
+	if provider == campaignGitLab {
+		return campaignGitLabCaseTargets(root, words, targets)
+	}
+
+	return nil
+}
+
+// campaignGitLabCaseTargets adds the runtime targets a GitLab case needs
+// beside those it names: a scenario's go image, every $CI_JOB_IMAGE_<TARGET>
+// the gate of a consumer's demo checks in, and for a snapshot, which runs no
+// gate, the toolchain family of each producer its plan builds.
+func campaignGitLabCaseTargets(root string, words []string, targets map[string]bool) error {
 	switch {
-	case provider != campaignGitLab:
 	case words[0] == "scenario":
 		targets[campaignScenarioTarget] = true
-	case words[0] == caseConsumer && len(words) > 1:
-		if !campaignDemo.MatchString(words[1]) {
-			return fmt.Errorf("not a demo name: %q: %w", words[1], errs.ErrValidation)
+
+		return nil
+	case words[0] != caseConsumer || len(words) < 2:
+		return nil
+	case !campaignDemo.MatchString(words[1]):
+		return fmt.Errorf("not a demo name: %q: %w", words[1], errs.ErrValidation)
+	}
+
+	var names []string
+
+	if len(words) > 2 && words[2] == TrialSnapshot {
+		families, err := campaignSnapshotFamilies(demoConsumerDir(root, words[1]))
+		if err != nil {
+			return err
 		}
 
+		names = families
+	} else {
 		gate, err := readCampaignGate(filepath.Join(demoConsumerDir(root, words[1]), filepath.FromSlash(GitLabGateFile)), words[2:])
 		if err != nil {
 			return err
 		}
 
-		for _, name := range gate.extraJobs {
-			targets[strings.ToLower(name)] = true
-		}
+		names = gate.extraJobs
+	}
+
+	for _, name := range names {
+		targets[strings.ToLower(name)] = true
 	}
 
 	return nil

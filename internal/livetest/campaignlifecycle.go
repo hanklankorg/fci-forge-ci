@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 
 	"github.com/diggsweden/forge-ci/internal/domain/errs"
+	"github.com/diggsweden/forge-ci/internal/domain/snapshotimage"
 )
 
 // campaignSupportsLifecycle reports whether a demo runs the lifecycle event on
@@ -65,4 +66,61 @@ func serviceSnapshotAdmission(checkout, source string) error {
 	}
 
 	return nil
+}
+
+// campaignSupportsSnapshot reports whether a demo runs the snapshot event on
+// a provider: whether it has the development route for every image the
+// planner plans from its declaration there.
+func campaignSupportsSnapshot(provider, checkout string) bool {
+	return campaignAdmitSnapshot(provider, checkout) == nil
+}
+
+// campaignAdmitSnapshot refuses a snapshot case whose demo has no
+// development route over every planned image: the declaration its release
+// builds its images from (ServiceSnapshotSource), which the planner must plan
+// in the snapshot's scope (snapshotImagesScope), on Forgejo through the
+// harness's service development workflow, which is pinned as the demo's
+// Forgejo release workflow pins the layer, on GitLab through the component,
+// which needs nothing of the demo's but the declaration. The snapshot
+// releases nothing, so no release build is asked for.
+func campaignAdmitSnapshot(provider, checkout string) error {
+	if !isCampaignProvider(provider) {
+		return fmt.Errorf("%s runs on %s and %s: %w", TrialSnapshot, campaignForgejo, campaignGitLab, errs.ErrValidation)
+	}
+
+	if _, err := snapshotImagesAdmission(checkout); err != nil {
+		return err
+	}
+
+	if provider != campaignForgejo {
+		return nil
+	}
+
+	if present, err := exists(filepath.Join(checkout, filepath.FromSlash(forgejoReleaseWorkflow))); err != nil || !present {
+		return fmt.Errorf("%s: the demo has no %s to pin the harness's development workflow by, so %w: %w", TrialSnapshot, forgejoReleaseWorkflow, errNoDevelopmentRoute, errs.ErrValidation)
+	}
+
+	return nil
+}
+
+// snapshotImagesAdmission plans the demo's source declaration in the
+// snapshot's scope and returns the plan; the planner's or the scope's
+// refusal is the demo's.
+func snapshotImagesAdmission(checkout string) (snapshotimage.Plan, error) {
+	source, err := ServiceSnapshotSource(checkout)
+	if err != nil {
+		return snapshotimage.Plan{}, err
+	}
+
+	body, err := os.ReadFile(filepath.Join(checkout, source)) //nolint:gosec // G304: a fixed file under the demo checkout the harness itself chose.
+	if err != nil {
+		return snapshotimage.Plan{}, fmt.Errorf("%s: the demo has no %s, so %w: %w", TrialSnapshot, source, errNoDevelopmentRoute, errs.ErrValidation)
+	}
+
+	_, plan, err := snapshotDeclarationOverlay(string(body), snapshotImagesScope)
+	if err != nil {
+		return snapshotimage.Plan{}, fmt.Errorf("%s: %s is not a snapshot's declaration, so the demo has no development route: %w: %w", TrialSnapshot, source, err, errs.ErrValidation)
+	}
+
+	return plan, nil
 }

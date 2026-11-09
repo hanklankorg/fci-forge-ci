@@ -915,8 +915,8 @@ test-live-image kind forge_lab:
 # and verifies anonymous reads are refused. On the lab, the lock, the preflight
 # and the log are those of `just test-live`.
 #
-# forgejo, events pull-request, release and lifecycle, on the lab. A setting
-# is key=value:
+# forgejo, events pull-request, release, lifecycle and snapshot, on the lab.
+# A setting is key=value:
 #
 #   <VARIABLE>=<value>   a repository variable, name in capitals. The values
 #                        @layer-commit and @request-commit stand for the
@@ -956,6 +956,15 @@ test-live-image kind forge_lab:
 #   just test-live-consumer forgejo /absolute/hello-maven-service/consumer lifecycle CI_JOB_IMAGE=<nanolinter java image, digest reference> RELEASE_PLATFORMS=linux/amd64
 #   just test-live-consumer forgejo /absolute/hello-cargo-container/consumer lifecycle CI_JOB_IMAGE=<nanolinter rust image, digest reference> RELEASE_PLATFORMS=linux/amd64
 #
+# snapshot is the lifecycle's development phase alone, over every image the
+# planner plans from the demo's declaration (hello-cargo-workspace): the
+# harness's service development workflow dispatched on main, judged by the
+# frozen plan and each planned image's receipt; nothing is released. It takes
+# CI_JOB_IMAGE and CI_IMAGE_BUILDER as the lifecycle does, and none of the
+# release's settings. A plan of one image also probes its readiness.
+#
+#   just test-live-consumer forgejo /absolute/hello-cargo-workspace/consumer snapshot CI_JOB_IMAGE=<nanolinter rust image, digest reference> CI_IMAGE_BUILDER=buildah
+#
 # gitlab, on the lab, with prepared Docker image archives as settings, as for
 # `just demo gitlab`. pull-request runs the consumer's own MR gate and takes
 # job-archive= (the MR job image) and lint-archive= (default
@@ -977,6 +986,16 @@ test-live-image kind forge_lab:
 #   just test-live-consumer gitlab /absolute/hello-maven-service/consumer lifecycle job-archive=<path> build-archive=<path> signer-archive=<path> lint-archive=<path> version=0.2.0 version-bump=maven job-user=65532:65532
 #   just test-live-consumer gitlab /absolute/hello-cargo-container/consumer lifecycle job-archive=<path> build-archive=<path> signer-archive=<path> lint-archive=<path> version=0.2.0 version-bump=cargo job-user=65532:65532
 #
+# snapshot is the snapshot-images component alone, in one project under one
+# policy, on a pipeline the harness requests on main, judged by the frozen
+# plan and each planned image's receipt (hello-cargo-workspace,
+# hello-monorepo). It takes job-archive= alone; each producer builds in the
+# runtime image of its toolchain family,
+# FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_<FAMILY>, and the images with the lane's
+# builder, FORGE_CI_LIVE_BUILDAH_JOB_IMAGE_ARCHIVE or the kaniko one.
+#
+#   just test-live-consumer gitlab /absolute/hello-monorepo/consumer snapshot job-archive=<path>
+#
 # github, events pull-request, dev-release, release and lifecycle, on hosted GitHub. Runs
 # inside Forge Lab's hosted session (`just github run --org ... --prefix ...
 # --fixtures none` there), which writes the private context
@@ -994,7 +1013,7 @@ test-live-image kind forge_lab:
 # docs/testing.md, Trying a consumer on GitHub, has the prerequisites.
 [arg('repo', help='Absolute path to a clean consumer checkout, for example /absolute/myapp')]
 [arg('forge', help='forgejo, gitlab or github')]
-[arg('event', help='pull-request, release or lifecycle; github also dev-release')]
+[arg('event', help='pull-request, release, lifecycle or snapshot; github pull-request, dev-release, release or lifecycle')]
 [arg('settings', help='key=value settings; gitlab: job-archive=, build-archive=, signer-archive=, lint-archive=; github: org=<id>; see docs/testing.md')]
 [doc('Live; run a consumer against this engine')]
 [group('live')]
@@ -1023,11 +1042,14 @@ test-live-consumer forge repo event *settings:
     FORGE_CI_LIVE_CONSUMER_SETTINGS="$(printf '%s\n' "${settings[@]}")"
     export FORGE_CI_LIVE_CONSUMER_SETTINGS
     case "$forge:$event" in
-    forgejo:lifecycle)
+    forgejo:lifecycle | forgejo:snapshot)
         # The development phase is the demo's service snapshot, with the demo's
-        # readiness probe and no runtime fixture.
+        # readiness probe and no runtime fixture; a snapshot of several images
+        # has no one service and probes none.
         export FORGE_CI_LIVE_SERVICE_READINESS_URL=http://127.0.0.1:8080/health FORGE_CI_LIVE_SERVICE_FIXTURE=''
-        exec bash scripts/ci/run-live-tests.sh focused '^TestForgejoLayer_ConsumerLifecycle$'
+        scenario=TestForgejoLayer_ConsumerLifecycle
+        [[ $event != snapshot ]] || scenario=TestForgejoLayer_ServiceSnapshot
+        exec bash scripts/ci/run-live-tests.sh focused "^${scenario}$"
         ;;
     forgejo:*)
         exec bash scripts/ci/run-live-tests.sh focused '^TestForgejoLayer_ConsumerTrial$'
@@ -1041,6 +1063,14 @@ test-live-consumer forge repo event *settings:
         export FORGE_CI_LIVE_CONSUMER_IMAGE_ARCHIVE="$FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE"
         unset FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE
         exec bash scripts/ci/run-live-tests.sh focused '^TestGitLabLayer_ConsumerTrial$'
+        ;;
+    gitlab:snapshot)
+        if [[ -z "${FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE:-}" || -n "${FORGE_CI_LIVE_BUILD_IMAGE_ARCHIVE:-}${FORGE_CI_LIVE_SIGNER_IMAGE_ARCHIVE:-}" ||
+            ${#settings[@]} != 0 ]]; then
+            printf 'a GitLab snapshot takes job-archive=<path> alone\n' >&2
+            exit 2
+        fi
+        exec bash scripts/ci/run-live-tests.sh focused '^TestGitLabLayer_ServiceSnapshot$'
         ;;
     gitlab:release | gitlab:lifecycle)
         for name in job build signer; do
@@ -1066,7 +1096,7 @@ test-live-consumer forge repo event *settings:
             -run="^${scenario}$" ./internal/livetest/githubconsumer/
         ;;
     gitlab:*)
-        printf 'a GitLab trial event is pull-request, release or lifecycle, got %q\n' "$event" >&2
+        printf 'a GitLab trial event is pull-request, release, lifecycle or snapshot, got %q\n' "$event" >&2
         exit 2
         ;;
     *)

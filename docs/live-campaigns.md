@@ -203,6 +203,7 @@ the caller, is refused naming that value:
 ```bash
 just campaign-lane ~/campaigns/lc gitlab test/live/campaigns/lifecycle-gitlab.cases hello-maven-service/lifecycle/image-builder=buildah/visibility=public
 just campaign-lane ~/campaigns/lc forgejo test/live/campaigns/lifecycle-forgejo.cases hello-maven-service/lifecycle/image-builder=buildah/visibility=private
+just campaign-lane ~/campaigns/sn gitlab test/live/campaigns/snapshot-gitlab.cases hello-monorepo/snapshot/image-builder=buildah/visibility=public
 ```
 
 A hosted GitHub cell is the demo's fixture workflow for the event, run by
@@ -343,7 +344,9 @@ token; the release secrets are set at the release phase and not before. It
 runs outside the campaign route, inside Forge Lab's hosted session:
 `just test-live-consumer github <checkout> lifecycle org=<org-id>`
 (docs/testing.md, Trying a consumer on GitHub). On GitHub the event is
-admitted for the `hello-maven-service` demo alone.
+admitted for the demos that ship all three fixtures and a service
+snapshot's declaration: `hello-maven-service`, `hello-cargo-container`,
+`hello-go-service` and `hello-npm-service`.
 
 **Development routes.** On Forgejo and GitLab the event is admitted for a
 demo with a development route on the provider, read from the demo's own
@@ -378,10 +381,10 @@ behind it:
 | hello-maven-service | lifecycle | lifecycle | artifact-first Maven application and its runtime image |
 | hello-cargo-container | lifecycle | lifecycle | container-first from `release-images.yml`, no producer |
 | hello-npm-service | lifecycle | lifecycle | artifact-first: `artifacts.yml` is a service snapshot's (one npm producer), with the snapshot-npm-layout merge's layout, and the demo ships its GitLab release build |
-| hello-cargo-workspace | — | — | two runtime images; the trial judges one container |
-| hello-go-service | lifecycle | — | container-first from `artifacts.yml`, no producer; its `extract.binary` is the release's, which the snapshot does not run; no GitLab release build, as no example demo ships one |
+| hello-cargo-workspace | — | — | two runtime images; the lifecycle judges one container (the snapshot event judges both, see [Snapshot](#snapshot)) |
+| hello-go-service | lifecycle | — | container-first from `artifacts.yml`, no producer; its `extract.binary` is the release's, which the snapshot does not run; no GitLab release build, as no example demo ships one (the snapshot event runs its development phase on GitLab, see [Snapshot](#snapshot)) |
 | hello-go-cli, hello-maven, hello-npm-package | — | — | no container, so no snapshot; hello-maven's library development route publishes a SNAPSHOT package, another shape |
-| hello-gradle, hello-monorepo, hello-android, hello-ios | — | — | no Forgejo flow or no container; the example demos ship no GitLab release build |
+| hello-gradle, hello-monorepo, hello-android, hello-ios | — | — | no Forgejo flow or no container; the example demos ship no GitLab release build (the snapshot event judges hello-monorepo's two images on GitLab, see [Snapshot](#snapshot)) |
 
 amd64 runners only for now. Standalone
 `test-live-consumer <forge> <checkout> lifecycle …` runs the same test
@@ -395,6 +398,83 @@ has no demo yet: `hello-go-cli` has the GPG
 declaration (`artifacts-gpg.yml`) but no development route, and the Forgejo
 demos' release workflows take the default declaration, so selecting another
 would be a workflow of the demo's, not a setting.
+
+### Snapshot
+
+`test/live/campaigns/snapshot-forgejo.cases` and
+`test/live/campaigns/snapshot-gitlab.cases` run the `snapshot` event: the
+lifecycle's development phase alone, over every image the planner plans from
+the demo's declaration. It is the route of every development cell no
+lifecycle line runs: the multi-image demos' until their full lifecycle
+exists, and `hello-go-service`'s on GitLab, which has no GitLab release
+build. It releases nothing and does not couple to a release's image
+fan-out:
+
+```text
+consumer hello-cargo-workspace snapshot CI_JOB_IMAGE=@JOB_IMAGE_RUST CI_IMAGE_BUILDER=buildah
+consumer hello-cargo-workspace snapshot job-archive=@FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_RUST
+consumer hello-monorepo snapshot job-archive=@FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_JAVA
+consumer hello-go-service snapshot job-archive=@FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_GO
+```
+
+Each cell reruns with one command:
+
+```bash
+just campaign-lane <dir> forgejo test/live/campaigns/snapshot-forgejo.cases hello-cargo-workspace/snapshot/image-builder=buildah/visibility=public
+just campaign-lane <dir> gitlab test/live/campaigns/snapshot-gitlab.cases hello-cargo-workspace/snapshot/image-builder=buildah/visibility=public
+just campaign-lane <dir> gitlab test/live/campaigns/snapshot-gitlab.cases hello-monorepo/snapshot/image-builder=buildah/visibility=public
+just campaign-lane <dir> gitlab test/live/campaigns/snapshot-gitlab.cases hello-go-service/snapshot/image-builder=buildah/visibility=public
+```
+
+The declaration is the lifecycle's, `livetest.ServiceSnapshotSource`, overlaid
+as native linux/amd64 and unsigned into `.forge-ci/service-development.yml`.
+The planner decides the images; a case names none. The trial's scope is every
+planned image under the run's one image repository, so no container may name
+an image of its own, each image must declare native amd64, and a declared
+request for provenance is refused rather than dropped
+(`snapshotImagesAdmitted`). The acceptance is the frozen plan, equal to the
+plan the planner makes of the staged declaration for the selected source,
+every build native amd64, and one receipt per planned image as the product's
+own collection requires (`snapshotimage.Collect`), each digest the registry
+serves under its receipt's tag, with no tag but the planned images' and
+their `-amd64` architecture tags. The readiness goes to the plan's one
+service, where the plan has one image (`livetest.ServiceReadiness`); a plan
+of several images declares no primary service among them, so none is
+probed. The branches stay where the trial pushed them, and the repository
+holds no tag and no release.
+
+On Forgejo (`TestForgejoLayer_ServiceSnapshot`) the consumer's main and a
+change on `development` are pushed with Actions off; the harness's
+`development.yml` is the only workflow planned, and the only run: it is
+dispatched on `main` and snapshots `development`. The receipts are the
+snapshot-images workflow's own `snapshot-images` artifact. The settings are
+the lifecycle's `CI_JOB_IMAGE` and `CI_IMAGE_BUILDER` (with
+`CI_IMAGE_BUILDER_JOB_IMAGE` under kaniko), and none of the release's. The
+harness pins its workflow as the demo's `.forgejo/workflows/release.yml` pins
+the layer, so a demo without one has no Forgejo route: `hello-monorepo`,
+whose example ships no Forgejo workflows, is refused on Forgejo, and adding
+them is the example's work.
+
+On GitLab (`TestGitLabLayer_ServiceSnapshot`) one pinned policy includes the
+`snapshot-images` component alone, admitted only for the pipeline the
+harness requests on `main` through the API; the pushes of `main` and
+`development` match no rule. The frozen plan is the parent's `Snapshot:
+plan` job's, the receipts the child's `Snapshot: collect` job's. The
+component probes no readiness, so none is claimed. The event takes
+`job-archive=` alone, the component's job image; each producer builds in
+the runtime image of its toolchain family,
+`FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_<FAMILY>`, which `campaign-prepare`
+prepares from the plan (none for the container-first Cargo workspace,
+`java` and `node` for the monorepo), and the images with the lane's
+builder. The development registry credential is a protected variable scoped
+to the publisher's environment, on a protected `main`. No release build,
+signer or lint archive is asked for.
+
+The generated [Testing matrices](testing-matrices.md) show these lines in the
+snapshot columns, `📝 snapshot`; a run's verdict is evidence for the
+`development` flow of the overlay. amd64 runners only for now. Standalone
+`test-live-consumer <forge> <checkout> snapshot …` runs the same test
+outside a campaign.
 
 ### Explicit-input GitLab regressions
 

@@ -8,7 +8,8 @@
 # (none for a container-first service), builds the image and publishes it;
 # readiness then runs the published digest with Podman on the container
 # runner. The snapshot's own producer build is the build; nothing is built
-# twice.
+# twice. A plan of several images has no one service to probe, and the
+# harness writes the snapshot job alone; readiness stays the last job.
 name: Service development
 on:
   workflow_dispatch:

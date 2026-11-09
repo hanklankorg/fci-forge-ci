@@ -38,7 +38,7 @@ const lifecycleGoJobImage = "registry.invalid/go@sha256:dddddddddddddddddddddddd
 const lifecycleCampaignEnv = "CAMPAIGN_COMMIT=" + campaignHead + "\nJOB_IMAGE_JAVA=" + snapshotJobImage + "\nJOB_IMAGE_RUST=" + lifecycleRustJobImage +
 	"\nJOB_IMAGE_JAVASCRIPT_TYPESCRIPT=" + lifecycleNodeJobImage + "\nJOB_IMAGE_GO=" + lifecycleGoJobImage +
 	"\nKANIKO_JOB_IMAGE=" + lifecycleKanikoJobImage + "\n" +
-	"FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_JAVA=/c/java.tar\nFORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_RUST=/c/rust.tar\nFORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_NODE=/c/node.tar\n" +
+	"FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_JAVA=/c/java.tar\nFORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_RUST=/c/rust.tar\nFORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_NODE=/c/node.tar\nFORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_GO=/c/go.tar\n" +
 	"FORGE_CI_LIVE_SIGNER_IMAGE_ARCHIVE=/c/signer.tar\nLINT_IMAGE_ARCHIVE_JAVA=/c/lint-java.tar\nLINT_IMAGE_ARCHIVE_RUST=/c/lint-rust.tar\nLINT_IMAGE_ARCHIVE_JAVASCRIPT_TYPESCRIPT=/c/lint-js.tar\n"
 
 // lifecycleDemos are the demos a lifecycle's admission reads in these tests,
@@ -46,13 +46,15 @@ const lifecycleCampaignEnv = "CAMPAIGN_COMMIT=" + campaignHead + "\nJOB_IMAGE_JA
 // the Cargo container and the Go service have a development route, the Go
 // service on Forgejo alone, since it ships no GitLab release build; the npm
 // service's declaration is one too; the Cargo workspace declares two images,
-// more than the trial judges; the Go CLI declares no container.
-var lifecycleDemos = []string{"hello-maven-service", "hello-cargo-container", "hello-npm-service", "hello-go-service", "hello-cargo-workspace", "hello-go-cli"}
+// more than the lifecycle judges and what the snapshot event judges; the
+// monorepo two images of two producers, without a root Containerfile or a
+// Forgejo workflow; the Go CLI declares no container.
+var lifecycleDemos = []string{"hello-maven-service", "hello-cargo-container", "hello-npm-service", "hello-go-service", "hello-cargo-workspace", "hello-monorepo", "hello-go-cli"}
 
 // shippedDemoFiles are the files a demo's admission reads for their presence,
-// not their content: the lifecycle's root Containerfile and the GitLab
-// release build.
-var shippedDemoFiles = []string{"Containerfile", GitLabConsumerBuildScript}
+// not their content: the lifecycle's root Containerfile, the GitLab release
+// build, and the Forgejo release workflow a snapshot's workflow is pinned by.
+var shippedDemoFiles = []string{"Containerfile", GitLabConsumerBuildScript, forgejoReleaseWorkflow}
 
 // writeShippedDemoStubs lays stubs of shippedDemoFiles out for a demo under
 // the campaign's demos directory, each where test/live/demos/<demo>/consumer
@@ -361,7 +363,7 @@ func TestCampaignLifecycle_RefusesWhatItCannotRun(t *testing.T) {
 		provider, line, want string
 	}{
 		"demo without a container":        {campaignForgejo, "consumer hello-go-cli lifecycle CI_JOB_IMAGE=" + snapshotJobImage, "no root Containerfile"},
-		"an event the demo lacks":         {campaignForgejo, "consumer hello-maven-service dev-release", "pull-request, release or lifecycle"},
+		"an event the demo lacks":         {campaignForgejo, "consumer hello-maven-service dev-release", "pull-request, release, lifecycle or snapshot"},
 		"an event a demo without a route": {campaignForgejo, "consumer hello-go-cli dev-release", "pull-request or release:"},
 		"no job image":                    {campaignForgejo, "consumer hello-maven-service lifecycle RELEASE_PLATFORMS=linux/amd64", "CI_JOB_IMAGE=<digest reference>"},
 		"floating job image":              {campaignForgejo, "consumer hello-maven-service lifecycle CI_JOB_IMAGE=registry.invalid/java:latest", "CI_JOB_IMAGE=<digest reference>"},

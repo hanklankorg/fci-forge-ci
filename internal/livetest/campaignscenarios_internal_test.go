@@ -23,7 +23,7 @@ func TestCampaignCannotRelabelPartialTrialsAsProductLifecycle(t *testing.T) {
 		t.Run(provider, func(t *testing.T) {
 			t.Parallel()
 
-			for _, event := range []string{TrialDevRelease, "snapshot", "checks-only"} {
+			for _, event := range []string{TrialDevRelease, matrixDevelopment, "checks-only"} {
 				t.Run(event, func(t *testing.T) {
 					t.Parallel()
 

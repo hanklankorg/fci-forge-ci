@@ -38,7 +38,12 @@ func TestReadMatrixEvidenceRefusesMalformedLines(t *testing.T) {
 // line is the fixture workflow a demo ships, a refusal carries the planner's
 // or the admission's reason, the harness's scope listed apart, and a GitLab
 // lifecycle without the demo's release build is not applicable. The Go
-// service extracts its binaries, yet its snapshot is container-first.
+// service extracts its binaries, yet its snapshot is container-first, and
+// the snapshot event runs it on GitLab, where no release build is needed.
+// Each one-image service ships its hosted development fixture, so its GitHub
+// development and lifecycle cells have a line.
+// The multi-image demos' snapshot lines judge every planned image; the
+// monorepo has no Forgejo workflow to pin the harness's workflow by.
 func TestRenderTestingMatricesReadsTheShippedTree(t *testing.T) {
 	t.Parallel()
 
@@ -51,15 +56,19 @@ func TestRenderTestingMatricesReadsTheShippedTree(t *testing.T) {
 		"| hello-maven-service (java · artifact-first · one image) |",
 		"| hello-cargo-container (rust · container-first · one image) |",
 		"| hello-npm-service (node · artifact-first · one image) |",
-		"| 📝 lifecycle / 📝 lifecycle / admitted |",
+		"| 📝 lifecycle / 📝 lifecycle / 📝 lifecycle |",
 		"| hello-ios (xcode-ios · no container · no image) | ⬚ / ⬚ / 📝 |",
 		"- hello-monorepo, github: the demo has no root Containerfile",
 		"| hello-go-cli (go · no container · no image) |",
 		"| hello-go-service (go · container-first · one image) |",
-		"| — | 📝 lifecycle / — / admitted |",
-		"| 📝 / — / ⬚ (admitted, no line) |",
+		"| — | 📝 lifecycle / 📝 snapshot / 📝 lifecycle |",
+		"| hello-cargo-workspace (rust · container-first · 2 images) |",
+		"| — | 📝 snapshot / 📝 snapshot / ⛔ |",
+		"| ⛔ / 📝 snapshot / ⛔ | — |",
+		"- hello-monorepo, forgejo snapshot: the demo has no .forgejo/workflows/release.yml",
+		"| 📝 / — / 📝 |",
 		"Outside the live harness's scope, the trial's acceptance and not a product rule:\n\n- hello-cargo-workspace, forgejo:",
-		"|  | container-first | 📝 hello-cargo-container | 📝 hello-cargo-container | ⬚ hello-cargo-container (admitted, no line) |",
+		"|  | container-first | 📝 hello-cargo-container | 📝 hello-cargo-container | 📝 hello-cargo-container |",
 		"| architecture | amd64 |",
 	} {
 		if !strings.Contains(page, want) {
@@ -231,5 +240,26 @@ forgejo hello-maven-service lifecycle ✅ visibility=private image-builder=kanik
 
 	if _, err := readMatrixEvidence(writeFile(t, filepath.Join(t.TempDir(), "evidence.txt"), seed)); err != nil {
 		t.Fatalf("the overlay does not read its own seed: %v", err)
+	}
+}
+
+// A snapshot run is evidence for the matrices' snapshot flow, development,
+// on either lab forge, whatever event name it was started with.
+func TestSeedTestingEvidenceReadsSnapshotRunsAsDevelopment(t *testing.T) {
+	t.Parallel()
+
+	live := t.TempDir()
+	for provider, scenario := range map[string]string{campaignForgejo: "TestForgejoLayer_ServiceSnapshot", campaignGitLab: "TestGitLabLayer_ServiceSnapshot"} {
+		writeFile(t, filepath.Join(live, provider, "verdict.json"), `{"verdict":"passed","run":{"provider":"`+provider+`","started_at":"2026-11-09T10:00:00Z",`+
+			`"scenario":"^`+scenario+`$","inputs":{"forge_ci_live_consumer":"/c/demos/hello-cargo-workspace/consumer","forge_ci_live_consumer_event":"snapshot"}}}`)
+	}
+
+	seed, err := SeedTestingEvidence(live, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if want := "forgejo hello-cargo-workspace development ✅ 2026-11-09\ngitlab hello-cargo-workspace development ✅ 2026-11-09\n"; seed != want {
+		t.Fatalf("seed:\n%s\nwant:\n%s", seed, want)
 	}
 }

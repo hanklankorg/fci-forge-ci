@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"slices"
 	"testing"
 
 	"github.com/diggsweden/forge-ci/internal/domain/snapshotimage"
@@ -22,11 +23,14 @@ const developmentWorkflow = "development.yml"
 
 // requireServiceDevelopment reads what a dispatched service development run
 // left: the frozen snapshot plan bound to the selected source head and
-// branch, one amd64 image receipt, the registry's digest and tag with no
-// stable alias, and the readiness evidence binding the published digest to
-// that source. It returns the image receipt and the count of the producers
-// the plan built, none for a container-first service.
-func requireServiceDevelopment(t *testing.T, target livetest.Target, repo string, run livetest.WorkflowRun, consumer livetest.Consumer, config livetest.ServiceDevelopmentConfig, head, image string) (snapshotimage.Receipt, int) {
+// branch, the receipts of every planned amd64 image as the snapshot
+// workflow's collect job exports them, the registry's digest and tag of each
+// with no stable alias, and, where the plan has a service to probe
+// (livetest.ServiceReadiness), the readiness evidence binding its published
+// digest to that source. It returns the receipts, in plan order, and the
+// count of the producers the plan built, none for a container-first
+// service.
+func requireServiceDevelopment(t *testing.T, target livetest.Target, repo string, run livetest.WorkflowRun, consumer livetest.Consumer, config livetest.ServiceDevelopmentConfig, head, image string) ([]snapshotimage.Receipt, int) {
 	t.Helper()
 
 	if run.Status != jobSuccess || (run.Event != "" && run.Event != "workflow_dispatch") || run.TriggerEvent != "workflow_dispatch" || run.WorkflowID != developmentWorkflow {
@@ -36,7 +40,7 @@ func requireServiceDevelopment(t *testing.T, target livetest.Target, repo string
 	artifacts := map[string]map[string][]byte{}
 
 	for _, artifact := range livetest.RunArtifacts(t, target, repo, run.ID) {
-		if artifact.Name != "service-evidence-"+head && artifact.Name != "snapshot-images-plan" {
+		if !slices.Contains([]string{"service-evidence-" + head, snapshotArtifact, snapshotArtifact + "-plan"}, artifact.Name) {
 			continue
 		}
 
@@ -54,22 +58,50 @@ func requireServiceDevelopment(t *testing.T, target livetest.Target, repo string
 		artifacts[artifact.Name] = tree
 	}
 
-	evidence := artifacts["service-evidence-"+head]
-	receipt, expected := requireServiceSnapshot(livetest.Context(t), t, target, repo, consumer, config.Branch, head, image, artifacts["snapshot-images-plan"]["snapshot-plan.json"], evidence["container-images.json"])
+	receipts, expected := requireSnapshotImages(livetest.Context(t), t, target, repo, consumer, config.Branch, head, image,
+		artifacts[snapshotArtifact+"-plan"]["snapshot-plan.json"], artifacts[snapshotArtifact]["container-images.json"])
 
-	if string(evidence["image-ref.txt"]) != receipt.Ref+"\n" || string(evidence["source-sha.txt"]) != head+"\n" || string(evidence["readiness-url.txt"]) != config.ReadinessURL+"\n" || len(evidence["readiness-body.txt"]) == 0 {
-		t.Fatalf("readiness evidence does not bind selected source and published image: %+v", receipt)
+	evidence, probed := artifacts["service-evidence-"+head]
+	if probed != livetest.ServiceReadiness(expected) {
+		t.Fatalf("readiness evidence present %t, want %t for a plan of %d images", probed, !probed, len(expected.Images))
 	}
 
-	return receipt, len(expected.Artifacts)
+	if probed && (string(evidence["image-ref.txt"]) != receipts[0].Ref+"\n" || string(evidence["source-sha.txt"]) != head+"\n" ||
+		string(evidence["readiness-url.txt"]) != config.ReadinessURL+"\n" || len(evidence["readiness-body.txt"]) == 0) {
+		t.Fatalf("readiness evidence does not bind selected source and published image: %+v", receipts[0])
+	}
+
+	return receipts, len(expected.Artifacts)
 }
 
-// requireServiceSnapshot reads what a service snapshot of a consumer left,
-// from its frozen plan and its receipts: the plan the trial
-// expects for the selected source head and branch, one amd64 image receipt
-// bound to them, the registry serving that digest under the receipt's tag
-// with no stable alias. It returns the receipt and the expected plan.
+// snapshotArtifact is the snapshot-images workflow's artifact namespace, its
+// artifact-name input's default: the collect job's receipts, and with -plan,
+// the frozen plan.
+const snapshotArtifact = "snapshot-images"
+
+// requireServiceSnapshot is requireSnapshotImages of a service snapshot, the
+// lifecycle's development phase: its plan has one image, whose receipt it
+// returns with the expected plan.
 func requireServiceSnapshot(ctx context.Context, t *testing.T, target livetest.Target, repo string, consumer livetest.Consumer, branch, head, image string, plan, receipts []byte) (snapshotimage.Receipt, snapshotimage.Plan) {
+	t.Helper()
+
+	published, expected := requireSnapshotImages(ctx, t, target, repo, consumer, branch, head, image, plan, receipts)
+	if len(published) != 1 {
+		t.Fatalf("a service snapshot published %d images, want one", len(published))
+	}
+
+	return published[0], expected
+}
+
+// requireSnapshotImages reads what a snapshot of a consumer left, from its
+// frozen plan and its receipts: the plan the trial expects for the selected
+// source head and branch, which the planner makes of the staged declaration,
+// every build native amd64, and a receipt of each planned image, bound to
+// them as the product's own collection requires (snapshotimage.Collect),
+// each image the registry serves under its receipt's tag, with no alias but
+// the tags of the planned images. It returns the receipts, in plan order,
+// and the expected plan.
+func requireSnapshotImages(ctx context.Context, t *testing.T, target livetest.Target, repo string, consumer livetest.Consumer, branch, head, image string, plan, receipts []byte) ([]snapshotimage.Receipt, snapshotimage.Plan) {
 	t.Helper()
 
 	var frozen snapshotimage.Plan
@@ -82,36 +114,47 @@ func requireServiceSnapshot(ctx context.Context, t *testing.T, target livetest.T
 		SourceDateEpoch: frozen.SourceDateEpoch, Publish: true,
 	})
 	if err := frozen.Validate(); err != nil || frozen.SourceSHA != head || frozen.SourceBranch != branch ||
-		!reflect.DeepEqual(frozen, expected) || len(frozen.Builds) != 1 || frozen.Builds[0].Arch != "amd64" {
-		t.Fatalf("wrong frozen service plan: %+v: %v", frozen, err)
+		!reflect.DeepEqual(frozen, expected) || len(frozen.Builds) != len(frozen.Images) ||
+		slices.ContainsFunc(frozen.Builds, func(build snapshotimage.Build) bool { return build.Arch != "amd64" }) {
+		t.Fatalf("wrong frozen snapshot plan: %+v: %v", frozen, err)
 	}
 
 	var published []snapshotimage.Receipt
-	if err := json.Unmarshal(receipts, &published); err != nil || len(published) != 1 {
-		t.Fatalf("missing service receipt: %v", err)
+	if err := json.Unmarshal(receipts, &published); err != nil {
+		t.Fatalf("missing snapshot receipts: %v", err)
 	}
 
-	receipt := published[0]
-	if receipt.SourceSHA != head || receipt.SourceBranch != branch || receipt.ImageRepository != image || receipt.Ref != image+"@"+receipt.Digest || receipt.Tag != frozen.Tag {
-		t.Fatalf("the receipt does not bind the selected source and the published image: %+v", receipt)
+	published, err := snapshotimage.Collect(frozen, published)
+	if err != nil {
+		t.Fatalf("the receipts do not bind the selected source and every planned image: %v", err)
 	}
 
-	imageConfig := livetest.ImageConfig(t, target, repo, receipt.Digest) //nolint:contextcheck // registry helper derives a bounded context from the test owner.
-	if imageConfig.OS != "linux" || imageConfig.Architecture != "amd64" ||
-		imageConfig.Config.Labels["org.opencontainers.image.revision"] != head ||
-		imageConfig.Config.Labels["org.opencontainers.image.ref.name"] != branch {
-		t.Fatal("published platform image does not match the selected architecture, source and branch")
-	}
+	tags := map[string]bool{}
 
-	if digest, found := livetest.ImageDigestContext(ctx, t, target, repo, receipt.Tag); !found || digest != receipt.Digest {
-		t.Fatalf("snapshot tag does not resolve to receipt digest: %s", digest)
+	for _, receipt := range published {
+		if receipt.ImageRepository != image {
+			t.Fatalf("the receipt of %s names %s, not the run's image repository %s", receipt.Name, receipt.ImageRepository, image)
+		}
+
+		imageConfig := livetest.ImageConfig(t, target, repo, receipt.Digest) //nolint:contextcheck // registry helper derives a bounded context from the test owner.
+		if imageConfig.OS != "linux" || imageConfig.Architecture != "amd64" ||
+			imageConfig.Config.Labels["org.opencontainers.image.revision"] != head ||
+			imageConfig.Config.Labels["org.opencontainers.image.ref.name"] != branch {
+			t.Fatalf("published image %s does not match the selected architecture, source and branch", receipt.Name)
+		}
+
+		if digest, found := livetest.ImageDigestContext(ctx, t, target, repo, receipt.Tag); !found || digest != receipt.Digest {
+			t.Fatalf("snapshot tag %s does not resolve to receipt digest: %s", receipt.Tag, digest)
+		}
+
+		tags[receipt.Tag], tags[receipt.Tag+"-amd64"] = true, true
 	}
 
 	for tag := range livetest.RegistrySnapshot(t, target, repo) { //nolint:contextcheck // registry helper derives a bounded context from the test owner.
-		if tag != receipt.Tag && tag != receipt.Tag+"-amd64" {
+		if !tags[tag] {
 			t.Errorf("unexpected registry alias %s", tag)
 		}
 	}
 
-	return receipt, expected
+	return published, expected
 }
