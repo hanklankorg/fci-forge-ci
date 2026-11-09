@@ -72,7 +72,7 @@ linters:
         # package itself or anything under it, hence a "$" (exact) and a "/"
         # (subtree) entry per denied layer, so internal/clicolor is not cli.
         # Test files are composition roots and exempt: app tests may wire the
-        # real git adapter. internal/testutil and internal/livetest are test
+        # real git adapter. internal/testutil and test/live/internal/livetest are test
         # infrastructure and bound by none of these (testutil may import
         # adapters/git, livetest may import cli). Every other internal package
         # is a utility, stated with negated globs so a new package is covered
@@ -219,6 +219,6 @@ linters:
       # another while their per-forge subtests run in parallel, so each lab
       # forge and its single runner serve one scenario at a time
       # (docs/testing.md, "Within one scenario").
-      - path: "internal/livetest/conformance/.*_test\\.go"
+      - path: "test/live/conformance/.*_test\\.go"
         linters:
           - tparallel

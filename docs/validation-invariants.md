@@ -31,7 +31,7 @@ native acceptance.
   branch before creating the initial README; preparing subsequent tags must not
   recreate that file or mutate the existing commit. A rejected branch read must
   stop before writes. Regression: `TestPrepareGitLabTagsSeedsOnlyTheFirstRelease`
-  in `internal/livetest/scratch_internal_test.go`.
+  in `test/live/internal/livetest/scratch_internal_test.go`.
 - A consecutive GitLab release needs a new admitted candidate. The generated
   release commit carries `[skip ci]`; signing the next request directly at that
   commit produces a skipped pipeline, not a second release. Reuse the protected
@@ -50,7 +50,7 @@ file can still match `.gitignore` (Cargo `src/bin` is one example). Ordinary
 the committed archive and rendered fixtures, never arbitrary uncommitted files.
 
 Regression: `TestGitHubConsumerPreservesTrackedIgnoredSource` in
-`internal/livetest/githubtrial_internal_test.go` also checks that uncommitted,
+`test/live/internal/livetest/githubtrial_internal_test.go` also checks that uncommitted,
 ignored local data does not enter the snapshot.
 
 ## 3. Validate workflow-to-CLI and workflow-to-workflow contracts
@@ -367,7 +367,8 @@ all three image references. Worker/BFF service startup and hardware HSM behavior
 are still outside that binary-inspection claim.
 
 These are explicit follow-up scenarios, not passing coverage. Extend the existing
-`internal/livetest` consumer/conformance suites and consumer-owned inspectors.
+`test/live/internal/livetest` kit, `test/live/conformance` and
+`test/live/githubconsumer` suites, and consumer-owned inspectors.
 
 | Priority | Missing oracle | Existing place to extend |
 | --- | --- | --- |

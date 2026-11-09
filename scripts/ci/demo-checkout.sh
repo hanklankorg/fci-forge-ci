@@ -3,7 +3,7 @@
 # SPDX-FileCopyrightText: 2026 Digg - Agency for Digital Government
 # SPDX-License-Identifier: CC0-1.0
 
-# Makes a built-in demo, test/live/demos/<name>/consumer, a repository of one
+# Makes a built-in demo, test/live/fixtures/consumers/<name>/consumer, a repository of one
 # commit, which a consumer trial reads like any clean consumer checkout. The
 # destination must be an empty directory or not exist yet.
 #
@@ -23,9 +23,9 @@ if [[ ! "$name" =~ ^[a-z0-9][a-z0-9-]*$ ]]; then
   printf 'demo name must be lowercase letters, digits and hyphens, got %q\n' "$name" >&2
   exit 2
 fi
-source_dir=$repo_root/test/live/demos/$name/consumer
+source_dir=$repo_root/test/live/fixtures/consumers/$name/consumer
 if [[ ! -d "$source_dir" ]]; then
-  printf 'no demo %q in test/live/demos\n' "$name" >&2
+  printf 'no demo %q in test/live/fixtures/consumers\n' "$name" >&2
   exit 2
 fi
 if [[ -e "$destination" && -n "$(ls -A -- "$destination")" ]]; then

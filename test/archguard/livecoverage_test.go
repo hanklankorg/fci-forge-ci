@@ -72,7 +72,7 @@ func TestEveryCommandGroupHasALiveDisposition(t *testing.T) {
 		}
 	}
 
-	scenarios := conformanceFuncs(t, filepath.Join(root, "internal", "livetest", "conformance"))
+	scenarios := conformanceFuncs(t, filepath.Join(root, "test", "live", "conformance"))
 
 	for group, disposition := range liveCoverage {
 		if !groups[group] {
@@ -91,7 +91,7 @@ func TestEveryCommandGroupHasALiveDisposition(t *testing.T) {
 
 		body, ok := scenarios[disposition.scenario]
 		if !ok {
-			t.Errorf("%s: scenario %s is not in internal/livetest/conformance", group, disposition.scenario)
+			t.Errorf("%s: scenario %s is not in test/live/conformance", group, disposition.scenario)
 
 			continue
 		}

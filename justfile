@@ -634,7 +634,7 @@ gen-runby:
 [doc('Generate the testing matrices sections')]
 [group('documentation')]
 gen-testing-matrices:
-    @go run ./internal/livetest/preflight testing-matrices . > docs/testing-matrices.md.tmp && mv docs/testing-matrices.md.tmp docs/testing-matrices.md
+    @go run ./test/live/internal/livetest/preflight testing-matrices . > docs/testing-matrices.md.tmp && mv docs/testing-matrices.md.tmp docs/testing-matrices.md
     @printf "Regenerated docs/testing-matrices.md\n"
 
 # Writes .forge-ci/artifacts.schema.json from the Go schema declarations.
@@ -866,7 +866,7 @@ test-live-preflight scenario="":
 [doc('Live; check restored signing inputs, no provider')]
 [group('live')]
 test-live-signing-inputs:
-    @exec go run ./internal/livetest/preflight signing-inputs
+    @exec go run ./test/live/internal/livetest/preflight signing-inputs
 
 # Build the signer or kaniko job image of this commit and publish it to the
 # lab registry, under the `forgeci` account, through Forge Lab's own image
@@ -968,7 +968,7 @@ test-live-image kind forge_lab budget="" cpus="" memory_mib="" compiler_jobs="":
 # harness's service development workflow dispatched on main, judged by the
 # frozen plan and each planned image's receipt; nothing is released. It takes
 # CI_JOB_IMAGE and CI_IMAGE_BUILDER as the lifecycle does, and none of the
-# release's settings. A plan of one image also probes its readiness.
+# release's settings. Snapshot-only trials probe no readiness, even for one image.
 #
 #   just test-live-consumer forgejo /absolute/hello-cargo-workspace/consumer snapshot CI_JOB_IMAGE=<nanolinter rust image, digest reference> CI_IMAGE_BUILDER=buildah
 #
@@ -990,8 +990,8 @@ test-live-image kind forge_lab budget="" cpus="" memory_mib="" compiler_jobs="":
 # archives and settings but scenario= and next-version=; the build image is
 # also the image the snapshot builds the service's producer with.
 #
-#   just test-live-consumer gitlab /absolute/hello-maven-service/consumer lifecycle job-archive=<path> build-archive=<path> signer-archive=<path> lint-archive=<path> version=0.2.0 version-bump=maven job-user=65532:65532
-#   just test-live-consumer gitlab /absolute/hello-cargo-container/consumer lifecycle job-archive=<path> build-archive=<path> signer-archive=<path> lint-archive=<path> version=0.2.0 version-bump=cargo job-user=65532:65532
+#   just test-live-consumer gitlab /absolute/hello-maven-service/consumer lifecycle job-archive=<path> build-archive=<path> signer-archive=<path> lint-archive=<path> version=0.2.0 job-user=65532:65532
+#   just test-live-consumer gitlab /absolute/hello-cargo-container/consumer lifecycle job-archive=<path> build-archive=<path> signer-archive=<path> lint-archive=<path> version=0.2.0 job-user=65532:65532
 #
 # snapshot is the snapshot-images component alone, in one project under one
 # policy, on a pipeline the harness requests on main, judged by the frozen
@@ -1009,8 +1009,12 @@ test-live-image kind forge_lab budget="" cpus="" memory_mib="" compiler_jobs="":
 # FORGE_LAB_GITHUB_CONTEXT names. org=<id> (required) is the numeric
 # organization ID authorized for this run. HEAD of this checkout is
 # force-pushed to main of <prefix>forge-ci in the organization, which builds
-# its runtime images and moves v0.90.0-pre. The consumer's GitHub fixture
-# workflows, pinned to that engine, then run in a disposable
+# its runtime images and moves v0.90.0-pre by default.
+# For parallel consumers, use FORGE_CI_LIVE_ENGINE_MODE=prepare once, then
+# FORGE_CI_LIVE_ENGINE_MODE=reuse; see docs/validation-invariants.md,
+# Freeze the engine before parallel consumers. Release and lifecycle also need
+# FORGE_CI_LIVE_GITHUB_RELEASE_TOKEN_FILE, separate from the session credential.
+# The consumer's GitHub fixture workflows, pinned to that engine, run in a disposable
 # <prefix><name>-<visibility>-<session> repository, deleted afterwards. Other
 # settings: workflow=<file> (not lifecycle), fixtures=<dir>, version=X.Y.Z and
 # image=<name> (release and lifecycle), RELEASE_PLATFORMS=<linux/amd64 and/or
@@ -1086,9 +1090,9 @@ test-live-consumer forge repo event *settings:
             [[ -n "${!variable:-}" ]] || { printf 'a GitLab %s needs %s-archive=<path>\n' "$event" "$name" >&2; exit 2; }
         done
         if [[ $event == release ]]; then
-            scenario=$(go run ./internal/livetest/preflight gitlab-consumer-scenario)
+            scenario=$(go run ./test/live/internal/livetest/preflight gitlab-consumer-scenario)
         else
-            go run ./internal/livetest/preflight gitlab-lifecycle-settings
+            go run ./test/live/internal/livetest/preflight gitlab-lifecycle-settings
             scenario=TestGitLabLayer_ConsumerLifecycle
         fi
         exec bash scripts/ci/run-live-tests.sh focused "^${scenario}$"
@@ -1101,7 +1105,7 @@ test-live-consumer forge repo event *settings:
         scenario=TestGitHubLayer_ConsumerTrial
         [[ $event != lifecycle ]] || scenario=TestGitHubLayer_ConsumerLifecycle
         GOTOOLCHAIN=local GOPROXY=off GOSUMDB=off exec go test -tags=live -count=1 -buildvcs=false -timeout=5h -v \
-            -run="^${scenario}$" ./internal/livetest/githubconsumer/
+            -run="^${scenario}$" ./test/live/githubconsumer/
         ;;
     gitlab:*)
         printf 'a GitLab trial event is pull-request, release, lifecycle or snapshot, got %q\n' "$event" >&2
@@ -1122,7 +1126,7 @@ test-live-consumer forge repo event *settings:
 # existing demo is refused, the consumer's history is pushed, and the
 # repository secrets the run set are deleted when it ends.
 #
-# The consumer is the built-in demo test/live/demos/<name>, committed as one
+# The consumer is the built-in demo test/live/fixtures/consumers/<name>, committed as one
 # commit, or any clean checkout named by checkout=/absolute/path. Settings
 # are the release trial's, plus per forge:
 #
@@ -1144,7 +1148,7 @@ test-live-consumer forge repo event *settings:
 #   just targets-revoke ~/.local/state/forge-lab/targets/demo.json   # when over
 #
 # docs/testing.md, Showing a consumer, lists the images each forge needs.
-[arg('name', help='Demo name: a directory of test/live/demos, or the name for checkout=')]
+[arg('name', help='Demo name: a directory of test/live/fixtures/consumers, or the name for checkout=')]
 [arg('forge', help='forgejo, gitlab or github')]
 [arg('settings', help='checkout=/abs for another consumer; release-trial key=value settings; gitlab: job-archive=, build-archive=, signer-archive=, lint-archive=, job-archive-<name>=, buildah-archive=; github: org=<id>')]
 [doc('Live; show a consumer and keep it')]
@@ -1189,8 +1193,8 @@ demo forge name *settings:
     # A built-in demo becomes a repository of one commit, which the trial
     # reads like any consumer checkout and the run removes when it ends.
     if [[ -z "$checkout" ]]; then
-        if [[ ! -d test/live/demos/"$name"/consumer ]]; then
-            printf 'no demo %q in test/live/demos; name another consumer with checkout=/absolute/path\n' "$name" >&2
+        if [[ ! -d test/live/fixtures/consumers/"$name"/consumer ]]; then
+            printf 'no demo %q in test/live/fixtures/consumers; name another consumer with checkout=/absolute/path\n' "$name" >&2
             exit 2
         fi
         checkout=$(mktemp -d "${TMPDIR:-/tmp}/forge-ci-demo.XXXXXXXX")
@@ -1208,7 +1212,7 @@ demo forge name *settings:
         export FORGE_LAB_GITHUB_CONTEXT="{{ invocation_directory() }}/$FORGE_LAB_GITHUB_CONTEXT"
     fi
     GOTOOLCHAIN=local GOPROXY=off GOSUMDB=off go test -tags=live -count=1 -buildvcs=false -timeout=5h -v \
-        -run="$scenario" ./internal/livetest/githubconsumer/
+        -run="$scenario" ./test/live/githubconsumer/
 
 # Build one runtime image of this tree for this machine's architecture and
 # save it as <directory>/forge-ci-runtime-<target>.tar, the archive a GitLab
@@ -1296,7 +1300,7 @@ demo-list forge *settings:
     if [[ -n "${FORGE_LAB_GITHUB_CONTEXT:-}" && "$FORGE_LAB_GITHUB_CONTEXT" != /* ]]; then
         export FORGE_LAB_GITHUB_CONTEXT="{{ invocation_directory() }}/$FORGE_LAB_GITHUB_CONTEXT"
     fi
-    GOTOOLCHAIN=local GOPROXY=off GOSUMDB=off exec go run -buildvcs=false ./internal/livetest/demoadmin list "$@"
+    GOTOOLCHAIN=local GOPROXY=off GOSUMDB=off exec go run -buildvcs=false ./test/live/internal/livetest/demoadmin list "$@"
 
 # Delete one demo for good. It shows exactly what goes, then asks for the
 # demo's name (or takes confirm=<name>); each repository is deleted by the ID
@@ -1314,7 +1318,7 @@ demo-delete forge name *settings:
     if [[ -n "${FORGE_LAB_GITHUB_CONTEXT:-}" && "$FORGE_LAB_GITHUB_CONTEXT" != /* ]]; then
         export FORGE_LAB_GITHUB_CONTEXT="{{ invocation_directory() }}/$FORGE_LAB_GITHUB_CONTEXT"
     fi
-    GOTOOLCHAIN=local GOPROXY=off GOSUMDB=off exec go run -buildvcs=false ./internal/livetest/demoadmin delete "$@"
+    GOTOOLCHAIN=local GOPROXY=off GOSUMDB=off exec go run -buildvcs=false ./test/live/internal/livetest/demoadmin delete "$@"
 
 # Minimal preparation checks: public test snapshots and a temporary CLI asset,
 # existing toolchain images, throwaway SSH keys and read-only package inspection.
@@ -1330,14 +1334,14 @@ test-live-github-minimal org token_file:
     GOTOOLCHAIN=local CGO_ENABLED=0 go build -trimpath -buildvcs=false -o "$state/forge-ci" ./cmd/forge-ci
     FORGE_CI_LIVE_GITHUB_ORG_ID="$1" FORGE_CI_LIVE_EXTERNAL_REGISTRY_TOKEN_FILE="$2" FORGE_CI_LIVE_BIN="$state/forge-ci" \
         GOTOOLCHAIN=local GOPROXY=off GOSUMDB=off go test -tags=live -count=1 -buildvcs=false -timeout=75m -v \
-        -run='^TestGitHubMinimalPreparation$' ./internal/livetest/
+        -run='^TestGitHubMinimalPreparation$' ./test/live/internal/livetest/
 
 # API-only prerelease admission/retry checks; no engine image build or runner jobs.
 [arg('org', help='Numeric GitHub organization ID explicitly authorized by the Forge Lab session')]
 [doc('Live GitHub; prerelease API round trips')]
 [group('live')]
 test-live-github-release-api org:
-    FORGE_CI_LIVE_GITHUB_ORG_ID="$1" GOTOOLCHAIN=local GOPROXY=off GOSUMDB=off go test -tags=live -count=1 -timeout=10m -v -run='^TestGitHubRelease_PrereleaseAPI$' ./internal/livetest/githubconsumer/
+    FORGE_CI_LIVE_GITHUB_ORG_ID="$1" GOTOOLCHAIN=local GOPROXY=off GOSUMDB=off go test -tags=live -count=1 -timeout=10m -v -run='^TestGitHubRelease_PrereleaseAPI$' ./test/live/githubconsumer/
 
 # Real scheduling semantics plus the actual CLI binary-publication workflow.
 # Uses separate disposable repositories; no engine image build is needed.
@@ -1345,7 +1349,7 @@ test-live-github-release-api org:
 [doc('Live GitHub; self-release scheduling and assets')]
 [group('live')]
 test-live-github-self-release org:
-    FORGE_CI_LIVE_GITHUB_ORG_ID="$1" GOTOOLCHAIN=local GOPROXY=off GOSUMDB=off go test -tags=live -count=1 -parallel=2 -buildvcs=false -timeout=75m -v -run='^TestGitHubSelfRelease_Binary(Scheduling|Assets)$' ./internal/livetest/
+    FORGE_CI_LIVE_GITHUB_ORG_ID="$1" GOTOOLCHAIN=local GOPROXY=off GOSUMDB=off go test -tags=live -count=1 -parallel=2 -buildvcs=false -timeout=75m -v -run='^TestGitHubSelfRelease_Binary(Scheduling|Assets)$' ./test/live/internal/livetest/
 
 # Exercise signed native GitLab release jobs with caller-prepared image archives.
 [arg('job', help='Path to the prepared Docker archive for the release job image')]
@@ -1392,7 +1396,7 @@ test-live-gitlab-base-images job build signer:
 # image (package nanolinter-<flavor>) with Forge Lab, saves those images, the
 # Buildah job image and each runtime image the named lanes' cases and the
 # GitLab gates of their demos take as archives, exports every demo of
-# test/live/demos as a one-commit checkout under <dir>/demos, and writes
+# test/live/fixtures/consumers as a one-commit checkout under <dir>/demos, and writes
 # <dir>/campaign.env: image references, archive paths and CAMPAIGN_COMMIT, no
 # secrets. A dirty checkout or a stale engine checksum is refused. A relative
 # cases file is the caller's.

@@ -174,7 +174,7 @@ each as `FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_<TARGET>`: every one a case names as
 `@FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_<TARGET>`, and on GitLab the scenarios' go
 image, also `FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE`, and every
 `$CI_JOB_IMAGE_<TARGET>` the gate of a named demo checks in
-(`go run ./internal/livetest/preflight campaign-runtime-targets . gitlab=<cases file> flavor=<flavor> ...`
+(`go run ./test/live/internal/livetest/preflight campaign-runtime-targets . gitlab=<cases file> flavor=<flavor> ...`
 lists them). Each nanolinter job image is published as `JOB_IMAGE_<FLAVOR>`
 and saved as `LINT_IMAGE_ARCHIVE_<FLAVOR>`, the flavor in capitals with `-` as
 `_`; a case naming a flavor the campaign is not given is refused before
@@ -271,7 +271,7 @@ gate includes the nanolinter component names its flavor's archive,
 `lint-archive=@LINT_IMAGE_ARCHIVE_JAVA` for example, for that case alone.
 Every runtime image archive and the Buildah and kaniko job images reach every
 case, so a gate's further job images and a release's image jobs find theirs. The live preflight reads both
-files as data and plans the lane (`internal/livetest/campaign.go`); it refuses
+files as data and plans the lane (`test/live/internal/livetest/campaign.go`); it refuses
 a checkout other than `CAMPAIGN_COMMIT` and any case it cannot read before the
 first runs, among them a case whose archive, or a further job image of its
 demo's gate, the campaign was not prepared with, and a GitLab consumer whose
@@ -308,8 +308,15 @@ the line goes to `<dir>/github.results`:
 
 ```bash
 just campaign-lane ~/campaigns/hosted github hello-maven-service/lifecycle org=<id>
-just campaign-lane ~/campaigns/hosted github hello-go-cli/release org=<id> fixtures=test/live/github-gpg/workflows workflow=release-gpg.yml
+just campaign-lane ~/campaigns/hosted github hello-go-cli/release org=<id> fixtures=test/live/github-gpg workflow=release-gpg.yml
 ```
+
+Hosted cells do not run the lab launcher/classifier: `github.results` records
+the exit status with `verdict=-`, not a lab `verdict.json` path. Retain each
+cell's stdout/stderr and exit status, engine/consumer revisions, native run IDs
+and cleanup output separately; the lane's temporary output copy is removed.
+For parallel hosted cells, [prepare the shared engine once and reuse it](validation-invariants.md#1-freeze-the-engine-before-parallel-consumers)
+within one guarded session. These cells are not lab `.cases` lanes.
 
 ### Lifecycle
 
@@ -354,7 +361,7 @@ lifecycle when it fails, with their acceptance owners unchanged:
    told which head commit is meant. A mirror then shows `main` at a commit whose
    parents are the base and the change and whose tree is the change's.
 3. **Development.** `development.yml`, the harness's service development
-   workflow (`internal/livetest/testdata/service-development.yml.tmpl`), is
+   workflow (`test/live/internal/livetest/testdata/service-development.yml.tmpl`), is
    dispatched on the merged `main` and snapshots `development`: the
    snapshot-images workflow over the staged declaration, then a readiness job
    that runs the published digest with Podman. The acceptance is the frozen
@@ -466,7 +473,7 @@ serves another forge's flow in a shape the snapshot refuses too), else
 `.forge-ci/artifacts.yml` (`livetest.ServiceSnapshotSource`); on GitLab the
 demo must also ship the GitLab release build, `.gitlab/build-release.sh`. On
 Forgejo the harness writes the consumer-side development workflow, one for
-every family (`internal/livetest/testdata/service-development.yml.tmpl`): the
+every family (`test/live/internal/livetest/testdata/service-development.yml.tmpl`): the
 snapshot-images workflow builds the producers in the image the repository's
 `SNAPSHOT_ARTIFACT_JOB_IMAGE_<FAMILY>` variable names, the lifecycle's
 `CI_JOB_IMAGE`, then the image; a readiness job runs the published digest.

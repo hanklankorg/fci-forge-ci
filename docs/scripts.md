@@ -60,7 +60,7 @@ contract.
 | `scripts/ci/campaign.sh` | A live campaign: prepares one commit's inputs once, then runs lanes of cases against them. Behind `just campaign-prepare` and `just campaign-lane`; see [live campaigns](live-campaigns.md). |
 | `scripts/ci/canonical-cli-delivery.sh` | Protected canonical delivery glue for `canonical-cli-bootstrap.yml`; transport is the pinned native Actions upload/download pair. |
 | `scripts/ci/canonical-consumer.sh` | Receiver glue for the `consume-canonical-cli` action, run from a fresh administrator-pinned engine checkout; see [canonical prerequisite consumption](canonical-prerequisite-consumption.md). |
-| `scripts/ci/demo-checkout.sh` | Makes a built-in demo, `test/live/demos/<name>/consumer`, a one-commit repository for a consumer trial. Behind `just demo`. |
+| `scripts/ci/demo-checkout.sh` | Makes a built-in demo, `test/live/fixtures/consumers/<name>/consumer`, a one-commit repository for a consumer trial. Behind `just demo`. |
 | `scripts/ci/engine-binary.sh` | The shared delivery-binary build, checksum and publisher: behind `just refresh-engine-binary`, the recorded-build guard, and Forgejo/GitLab generic package publication. See [GitLab bootstrap](gitlab.md#checksum-bound-engine-bootstrap) for GitLab coordinates and token types. |
 | `scripts/ci/publish-live-image.sh` | Builds and publishes the signer or kaniko job image to the configured Forge Lab registry for authorized live-tier runs; see [live testing](testing.md). |
 | `scripts/ci/run-live-tests.sh` | The live conformance tier's entry, behind `just test-live` and `just test-live-consumer forgejo`. |
@@ -87,8 +87,8 @@ checkout.
 | Path | Purpose |
 |------|---------|
 | `internal/app/container/github-kaniko-action.sh` | Entrypoint of the disposable GitHub Docker action that runs a kaniko image, extract or snapshot build through the CLI. |
-| `internal/livetest/probes/credential-setup-forgejo.sh` | Live-tier in-runner probe prelude: takes the Forgejo OIDC token endpoint out of the environment, failing when none was injected. |
-| `internal/livetest/probes/credential-setup-gitlab.sh` | Live-tier in-runner probe prelude: takes the GitLab `SIGSTORE_ID_TOKEN` out of the environment, failing when none was minted. |
+| `test/live/internal/livetest/probes/credential-setup-forgejo.sh` | Live-tier in-runner probe prelude: takes the Forgejo OIDC token endpoint out of the environment, failing when none was injected. |
+| `test/live/internal/livetest/probes/credential-setup-gitlab.sh` | Live-tier in-runner probe prelude: takes the GitLab `SIGSTORE_ID_TOKEN` out of the environment, failing when none was minted. |
 
 ## `test/live/` fixtures
 
@@ -97,17 +97,17 @@ consumer repositories, not in this repository's CI.
 
 | Path | Purpose |
 |------|---------|
-| `test/live/cases/maven-issuer-service/service-fixture.sh` | Inert service fixture, written into the trial consumer as `.forge-ci/service-fixture.sh` and run in the Java 25 job image. |
-| `test/live/cases/npm-rest-service/installed-oracle.sh` | Installs the retained npm package into a scratch prefix and checks the installed CLI; set as the case's oracle in `operator.env`. |
-| `test/live/cases/rust-development/consumer/ci/build.sh` | Tests and builds the fixture's static Rust binaries offline and checks their versions. |
-| `test/live/cases/rust-development/consumer/ci/produce.sh` | The native provider job's development build: runs `build.sh`, builds and scans the images and writes `development-artifacts/`. |
-| `test/live/cases/rust-development/consumer/ci/receipt.sh` | Runs the fixture's receipt example in `development-artifacts/`; called by `produce.sh`. |
-| `test/live/consumer-fixtures/generic-cli/prepare.sh` | Operator-only: creates an unsigned disposable adapter snapshot; see its README. |
-| `test/live/consumer-fixtures/generic-cli/check-release.sh` | The adapter's release checks for a Go or Cargo consumer. |
-| `test/live/consumer-fixtures/generic-cli/build-release.sh` | The adapter's release build into `dist/` for a Go or Cargo consumer. |
-| `test/live/consumer-fixtures/generic-cli/verify-rust-job.sh` | Checks the Rust job image's user, toolchain and tools; installed into the image by `rust-job.Containerfile`. |
+| `test/live/fixtures/services/maven-issuer-service/service-fixture.sh` | Inert service fixture, written into the trial consumer as `.forge-ci/service-fixture.sh` and run in the Java 25 job image. |
+| `test/live/fixtures/services/npm-rest-service/installed-oracle.sh` | Installs the retained npm package into a scratch prefix and checks the installed CLI; set as the case's oracle in `operator.env`. |
+| `test/live/fixtures/development/rust-development/consumer/ci/build.sh` | Tests and builds the fixture's static Rust binaries offline and checks their versions. |
+| `test/live/fixtures/development/rust-development/consumer/ci/produce.sh` | The native provider job's development build: runs `build.sh`, builds and scans the images and writes `development-artifacts/`. |
+| `test/live/fixtures/development/rust-development/consumer/ci/receipt.sh` | Runs the fixture's receipt example in `development-artifacts/`; called by `produce.sh`. |
+| `test/live/fixtures/adapters/generic-cli/prepare.sh` | Operator-only: creates an unsigned disposable adapter snapshot; see its README. |
+| `test/live/fixtures/adapters/generic-cli/check-release.sh` | The adapter's release checks for a Go or Cargo consumer. |
+| `test/live/fixtures/adapters/generic-cli/build-release.sh` | The adapter's release build into `dist/` for a Go or Cargo consumer. |
+| `test/live/fixtures/adapters/generic-cli/verify-rust-job.sh` | Checks the Rust job image's user, toolchain and tools; installed into the image by `rust-job.Containerfile`. |
 
-Each built-in demo under `test/live/demos/<name>/consumer/.gitlab/` carries the
+Each built-in demo under `test/live/fixtures/consumers/<name>/consumer/.gitlab/` carries the
 same small set of GitLab release scripts:
 
 | Script | Purpose | Demos |

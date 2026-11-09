@@ -62,7 +62,7 @@ signer)
 kaniko-job)
   context=$repo_root/containers/kaniko-job
   image_inputs=(containers/kaniko-job)
-  source_url=$(cd -- "$repo_root" && "${GO:-go}" run ./internal/livetest/preflight consumer-trial-layer) || exit 2
+  source_url=$(cd -- "$repo_root" && "${GO:-go}" run ./test/live/internal/livetest/preflight consumer-trial-layer) || exit 2
   ;;
 buildah-job)
   context=$repo_root/containers/buildah-job
@@ -74,7 +74,7 @@ esac
 # and the build executes the image's own steps. Ask the engine that builds it
 # (on macOS a VM, not this controller) for its architecture, so the build is
 # native rather than emulated.
-runner_arch=$(cd -- "$repo_root" && "${GO:-go}" run ./internal/livetest/preflight runner-arch) || exit 2
+runner_arch=$(cd -- "$repo_root" && "${GO:-go}" run ./test/live/internal/livetest/preflight runner-arch) || exit 2
 engine_arch=$(podman info --format '{{.Host.Arch}}') || {
   printf 'live: cannot ask podman for its host architecture\n' >&2
   exit 2

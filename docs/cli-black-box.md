@@ -327,5 +327,5 @@ coverage.
 | `cmd/forge-ci/smoke_git_credentials_test.go` | Built-binary rejection of literal Git-token flags, file-input discovery and read-failure boundaries for `SEC-02`. |
 | `internal/domain/artifact/*_test.go` | Supporting collection and path-safety evidence for `ART-06` and `ART-08`; not binary wiring. |
 | `internal/adapters/{github,forgejo}/*artifact*_test.go` | Supporting provider-method evidence for `ART-07`–`ART-09`; not CLI provider selection. |
-| `internal/livetest/conformance/artifact_test.go` | Opt-in named run-artifact round trip; currently Forgejo only, not pattern/zero-match coverage. |
+| `test/live/conformance/artifact_test.go` | Opt-in named run-artifact round trip; currently Forgejo only, not pattern/zero-match coverage. |
 | External black-box testsuite | The bulk of these scenarios: real toolchains, fixtures, signing round-trips, reproducibility. |

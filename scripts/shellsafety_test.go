@@ -181,7 +181,7 @@ var placeholderPattern = regexp.MustCompile(`__[A-Z][A-Z0-9_]*__`)
 // renderShellTemplate makes a `.sh.tmpl` probe parsable without knowing what it
 // will be filled with.
 //
-// The templates in internal/livetest/probes substitute two different kinds of
+// The templates in test/live/internal/livetest/probes substitute two different kinds of
 // thing through the same `__NAME__` spelling. A marker at the start of a line
 // expands to whole statements — `__TOKEN_FETCH__if [ -z ... ]` is a block of
 // shell followed by an `if` — so it is dropped. A marker anywhere else is a

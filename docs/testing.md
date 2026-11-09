@@ -63,7 +63,7 @@ in release CI. See the workflow files for each exact gate.
 ### Rust development publication evidence
 
 For the external Rust workspace's role declaration and publication layout, see
-the [Rust development fixture contract](../test/live/cases/rust-development/README.md).
+the [Rust development fixture contract](../test/live/fixtures/development/rust-development/README.md).
 
 ### Maven-format publication evidence
 
@@ -344,7 +344,8 @@ forge, which is neither of these. The in-repo tier is named for what it does,
 
 ### The live tier
 
-`internal/livetest/` holds a kit and `internal/livetest/conformance/` the
+The [live ownership map](../test/live/README.md) describes the test-only tree.
+`test/live/internal/livetest/` holds a kit and `test/live/conformance/` the
 scenarios (`PAR-*`). One scenario body runs against every configured lab forge
 that *claims* the capability it needs, so parity is enforced by shape rather
 than by discipline. The alternative, a suite per forge, is how parity rots.
@@ -365,9 +366,11 @@ setup, evidence and cleanup.
 | Forge / event | Command | Preparation |
 |---|---|---|
 | Forgejo PR, release or lifecycle | `just test-live-consumer forgejo <checkout> <pull-request\|release\|lifecycle> [setting ...]` | Local `forgeci` contract and runner; consumer job image; signer image for releases; lifecycle: the Maven service demo and the container/readiness runner (docs/live-campaigns.md, Lifecycle) |
+| Forgejo snapshot | `just test-live-consumer forgejo <checkout> snapshot CI_JOB_IMAGE=<digest reference> [CI_IMAGE_BUILDER=buildah\|kaniko]` | A planned image route and the selected builder's prerequisites; [snapshot admission](live-campaigns.md#snapshot); no readiness |
 | GitLab MR | `just test-live-consumer gitlab <checkout> pull-request job-archive=<image-archive>` | Local `forgeci` contract and runner; prepared MR job image archive |
 | GitLab release | `just test-live-consumer gitlab <checkout> release job-archive=<archive> build-archive=<archive> signer-archive=<archive> [setting ...]` | Local contract, prepared image archives and guarded full-release runner profile |
 | GitLab lifecycle | `just test-live-consumer gitlab <checkout> lifecycle job-archive=<archive> build-archive=<archive> signer-archive=<archive> lint-archive=<archive> [setting ...]` | As the release; a demo with a service snapshot and a GitLab release, `hello-maven-service` or `hello-cargo-container` (docs/live-campaigns.md, Lifecycle) |
+| GitLab snapshot | `just test-live-consumer gitlab <checkout> snapshot job-archive=<archive>` | Planned images, selected builder archive and any producer runtime archives; [snapshot admission](live-campaigns.md#snapshot); no readiness |
 | GitHub PR, development build or release | `just test-live-consumer github <checkout> <pull-request\|dev-release\|release> org=<org-id> [setting ...]` | Forge Lab's hosted `github run` session, consumer workflow fixtures and public engine images |
 | GitHub lifecycle | `just test-live-consumer github <checkout> lifecycle org=<org-id> [version=X.Y.Z] [image=<name>]` | As the release, plus the consumer's `release-dev.yml` fixture and the release credential; the `hello-maven-service`, `hello-cargo-container`, `hello-go-service` and `hello-npm-service` demos (docs/live-campaigns.md, Lifecycle) |
 
@@ -376,9 +379,17 @@ and [GitHub trials](#trying-a-consumer-on-github). `just test-live` is the local
 GitLab/Forgejo conformance suite; it does not run the hosted GitHub trial.
 For a retained demonstration, use [`just demo <forge> <name>`](#showing-a-consumer).
 
+`hello-maven` is a Maven application JAR without an image, not a library
+publication fixture. `hello-maven-service` adds the runtime image required by
+the service snapshot and lifecycle roads. On GitHub, that service's snapshot
+uses `dev-release`, not `snapshot`; its `release-dev.yml` fixture selects the
+[shared snapshot oracle](#trying-a-consumer-on-github). The plain application
+ships no such development fixture. Image snapshots do not prove Maven SNAPSHOT
+package publication.
+
 A trial answers one of two questions; keep them apart.
 
-- **Does an example work?** Run its demo, `test/live/demos/hello-go-cli` for
+- **Does an example work?** Run its demo, `test/live/fixtures/consumers/hello-go-cli` for
   example, whose CI files are the example filled in and kept so by a unit
   test. Do not copy an example into a scratch checkout by hand: such copies
   went live missing a release workflow or the files a release reads.
@@ -405,10 +416,12 @@ just demo-list forgejo
 just demo-delete forgejo hello-maven
 ```
 
-Before any launch, check that no other live run holds the lock and no
-`run-live-tests.sh` or `forge-labctl release run` process exists; two runs on
-one lab account clobber each other, and the full-release wrapper swaps the
-runner. [Running it](#running-it) prepares the lab, [Trying a
+Before any launch, check for conflicting runs and runner changes: same-provider
+runs share fixed resources, and the full-release wrapper swaps the runner.
+Independent focused providers may overlap under the supported
+[execution scopes and locks](live-campaigns.md#execution-scopes-and-locks),
+subject to [shared dependencies](live-campaigns.md#shared-dependencies).
+Never bypass a held lock. [Running it](#running-it) prepares the lab, [Trying a
 consumer](#trying-a-consumer) explains the trial, [Showing a
 consumer](#showing-a-consumer) the demo.
 
@@ -498,7 +511,7 @@ just test-live '^TestRunnerLending_LocalLifecycle/(idle|cancel)$'
 
 It requires an accepted `forgeci` contract for a disposable Forgejo endpoint on
 either the Compose or k3s road, local rootless Podman and the cached digest-pinned
-Forgejo 13.2.0 runner image named in `internal/livetest/lending.go`. The lent
+Forgejo 13.2.0 runner image named in `test/live/internal/livetest/lending.go`. The lent
 worker remains a local rootless Podman container even when Forgejo runs on k3s.
 `LAB_TARGETS_FILE` selects a dedicated contract as usual; use a separate absolute
 path per road when retaining both contracts. No Forge Lab source change,
@@ -700,7 +713,7 @@ The contract is read through the shared `forge-lab-contract` module
 package that decode it, apply the private-file policy, hold the disposable-host
 list, check credential lifetime and derive the run identity, with the accepted
 and refused corpus pinned there. This repository keeps only its two accepted
-fixtures under `internal/livetest/testdata/`; ordinary untagged tests project
+fixtures under `test/live/internal/livetest/testdata/`; ordinary untagged tests project
 them onto targets, exercise the guard and test the preflight without reaching a
 provider.
 
@@ -737,7 +750,7 @@ that fixture; manifest data grants no mutation authority.
 
 **The layer scenarios** (`TestForgejoLayer_*`) test `.forgejo/` itself. Each
 pushes HEAD's tree to a branch of its scratch repository and pins that commit
-in a fixture under `internal/livetest/conformance/testdata/layer`. A job
+in a fixture under `test/live/conformance/testdata/layer`. A job
 runs the binary that commit's checksum names, downloaded as the layer
 delivers it: `just test-live` builds it with `scripts/ci/engine-binary.sh`,
 and the scenario uploads it to the scratch owner's generic packages and
@@ -1218,10 +1231,10 @@ and the workflows under `.forgejo/` do not run them.
 
 A trial answers a question and leaves nothing. A demo shows a consumer's
 release and pull request to people and keeps them, until a person deletes it.
-The demos ship in `test/live/demos/<name>`: a small consumer for each
+The demos ship in `test/live/fixtures/consumers/<name>`: a small consumer for each
 ecosystem or feature worth showing, rendered for all three forges by `just
 test-unit` so none drifts out of what the live tier accepts.
-[test/live/demos/README.md](../test/live/demos/README.md) says how one is
+[test/live/fixtures/consumers/README.md](../test/live/fixtures/consumers/README.md) says how one is
 laid out. `checkout=/absolute/path` shows any other consumer instead.
 
 Each forge runs the demo's jobs in images the lab must have. For the
@@ -1408,14 +1421,23 @@ keyless or key-based artifact verification. It is separate from the local
 recovery scenario. With `image=<name>`, private-consumer container signature
 verification requires authenticated GHCR pulls on the controller, preferably
 through an isolated `DOCKER_CONFIG`; it must pass rather than silently skip.
-GHCR packages remain for separate cleanup. Availability of this
-route is not evidence that a particular consumer or signing backend passed it.
+Stable-release GHCR packages remain for separate cleanup; disposable service
+snapshot trials register exact snapshot-package cleanup as described below.
+Availability of this route is not evidence that a particular consumer or signing
+backend passed it.
 
 The GitHub layer has no local lab, so its consumer trial runs in a disposable
-hosted organization that Forge Lab's hosted session authorizes. Inside that
+hosted organization that Forge Lab's hosted session authorizes. Run inside that
 session (`just github run --org <login> --prefix <prefix> --fixtures none` in
 Forge Lab; the trial creates its own repositories, so the session prepares
-none), which writes the private context `FORGE_LAB_GITHUB_CONTEXT` names:
+none). The session writes the private context `FORGE_LAB_GITHUB_CONTEXT` names.
+
+For parallel consumers, [prepare the shared engine once, then reuse it](validation-invariants.md#1-freeze-the-engine-before-parallel-consumers)
+inside that same guarded session. `FORGE_CI_LIVE_ENGINE_MODE=prepare` on the
+consumer recipe prepares the engine and returns without running the consumer;
+`FORGE_CI_LIVE_ENGINE_MODE=reuse` on subsequent calls checks that frozen engine.
+Prepare all required image platforms first and wait for every consumer's cleanup
+before leaving the session. Without a mode, each call prepares the engine.
 
 ```text
 just test-live-consumer github /absolute/myapp pull-request org=<org-id>
@@ -1477,8 +1499,8 @@ What it does, in order:
    one, as on the lab) a repository `<prefix><checkout name>-<visibility>-<session>` gets
    the consumer's `HEAD`, with `.github/workflows` replaced by its fixtures
    (`test/live/github/workflows` or `tests/live/github/workflows`, or
-   `fixtures=<dir>`). Rendering pins every `diggsweden/forge-ci` reusable
-   workflow to the engine at its commit, `forge-ci-binary-ref` to
+   `fixtures=<dir>`, naming the root above `workflows/`). Rendering pins every
+   `diggsweden/forge-ci` reusable workflow to the engine at its commit, `forge-ci-binary-ref` to
    `v0.90.0-pre`, and `ghcr.io/diggsweden/forge-ci-runtime*` images to the
    organization's `sha-<commit>` tag; a workflow that still calls another engine
    is refused. Only an image a fixture names can be rewritten, so a fixture
@@ -1495,8 +1517,9 @@ What it does, in order:
    and an SSH signature by a key made for it, because the consumer lints the
    commits it reviews. A release: an ephemeral
    passphrase-protected GPG key becomes `RELEASE_GPG_PRIVATE_KEY`,
-   `RELEASE_GPG_PASSPHRASE` and `RELEASE_GPG_PUBLIC_KEY`, the context token
-   `RELEASE_TOKEN`, and a signed annotated `release-request/vX.Y.Z` tag starts
+   `RELEASE_GPG_PASSPHRASE` and `RELEASE_GPG_PUBLIC_KEY`; the separate credential
+   file supplies `RELEASE_TOKEN` (never the hosted context's management/Packages
+   token), and a signed annotated `release-request/vX.Y.Z` tag starts
    `release.yml`. After it succeeds, `main` must be one signed commit ahead, the
    final tag and a release with assets must exist, and every `*.bundle` asset
    must verify with `cosign verify-blob` against the engine's keyless identity.
@@ -1515,12 +1538,20 @@ What it does, in order:
    `DOCKER_CONFIG`. Use `cosign login ghcr.io --username <actor> --password-stdin`
    with a locally stored Packages token; never put the token in command
    arguments. This host credential is not forwarded to consumer workflows.
-4. **Cleanup.** The consumer repository is deleted by its ID. Its GHCR
-   packages stay: a fine-grained token cannot reach GitHub's packages API, so
-   they are left for the organization's sweep, such as Forge Tidy's. The
-   session in the repository's name keeps the next trial clear of them: a
-   package outlives its repository, and GitHub denies a new repository of the
+4. **Cleanup.** The disposable consumer repository is deleted by its ID.
+   Service-snapshot `dev-release` and lifecycle trials register removal of their
+   exact snapshot container package before dispatch, using the hosted management
+   credential and checking package/repository identity; unreadable identity
+   refuses deletion and cleanup errors fail the test. This is not a sweep of
+   stable-release packages: those remain for the organization's sweep, such as
+   Forge Tidy's. The session in the repository's name keeps the next trial clear
+   of them: a package outlives its repository, and GitHub denies a new repository of the
    same name a push to it.
+
+Kept demos are separate: use [`demo-list` and `demo-delete`](#showing-a-consumer)
+for their guarded named resources, not to sweep disposable trial packages.
+`FORGE_CI_LIVE_KEEP_SCRATCH=1` retains lab scratch for diagnosis; it does not
+turn a disposable trial into a protected demo.
 
 Each run prints the jobs of the judged run and, for each failed job, the
 lines of its log up to the first error, not its cleanup steps.
@@ -1530,6 +1561,12 @@ What the caller brings:
 - **A token that can do it.** The context's token creates and administers
   repositories, writes contents, workflows, Actions variables and secrets, and
   opens pull requests.
+- **A separate release credential for `release` and `lifecycle`.** Set
+  `FORGE_CI_LIVE_GITHUB_RELEASE_TOKEN_FILE` to an owner-private regular file
+  containing a bounded fine-grained PAT. There is no fallback to the context's
+  management/Packages token. PR, development and engine-only `prepare` runs do
+  not require it. Token-kind admission does not prove provider permissions;
+  see [release credential admission](live-campaigns.md#execution-scopes-and-locks).
 - **Public engine images.** A consumer's job pulls the engine's runtime images
   from GHCR without credentials, and the API cannot change a package's
   visibility, so after the engine's first build the owner makes its
@@ -1601,7 +1638,7 @@ proves that a deployed service works.
 A demo's development snapshot is phase 3 of the Forgejo lifecycle
 (`TestForgejoLayer_ConsumerLifecycle`; docs/live-campaigns.md, Lifecycle): the
 harness's service development workflow
-(`internal/livetest/testdata/service-development.yml.tmpl`) dispatched on the
+(`test/live/internal/livetest/testdata/service-development.yml.tmpl`) dispatched on the
 merged `main`, snapshotting `development` with the shared
 `snapshot-images.yml`, which builds the declaration's producers in the image
 the harness sets for each producer family. The standalone
@@ -1645,11 +1682,11 @@ HTTP requests, each bounded to two seconds with two-second retries.
 The offline guard for source preservation and the declaration's admission is:
 
 ```sh
-env GOTOOLCHAIN=local GOPROXY=off GOSUMDB=off go test ./internal/livetest \
+env GOTOOLCHAIN=local GOPROXY=off GOSUMDB=off go test ./test/live/internal/livetest \
   -run '^TestService(Development|Snapshot)' -count=1
 ```
 
-The bundled fixture `test/live/cases/maven-issuer-service/service-fixture.sh`
+The bundled fixture `test/live/fixtures/services/maven-issuer-service/service-fixture.sh`
 generates a one-day EC PKCS12 key with `keytool` in the Java 25 job and
 supplies inert issuer metadata with `example.invalid` URLs.
 

@@ -21,7 +21,7 @@ import (
 // These tests drive campaign.sh lane and demo-checkout.sh offline. A fake go
 // plays the preflight and hands over a plan; a fake just records each case's
 // argv and the environment it saw, prints a verdict path and exits as told.
-// What a plan holds and refuses is tested in internal/livetest; these pin
+// What a plan holds and refuses is tested in test/live/internal/livetest; these pin
 // what the script does with one: run it in order, past failures, and record.
 
 const fakeCampaignGo = `#!/usr/bin/env bash
@@ -343,7 +343,7 @@ func TestCampaignLane_RunsThePlanInOrderAndRecordsEachCase(t *testing.T) {
 
 	// The preflight is asked from the repository about the caller's cases file.
 	if got := readLines(t, lane.goArgvFile); len(got) != 1 ||
-		got[0] != "run ./internal/livetest/preflight campaign-plan "+reporoot.Path(t)+" "+lane.dir+" forgejo "+filepath.Join(lane.workDir, "lane.cases") {
+		got[0] != "run ./test/live/internal/livetest/preflight campaign-plan "+reporoot.Path(t)+" "+lane.dir+" forgejo "+filepath.Join(lane.workDir, "lane.cases") {
 		t.Fatalf("go calls %q", got)
 	}
 

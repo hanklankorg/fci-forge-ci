@@ -11,7 +11,7 @@ image_build_settings() {
   local settings
   local -a fields
   settings=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." &&
-    "${GO:-go}" run ./internal/livetest/preflight "$@") || return 2
+    "${GO:-go}" run ./test/live/internal/livetest/preflight "$@") || return 2
   # Command substitution removes trailing empty fields on the legacy path.
   mapfile -t fields <<<"$settings"
   case "${fields[0]:-}" in

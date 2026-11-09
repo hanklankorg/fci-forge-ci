@@ -6,19 +6,15 @@ package ci
 import (
 	"context"
 	"errors"
-	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"slices"
-	"strconv"
 	"strings"
 	"syscall"
 	"testing"
 	"time"
 
 	"github.com/diggsweden/forge-ci/internal/domain/container"
-	"github.com/diggsweden/forge-ci/internal/livetest"
 	"github.com/diggsweden/forge-ci/internal/retry"
 	"github.com/diggsweden/forge-ci/internal/testutil/reporoot"
 	"github.com/diggsweden/forge-ci/internal/testutil/testenv"
@@ -27,8 +23,9 @@ import (
 // These tests drive run-live-tests.sh offline: a fake go on PATH records its
 // argv and environment and plays the preflight/build roles and emits a compiled
 // suite with a configurable exit status. Fake host tools stand in for
-// the pinned toolchain. No lab, network or real go toolchain is touched. What
-// the real preflight prints and refuses is tested in internal/livetest. Plain
+// the pinned toolchain. No lab or network is touched; the classifier cases build
+// the maintained preflight CLI offline with real Go before installing fake PATH.
+// What preflight prints and refuses is tested in test/live/internal/livetest. Plain
 // argument and tool-check flow is left to shellcheck and to reading the script;
 // these tests pin what a reader cannot see: the redacted log, the suite status
 // surviving the tee, the pruning and the run lock.
@@ -51,7 +48,7 @@ env)
 run)
   if [[ "${3:-}" == classify-run ]]; then
     if [[ -n "${FAKE_REAL_CLASSIFIER:-}" ]]; then
-      exec "$FAKE_REAL_CLASSIFIER" -test.run '^TestLiveClassifierProcessFixture$' -- "$4" "$5"
+      exec "$FAKE_REAL_CLASSIFIER" classify-run "$4" "$5"
     fi
     case "$4" in
       0) printf '%s\n' "${FAKE_LIVE_CLASSIFICATION:-0 passed}" ;;
@@ -346,7 +343,7 @@ const fakePreflightReport = "live preflight: 2 provider(s), generation fake-gene
 const fakeSuiteOutput = "=== RUN TestFake\ntoken glpat-ABCDEFGHIJKLMNOPQRSTUVWX\nAuthorization: Bearer abc.def\ntoken\x1b[0;m=inert-ansi-secret\n--- PASS: TestFake\nok\tfake\t0.01s" // gitleaks:allow -- synthetic redaction canaries.
 
 // hostToolsPreflight is the launcher's Go check of the host tools.
-const hostToolsPreflight = "run ./internal/livetest/preflight host-tools"
+const hostToolsPreflight = "run ./test/live/internal/livetest/preflight host-tools"
 
 // requireGoCalls requires preflight, the host-tool preflight, the runner
 // architecture, four product builds, test compilation, package discovery and
@@ -360,26 +357,26 @@ func requireGoCalls(t *testing.T, calls []string, wantTest string) {
 
 	calls = append(calls[:1:1], calls[2:]...)
 
-	if len(calls) != 10 || calls[0] != "run ./internal/livetest/preflight" ||
-		calls[1] != "run ./internal/livetest/preflight runner-arch" || calls[8] != wantTest {
+	if len(calls) != 10 || calls[0] != "run ./test/live/internal/livetest/preflight" ||
+		calls[1] != "run ./test/live/internal/livetest/preflight runner-arch" || calls[8] != wantTest {
 		t.Fatalf("go calls:\n%s", strings.Join(calls, "\n"))
 	}
 
-	if !strings.HasPrefix(calls[9], "run ./internal/livetest/preflight classify-run 0 ") {
+	if !strings.HasPrefix(calls[9], "run ./test/live/internal/livetest/preflight classify-run 0 ") {
 		t.Fatalf("missing Go result classification: %v", calls[9])
 	}
 
 	if !strings.HasPrefix(calls[6], "test -c -tags=live -buildvcs=false -o ") ||
-		!strings.HasSuffix(calls[6], "/tests/ ./internal/livetest/...") ||
-		!strings.HasPrefix(calls[7], "list -tags=live -f ") || !strings.HasSuffix(calls[7], " ./internal/livetest/...") {
+		!strings.HasSuffix(calls[6], "/tests/ ./test/live/internal/livetest/... ./test/live/conformance ./test/live/githubconsumer") ||
+		!strings.HasPrefix(calls[7], "list -tags=live -f ") || !strings.HasSuffix(calls[7], " ./test/live/internal/livetest/... ./test/live/conformance ./test/live/githubconsumer") {
 		t.Fatalf("test compilation/discovery calls: %v", calls[6:8])
 	}
 
 	for index, target := range []string{
 		"forge-ci-host ./cmd/forge-ci",
 		"forge-ci-runner ./cmd/forge-ci",
-		"credential-proxy ./internal/livetest/credentialproxy",
-		"probe-json ./internal/livetest/probejson",
+		"credential-proxy ./test/live/internal/livetest/credentialproxy",
+		"probe-json ./test/live/internal/livetest/probejson",
 	} {
 		if call := calls[2+index]; !strings.HasPrefix(call, "build -trimpath -buildvcs=false -o ") || !strings.HasSuffix(call, "/"+target) {
 			t.Fatalf("build call %d: %q", index, call)
@@ -495,36 +492,36 @@ func TestRunLiveTests_ReportsARunInWhichNothingRanAsSkipped(t *testing.T) {
 	}
 }
 
-// Use the real Go classifier behind the launcher's inert preflight collaborator.
-// Only the test data below contains scenario markers; this fixture is not a live
-// scenario and must never register itself.
-func TestLiveClassifierProcessFixture(t *testing.T) {
-	if os.Getenv("FAKE_REAL_CLASSIFIER") == "" {
-		return
-	}
+// buildLiveClassifier builds the maintained command once per parent test, before
+// newLiveRun installs the launcher's inert Go collaborator. Only classify-run is
+// invoked: no default preflight, target contract or provider is involved.
+func buildLiveClassifier(t *testing.T) string {
+	t.Helper()
 
-	status, err := strconv.Atoi(os.Args[len(os.Args)-2])
+	goBin, err := exec.LookPath("go")
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	log, err := os.Open(os.Args[len(os.Args)-1])
-	if err != nil {
-		t.Fatal(err)
+	output := filepath.Join(t.TempDir(), "preflight")
+
+	ctx, cancel := context.WithTimeout(t.Context(), liveCommandBound)
+	defer cancel()
+
+	command := exec.CommandContext(ctx, goBin, "build", "-buildvcs=false", "-o", output, "./test/live/internal/livetest/preflight")
+	command.Dir = reporoot.Path(t)
+
+	command.Env = append(os.Environ(), "GOTOOLCHAIN=local", "GOPROXY=off", "GOSUMDB=off")
+	if body, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("build offline classifier: %v\n%s", err, body)
 	}
 
-	result, err := livetest.ClassifyLiveRun(log, status)
-	_ = log.Close()
-
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	fmt.Printf("%d %s\n", result.ExitCode, result.Verdict)
-	os.Exit(0)
+	return output
 }
 
 func TestRunLiveTests_RealClassifierRequiresRegisteredScenario(t *testing.T) {
+	classifier := buildLiveClassifier(t)
+
 	for _, tc := range []struct {
 		name, output string
 		want         int
@@ -538,7 +535,7 @@ func TestRunLiveTests_RealClassifierRequiresRegisteredScenario(t *testing.T) {
 		{"missing RUN", "FORGE_CI_LIVE_SCENARIO TestTrial\n--- PASS: TestTrial (0s)", 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			run := newLiveRun(t, "FAKE_REAL_CLASSIFIER="+os.Args[0], "FAKE_GO_TEST_OUTPUT="+tc.output)
+			run := newLiveRun(t, "FAKE_REAL_CLASSIFIER="+classifier, "FAKE_GO_TEST_OUTPUT="+tc.output)
 
 			stdout, stderr, status := run.exec(t, "focused", "TestTrial|TestOffline")
 			if status != tc.want {
@@ -558,8 +555,9 @@ func TestRunLiveTests_RealClassifierRequiresRegisteredScenario(t *testing.T) {
 }
 
 func TestRunLiveTests_RealClassifierSeparatesPackages(t *testing.T) {
+	classifier := buildLiveClassifier(t)
 	first, second := t.TempDir(), t.TempDir()
-	run := newLiveRun(t, "FAKE_REAL_CLASSIFIER="+os.Args[0], "FAKE_GO_PACKAGE="+first+"\n"+second,
+	run := newLiveRun(t, "FAKE_REAL_CLASSIFIER="+classifier, "FAKE_GO_PACKAGE="+first+"\n"+second,
 		"FAKE_GO_TEST_OUTPUT==== RUN   TestTrial\nFORGE_CI_LIVE_SCENARIO TestTrial\n--- SKIP: TestTrial (0s)",
 		"FAKE_GO_SECOND_PACKAGE="+second, "FAKE_GO_SECOND_OUTPUT==== RUN   TestTrial\n--- PASS: TestTrial (0s)")
 
@@ -643,7 +641,7 @@ func TestRunLiveTests_RefusesWhileAnotherRunHoldsTheLock(t *testing.T) {
 		t.Fatalf("stderr does not name the held lock:\n%s", stderr)
 	}
 
-	if calls := run.goCalls(t); len(calls) != 2 || calls[0] != "run ./internal/livetest/preflight" || calls[1] != hostToolsPreflight {
+	if calls := run.goCalls(t); len(calls) != 2 || calls[0] != "run ./test/live/internal/livetest/preflight" || calls[1] != hostToolsPreflight {
 		t.Fatalf("expected only the preflight calls, got %v", calls)
 	}
 
@@ -820,26 +818,5 @@ func TestRunLiveTests_ScopedLaneRespectsLegacyExclusiveLock(t *testing.T) {
 
 			requireNoEvidence(t, run)
 		})
-	}
-}
-
-// verdict.json records the consumer inputs livetest.LiveRunInputs names, and
-// the log's header those its loop names: the two lists must stay one, so the
-// verdict never takes an input the log's header would not show.
-func TestRunLiveTests_HeaderInputsAreTheVerdictsInputs(t *testing.T) {
-	t.Parallel()
-
-	script := string(reporoot.ReadFile(t, "scripts/ci/run-live-tests.sh"))
-
-	_, loop, found := strings.Cut(script, "\n  for input in ")
-	loop, _, ended := strings.Cut(loop, "; do")
-
-	if !found || !ended {
-		t.Fatal("run-live-tests.sh has no header input loop")
-	}
-
-	logged := strings.Fields(strings.ReplaceAll(loop, "\\\n", " "))
-	if !slices.Equal(logged, livetest.LiveRunInputs) {
-		t.Fatalf("the header logs %v, verdict.json records %v", logged, livetest.LiveRunInputs)
 	}
 }

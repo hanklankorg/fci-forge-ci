@@ -456,7 +456,7 @@ func consumerEnforcementFindings(t *testing.T, root string) ([]string, int) {
 	// Ignored build output is not consumer configuration; a tracked file must
 	// still be checked even when an ignore rule also matches it.
 	command := exec.CommandContext(t.Context(), "git", "-C", root, "ls-files", "--cached", "--others", "--exclude-standard", "-z", "--",
-		"examples", "test/live/demos", "test/live/consumer-fixtures", "test/live/cases", "internal/livetest/testdata")
+		"examples", "test/live/fixtures", "test/live/internal/livetest/testdata")
 
 	output, err := command.Output()
 	if err != nil {
@@ -494,12 +494,16 @@ func TestConsumerEnforcementGuardUsesRepositoryFiles(t *testing.T) {
 	root := t.TempDir()
 
 	for name, body := range map[string]string{
-		".gitignore":                           "**/generated/\n",
-		"examples/consumer.yml":                "enforce-lint: false\n",
-		"examples/safe.yml":                    "name: safe\n",
-		"examples/generated/ignored.txt":       "enforce-lint: false\n",
-		"examples/generated/tracked.yml":       "enforce-lint: false\n",
-		"test/live/demos/example/consumer.yml": "enforce-lint: false\n",
+		".gitignore":                                          "**/generated/\n",
+		"examples/consumer.yml":                               "enforce-lint: false\n",
+		"examples/safe.yml":                                   "name: safe\n",
+		"examples/generated/ignored.txt":                      "enforce-lint: false\n",
+		"examples/generated/tracked.yml":                      "enforce-lint: false\n",
+		"test/live/fixtures/consumers/example/consumer.yml":   "enforce-lint: false\n",
+		"test/live/fixtures/adapters/example/workflow.yml":    "enforce-lint: false\n",
+		"test/live/fixtures/development/example/workflow.yml": "enforce-lint: false\n",
+		"test/live/fixtures/services/example/workflow.yml":    "enforce-lint: false\n",
+		"test/live/fixtures/oracles/example/oracle.yml":       "enforce-lint: false\n",
 	} {
 		path := filepath.Join(root, name)
 		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
@@ -520,11 +524,15 @@ func TestConsumerEnforcementGuardUsesRepositoryFiles(t *testing.T) {
 	}
 
 	findings, scanned := consumerEnforcementFindings(t, root)
-	if scanned != 4 || len(findings) != 3 {
-		t.Fatalf("scanned=%d findings=%v, want four source files and three enforcement settings", scanned, findings)
+	if scanned != 8 || len(findings) != 7 {
+		t.Fatalf("scanned=%d findings=%v, want eight source files and seven enforcement settings", scanned, findings)
 	}
 
-	for _, path := range []string{"examples/consumer.yml", "examples/generated/tracked.yml", "test/live/demos/example/consumer.yml"} {
+	for _, path := range []string{
+		"examples/consumer.yml", "examples/generated/tracked.yml", "test/live/fixtures/consumers/example/consumer.yml",
+		"test/live/fixtures/adapters/example/workflow.yml", "test/live/fixtures/development/example/workflow.yml",
+		"test/live/fixtures/services/example/workflow.yml", "test/live/fixtures/oracles/example/oracle.yml",
+	} {
 		if !slices.Contains(findings, path+":1: enforce-lint: false") {
 			t.Errorf("missing tracked or untracked source finding for %s", path)
 		}

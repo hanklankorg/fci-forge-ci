@@ -15,7 +15,7 @@ import (
 )
 
 func TestNativeGPGFixtureUsesRealGoAndOrdinaryReleaseOwner(t *testing.T) {
-	root := filepath.Join(reporoot.Path(t), "test/live/demos/hello-go-cli/consumer")
+	root := filepath.Join(reporoot.Path(t), "test/live/fixtures/consumers/hello-go-cli/consumer")
 	read := func(path string) map[string]any {
 		body, err := os.ReadFile(filepath.Join(root, path))
 		require.NoError(t, err)

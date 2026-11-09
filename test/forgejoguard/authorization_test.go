@@ -54,7 +54,7 @@ func TestForgejoAuthorization(t *testing.T) {
 	root := reporoot.Path(t)
 	// Discover standalone examples as well as release kits and live callers.
 	// GitHub workflows in the same trees retain their native permission model.
-	for _, tree := range []string{".forgejo/workflows", "examples", "test/live/demos"} {
+	for _, tree := range []string{".forgejo/workflows", "examples", "test/live/fixtures/consumers"} {
 		checked := 0
 
 		err := filepath.WalkDir(filepath.Join(root, tree), func(path string, entry fs.DirEntry, err error) error {
@@ -106,10 +106,10 @@ func TestForgejoAuthorizationWorkflowSelection(t *testing.T) {
 		{".forgejo/workflows/release.yml", true},
 		{"examples/forgejo/signer-image.yaml", true},
 		{"examples/new-kit/forgejo/snapshot.yml", true},
-		{"test/live/demos/app/consumer/.forgejo/workflows/release.yml", true},
+		{"test/live/fixtures/consumers/app/consumer/.forgejo/workflows/release.yml", true},
 		{".github/workflows/release.yml", false},
 		{"examples/new-kit/github/release.yml", false},
-		{"test/live/demos/app/consumer/test/live/github/workflows/release.yml", false},
+		{"test/live/fixtures/consumers/app/consumer/test/live/github/workflows/release.yml", false},
 		{".forgejo/actions/build/action.yml", false},
 		{"examples/new-kit/forgejo/README.md", false},
 	} {

@@ -98,13 +98,13 @@ esac
 # validates it exactly as the scenarios will. A refusal says where it looked;
 # an accepted contract is explained, run identity included, so the operator
 # sees what the run will touch. The report is kept for the log header.
-preflight_report=$(cd -- "$repo_root" && "$go_bin" run ./internal/livetest/preflight)
+preflight_report=$(cd -- "$repo_root" && "$go_bin" run ./test/live/internal/livetest/preflight)
 printf '%s\n' "$preflight_report"
 
 # The pinned host tools the scenarios run must resolve to real executables,
 # not to a mise shim with nothing installed behind it; Go owns the list and
 # the resolution the scenarios use.
-(cd -- "$repo_root" && "$go_bin" run ./internal/livetest/preflight host-tools) >/dev/null
+(cd -- "$repo_root" && "$go_bin" run ./test/live/internal/livetest/preflight host-tools) >/dev/null
 
 # All-provider/older launchers own live.lock exclusively. A provider-scoped run
 # takes it shared plus its provider lock exclusively: independent providers may
@@ -169,7 +169,7 @@ export FORGE_CI_LIVE_SNAPSHOT_EVIDENCE_DIR="${FORGE_CI_LIVE_SNAPSHOT_EVIDENCE_DI
 
 # The runner binaries are built for the architecture the lab's runners
 # execute, as the contract states it; nothing here runs under emulation.
-runner_arch=$(cd -- "$repo_root" && "$go_bin" run ./internal/livetest/preflight runner-arch)
+runner_arch=$(cd -- "$repo_root" && "$go_bin" run ./test/live/internal/livetest/preflight runner-arch)
 printf 'live: building runner binaries for linux/%s, the lab runners architecture\n' "$runner_arch"
 
 state=$(mktemp -d "${TMPDIR:-/tmp}/forge-ci-live.XXXXXXXX")
@@ -184,9 +184,9 @@ trap 'rm -rf -- "$state"' EXIT
   CGO_ENABLED=0 GOOS=linux GOARCH="$runner_arch" "$go_bin" build -trimpath -buildvcs=false \
     -o "$state/forge-ci-runner" ./cmd/forge-ci
   CGO_ENABLED=0 GOOS=linux GOARCH="$runner_arch" "$go_bin" build -trimpath -buildvcs=false \
-    -o "$state/credential-proxy" ./internal/livetest/credentialproxy
+    -o "$state/credential-proxy" ./test/live/internal/livetest/credentialproxy
   CGO_ENABLED=0 GOOS=linux GOARCH="$runner_arch" "$go_bin" build -trimpath -buildvcs=false \
-    -o "$state/probe-json" ./internal/livetest/probejson
+    -o "$state/probe-json" ./test/live/internal/livetest/probejson
   # The Forgejo layer's binary, as its jobs download it: the build of the
   # runners' architecture that the tree's checksum names, which the layer
   # scenarios publish to the lab.
@@ -196,9 +196,9 @@ trap 'rm -rf -- "$state"' EXIT
   # Run the compiled suites directly: the go test driver's signal handling
   # can terminate a test before its cancellation-aware cleanup runs.
   install -d -m 0700 -- "$state/tests"
-  "$go_bin" test -c -tags=live -buildvcs=false -o "$state/tests/" ./internal/livetest/... 9>&-
+  "$go_bin" test -c -tags=live -buildvcs=false -o "$state/tests/" ./test/live/internal/livetest/... ./test/live/conformance ./test/live/githubconsumer 9>&-
 ) 7>&- 9>&-
-packages=$(cd -- "$repo_root" && "$go_bin" list -tags=live -f '{{if or .TestGoFiles .XTestGoFiles}}{{.Dir}}{{end}}' ./internal/livetest/... 7>&- 9>&-)
+packages=$(cd -- "$repo_root" && "$go_bin" list -tags=live -f '{{if or .TestGoFiles .XTestGoFiles}}{{.Dir}}{{end}}' ./test/live/internal/livetest/... ./test/live/conformance ./test/live/githubconsumer 7>&- 9>&-)
 
 export FORGE_CI_LIVE_BIN="$state/forge-ci-host"
 export FORGE_CI_LIVE_RUNNER_BIN="$state/forge-ci-runner"
@@ -293,7 +293,7 @@ set -e
 # read from the redacted log and given the run's header as values, not as the
 # shell-quoted text the log holds.
 classification=$(cd -- "$repo_root" && FORGE_CI_LIVE_RUN_STARTED_AT="$started_at" FORGE_CI_LIVE_RUN_SOURCE_COMMIT="$source_commit" \
-  FORGE_CI_LIVE_RUN_SCENARIO="$scenario" "$go_bin" run ./internal/livetest/preflight classify-run "$status" "$log" 7>&- 9>&-) || classification='1 failed'
+  FORGE_CI_LIVE_RUN_SCENARIO="$scenario" "$go_bin" run ./test/live/internal/livetest/preflight classify-run "$status" "$log" 7>&- 9>&-) || classification='1 failed'
 read -r status verdict <<<"$classification"
 if [[ "$interrupted" -ne 0 ]]; then
   status=130

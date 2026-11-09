@@ -1,0 +1,209 @@
+// SPDX-FileCopyrightText: 2026 Digg - Agency for Digital Government
+// SPDX-License-Identifier: EUPL-1.2 OR GPL-3.0-or-later
+
+//go:build live
+
+package conformance_test
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	gitlabapi "gitlab.com/gitlab-org/api/client-go"
+
+	"github.com/diggsweden/forge-ci/internal/domain/errs"
+	"github.com/diggsweden/forge-ci/internal/retry"
+	"github.com/diggsweden/forge-ci/test/live/internal/livetest"
+)
+
+func TestGitLabRelease_BaseImagesColdAndWarm(t *testing.T) {
+	livetest.RegisterLiveScenario(t)
+
+	for _, visibility := range livetest.ConsumerVisibilities(t) {
+		t.Run(visibility.Name, func(t *testing.T) {
+			runGitLabReleaseScenario(t, "", gitlabBaseRelease, visibility.Private)
+		})
+	}
+}
+
+func requireGitLabBaseReuse(t *testing.T, client *gitlabapi.Client, target livetest.Target, repo, publication string, keys releaseKeys, requestKeyDir string) {
+	t.Helper()
+
+	ctx, cancel := context.WithTimeout(livetest.Context(t), 45*time.Minute)
+	defer cancel()
+
+	baseTag := strings.Repeat("b", 64) + "-go"
+
+	digest, found := livetest.ImageDigest(t, target, publication+"/bases", baseTag)
+	if !found {
+		t.Fatal("cold base publication did not create its immutable final tag")
+	}
+
+	registry, err := livetest.RegistryHost(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ref := registry + "/" + livetest.RepoSlug(target, publication) + "/bases@" + digest
+	auth := livetest.RegistryAuthConfigDir(t, target, t.TempDir())
+	verifyCosignSignature(t, target, ref, keys.cosignPublicPath, auth)
+	verifyCosignAttestations(t, target, ref, keys.cosignPublicPath, auth, digest)
+
+	const requestTag, finalTag = "release-request/v0.0.2", "v0.0.2"
+
+	request := mergeGitLabNextCandidate(t, client, target, repo)
+	livetest.SignGitLabRequest(t, target, repo, request, requestTag, filepath.Join(requestKeyDir, "lab-ssh"))
+	run := waitGitLabTagPipeline(t, ctx, client, livetest.RepoSlug(target, repo), requestTag, request)
+	child := requireGitLabReleaseChild(t, ctx, client, livetest.RepoSlug(target, repo), run)
+	requireReleaseGit(t, target, repo, keys, request, requestTag, finalTag)
+
+	verified := requireGitLabReleaseBundles(t, client, target, repo, child, run.SHA, keys, finalTag, false)
+	if actual, exists := livetest.ImageDigest(t, target, publication+"/bases", baseTag); !exists || actual != digest {
+		t.Fatal("warm release changed the immutable base digest")
+	}
+
+	for _, tc := range []struct {
+		tag   string
+		found bool
+	}{{releaseFinalTag, false}, {finalTag, true}} {
+		body := livetest.Download(t, target, livetest.ReleaseAssetURL(t, target, repo, tc.tag, "base-verification.json"), maxReleaseFile)
+
+		var evidence struct {
+			AllFound bool `json:"all_found"`
+		}
+		if err := json.Unmarshal(body, &evidence); err != nil || evidence.AllFound != tc.found {
+			t.Fatalf("base reuse evidence for %s: %v", tc.tag, err)
+		}
+	}
+
+	t.Logf("base cold publication and verified warm reuse: %s; warm parent %d child %d, %d bundles", ref, run.ID, child, verified)
+}
+
+// Prepared release commits carry [skip ci]. The next request must name a new
+// candidate, admitted through normal MR merge authority rather than unprotecting
+// main or changing the release bot's generated message.
+func mergeGitLabNextCandidate(t *testing.T, client *gitlabapi.Client, target livetest.Target, repo string) string {
+	t.Helper()
+
+	ctx, cancel := context.WithTimeout(livetest.Context(t), 5*time.Minute)
+	defer cancel()
+
+	project := livetest.RepoSlug(target, repo)
+
+	const branch = "next-release-candidate"
+
+	commit, _, err := client.Commits.CreateCommit(project, &gitlabapi.CreateCommitOptions{
+		Branch: gitlabapi.Ptr(branch), StartBranch: new("main"), CommitMessage: new("test: request next release"),
+		Actions: []*gitlabapi.CommitActionOptions{{Action: gitlabapi.Ptr(gitlabapi.FileCreate), FilePath: new("next-release-request.txt"), Content: new("release inputs remain unchanged\n")}},
+	}, gitlabapi.WithContext(ctx))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	waitGitLabPush(t, ctx, client, project, branch, commit.ID)
+
+	mr, err := livetest.CreateGitLabMergeRequest(ctx, client, project, &gitlabapi.CreateMergeRequestOptions{
+		SourceBranch: gitlabapi.Ptr(branch), TargetBranch: new("main"), Title: new("Request next release candidate"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err = retry.Run(ctx, nil, 90, 2*time.Second, func() error {
+		current, _, readErr := client.MergeRequests.GetMergeRequest(project, mr.IID, nil, gitlabapi.WithContext(ctx))
+		if readErr != nil {
+			return retry.Permanent(readErr)
+		}
+
+		if current.DetailedMergeStatus != "mergeable" {
+			return fmt.Errorf("merge request is %s: %w", current.DetailedMergeStatus, errs.ErrDependencyUnavailable)
+		}
+
+		return nil
+	}, retry.WithBackoff(retry.Constant)); err != nil {
+		t.Fatal(err)
+	}
+
+	merged, _, err := client.MergeRequests.AcceptMergeRequest(project, mr.IID, &gitlabapi.AcceptMergeRequestOptions{
+		SHA: new(commit.ID), MergeCommitMessage: new("test: merge next release candidate"), ShouldRemoveSourceBranch: new(true),
+	}, gitlabapi.WithContext(ctx))
+	if err != nil || merged.MergeCommitSHA == "" {
+		t.Fatalf("merge next release candidate: %v", err)
+	}
+
+	return merged.MergeCommitSHA
+}
+
+// gitlabBaseInputID is the base fixture's content-addressed input identity.
+const gitlabBaseInputID = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+
+// gitlabBaseExport builds the base fixture, one tiny scratch image, in the
+// release's export jobs: once per selected architecture, natively, with the
+// policy's image builder (Buildah or kaniko) in its job image, and with no
+// credential. The engine's builder-neutral two-phase build stages the image
+// as an OCI layout, uploading nothing; the build job publishes it only when
+// the release finds no verified base. Export commands take no single quote.
+var gitlabBaseExport = []string{
+	`base_context=$(mktemp -d)`,
+	`printf "one immutable base fixture\n" > "${base_context}/base.txt"`,
+	`printf "FROM scratch\nCOPY base.txt /base.txt\n" > "${base_context}/Containerfile"`,
+	`forge-ci container multiarch-image build-arch --stage --arch "${EXPORT_ARCH}" --source-sha "${RELEASE_SHA}"` +
+		` --containerfile "${base_context}/Containerfile" --context "${base_context}"` +
+		` --image-repository "${CI_REGISTRY_IMAGE}/bases" --tag "staging-` + gitlabBaseInputID + `-go"` +
+		` --name base --metadata-dir "dist/base-arch-${EXPORT_ARCH}"`,
+}
+
+// The second request must find verified evidence and never publish the
+// staged base: no consumer toolchain or release matrix, and no image builder
+// in this job, which only scans and uploads what the export jobs staged.
+const gitlabBaseBuild = `# Verification uses an isolated subprocess, including on a warm-only build.
+# A tool-manager shim needing additional environment is not a usable verifier.
+env -i HOME="${HOME}" PATH="${PATH}" cosign version
+# The export jobs' staged base layouts arrive in dist/; they are no release file.
+mkdir -p dist
+base_layouts="${RC_WORK}/base-layouts"
+mkdir -m 0700 "${base_layouts}"
+for layout in dist/base-arch-*; do mv -- "${layout}" "${base_layouts}/"; done
+printf '%s\n' "${COSIGN_PUBLIC_KEY%$'\n'}" > "${RC_WORK}/base-key.pub"
+printf '%s\n' "${RC_PUBLIC_KEY_SHA256}" > "${RC_WORK}/base-key.sha256"
+forge-ci platform stage-public-key --source "${RC_WORK}/base-key.pub" \
+  --digest-file "${RC_WORK}/base-key.sha256" --workspace "$PWD" --destination .base-trust.pub
+printf 'go\n' > .base-flavors
+base_id=` + gitlabBaseInputID + `
+forge-ci --format json container base-images validate --expected-repository "${RC_PUBLICATION_IMAGE_REPOSITORY}/bases" \
+  --expected-source "${CI_PROJECT_URL}" --expected-workflow gitlab/release.yml \
+  --cosign-public-key-path .base-trust.pub --cosign-public-key-sha256 "${RC_PUBLIC_KEY_SHA256}" \
+  --flavors-file .base-flavors --base-input-id "${base_id}" > dist/base-verification.json
+if jq -e '.all_found == true' dist/base-verification.json >/dev/null; then
+  test "${RELEASE_TAG}" = v0.0.2
+  printf 'reused\n' > dist/base-use.txt
+else
+  test "${RELEASE_TAG}" = v0.0.1
+  archs=$(cd "${base_layouts}" && for layout in base-arch-*; do printf '%s\n' "${layout#base-arch-}"; done)
+  test -n "${archs}"
+  # shellcheck source=/dev/null
+  source "${RC_HELPERS_DIR}/scripts/bootstrap/install-trivy.sh"
+  install_trivy
+  auth="${RC_WORK}/registry-auth.json"
+  printf '%s' "${CI_REGISTRY_PASSWORD}" | forge-ci container login --registry "${CI_REGISTRY}" \
+    --registry-username "${CI_REGISTRY_USER}" --registry-password-file - --auth-file "${auth}"
+  (cd "${base_layouts}" && forge-ci container multiarch-image assemble --from-layouts --archs "${archs}" \
+    --source-sha "${RELEASE_SHA:?}" --image-repository "${CI_REGISTRY_IMAGE}/bases" --tag "staging-${base_id}-go" \
+    --name base --auth-file "${auth}" --scan-output-template "${RC_WORK}/base-scan-{arch}.json" \
+    --manifest-output "${RC_WORK}/base-index.json" --metadata-dir "${RC_WORK}/base-dist")
+  digest="sha256:$(sha256sum "${RC_WORK}/base-index.json" | cut -d " " -f 1)"
+  forge-ci container ledger add --ledger dist/base-images.json --image-kind base --role base --flavor go \
+    --base-input-id "${base_id}" --image-name "${CI_REGISTRY_IMAGE}/bases" --digest "${digest}" \
+    --final-tag-name "${base_id}-go" --derive-candidate-tag --default-sbom
+  printf 'built\n' > dist/base-use.txt
+fi
+printf '{"bomFormat":"CycloneDX","specVersion":"1.6","version":1,"metadata":{"component":{"type":"file","name":"base-use.txt"}}}\n' > dist/fixture-sbom.json
+forge-ci release notes --changelog-file CHANGELOG.md --release-version "$RELEASE_TAG" --target-file dist/release-notes.md
+forge-ci release files declare --dist-dir dist --asset dist/base-use.txt --sbom dist/fixture-sbom.json \
+  --checksums-file dist/checksums.txt --evidence-file dist/base-verification.json --evidence-file dist/release-notes.md
+`

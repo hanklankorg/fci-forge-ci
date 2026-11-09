@@ -62,7 +62,7 @@ SPDX-License-Identifier = "CC0-1.0"
 
 # Fixtures and test data, CC0-1.0: closest, as fuzz seeds, golden JSON, sample
 # inputs and consumer projects keep their bytes exact or have no comment
-# syntax. The in-runner probe shell bodies are embedded by internal/livetest
+# syntax. The in-runner probe shell bodies are embedded by test/live/internal/livetest
 # (go:embed), where a header would corrupt the generated probes.
 [[annotations]]
 path = [
@@ -70,9 +70,9 @@ path = [
   "internal/domain/build/testdata/**",
   "internal/domain/pipeline/testdata/**",
   "internal/domain/provenance/testdata/**",
-  "internal/livetest/probes/**",
-  "internal/livetest/testdata/**",
-  "test/live/cases/rust-development/consumer/**",
+  "test/live/internal/livetest/probes/**",
+  "test/live/internal/livetest/testdata/**",
+  "test/live/fixtures/development/rust-development/consumer/**",
   "test/workflowguard/testdata/**",
 ]
 precedence = "closest"
@@ -81,9 +81,9 @@ SPDX-License-Identifier = "CC0-1.0"
 
 # Demo consumer projects, CC0-1.0: override, as `just demo` publishes each
 # whole project as it is and the Maven recipe overlay copies exactly this
-# metadata into consumers (internal/livetest/mavenrecipelicenses.go).
+# metadata into consumers (test/live/internal/livetest/mavenrecipelicenses.go).
 [[annotations]]
-path = "test/live/demos/**"
+path = "test/live/fixtures/consumers/**"
 precedence = "override"
 SPDX-FileCopyrightText = "2026 Digg - Agency for Digital Government"
 SPDX-License-Identifier = "CC0-1.0"
@@ -93,10 +93,10 @@ SPDX-License-Identifier = "CC0-1.0"
 # which state the same terms.
 [[annotations]]
 path = [
-  "test/live/demos/**/*.go",
-  "test/live/demos/**/*.java",
-  "test/live/demos/**/*.kt",
-  "test/live/demos/**/*.rs",
+  "test/live/fixtures/consumers/**/*.go",
+  "test/live/fixtures/consumers/**/*.java",
+  "test/live/fixtures/consumers/**/*.kt",
+  "test/live/fixtures/consumers/**/*.rs",
 ]
 precedence = "override"
 SPDX-FileCopyrightText = "2026 Digg - Agency for Digital Government"
@@ -106,12 +106,12 @@ SPDX-License-Identifier = "EUPL-1.2 OR GPL-3.0-or-later"
 # keeps its own terms.
 [[annotations]]
 path = [
-  "test/live/demos/hello-android/consumer/gradle/wrapper/gradle-wrapper.jar",
-  "test/live/demos/hello-android/consumer/gradlew",
-  "test/live/demos/hello-android/consumer/gradlew.bat",
-  "test/live/demos/hello-gradle/consumer/gradle/wrapper/gradle-wrapper.jar",
-  "test/live/demos/hello-gradle/consumer/gradlew",
-  "test/live/demos/hello-gradle/consumer/gradlew.bat",
+  "test/live/fixtures/consumers/hello-android/consumer/gradle/wrapper/gradle-wrapper.jar",
+  "test/live/fixtures/consumers/hello-android/consumer/gradlew",
+  "test/live/fixtures/consumers/hello-android/consumer/gradlew.bat",
+  "test/live/fixtures/consumers/hello-gradle/consumer/gradle/wrapper/gradle-wrapper.jar",
+  "test/live/fixtures/consumers/hello-gradle/consumer/gradlew",
+  "test/live/fixtures/consumers/hello-gradle/consumer/gradlew.bat",
 ]
 precedence = "override"
 SPDX-FileCopyrightText = "2015 the original authors; Gradle, Inc."

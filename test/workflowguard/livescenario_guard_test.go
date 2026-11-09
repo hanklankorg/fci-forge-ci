@@ -19,8 +19,10 @@ import (
 	"github.com/diggsweden/forge-ci/internal/testutil/reporoot"
 )
 
-// livetestTree holds the live scenarios and their kit.
-const livetestTree = "internal/livetest"
+// livetestTree holds the live kit; liveScenarioTrees includes its scenario owners.
+const livetestTree = "test/live/internal/livetest"
+
+var liveScenarioTrees = []string{livetestTree, "test/live/conformance", "test/live/githubconsumer"}
 
 // repositoryCreators are the only files that make a creating request for a
 // repository: the visibility-aware scratch helpers, and the demos, which are
@@ -36,9 +38,9 @@ var repositoryCreators = map[string]bool{
 // it with RequireVisibility first, so the other visibility's run reports it
 // not covered.
 var subjectVisibility = map[string]string{
-	livetestTree + "/conformance/privateaccess_test.go": "proves a private repository refuses anonymous reads and admits the job token",
-	livetestTree + "/conformance/privateimage_test.go":  "pulls a private job image into a private repository's job",
-	livetestTree + "/conformance/gitlabcheck_test.go":   "its private case checks out a private consumer with the job token",
+	"test/live/conformance/privateaccess_test.go": "proves a private repository refuses anonymous reads and admits the job token",
+	"test/live/conformance/privateimage_test.go":  "pulls a private job image into a private repository's job",
+	"test/live/conformance/gitlabcheck_test.go":   "its private case checks out a private consumer with the job token",
 }
 
 // privilegedDirect are the live files that may ask for the privileged runner
@@ -47,18 +49,18 @@ var subjectVisibility = map[string]string{
 // and a scenario that runs a container itself takes the runner from
 // ContainerRunnerLabel, whichever the builder.
 var privilegedDirect = map[string]string{
-	livetestTree + "/imagebuilder.go":                               "ChooseImageBuilder, the shared builder selection",
-	livetestTree + "/conformance/gitlabrelease_test.go":             "the Go CLI fixture's checks are Buildah's own integration tests, its subject",
-	livetestTree + "/conformance/gitlabconsumerdevelopment_test.go": "the Buildah branch of its own GitLabKaniko selection",
-	livetestTree + "/conformance/layerconsumertrial_test.go":        "Maven Testcontainers need user namespaces to run containers, and the Buildah branch of the trial's CI_IMAGE_BUILDER",
+	livetestTree + "/imagebuilder.go":                         "ChooseImageBuilder, the shared builder selection",
+	"test/live/conformance/gitlabrelease_test.go":             "the Go CLI fixture's checks are Buildah's own integration tests, its subject",
+	"test/live/conformance/gitlabconsumerdevelopment_test.go": "the Buildah branch of its own GitLabKaniko selection",
+	"test/live/conformance/layerconsumertrial_test.go":        "Maven Testcontainers need user namespaces to run containers, and the Buildah branch of the trial's CI_IMAGE_BUILDER",
 }
 
 // buildahNamed are the live files whose fixtures may name Buildah, and why.
 var buildahNamed = map[string]string{
-	livetestTree + "/imagebuilder.go":                   "Kaniko development admission rejects an explicit setup-buildah action",
-	livetestTree + "/imagebuilder_internal_test.go":     "negative admission regression for an explicit setup-buildah action",
-	livetestTree + "/nativesnapshotartifact_test.go":    "the Buildah capability probe, run only when the selection is Buildah",
-	livetestTree + "/conformance/gitlabrelease_test.go": "the build-image probe checks the build image's own Buildah",
+	livetestTree + "/imagebuilder.go":                "Kaniko development admission rejects an explicit setup-buildah action",
+	livetestTree + "/imagebuilder_internal_test.go":  "negative admission regression for an explicit setup-buildah action",
+	livetestTree + "/nativesnapshotartifact_test.go": "the Buildah capability probe, run only when the selection is Buildah",
+	"test/live/conformance/gitlabrelease_test.go":    "the build-image probe checks the build image's own Buildah",
 }
 
 // buildahLiteral names Buildah as a build step in a fixture.
@@ -115,7 +117,7 @@ func f() { _ = PrivilegedRunnerLabel(t, target) }`,
 		"empty public reason": `package p
 func f() { NewPublicScratchRepo(t, target, "weburl", "") }`,
 	} {
-		findings, _ := scanLiveFile(t, livetestTree+"/conformance/example_test.go", source)
+		findings, _ := scanLiveFile(t, "test/live/conformance/example_test.go", source)
 		if len(findings) == 0 {
 			t.Errorf("%s: the guard accepted %q", name, source)
 		}
@@ -129,26 +131,28 @@ func scanLiveScenarios(t *testing.T, root string) ([]liveFinding, map[string]boo
 
 	seen := map[string]bool{}
 
-	require.NoError(t, filepath.WalkDir(filepath.Join(root, livetestTree), func(path string, entry fs.DirEntry, err error) error {
-		if err != nil || entry.IsDir() || filepath.Ext(path) != ".go" {
-			return err
-		}
+	for _, tree := range liveScenarioTrees {
+		require.NoError(t, filepath.WalkDir(filepath.Join(root, tree), func(path string, entry fs.DirEntry, err error) error {
+			if err != nil || entry.IsDir() || filepath.Ext(path) != ".go" {
+				return err
+			}
 
-		rel, _ := filepath.Rel(root, path)
-		rel = filepath.ToSlash(rel)
+			rel, _ := filepath.Rel(root, path)
+			rel = filepath.ToSlash(rel)
 
-		body, readErr := os.ReadFile(path)
-		require.NoError(t, readErr)
+			body, readErr := os.ReadFile(path)
+			require.NoError(t, readErr)
 
-		found, marks := scanLiveFile(t, rel, string(body))
-		findings = append(findings, found...)
+			found, marks := scanLiveFile(t, rel, string(body))
+			findings = append(findings, found...)
 
-		for mark := range marks {
-			seen[mark] = true
-		}
+			for mark := range marks {
+				seen[mark] = true
+			}
 
-		return nil
-	}))
+			return nil
+		}))
+	}
 
 	return findings, seen
 }

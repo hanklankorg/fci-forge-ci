@@ -19,7 +19,7 @@
 # <dir>/campaign.env: KEY=value lines of image references and archive paths,
 # no secrets.
 #
-# lane runs the plan the preflight makes of a cases file (internal/livetest,
+# lane runs the plan the preflight makes of a cases file (test/live/internal/livetest,
 # campaign.go, says what a case is and refuses what it is not), in order,
 # past failures. A case sees the campaign's images and what it names: the
 # plan clears the caller's image variables first. Each case appends a line to <dir>/<provider>.results; the
@@ -53,7 +53,7 @@ fail() {
 }
 
 preflight() {
-  (cd -- "$repo_root" && "$go_bin" run ./internal/livetest/preflight "$@")
+  (cd -- "$repo_root" && "$go_bin" run ./test/live/internal/livetest/preflight "$@")
 }
 
 prepare() {
@@ -121,7 +121,7 @@ prepare() {
   install -d -m 0700 -- "$dir/demos" "$dir/images"
 
   local consumer name
-  for consumer in "$repo_root"/test/live/demos/*/consumer; do
+  for consumer in "$repo_root"/test/live/fixtures/consumers/*/consumer; do
     name=${consumer%/consumer}
     name=${name##*/}
     bash "$repo_root/scripts/ci/demo-checkout.sh" "$name" "$dir/demos/$name"

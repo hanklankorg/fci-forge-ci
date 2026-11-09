@@ -1,0 +1,210 @@
+// SPDX-FileCopyrightText: 2026 Digg - Agency for Digital Government
+// SPDX-License-Identifier: EUPL-1.2 OR GPL-3.0-or-later
+
+//go:build live
+
+package conformance_test
+
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/diggsweden/forge-ci/internal/domain/container"
+	"github.com/diggsweden/forge-ci/internal/domain/errs"
+	"github.com/diggsweden/forge-ci/internal/domain/provider"
+	"github.com/diggsweden/forge-ci/internal/retry"
+	"github.com/diggsweden/forge-ci/test/live/internal/livetest"
+)
+
+// A native Cargo development push publishes an unsigned image, not a release.
+func TestForgejoLayer_ContainerDevelopment(t *testing.T) {
+	livetest.RegisterLiveScenario(t)
+
+	root := os.Getenv(consumerCheckoutEnv)
+	if root == "" {
+		t.Skip("name a clean Cargo container-first development consumer with FORGE_CI_LIVE_CONSUMER")
+	}
+
+	if livetest.DemoName() != "" {
+		t.Fatal("the development trial requires disposable scratch repositories")
+	}
+
+	for _, visibility := range livetest.ConsumerVisibilities(t) {
+		t.Run(visibility.Name, func(t *testing.T) {
+			if !livetest.Requires(t, provider.ForgeForgejo, livetest.NeedsInRunner) {
+				livetest.NotCoveredf(t, "the development consumer needs a Forgejo runner")
+			}
+
+			target := livetest.Accept(t, provider.ForgeForgejo)
+			builder := livetest.ChooseImageBuilder(t, target)
+			buildLabel := builder.RunnerLabels[0]
+			t.Logf("development image builder: %s; runner: %q", builder.Builder, buildLabel)
+
+			if livetest.RunnerArch(t, target) != "amd64" {
+				t.Fatal("the Cargo fixture requires a native linux/amd64 image builder")
+			}
+
+			consumer := livetest.OpenConsumer(t, target, root)
+			consumer = livetest.NewCargoDevelopmentFixture(t, consumer)
+
+			const workflow = "development.yml"
+
+			workflows := consumer.Workflows(t)
+			if len(workflows) != 1 || workflows[workflow] == "" {
+				t.Fatal("the consumer must supply only .forgejo/workflows/development.yml")
+			}
+
+			if builder.Builder == livetest.ImageBuilderKaniko {
+				if err := livetest.ValidateKanikoDevelopmentJob(workflows[workflow], "Check: development container", "CI_IMAGE_BUILDER_JOB_IMAGE"); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			layer, repo := newConsumerRepos(t, target, consumer, "container-development", visibility.Private)
+			jobImage := consumerBuilderJobImage(t, target, builder, layer)
+
+			registry, err := livetest.RegistryHost(target)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			image := registry + "/" + strings.ToLower(livetest.RepoSlug(target, repo))
+
+			plan, err := layer.PlanConsumer(workflows, livetest.ConsumerFacts{
+				Inputs: map[string]string{"forge-ci-repository": layer.Repository},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			label := livetest.RunnerLabel(t, target)
+
+			variables, err := livetest.MergeConsumerVariables(plan.Variables, map[string]string{
+				layerRunnerVariable: runnerLabelsJSON(t, label), containerRunnerVariable: runnerLabelsJSON(t, buildLabel),
+				"CI_IMAGE_BUILDER": builder.Builder, "CI_IMAGE_BUILDER_JOB_IMAGE": jobImage,
+				"FORGE_CI_REPOSITORY": layer.Repository, "DEVELOPMENT_REGISTRY_USERNAME": target.CredentialUsername,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			main := consumer.Push(t, repo, plan)
+			requireObjectFormats(t, consumer.ObjectFormat, main, layer.Commit)
+
+			if err = retry.Run(livetest.Context(t), nil, 30, 2*time.Second, func() error {
+				before, found := livetest.Branches(t, target, repo)["main"]
+				if !found {
+					return fmt.Errorf("main is not visible after push: %w", errs.ErrDependencyUnavailable)
+				}
+
+				if before != main {
+					return retry.Permanent(fmt.Errorf("main = %s, want %s: %w", before, main, errs.ErrValidation))
+				}
+
+				return nil
+			}, retry.WithBackoff(retry.Constant)); err != nil {
+				t.Fatal(err)
+			}
+
+			var head string
+
+			defer func() {
+				if after := livetest.BranchCommitSHA(t, target, repo, "main"); after != main {
+					t.Errorf("development advanced main: before=%s after=%s", main, after)
+				}
+
+				if livetest.RepoCount(t, target, repo, "/tags") != 0 || len(livetest.Releases(t, target, repo)) != 0 {
+					t.Error("development created Git tags or releases")
+				}
+
+				for tag := range livetest.RegistrySnapshot(t, target, repo) {
+					if tag != "dev-"+head {
+						t.Errorf("development published unexpected image tag %q", tag)
+					}
+				}
+			}()
+
+			livetest.EnableActions(t, target, repo)
+
+			for name, value := range variables {
+				livetest.SetRepoVariable(t, target, repo, name, value)
+			}
+
+			// The sole build/publish job consumes the account's package credential.
+			livetest.SetRepoSecret(t, target, repo, "DEVELOPMENT_REGISTRY_TOKEN", target.Token)
+			head = consumer.PushChange(t, repo, "development", main)
+			t.Logf("consumer %s at %s; development %s; layer %s; image %s", root, consumer.Commit, head, layer.Commit, image)
+			run := livetest.WaitForConsumerRun(t, target, repo, workflow, "push", "")
+			jobs := livetest.RunJobs(t, target, repo, run.ID)
+			scenario := layerScenario{target: target, repo: repo, layer: layer, label: label}
+			scenario.logJobs(t, jobs)
+
+			if err := livetest.ValidateDevelopmentPush(run, livetest.WorkflowRuns(t, target, repo), workflow); err != nil {
+				t.Fatal(err)
+			}
+
+			// The one job builds the image, so it runs on the container runner.
+			assertLayerJobs(t, jobs, run.ID, buildLabel, "Check: development container")
+
+			var source struct {
+				Branch string `json:"prettyref"`
+				SHA    string `json:"commit_sha"`
+			}
+
+			url := fmt.Sprintf("%s/api/v1/repos/%s/actions/runs/%d", target.BaseURL(), livetest.RepoSlug(target, repo), run.ID)
+			if err = json.Unmarshal(livetest.Download(t, target, url, 1<<20), &source); err != nil {
+				t.Fatal(err)
+			}
+
+			if source.Branch != "development" || source.SHA != head || livetest.BranchCommitSHA(t, target, repo, "development") != head {
+				t.Fatalf("run source = %+v, want development at %s", source, head)
+			}
+
+			artifacts := livetest.RunArtifacts(t, target, repo, run.ID)
+
+			artifact, err := livetest.SelectDevelopmentArtifact(artifacts, "fc-cargo-dev-"+head, 32<<10)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			tree, err := livetest.ZIPTree(livetest.ArtifactZIP(t, target, repo, artifact.ID), 4096)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			digest, found := livetest.ImageDigest(t, target, repo, "dev-"+head)
+			if !found || !container.ValidDigest(digest) {
+				t.Fatalf("registry did not serve a development digest: %q", digest)
+			}
+
+			work := t.TempDir()
+			auth := livetest.RegistryAuthFile(t, target, work)
+
+			readback := livetest.CLIIn(t, target, repo, livetest.RunOptions{Dir: work},
+				"container", "image", "usable-digest", "--ref", image+"@"+digest,
+				"--arch", "amd64", "--auth-file", auth,
+				"--require-label", "org.opencontainers.image.revision="+head)
+
+			child := strings.TrimSpace(readback.Stdout)
+			if readback.ExitCode != 0 || !container.ValidDigest(child) {
+				t.Fatalf("development image readback failed: exit=%d stdout=%q\n%s", readback.ExitCode, readback.Stdout, readback.Stderr)
+			}
+
+			t.Logf("development readback identities: run=%d artifact=%d parent=%s linux/amd64-child=%s revision=%s stdout=%q", run.ID, artifact.ID, digest, child, head, readback.Stdout)
+
+			if err = livetest.VerifyDevelopmentImage(t, target, image, digest, child, head); err != nil {
+				t.Fatalf("development image identities differ: parent=%s child=%s stdout=%q: %v", digest, child, readback.Stdout, err)
+			}
+
+			if err = livetest.ValidateDevelopmentImageReceipt(tree, image, head, digest); err != nil {
+				t.Fatal(err)
+			}
+
+			t.Logf("development image and four-file receipt verified: parent=%s child=%s revision=%s", digest, child, head)
+		})
+	}
+}
