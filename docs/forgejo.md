@@ -344,7 +344,7 @@ alone. Each `action.yml` documents its own inputs and outputs.
 | Action | Does |
 |---|---|
 | `setup-forge-ci` | Downloads the layer's binary, verifies it against the recorded checksum and puts it on the job `PATH`. The first step of a consumer job that calls `forge-ci` itself. |
-| `check-l3-isolation` | The pull-request gate over the consumer's release workflow: no signing secret in the build job, enumerated signer secrets, the prepare job's `release-tag`, `release-sha` and `artifacts-config` passed to the signer, the digest hand-off, one commit across every reference, and the signer image, the key digest and the transparency-log setting written out as literals. |
+| `check-l3-isolation` | The pull-request gate over the consumer's release workflow: no signing secret in the build job, enumerated signer secrets, a prepare job that calls `prepare-release.yml`, its `release-tag`, `release-sha` and `artifacts-config` passed to the signer as bare `needs` expressions, the digest hand-off, one commit across every reference, and the signer image, the key digest and the transparency-log setting written out as literals. |
 | `checkout-consumer` | Checks the consumer out without Node and without persisted credentials. |
 | `setup-toolchain` | Installs the consumer's pinned tools with mise, verified and cache-aware. |
 | `lint-nanolinter` | The pull-request lint gate: the repository's nanolinter plan with a mandated floor. |
@@ -794,7 +794,8 @@ for them; every `pullrequest.yml` in the examples, such as
   choice on each forge.
 - **`check-l3-isolation`**: the release-isolation gate over the consumer's
   workflows: no signing secret in the build job, enumerated signer secrets,
-  the prepare job's release identity and declaration passed to the signer,
+  a prepare job that calls `prepare-release.yml`, its release identity and
+  declaration passed to the signer as bare `needs` expressions,
   the digest hand-off, one commit across every reference, and the signer
   image, key digest, transparency-log setting and every `enforce-*` setting
   written out as literals.
@@ -1598,7 +1599,10 @@ reviewed as one set.
   the validated `artifacts-config` it planned the bump from, and the signer
   takes it as `${{ needs.prepare.outputs.artifacts-config }}`, the way it
   takes `release-tag` and `release-sha`; `check-l3-isolation` refuses a
-  release workflow that passes the signer anything else. The signer
+  release workflow that passes the signer anything else: a value that
+  falls back to or wraps another, a longer output name, a second key
+  spelled in another case, or a prepare job that does not call
+  `prepare-release.yml`. The signer
   re-plans from the release commit, whose declaration the check above
   admits unchanged from the request prepare planned.
 - **The hand-off is unsigned.** After the signer has verified the `dist/`

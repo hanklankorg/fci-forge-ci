@@ -5,6 +5,7 @@ package validate
 
 import (
 	"fmt"
+	"regexp"
 	"slices"
 	"strings"
 
@@ -28,8 +29,9 @@ type IsolationConfig struct {
 	// checks.
 	SignJob string
 	// PrepareJob is the job that produces release-tag, release-sha and
-	// artifacts-config, and may run fail-fast signing-secret presence checks
-	// before the consumer checkout.
+	// artifacts-config. With SignJob set it must call the layer's
+	// prepare-release.yml; without, a job built from steps must run its
+	// signing-secret presence checks before the consumer checkout.
 	PrepareJob string
 	// DistDigestOutput is the build job output carrying the build-to-sign digest.
 	// Empty disables the dist-digest channel check.
@@ -271,6 +273,12 @@ const (
 // releaseIdentityOutputs are the prepare outputs the sign job must take.
 var releaseIdentityOutputs = []string{releaseTagOutput, releaseSHAOutput, artifactsConfigOutput}
 
+// prepareReleaseWorkflow is the reusable workflow the prepare job must call.
+// Its outputs are the release identity and the declaration the bump was
+// planned from; a prepare job of the caller's own would let the caller
+// choose them.
+const prepareReleaseWorkflow = "/.forgejo/workflows/prepare-release.yml@"
+
 func releaseIdentityViolations(jobs map[string]yaml.Node, cfg IsolationConfig) []IsolationViolation {
 	if cfg.SignJob == "" || cfg.PrepareJob == "" {
 		return nil
@@ -288,34 +296,44 @@ func releaseIdentityViolations(jobs map[string]yaml.Node, cfg IsolationConfig) [
 
 	var violations []IsolationViolation
 
-	// A prepare job that is a reusable-workflow call (job-level `uses:`, no
-	// steps) gets its outputs from the CALLED workflow's outputs mapping,
-	// which this static pass cannot see — the call target is covered by the
-	// single-pin invariant instead. Only a step-based prepare job must
-	// declare the release identity outputs itself; the sign-side checks
-	// below apply to both shapes.
-	if mappingValue(&prepare, "uses") == nil {
-		prepareOutputs := mappingValue(&prepare, "outputs")
-		for _, outputName := range releaseIdentityOutputs {
-			if mappingValue(prepareOutputs, outputName) == nil {
-				violations = append(violations, IsolationViolation{
-					Line: prepare.Line,
-					Msg:  fmt.Sprintf("prepare job %q does not declare %s output", cfg.PrepareJob, outputName),
-				})
-			}
+	uses := scalarValue(mappingValue(&prepare, "uses"))
+	if strings.HasPrefix(uses, "./") || !strings.Contains(uses, prepareReleaseWorkflow) {
+		violations = append(violations, IsolationViolation{
+			Line: prepare.Line,
+			Msg:  fmt.Sprintf("prepare job %q must call the layer's prepare-release.yml; its outputs are what the sign job is bound to", cfg.PrepareJob),
+		})
+	}
+
+	for _, name := range releaseIdentityOutputs {
+		violations = append(violations, boundInputViolations(&sign, cfg.SignJob, name, cfg.PrepareJob, name)...)
+	}
+
+	return violations
+}
+
+// boundInputViolations refuses a sign job that passes input as anything but
+// the whole expression ${{ needs.<job>.outputs.<output> }} under its exact
+// key. A value that only contains the reference can fall back to, or be
+// built around, a value of the caller's choosing; a key that differs only in
+// case is a second spelling a reader can miss.
+func boundInputViolations(sign *yaml.Node, signJob, input, job, output string) []IsolationViolation {
+	var violations []IsolationViolation
+
+	with := mappingValue(sign, "with")
+	for _, key := range mappingKeys(with) {
+		if key != input && strings.EqualFold(key, input) {
+			violations = append(violations, IsolationViolation{
+				Line: sign.Line,
+				Msg:  fmt.Sprintf("sign job %q passes %q; the input is spelled %s", signJob, key, input),
+			})
 		}
 	}
 
-	signWith := mappingValue(&sign, "with")
-
-	for _, name := range releaseIdentityOutputs {
-		val := scalarValue(mappingValue(signWith, name))
-		if !referencesNeedOutput(val, cfg.PrepareJob, name) {
-			violations = append(violations, IsolationViolation{
-				Line: sign.Line,
-				Msg:  fmt.Sprintf("sign job %q must pass %s from needs.%s.outputs.%s", cfg.SignJob, name, cfg.PrepareJob, name),
-			})
-		}
+	if !isNeedOutput(scalarValue(mappingValue(with, input)), job, output) {
+		violations = append(violations, IsolationViolation{
+			Line: sign.Line,
+			Msg:  fmt.Sprintf("sign job %q must pass %s from needs.%s.outputs.%s, as that expression alone", signJob, input, job, output),
+		})
 	}
 
 	return violations
@@ -344,15 +362,7 @@ func distDigestViolations(jobs map[string]yaml.Node, cfg IsolationConfig) []Isol
 		})
 	}
 
-	val := scalarValue(mappingValue(mappingValue(&sign, "with"), "dist-digest"))
-	if !referencesNeedOutput(val, cfg.BuildJob, cfg.DistDigestOutput) {
-		violations = append(violations, IsolationViolation{
-			Line: sign.Line,
-			Msg:  fmt.Sprintf("sign job %q must pass dist-digest from needs.%s.outputs.%s", cfg.SignJob, cfg.BuildJob, cfg.DistDigestOutput),
-		})
-	}
-
-	return violations
+	return append(violations, boundInputViolations(&sign, cfg.SignJob, "dist-digest", cfg.BuildJob, cfg.DistDigestOutput)...)
 }
 
 // persistCredentialViolations flags every actions/checkout step that does not
@@ -595,6 +605,21 @@ func mappingValue(node *yaml.Node, key string) *yaml.Node {
 	return resolveAlias(&value)
 }
 
+// mappingKeys are a mapping's keys after merges, as mappingValue sees them.
+func mappingKeys(node *yaml.Node) []string {
+	node = resolveAlias(node)
+	if node == nil || node.Kind != yaml.MappingNode {
+		return nil
+	}
+
+	var values map[string]yaml.Node
+	if err := node.Decode(&values); err != nil {
+		return nil
+	}
+
+	return sortedKeys(values)
+}
+
 func scalarValue(node *yaml.Node) string {
 	node = resolveAlias(node)
 	if node == nil || node.Kind != yaml.ScalarNode {
@@ -604,12 +629,14 @@ func scalarValue(node *yaml.Node) string {
 	return node.Value
 }
 
-func referencesNeedOutput(expr, job, outputName string) bool {
-	dot := "needs." + job + ".outputs." + outputName
-	bracketSingle := "needs." + job + ".outputs['" + outputName + "']"
-	bracketDouble := "needs." + job + ".outputs[\"" + outputName + "\"]"
+// isNeedOutput reports whether expr is exactly one expression reading
+// needs.<job>.outputs.<output>, dotted or bracketed, and nothing else.
+func isNeedOutput(expr, job, output string) bool {
+	name := regexp.QuoteMeta(output)
+	pattern := `^\$\{\{\s*needs\.` + regexp.QuoteMeta(job) +
+		`\.outputs(?:\.` + name + `|\['` + name + `'\]|\["` + name + `"\])\s*\}\}$`
 
-	return strings.Contains(expr, dot) || strings.Contains(expr, bracketSingle) || strings.Contains(expr, bracketDouble)
+	return regexp.MustCompile(pattern).MatchString(expr)
 }
 
 func sortedKeys[V any](m map[string]V) []string {

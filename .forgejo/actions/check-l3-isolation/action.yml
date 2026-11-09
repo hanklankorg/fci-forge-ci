@@ -4,7 +4,7 @@
 
 name: 'Check release isolation'
 description: >-
-  The release-integrity gate: statically asserts the release-isolation and secret-boundary invariants of a consumer's release workflow (the build job references no signing-key secret, the prepare job's signing-key refs precede checkout, the cross-repo sign job enumerates every required signing secret and is pinned, release-tag, release-sha and artifacts-config flow from prepare to signer, and the dist-digest tamper-evidence channel is intact) plus the supporting hygiene that keeps them meaningful (one forge-ci pin across the workflow directory, and the signer image, the Cosign public key digest, the transparency-log setting and the enforce-* settings written out as literals wherever a job or step passes them to the layer). Shared so every signing consumer enforces the same guard instead of carrying its own copy.
+  The release-integrity gate: statically asserts the release-isolation and secret-boundary invariants of a consumer's release workflow (the build job references no signing-key secret, the prepare job calls the layer's prepare-release.yml, the cross-repo sign job enumerates every required signing secret and is pinned, release-tag, release-sha and artifacts-config flow from prepare to signer as bare needs expressions, and the dist-digest tamper-evidence channel is intact) plus the supporting hygiene that keeps them meaningful (one forge-ci pin across the workflow directory, and the signer image, the Cosign public key digest, the transparency-log setting and the enforce-* settings written out as literals wherever a job or step passes them to the layer). Shared so every signing consumer enforces the same guard instead of carrying its own copy.
 inputs:
   workflow:
     description: Release workflow path.
@@ -20,7 +20,7 @@ inputs:
     default: sign-and-publish
   prepare-job:
     description: >-
-      Prepare job whose signing-key references (fail-fast secrets checks) must come before its first checkout step. Skipped when the job doesn't exist.
+      Prepare job, which must call the layer's prepare-release.yml; the sign job takes release-tag, release-sha and artifacts-config from its outputs. Skipped when the job doesn't exist.
     required: false
     default: prepare
   signing-secrets:

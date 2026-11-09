@@ -90,17 +90,7 @@ func runForgejoIsolationInFS(t *testing.T, mem *testfs.Memory, workflow string) 
 
 const forgejoIsolationCleanWorkflow = `jobs:
   prepare:
-    outputs:
-      release-tag: ${{ steps.prepare.outputs.release-tag }}
-      release-sha: ${{ steps.prepare.outputs.release-sha }}
-      artifacts-config: ${{ steps.prepare.outputs.artifacts-config }}
-    steps:
-      - name: Check secrets before checkout
-        env:
-          KEY: ${{ secrets.GPG_SIGNING_KEY }}
-      - uses: actions/checkout@1111111111111111111111111111111111111111
-        with:
-          persist-credentials: false
+    uses: examplescope/ci-layer/.forgejo/workflows/prepare-release.yml@1111111111111111111111111111111111111111
   build-and-release:
     outputs:
       dist-digest: ${{ steps.handoff.outputs.digest }}
@@ -304,44 +294,13 @@ func TestIsolation_ForgejoStrictWorkflowPasses(t *testing.T) {
 	}
 }
 
-// TestIsolation_CalledPrepareJobPasses pins the reusable-workflow prepare
-// shape (Forgejo v15+): a prepare job that is a `uses:` call gets its
-// release-identity outputs from the CALLED workflow, invisible to this
-// static pass — the declared-outputs check applies only to step-based
-// prepare jobs, while the sign-side needs.prepare checks still apply.
-func TestIsolation_CalledPrepareJobPasses(t *testing.T) {
-	body := `jobs:
-  prepare:
-    uses: examplescope/ci-layer/.forgejo/workflows/prepare-release.yml@1111111111111111111111111111111111111111
-    with:
-      forgejo-ci-sha: 1111111111111111111111111111111111111111
-    secrets:
-      GPG_SIGNING_KEY: ${{ secrets.GPG_SIGNING_KEY }}
-      COSIGN_SIGNING_KEY: ${{ secrets.COSIGN_SIGNING_KEY }}
-  build-and-release:
-    outputs:
-      dist-digest: ${{ steps.handoff.outputs.digest }}
-    steps: []
-  sign-and-publish:
-    uses: examplescope/ci-layer/.forgejo/workflows/sign-and-publish-release.yml@1111111111111111111111111111111111111111
-    with:
-      release-tag: ${{ needs.prepare.outputs.release-tag }}
-      release-sha: ${{ needs.prepare.outputs.release-sha }}
-      artifacts-config: ${{ needs.prepare.outputs.artifacts-config }}
-      dist-digest: ${{ needs.build-and-release.outputs.dist-digest }}
-    secrets:
-      COSIGN_SIGNING_KEY: ${{ secrets.COSIGN_SIGNING_KEY }}
-      GPG_SIGNING_KEY: ${{ secrets.GPG_SIGNING_KEY }}
-`
+// composedPrepare is forgejoIsolationCleanWorkflow with its called prepare
+// job replaced by one built from steps.
+func composedPrepare(steps string) string {
+	called := forgejoIsolationCleanWorkflow[strings.Index(forgejoIsolationCleanWorkflow, "  prepare:\n"):strings.Index(forgejoIsolationCleanWorkflow, "  build-and-release:\n")]
 
-	out, err := runForgejoIsolation(t, body)
-	if err != nil {
-		t.Fatalf("Isolation: %v\n%s", err, out)
-	}
-
-	if !strings.Contains(out, "Static release-isolation checks passed") {
-		t.Errorf("missing success line in:\n%s", out)
-	}
+	return strings.Replace(forgejoIsolationCleanWorkflow, called,
+		"  prepare:\n    outputs:\n      release-tag: v1\n      release-sha: abc\n      artifacts-config: ''\n    steps:\n"+steps, 1)
 }
 
 func TestIsolation_ForgejoStrictViolations(t *testing.T) {
@@ -349,15 +308,19 @@ func TestIsolation_ForgejoStrictViolations(t *testing.T) {
 		body string
 		want string
 	}{
-		"late_prepare_secret": {strings.Replace(forgejoIsolationCleanWorkflow,
-			`      - name: Check secrets before checkout
+		"composed_prepare": {composedPrepare(`      - name: Check secrets before checkout
         env:
           KEY: ${{ secrets.GPG_SIGNING_KEY }}
-      - uses: actions/checkout@1111111111111111111111111111111111111111`,
-			`      - uses: actions/checkout@1111111111111111111111111111111111111111
+      - uses: actions/checkout@1111111111111111111111111111111111111111
+`), "must call the layer's prepare-release.yml"},
+		"late_prepare_secret": {composedPrepare(`      - uses: actions/checkout@1111111111111111111111111111111111111111
       - name: Late secret check
         env:
-          KEY: ${{ secrets.GPG_SIGNING_KEY }}`, 1), "at/after checkout"},
+          KEY: ${{ secrets.GPG_SIGNING_KEY }}
+`), "at/after checkout"},
+		"declaration_with_a_fallback": {strings.Replace(forgejoIsolationCleanWorkflow,
+			"artifacts-config: ${{ needs.prepare.outputs.artifacts-config }}",
+			"artifacts-config: ${{ needs.prepare.outputs.artifacts-config || '.forge-ci/evil.yml' }}", 1), "must pass artifacts-config"},
 		"missing_sign_secret": {strings.Replace(forgejoIsolationCleanWorkflow,
 			`      GPG_SIGNING_KEY: ${{ secrets.GPG_SIGNING_KEY }}
 `, "", 1), "missing signing secret GPG_SIGNING_KEY"},
@@ -407,14 +370,7 @@ func TestIsolation_UnmatchedSinglePinSubjectFails(t *testing.T) {
 // renamed fork or a lab snapshot is. The %s is the sign job's extra input.
 const otherSubjectWorkflow = `jobs:
   prepare:
-    outputs:
-      release-tag: ${{ steps.prepare.outputs.release-tag }}
-      release-sha: ${{ steps.prepare.outputs.release-sha }}
-      artifacts-config: ${{ steps.prepare.outputs.artifacts-config }}
-    steps:
-      - uses: actions/checkout@1111111111111111111111111111111111111111
-        with:
-          persist-credentials: false
+    uses: examplescope/ci-layer/.forgejo/workflows/prepare-release.yml@1111111111111111111111111111111111111111
   build-and-release:
     outputs:
       dist-digest: ${{ steps.handoff.outputs.digest }}

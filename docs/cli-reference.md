@@ -5711,8 +5711,10 @@ access to signing secrets (those belong only to the separately-trusted signing
 job), and every actions/checkout step must set persist-credentials: false.
 
 When --sign-job is set, additional Forgejo release-signing invariants are
-checked: prepare release identity outputs, signer secret enumeration, dist-digest
-handoff wiring, prepare-secret-before-checkout ordering, and cache-free
+checked: the prepare job calls the layer's prepare-release.yml, the signer takes
+release-tag, release-sha, artifacts-config and dist-digest each as the bare
+${{ needs.<job>.outputs.<name> }} expression under its exact key, signer secret
+enumeration, prepare-secret-before-checkout ordering, and cache-free
 setup-toolchain use. --single-pin-subject additionally enforces that every
 matching cross-repo reference in the workflow directory uses one commit pin.
 --single-pin-input names the input through which the subject's reusable
@@ -5741,7 +5743,7 @@ EXAMPLE:
 | `--workflow` | path to the workflow file to check (required) | string | `""` | n/a |
 | `--build-job` | the artifact-producing job that must not see signing secrets | string | `"build"` | n/a |
 | `--sign-job` | cross-repo signing workflow call-site job; enables Forgejo release-signing channel checks | string | `""` | n/a |
-| `--prepare-job` | job that emits release-tag, release-sha and artifacts-config and may check signing-secret presence before checkout | string | `""` | n/a |
+| `--prepare-job` | job that calls prepare-release.yml for release-tag, release-sha and artifacts-config, required when --sign-job is set | string | `""` | n/a |
 | `--dist-digest-output` | build job output carrying the dist-digest passed to the signer | string | `""` | n/a |
 | `--single-pin-subject` | subject whose @<sha> refs must agree across the workflow directory (for example, example/provider-workflows) | string | `""` | n/a |
 | `--single-pin-input` | input of the subject's reusable workflows that repeats their commit pin (for example, forge-ci-sha); needs --single-pin-subject | string | `""` | n/a |

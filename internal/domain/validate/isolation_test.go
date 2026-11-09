@@ -4,6 +4,7 @@
 package validate_test
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -529,47 +530,74 @@ func TestCheckIsolation_ActionNamesMatchCaseInsensitively(t *testing.T) {
 // job's checkout-consumer step orders the secret check like actions/checkout;
 // a sign job called from the same repository is refused; bracketed
 // needs.<job>.outputs['x'] spellings satisfy the identity check; and a build
-// job that does not declare the dist-digest output is refused. A sign job
-// that takes its declaration from anywhere but the prepare job's
-// artifacts-config output is refused: it would re-check the release commit
-// against another plan than the one the release bumped.
+// job that does not declare the dist-digest output is refused.
+//
+// The prepare job must call prepare-release.yml, and the sign job must pass
+// each bound input as that expression alone under its exact key: a value
+// that falls back to, or is built around, another, a longer output name, or
+// a second key spelled in another case would let the caller re-check the
+// release against another plan than the one the release bumped.
 func TestCheckIsolation_ReleaseCallSiteInvariants(t *testing.T) {
 	t.Parallel()
 
-	const remote = "org/forge-ci/.github/workflows/sign.yml@0123456789abcdef0123456789abcdef01234567"
+	const (
+		remote  = "org/forge-ci/.github/workflows/sign.yml@0123456789abcdef0123456789abcdef01234567"
+		called  = "  prepare:\n    uses: org/forge-ci/.forgejo/workflows/prepare-release.yml@0123456789abcdef0123456789abcdef01234567\n"
+		bound   = "${{ needs.prepare.outputs.artifacts-config }}"
+		mustUse = "must call the layer's prepare-release.yml"
+	)
 
 	cfg := validate.IsolationConfig{
 		BuildJob: "build", SigningSecrets: []string{"RELEASE_GPG_PRIVATE_KEY"},
 		SignJob: "sign", PrepareJob: "prepare", DistDigestOutput: "dist-digest",
 	}
 
-	base := func(signUses, prepareSteps, withBlock, buildOutputs string) string {
-		return "jobs:\n" +
-			"  prepare:\n    runs-on: x\n    outputs:\n      release-tag: v1\n      release-sha: abc\n      artifacts-config: ''\n    steps:\n" + prepareSteps +
+	composed := func(steps string) string {
+		return "  prepare:\n    runs-on: x\n    outputs:\n      release-tag: v1\n      release-sha: abc\n      artifacts-config: ''\n    steps:\n" + steps
+	}
+
+	base := func(signUses, prepare, withBlock, buildOutputs string) string {
+		return "jobs:\n" + prepare +
 			"  build:\n    runs-on: x\n" + buildOutputs + "    steps: []\n" +
 			"  sign:\n    uses: " + signUses + "\n    secrets:\n      RELEASE_GPG_PRIVATE_KEY: ${{ secrets.RELEASE_GPG_PRIVATE_KEY }}\n    with:\n" + withBlock
 	}
 
 	dotWith := "      release-tag: ${{ needs.prepare.outputs.release-tag }}\n      release-sha: ${{ needs.prepare.outputs.release-sha }}\n" +
-		"      artifacts-config: ${{ needs.prepare.outputs.artifacts-config }}\n      dist-digest: ${{ needs.build.outputs.dist-digest }}\n"
+		"      artifacts-config: " + bound + "\n      dist-digest: ${{ needs.build.outputs.dist-digest }}\n"
 	bracketWith := "      release-tag: ${{ needs.prepare.outputs['release-tag'] }}\n      release-sha: ${{ needs.prepare.outputs[\"release-sha\"] }}\n" +
 		"      artifacts-config: ${{ needs.prepare.outputs['artifacts-config'] }}\n      dist-digest: ${{ needs.build.outputs['dist-digest'] }}\n"
 	safeSteps := "      - run: test -n \"${{ secrets.RELEASE_GPG_PRIVATE_KEY }}\"\n      - uses: org/forge-ci/checkout-consumer@0123456789abcdef0123456789abcdef01234567\n        with:\n          persist-credentials: false\n"
 	lateSteps := "      - uses: org/forge-ci/checkout-consumer@0123456789abcdef0123456789abcdef01234567\n        with:\n          persist-credentials: false\n      - run: test -n \"${{ secrets.RELEASE_GPG_PRIVATE_KEY }}\"\n"
 	digestOutput := "    outputs:\n      dist-digest: ${{ steps.d.outputs.digest }}\n"
+	declaration := func(value string) string {
+		return base(remote, called, strings.Replace(dotWith, bound, value, 1), digestOutput)
+	}
+	unbound := "must pass artifacts-config from needs.prepare.outputs.artifacts-config"
 
 	for name, tc := range map[string]struct {
 		body string
-		want string
+		want []string
 	}{
-		"clean dotted":                   {body: base(remote, safeSteps, dotWith, digestOutput)},
-		"clean bracketed":                {body: base(remote, safeSteps, bracketWith, digestOutput)},
-		"secret after consumer checkout": {body: base(remote, lateSteps, dotWith, digestOutput), want: "at/after checkout"},
-		"local sign job":                 {body: base("./.github/workflows/sign.yml", safeSteps, dotWith, digestOutput), want: "cross-repo workflow_call"},
-		"no dist-digest output":          {body: base(remote, safeSteps, dotWith, ""), want: `does not declare "dist-digest" output`},
-		"declaration not from prepare": {
-			body: base(remote, safeSteps, strings.Replace(dotWith, "${{ needs.prepare.outputs.artifacts-config }}", ".forge-ci/other.yml", 1), digestOutput),
-			want: "must pass artifacts-config from needs.prepare.outputs.artifacts-config",
+		"clean dotted":          {body: base(remote, called, dotWith, digestOutput)},
+		"clean bracketed":       {body: base(remote, called, bracketWith, digestOutput)},
+		"composed prepare":      {body: base(remote, composed(safeSteps), dotWith, digestOutput), want: []string{mustUse}},
+		"local prepare":         {body: base(remote, strings.Replace(called, "org/forge-ci/", "./", 1), dotWith, digestOutput), want: []string{mustUse}},
+		"local sign job":        {body: base("./.github/workflows/sign.yml", called, dotWith, digestOutput), want: []string{"cross-repo workflow_call"}},
+		"no dist-digest output": {body: base(remote, called, dotWith, ""), want: []string{`does not declare "dist-digest" output`}},
+		"secret after consumer checkout": {
+			body: base(remote, composed(lateSteps), dotWith, digestOutput),
+			want: []string{"at/after checkout", mustUse},
+		},
+		"declaration not from prepare": {body: declaration(".forge-ci/other.yml"), want: []string{unbound}},
+		"declaration with a fallback": {
+			body: declaration("${{ needs.prepare.outputs.artifacts-config || '.forge-ci/evil.yml' }}"),
+			want: []string{unbound},
+		},
+		"declaration under a prefix": {body: declaration("evil/" + bound), want: []string{unbound}},
+		"a longer output name":       {body: declaration("${{ needs.prepare.outputs.artifacts-config-x }}"), want: []string{unbound}},
+		"a second key in another case": {
+			body: base(remote, called, dotWith+"      Artifacts-Config: .forge-ci/evil.yml\n", digestOutput),
+			want: []string{`passes "Artifacts-Config"; the input is spelled artifacts-config`},
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -580,16 +608,14 @@ func TestCheckIsolation_ReleaseCallSiteInvariants(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			if tc.want == "" {
-				if len(violations) != 0 {
-					t.Fatalf("violations = %+v, want none", violations)
-				}
-
-				return
+			if len(violations) != len(tc.want) {
+				t.Fatalf("violations = %+v, want %q", violations, tc.want)
 			}
 
-			if len(violations) != 1 || !strings.Contains(violations[0].Msg, tc.want) {
-				t.Fatalf("violations = %+v, want one naming %q", violations, tc.want)
+			for _, want := range tc.want {
+				if !slices.ContainsFunc(violations, func(v validate.IsolationViolation) bool { return strings.Contains(v.Msg, want) }) {
+					t.Errorf("violations = %+v, want one naming %q", violations, want)
+				}
 			}
 		})
 	}
