@@ -334,11 +334,16 @@ commit, and the merge is read back as on the lab forges: `main` at it and
 `development` still at the change, through the API, then, in the working
 copy fetched to `main`, its parents the base and the change and its tree the
 change's. The development
-phase's acceptance is the development build's (a green run, its artifacts
-delivered, `main`, tags and releases unchanged) and the snapshot image
-published to the repository's container package, which is removed with the
-repository; the engine's snapshot inventory is read from the run's artifacts
-by the standalone snapshot trial, not claimed here. The release is judged as
+phase snapshots the service snapshot's declaration the trial stages into
+the pushed tree, `.forge-ci/service-development.yml`, overlaid unsigned and
+native amd64 as on the lab forges (`livetest.ServiceSnapshotOverlay`). Its
+acceptance is the development build's (a green run, its artifacts
+delivered, `main`, tags and releases unchanged) and the same snapshot oracle
+the lab forges use (`livetest.RequireSnapshotImages`): the frozen plan from
+the run's `snapshot-images-inputs` artifact equal to the planner's, the
+receipts from its `snapshot-images` artifact collected against it, and each
+image read from the repository's container package on GHCR, which is
+removed with the repository. The release is judged as
 the GitHub release trial's. The snapshot publishes with the workflow's own
 token; the release secrets are set at the release phase and not before. It
 runs outside the campaign route, inside Forge Lab's hosted session:
@@ -437,10 +442,10 @@ plan the planner makes of the staged declaration for the selected source,
 every build native amd64, and one receipt per planned image as the product's
 own collection requires (`snapshotimage.Collect`), each digest the registry
 serves under its receipt's tag, with no tag but the planned images' and
-their `-amd64` architecture tags. The readiness goes to the plan's one
-service, where the plan has one image (`livetest.ServiceReadiness`); a plan
-of several images declares no primary service among them, so none is
-probed. The branches stay where the trial pushed them, and the repository
+their `-amd64` architecture tags. This snapshot-only event probes no
+readiness, even for a single image: the image count does not declare a
+runnable service. The lifecycle event retains its service readiness check.
+The branches stay where the trial pushed them, and the repository
 holds no tag and no release.
 
 On Forgejo (`TestForgejoLayer_ServiceSnapshot`) the consumer's main and a

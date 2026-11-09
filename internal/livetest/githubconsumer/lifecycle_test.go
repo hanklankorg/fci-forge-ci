@@ -7,8 +7,10 @@
 package githubconsumer_test
 
 import (
+	"strings"
 	"testing"
 
+	"github.com/diggsweden/forge-ci/internal/domain/snapshotimage"
 	"github.com/diggsweden/forge-ci/internal/livetest"
 )
 
@@ -27,10 +29,13 @@ const lifecycleBranch = "development"
 //  2. its native merge through the API, told the head commit, with a merge
 //     commit of the base and the change;
 //  3. the development snapshot: release-dev.yml, the consumer's call of the
-//     snapshot orchestrator, dispatched on the merged main and told to
-//     snapshot development; its run must succeed and deliver its artifacts,
-//     publish the snapshot image to the repository's container package, and
-//     leave main, the tags and the releases alone;
+//     snapshot orchestrator over the service snapshot's declaration the
+//     trial staged (livetest.ServiceSnapshotOverlay), dispatched on the
+//     merged main and told to snapshot development; its run must succeed,
+//     deliver its artifacts and leave main, the tags and the releases
+//     alone, and what it published to the repository's container package is
+//     judged by the snapshot oracle every forge's trial shares
+//     (livetest.RequireSnapshotImages);
 //  4. a signed release request at the merged main, judged as the release
 //     trial's: main advanced by one signed release commit, the final tag, a
 //     release whose signatures verify, and the released images image= names;
@@ -80,6 +85,9 @@ func runLifecycle(t *testing.T, trial *livetest.GitHubTrial, engine livetest.Git
 		t.Fatal(err)
 	}
 
+	// The development phase snapshots the service snapshot's declaration,
+	// staged as every forge's lifecycle stages it.
+	trial = trial.WithFile(livetest.ServiceSnapshotDeclarationFile, livetest.ServiceSnapshotOverlay(t, root))
 	tree := trial.PushConsumer(repo, root, fixtures, engine, signing.overrides)
 	trial.SetVariable(repo, "FORGE_CI_REPOSITORY", engine.Owner+"/"+engine.Repository)
 	trial.SetVariable(repo, "RELEASE_PLATFORMS", settings.Platforms)
@@ -115,9 +123,9 @@ func runLifecycle(t *testing.T, trial *livetest.GitHubTrial, engine livetest.Git
 	}
 
 	trial.CheckDevelopmentRelease(repo, merge, development.GetID())
-	snapshot := trial.CheckSnapshotPackage(repo, repositoryID)
+	receipts := judgeSnapshot(t, trial, repo, tree, development.GetID(), lifecycleBranch, head)
 	requireInventory(t, trial, repo, livetest.GitHubInventory{Runs: 2})
-	t.Logf("lifecycle phase 3 development: run %d dispatched on main@%s snapshots %s@%s; package %s (id %d)", development.GetID(), merge, lifecycleBranch, head, snapshot.Name, snapshot.ID)
+	t.Logf("lifecycle phase 3 development: run %d dispatched on main@%s snapshots %s@%s as %s", development.GetID(), merge, lifecycleBranch, head, receiptRefs(receipts))
 
 	// Phase 4: the signed release request at the merged main. The release's
 	// authority is given now and not before.
@@ -153,4 +161,25 @@ func requireInventory(t *testing.T, trial *livetest.GitHubTrial, repo string, wa
 	if got := trial.RepositoryInventory(repo); got != want {
 		t.Fatalf("%s holds %d runs, %d tags and %d releases; want %d, %d and %d", repo, got.Runs, got.Tags, got.Releases, want.Runs, want.Tags, want.Releases)
 	}
+}
+
+// judgeSnapshot judges a development run by the snapshot oracle every
+// forge's trial shares: the frozen plan, one receipt per planned image and
+// each image in the repository's container package on GHCR.
+func judgeSnapshot(t *testing.T, trial *livetest.GitHubTrial, repo string, tree livetest.GitHubConsumerTree, runID int64, branch, head string) []snapshotimage.Receipt {
+	t.Helper()
+
+	receipts, _ := livetest.RequireSnapshotImages(livetest.Context(t), t, trial.SnapshotRun(repo, tree, runID, branch, head), trial.SnapshotRegistry(repo))
+
+	return receipts
+}
+
+// receiptRefs names each receipt's image by its digest reference.
+func receiptRefs(receipts []snapshotimage.Receipt) string {
+	refs := make([]string, 0, len(receipts))
+	for _, receipt := range receipts {
+		refs = append(refs, receipt.Name+"="+receipt.Ref)
+	}
+
+	return strings.Join(refs, " ")
 }

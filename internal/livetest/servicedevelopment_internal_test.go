@@ -23,6 +23,41 @@ import (
 
 const serviceTestJobImage = "registry.invalid/toolchain@sha256:" + "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
+func TestSnapshotEventDoesNotProbeSingleImageReadiness(t *testing.T) {
+	recipe, _, source, _ := stageTestDemo(t, "hello-cargo-container")
+
+	for _, snapshot := range []bool{false, true} {
+		config := ServiceDevelopmentConfig{
+			RecipeDirectory: recipe, JobImage: serviceTestJobImage,
+			Branch: "development", ReadinessURL: "http://127.0.0.1:8080/health", Images: snapshot,
+		}
+
+		fixture, err := serviceDevelopmentFixture(t.Context(), source, config)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		workflow, err := githubWorkflow(t.Context(), fixture, forgejoDevelopmentWorkflow)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		var document struct {
+			Jobs map[string]yaml.Node `yaml:"jobs"`
+		}
+		if err := yaml.Unmarshal([]byte(workflow), &document); err != nil {
+			t.Fatal(err)
+		}
+
+		_, readiness := document.Jobs["readiness"]
+
+		_, builds := document.Jobs["snapshot"]
+		if readiness == snapshot || !builds {
+			t.Fatalf("snapshot event %t: readiness %t, snapshot job %t", snapshot, readiness, builds)
+		}
+	}
+}
+
 // Exercise variations entirely with local Git objects: no toolchain, API or
 // container execution. The admitted objects and every non-CI blob must survive.
 func TestServiceDevelopmentPreservesSource(t *testing.T) {
@@ -447,7 +482,7 @@ func TestServiceDevelopmentSnapshotsEveryPlannedImage(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if !strings.Contains(workflow, "\n  snapshot:\n") || strings.Contains(workflow, serviceReadinessJob) || strings.Contains(workflow, "podman") {
+	if !strings.Contains(workflow, "\n  snapshot:\n") || strings.Contains(workflow, "\n  readiness:\n") || strings.Contains(workflow, "podman") {
 		t.Fatalf("a plan of two images probed a readiness:\n%s", workflow)
 	}
 
@@ -471,7 +506,7 @@ func TestServiceDevelopmentSnapshotsEveryPlannedImage(t *testing.T) {
 		suffixes = append(suffixes, image.TagSuffix)
 	}
 
-	if !slices.Equal(suffixes, []string{"-worker", "-keytool"}) || len(plan.Builds) != 2 || ServiceReadiness(plan) {
+	if !slices.Equal(suffixes, []string{"-worker", "-keytool"}) || len(plan.Builds) != 2 {
 		t.Fatalf("want the worker and keytool images, one amd64 build each, and no readiness: %+v", plan)
 	}
 }

@@ -22,9 +22,9 @@ import (
 // development workflow is then dispatched on main and snapshots development
 // through the snapshot-images policy. The trial requests that run and
 // observes what it left: the frozen plan, every planned image's receipt and
-// the registry's tags (requireServiceDevelopment), the readiness of the one
-// service where the plan has one, and a repository with that run, its two
-// branches unmoved and nothing released. The consumer's own workflows are
+// the registry's tags (requireServiceDevelopment), and a repository with
+// that run, its two branches unmoved and nothing released; a snapshot
+// probes no readiness. The consumer's own workflows are
 // pinned to the layer and never run.
 func TestForgejoLayer_ServiceSnapshot(t *testing.T) {
 	livetest.RegisterLiveScenario(t)
@@ -163,5 +163,5 @@ func runForgejoServiceSnapshot(t *testing.T, root string, private bool) {
 		refs = append(refs, receipt.Name+"="+receipt.Ref)
 	}
 
-	t.Logf("snapshot: run %d dispatched on %s@%s snapshots %s@%s as %s; producers %d, readiness %t", run.ID, layerMain, base, lifecycleBranch, head, strings.Join(refs, " "), producers, len(receipts) == 1)
+	t.Logf("snapshot: run %d dispatched on %s@%s snapshots %s@%s as %s; producers %d, readiness false", run.ID, layerMain, base, lifecycleBranch, head, strings.Join(refs, " "), producers)
 }

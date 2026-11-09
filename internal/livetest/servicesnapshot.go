@@ -78,6 +78,42 @@ func ServiceSnapshotSource(consumerRoot string) (string, error) {
 	return cmp.Or(dedicated, GitLabDefaultArtifactsConfig), nil
 }
 
+// ServiceSnapshotOverlay is the service snapshot's declaration of the
+// consumer checkout at root, as every forge's lifecycle stages it at
+// ServiceSnapshotDeclarationFile: the release declaration
+// (ServiceSnapshotSource) at HEAD, overlaid for the trial's native platform
+// and unsigned policy, a snapshot's images being unsigned. The hosted
+// lifecycle stages it into the tree it pushes, where the lab's development
+// routes stage it into the consumer's.
+func ServiceSnapshotOverlay(tb TB, root string) string {
+	tb.Helper()
+
+	source, err := ServiceSnapshotSource(root)
+	if err != nil {
+		tb.Fatalf("service snapshot source: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(Context(tb), timeoutScratch)
+	defer cancel()
+
+	git := githubStageGit()
+	if _, err := git.output(ctx, root, nil, "cat-file", "-e", "HEAD:Containerfile"); err != nil {
+		tb.Fatalf("service snapshot: the consumer has no root Containerfile at HEAD: %v", err)
+	}
+
+	body, err := git.output(ctx, root, nil, "show", "HEAD:"+source)
+	if err != nil {
+		tb.Fatalf("service snapshot declaration %s: %v", source, err)
+	}
+
+	declaration, _, err := serviceSnapshotDeclarationOverlay(string(body))
+	if err != nil {
+		tb.Fatalf("service snapshot declaration %s: %v", source, err)
+	}
+
+	return declaration
+}
+
 // serviceSnapshot is a consumer admitted for a service snapshot: its
 // declaration overlaid for the trial, and the plan the planner makes of it.
 type serviceSnapshot struct {
@@ -192,22 +228,36 @@ func ServiceSnapshotFamilies(ctx context.Context, tb TB, consumer Consumer) []st
 func ServiceSnapshotPlan(ctx context.Context, tb TB, consumer Consumer, in snapshotimage.Input) snapshotimage.Plan {
 	tb.Helper()
 
-	body, err := githubWorkflow(ctx, consumer, ServiceSnapshotDeclarationFile)
-	if err != nil {
-		tb.Fatalf("service declaration: %v", err)
-	}
-
-	cfg, err := parseServiceDeclaration(body)
-	if err != nil {
-		tb.Fatalf("service declaration: %v", err)
-	}
-
-	plan, err := snapshotimage.New(pipeline.NewConfigPlan(cfg), in)
+	plan, err := planSnapshotDeclaration(ServiceSnapshotDeclaration(ctx, tb, consumer), in)
 	if err != nil {
 		tb.Fatalf("service plan: %v", err)
 	}
 
 	return plan
+}
+
+// ServiceSnapshotDeclaration reads the consumer's staged snapshot
+// declaration, the one its development run plans.
+func ServiceSnapshotDeclaration(ctx context.Context, tb TB, consumer Consumer) string {
+	tb.Helper()
+
+	body, err := githubWorkflow(ctx, consumer, ServiceSnapshotDeclarationFile)
+	if err != nil {
+		tb.Fatalf("service declaration: %v", err)
+	}
+
+	return body
+}
+
+// planSnapshotDeclaration plans a declaration's body with the shared
+// planner, as the product's snapshot plan step does.
+func planSnapshotDeclaration(body string, in snapshotimage.Input) (snapshotimage.Plan, error) {
+	cfg, err := parseServiceDeclaration(body)
+	if err != nil {
+		return snapshotimage.Plan{}, err
+	}
+
+	return snapshotimage.New(pipeline.NewConfigPlan(cfg), in)
 }
 
 // serviceSnapshotStandInInput is the planner input a declaration is admitted
@@ -356,14 +406,6 @@ func snapshotImagesAdmitted(cfg *config.Config) bool {
 	return !slices.ContainsFunc(cfg.Containers, func(ctr config.Container) bool {
 		return ctr.ImageName != "" || (ctr.EnableSLSA != nil && *ctr.EnableSLSA)
 	})
-}
-
-// ServiceReadiness is whether a snapshot of the plan checks a service's
-// readiness: where the plan's one image is the service. A plan of several
-// images declares no primary service among them, so none is probed, and the
-// snapshot is judged by its receipts alone.
-func ServiceReadiness(plan snapshotimage.Plan) bool {
-	return len(plan.Images) == 1
 }
 
 // serviceSnapshotFamilies lists the toolchain families of a plan's producers,
