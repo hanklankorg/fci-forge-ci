@@ -131,6 +131,7 @@ func TestPrepareReleaseGoesOnWithoutAVersionBump(t *testing.T) {
 	}
 
 	version := parsed.jobs["version"]
+
 	matrix := scalarString(mappingValue(mappingValue(mappingValue(version.node, "strategy"), "matrix"), "version"))
 	if want := "${{ fromJSON(needs.plan.outputs.versions != '[]' && needs.plan.outputs.versions || '[{}]') }}"; matrix != want {
 		t.Errorf("the version matrix is %q, want %q", matrix, want)

@@ -348,43 +348,6 @@ func VersionBumpRuns(rendersChangelog, skipBump bool) bool {
 	return rendersChangelog && !skipBump
 }
 
-// VersionFamily is a toolchain family whose native version tool prepares a
-// share of a release's version bump in a key-free job of its own, in the
-// family's runtime image, and the project type that tool bumps.
-type VersionFamily struct {
-	Family      string           `json:"family"`
-	ProjectType projecttype.Type `json:"project-type"`
-}
-
-// versionFamilies are the families with a native version tool, in the order
-// every forge lists them. The other types' version files are text, which the
-// release commit's job writes itself.
-var versionFamilies = []VersionFamily{
-	{Family: "java", ProjectType: projecttype.Maven},
-	{Family: "node", ProjectType: projecttype.NPM},
-	{Family: "rust", ProjectType: projecttype.Cargo},
-}
-
-// VersionFamilies are the families whose native version tools the planned
-// bump runs, each once, in family order; none when the plan bumps nothing.
-func (p ReleasePrepareStagePlan) VersionFamilies() []VersionFamily {
-	if !p.Targets.VersionBump.Runs {
-		return nil
-	}
-
-	var out []VersionFamily
-
-	for _, family := range versionFamilies {
-		if slices.ContainsFunc(p.Targets.VersionBump.Items, func(item PlannedArtifact) bool {
-			return item.ProjectType == family.ProjectType
-		}) {
-			out = append(out, family)
-		}
-	}
-
-	return out
-}
-
 // NewPolicyReleaseStagePlans returns the prepare and build stage plans of a
 // declaration for a release whose policy, not artifacts.yml, decides signing
 // and publication: the GitLab release component's and Forgejo's
@@ -436,6 +399,43 @@ func newReleaseBuildStagePlan(configPlan ConfigPlan) ReleaseBuildStagePlan {
 			Cargo:         newTargetPlan(artifacts.CargoArtifactFirst),
 		},
 	}
+}
+
+// VersionFamily is a toolchain family whose native version tool prepares a
+// share of a release's version bump in a key-free job of its own, in the
+// family's runtime image, and the project type that tool bumps.
+type VersionFamily struct {
+	Family      string           `json:"family"`
+	ProjectType projecttype.Type `json:"project-type"`
+}
+
+// versionFamilies are the families with a native version tool, in the order
+// every forge lists them. The other types' version files are text, which the
+// release commit's job writes itself.
+var versionFamilies = []VersionFamily{
+	{Family: "java", ProjectType: projecttype.Maven},
+	{Family: "node", ProjectType: projecttype.NPM},
+	{Family: "rust", ProjectType: projecttype.Cargo},
+}
+
+// VersionFamilies are the families whose native version tools the planned
+// bump runs, each once, in family order; none when the plan bumps nothing.
+func (p ReleasePrepareStagePlan) VersionFamilies() []VersionFamily {
+	if !p.Targets.VersionBump.Runs {
+		return nil
+	}
+
+	var out []VersionFamily
+
+	for _, family := range versionFamilies {
+		if slices.ContainsFunc(p.Targets.VersionBump.Items, func(item PlannedArtifact) bool {
+			return item.ProjectType == family.ProjectType
+		}) {
+			out = append(out, family)
+		}
+	}
+
+	return out
 }
 
 // newReleasePublishStagePlan builds the standalone release publish-stage plan.
