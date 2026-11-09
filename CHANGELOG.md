@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **BREAKING**: The GitHub reusable workflows take their runners as JSON-array
+  inputs: `runs-on` for ordinary jobs, `build-runs-on-linux-amd64` and
+  `build-runs-on-linux-arm64` for image builds, and `runs-on-darwin-arm64`
+  for the Xcode build and Swift lint jobs, defaulting to today's hosted
+  labels. The orchestrators pass them on. Signing, promotion and publication
+  jobs stay on GitHub-hosted runners. The `macos-version` workflow input and
+  the `xcode-ios` `config.macos-version` key are removed, with no alias:
+  replace `macos-version: macos-26` with
+  `runs-on-darwin-arm64: '["macos-26"]'`, and drop the key from
+  `artifacts.yml`, which now refuses it. App Store publication runs on
+  `macos-26`. See docs/runners.md, GitHub runners.
 - Add credential-free root-only plan and canonical-payload admission against
   independently approved exact plan bytes and explicit producer source facts.
   Verify retained producer SBOM pins without regeneration; content revisions

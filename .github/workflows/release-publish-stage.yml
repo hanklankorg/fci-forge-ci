@@ -29,6 +29,21 @@ on:
       publish-stage-plan-json:
         required: true
         type: string
+      runs-on:
+        description: "JSON array of runner labels for the ordinary jobs, read with fromJSON. Signing, promotion and publication jobs stay on GitHub-hosted runners."
+        required: false
+        default: '["ubuntu-26.04"]'
+        type: string
+      build-runs-on-linux-amd64:
+        description: "JSON array of runner labels for the linux/amd64 image builds, read with fromJSON. The runner must permit the user namespaces Buildah needs."
+        required: false
+        default: '["ubuntu-26.04"]'
+        type: string
+      build-runs-on-linux-arm64:
+        description: "JSON array of runner labels for the linux/arm64 image builds, read with fromJSON. The runner must permit the user namespaces Buildah needs."
+        required: false
+        default: '["ubuntu-26.04-arm"]'
+        type: string
       forge-ci-binary-ref:
         description: "Full engine commit (40 hex) the workflow ref names; a tag or branch is refused"
         required: true
@@ -253,7 +268,6 @@ jobs:
       ipa-artifact-name: ${{ matrix.artifact.name }}
       enabled: ${{ matrix.artifact.xcode_ios.enable_code_signing != false }}
       branch: ${{ inputs.branch }}
-      macos-version: ${{ matrix.artifact.xcode_ios.macos_version || 'macos-26' }}
       submit-for-review: ${{ matrix.artifact.xcode_ios.submit_for_review || false }}
       skip-validation: ${{ matrix.artifact.xcode_ios.skip_validation || false }}
       forge-ci-binary-ref: ${{ inputs['forge-ci-binary-ref'] }}
@@ -306,6 +320,9 @@ jobs:
       RELEASE_COSIGN_PASSPHRASE: ${{ secrets.RELEASE_COSIGN_PASSPHRASE }}
     uses: ./.github/workflows/publish-container.yml
     with:
+      runs-on: ${{ inputs['runs-on'] }}
+      build-runs-on-linux-amd64: ${{ inputs['build-runs-on-linux-amd64'] }}
+      build-runs-on-linux-arm64: ${{ inputs['build-runs-on-linux-arm64'] }}
       enforce-vulnerabilities: ${{ inputs['enforce-vulnerabilities'] }}
       branch: ${{ inputs.branch }}
       release-tag: ${{ inputs['release-tag'] }}
@@ -392,6 +409,7 @@ jobs:
     # sbom-cargo uses only auto-provided GITHUB_TOKEN.
     uses: ./.github/workflows/sbom-cargo.yml
     with:
+      runs-on: ${{ inputs['runs-on'] }}
       forge-ci-binary-ref: ${{ inputs['forge-ci-binary-ref'] }}
       working-directory: ${{ matrix.artifact.working_directory }}
       branch: ${{ inputs.branch }}
@@ -416,6 +434,7 @@ jobs:
     # sbom-go uses only auto-provided GITHUB_TOKEN.
     uses: ./.github/workflows/sbom-go.yml
     with:
+      runs-on: ${{ inputs['runs-on'] }}
       forge-ci-binary-ref: ${{ inputs['forge-ci-binary-ref'] }}
       working-directory: ${{ matrix.artifact.working_directory }}
       branch: ${{ inputs.branch }}
@@ -426,7 +445,7 @@ jobs:
     name: Summary
     needs: [resolve-bootstrap, forge-packages, maven-central, xcode-ios, google-play, containers, cargo-container-first, go-container-first]
     if: always() && needs.resolve-bootstrap.result == 'success'
-    runs-on: ubuntu-26.04
+    runs-on: ${{ fromJSON(inputs['runs-on']) }}
     container:
       image: ${{ inputs['runtime-image'] }}
     permissions:

@@ -140,6 +140,11 @@ on:
         description: "forge-ci runtime image carrying JDK + Gradle + Android SDK., pinned by digest (image@sha256:<64 hex>); the resolver refuses anything else before the job container starts."
         required: true
         type: string
+      runs-on:
+        description: "JSON array of runner labels for the ordinary jobs, read with fromJSON. Signing, promotion and publication jobs stay on GitHub-hosted runners."
+        required: false
+        default: '["ubuntu-26.04"]'
+        type: string
       forge-ci-binary-ref:
         description: "Full engine commit (40 hex) the workflow ref names; a tag or branch is refused"
         required: true
@@ -191,7 +196,7 @@ jobs:
   build-variants:
     needs: [resolve-bootstrap]
     name: Build Gradle Android
-    runs-on: ubuntu-26.04
+    runs-on: ${{ fromJSON(inputs['runs-on']) }}
     timeout-minutes: 60
     container:
       image: ${{ inputs['runtime-image'] }}

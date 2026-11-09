@@ -72,6 +72,11 @@ on:
         description: "forge-ci runtime image to run inside. Caller picks based on project-type — runtime-java-25 for maven/gradle/gradle-android, runtime-node-24 for npm, runtime-rust-stable for cargo, runtime-base for xcode-ios. Pinned by digest (image@sha256:<64 hex>); the resolver refuses anything else."
         required: true
         type: string
+      runs-on:
+        description: "JSON array of runner labels for the ordinary jobs, read with fromJSON. Signing, promotion and publication jobs stay on GitHub-hosted runners."
+        required: false
+        default: '["ubuntu-26.04"]'
+        type: string
       forge-ci-binary-ref:
         description: "Full engine commit (40 hex) the workflow ref names; a tag or branch is refused"
         required: true
@@ -127,6 +132,7 @@ jobs:
       actions: read # Propagate generate-changelog's read-only receiver cap.
     uses: ./.github/workflows/generate-changelog.yml
     with:
+      runs-on: ${{ inputs['runs-on'] }}
       branch: ${{ github.sha }}
       forge-ci-binary-ref: ${{ inputs['forge-ci-binary-ref'] }}
       runtime-image: ${{ inputs['runtime-image'] }}
@@ -144,6 +150,7 @@ jobs:
       actions: read
     uses: ./.github/workflows/generate-changelog.yml
     with:
+      runs-on: ${{ inputs['runs-on'] }}
       branch: ${{ github.sha }}
       forge-ci-binary-ref: ${{ inputs['forge-ci-binary-ref'] }}
       runtime-image: ${{ inputs['runtime-image'] }}
@@ -155,7 +162,7 @@ jobs:
   prepare-version-files:
     needs: [resolve-bootstrap]
     name: "Prepare: native version files without signing keys"
-    runs-on: ubuntu-26.04
+    runs-on: ${{ fromJSON(inputs['runs-on']) }}
     container:
       image: ${{ inputs['runtime-image'] }}
     permissions:

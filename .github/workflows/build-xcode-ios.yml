@@ -118,11 +118,10 @@ on:
         required: false
         default: "generic/platform=iOS"
         type: string
-      # === MACOS RUNNER ===
-      macos-version:
-        description: "macOS runner version (macos-13, macos-14, macos-15, macos-26)"
+      runs-on-darwin-arm64:
+        description: "JSON array of runner labels for the macOS arm64 jobs, read with fromJSON."
         required: false
-        default: "macos-26"
+        default: '["macos-26"]'
         type: string
       forge-ci-binary-ref:
         description: "Full approved engine commit; the macOS job builds forge-ci from the engine checkout at it (canonical delivery serves Linux only). The release route passes its own."
@@ -157,7 +156,7 @@ jobs:
   build-variants:
     needs: [resolve-bootstrap]
     name: Build Xcode iOS
-    runs-on: ${{ inputs.macos-version }}
+    runs-on: ${{ fromJSON(inputs['runs-on-darwin-arm64']) }}
     timeout-minutes: 60
     permissions:
       contents: read

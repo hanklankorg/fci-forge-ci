@@ -75,6 +75,16 @@ on:
         required: false
         default: false
         type: boolean
+      runs-on:
+        description: "JSON array of runner labels for the ordinary jobs, read with fromJSON. Signing, promotion and publication jobs stay on GitHub-hosted runners."
+        required: false
+        default: '["ubuntu-26.04"]'
+        type: string
+      runs-on-darwin-arm64:
+        description: "JSON array of runner labels for the macOS arm64 jobs, read with fromJSON."
+        required: false
+        default: '["macos-26"]'
+        type: string
       forge-ci-binary-ref:
         description: "Full approved engine commit (40 hex). The canonical CLI every control-plane job and lint job runs is built from exactly this commit; the stage pins its callees to it."
         required: true
@@ -136,7 +146,7 @@ jobs:
     needs: [resolve-bootstrap, canonical-cli]
     if: ${{ !failure() && !cancelled() && needs.canonical-cli.result == 'success' }}
     name: "Check: plan"
-    runs-on: ubuntu-26.04
+    runs-on: ${{ fromJSON(inputs['runs-on']) }}
     container:
       image: ${{ inputs['runtime-image'] }}
     permissions:
@@ -211,6 +221,8 @@ jobs:
       CODE_SCANNING_TOKEN: ${{ secrets.CODE_SCANNING_TOKEN }}
     uses: ./.github/workflows/pullrequest-quality-stage.yml
     with:
+      runs-on: ${{ inputs['runs-on'] }}
+      runs-on-darwin-arm64: ${{ inputs['runs-on-darwin-arm64'] }}
       enforce-lint: ${{ inputs['enforce-lint'] }}
       enforce-vulnerabilities: ${{ inputs['enforce-vulnerabilities'] }}
       pr-plan-json: ${{ needs.compose-pr-plan.outputs.pr-plan-json }}
@@ -232,7 +244,7 @@ jobs:
     name: Summary
     needs: [resolve-bootstrap, canonical-cli, compose-pr-plan, execute-quality-stage]
     if: always() && needs.resolve-bootstrap.result == 'success'
-    runs-on: ubuntu-26.04
+    runs-on: ${{ fromJSON(inputs['runs-on']) }}
     container:
       image: ${{ inputs['runtime-image'] }}
     permissions:

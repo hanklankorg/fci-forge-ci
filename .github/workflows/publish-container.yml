@@ -268,6 +268,21 @@ on:
         description: "Enforce namespace validation (defaults to repository owner)"
         required: false
         type: string
+      runs-on:
+        description: "JSON array of runner labels for the ordinary jobs, read with fromJSON. Signing, promotion and publication jobs stay on GitHub-hosted runners."
+        required: false
+        default: '["ubuntu-26.04"]'
+        type: string
+      build-runs-on-linux-amd64:
+        description: "JSON array of runner labels for the linux/amd64 image builds, read with fromJSON. The runner must permit the user namespaces Buildah needs."
+        required: false
+        default: '["ubuntu-26.04"]'
+        type: string
+      build-runs-on-linux-arm64:
+        description: "JSON array of runner labels for the linux/arm64 image builds, read with fromJSON. The runner must permit the user namespaces Buildah needs."
+        required: false
+        default: '["ubuntu-26.04-arm"]'
+        type: string
       forge-ci-binary-ref:
         description: "Full approved engine commit the canonical CLI was built from; the host build legs receive exactly that build"
         required: true
@@ -557,7 +572,7 @@ jobs:
     needs: [resolve-bootstrap, prep]
     # linux/arm64 -> ubuntu-26.04-arm (native ARM hosted runner). Anything
     # else falls through to ubuntu-26.04. No QEMU emulation in either path.
-    runs-on: ${{ matrix.platform == 'linux/arm64' && 'ubuntu-26.04-arm' || 'ubuntu-26.04' }}
+    runs-on: ${{ fromJSON(matrix.platform == 'linux/arm64' && inputs['build-runs-on-linux-arm64'] || inputs['build-runs-on-linux-amd64']) }}
     timeout-minutes: 45
     defaults:
       run:
@@ -995,7 +1010,7 @@ jobs:
       fail-fast: false
       matrix:
         platform: ${{ fromJson(needs.prep.outputs.platforms-json) }}
-    runs-on: ubuntu-26.04
+    runs-on: ${{ fromJSON(inputs['runs-on']) }}
     timeout-minutes: 30
     container:
       image: ${{ inputs['runtime-image-full'] }}

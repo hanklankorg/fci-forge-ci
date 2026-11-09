@@ -41,6 +41,11 @@ on:
       prepare-stage-plan-json:
         required: true
         type: string
+      runs-on:
+        description: "JSON array of runner labels for the ordinary jobs, read with fromJSON. Signing, promotion and publication jobs stay on GitHub-hosted runners."
+        required: false
+        default: '["ubuntu-26.04"]'
+        type: string
       forge-ci-binary-ref:
         description: "Full engine commit (40 hex) the workflow ref names; a tag or branch is refused"
         required: true
@@ -135,6 +140,7 @@ jobs:
       actions: read # Propagate only the receiver's read cap through workflow_call.
     uses: ./.github/workflows/generate-changelog.yml
     with:
+      runs-on: ${{ inputs['runs-on'] }}
       require-canonical-bootstrap: ${{ inputs['require-canonical-bootstrap'] }}
       canonical-artifact-id: ${{ inputs['canonical-artifact-id'] }}
       canonical-artifact-name: ${{ inputs['canonical-artifact-name'] }}
@@ -161,6 +167,7 @@ jobs:
       actions: read
     uses: ./.github/workflows/generate-changelog.yml
     with:
+      runs-on: ${{ inputs['runs-on'] }}
       require-canonical-bootstrap: ${{ inputs['require-canonical-bootstrap'] }}
       canonical-artifact-id: ${{ inputs['canonical-artifact-id'] }}
       canonical-artifact-name: ${{ inputs['canonical-artifact-name'] }}
@@ -182,7 +189,7 @@ jobs:
     name: "Prepare: version files without signing keys"
     needs: [resolve-bootstrap, generate-full-changelog]
     if: ${{ inputs['existing-release-sha'] == '' && fromJson(inputs['prepare-stage-plan-json']).targets.version_bump.runs }}
-    runs-on: ubuntu-26.04
+    runs-on: ${{ fromJSON(inputs['runs-on']) }}
     permissions:
       actions: read
       contents: read
@@ -540,7 +547,7 @@ jobs:
     name: Summary
     needs: [resolve-bootstrap, version-bump]
     if: always() && needs.resolve-bootstrap.result == 'success'
-    runs-on: ubuntu-26.04
+    runs-on: ${{ fromJSON(inputs['runs-on']) }}
     container:
       image: ${{ inputs['runtime-image'] }}
     permissions:

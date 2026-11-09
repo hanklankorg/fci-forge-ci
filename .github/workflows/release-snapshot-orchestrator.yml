@@ -133,6 +133,26 @@ on:
         required: false
         default: true
         type: boolean
+      runs-on:
+        description: "JSON array of runner labels for the ordinary jobs, read with fromJSON. Signing, promotion and publication jobs stay on GitHub-hosted runners."
+        required: false
+        default: '["ubuntu-26.04"]'
+        type: string
+      runs-on-darwin-arm64:
+        description: "JSON array of runner labels for the macOS arm64 jobs, read with fromJSON."
+        required: false
+        default: '["macos-26"]'
+        type: string
+      build-runs-on-linux-amd64:
+        description: "JSON array of runner labels for the linux/amd64 image builds, read with fromJSON. The runner must permit the user namespaces Buildah needs."
+        required: false
+        default: '["ubuntu-26.04"]'
+        type: string
+      build-runs-on-linux-arm64:
+        description: "JSON array of runner labels for the linux/arm64 image builds, read with fromJSON. The runner must permit the user namespaces Buildah needs."
+        required: false
+        default: '["ubuntu-26.04-arm"]'
+        type: string
       forge-ci-binary-ref:
         description: "Full approved engine commit (40 hex). The canonical CLI every control-plane job and host build leg runs is built from exactly this commit; the stages pin their callees to it."
         required: true
@@ -269,7 +289,7 @@ jobs:
     needs: [resolve-bootstrap, canonical-cli]
     if: ${{ !failure() && !cancelled() && needs.canonical-cli.result == 'success' }}
     name: Prepare
-    runs-on: ubuntu-26.04
+    runs-on: ${{ fromJSON(inputs['runs-on']) }}
     container:
       image: ${{ inputs['runtime-image'] }}
     permissions:
@@ -385,6 +405,8 @@ jobs:
       XCCONFIG_BASE64: ${{ secrets.XCCONFIG_BASE64 }}
     uses: ./.github/workflows/release-snapshot-build-stage.yml
     with:
+      runs-on: ${{ inputs['runs-on'] }}
+      runs-on-darwin-arm64: ${{ inputs['runs-on-darwin-arm64'] }}
       enforce-application-tests: ${{ inputs['enforce-application-tests'] }}
       snapshot-release-plan-json: ${{ needs.setup-snapshot.outputs.snapshot-release-plan-json }}
       snapshot-build-stage-plan-json: ${{ needs.setup-snapshot.outputs.snapshot-build-stage-plan-json }}
@@ -417,6 +439,7 @@ jobs:
       MAVEN_CENTRAL_PASSWORD: ${{ inputs['publish-maven-snapshots'] && secrets.MAVEN_CENTRAL_PASSWORD || '' }}
     uses: ./.github/workflows/release-snapshot-publish-stage.yml
     with:
+      runs-on: ${{ inputs['runs-on'] }}
       snapshot-release-plan-json: ${{ needs.setup-snapshot.outputs.snapshot-release-plan-json }}
       forge-ci-binary-ref: ${{ inputs['forge-ci-binary-ref'] }}
       runtime-image: ${{ inputs['runtime-image-full'] }}
@@ -439,6 +462,9 @@ jobs:
       packages: write
     uses: ./.github/workflows/snapshot-images.yml
     with:
+      runs-on: ${{ inputs['runs-on'] }}
+      build-runs-on-linux-amd64: ${{ inputs['build-runs-on-linux-amd64'] }}
+      build-runs-on-linux-arm64: ${{ inputs['build-runs-on-linux-arm64'] }}
       enforce-application-tests: ${{ inputs['enforce-application-tests'] }}
       enforce-vulnerabilities: ${{ inputs['enforce-vulnerabilities'] }}
       branch: ${{ fromJson(needs.setup-snapshot.outputs.snapshot-release-plan-json).context.branch }}
@@ -477,7 +503,7 @@ jobs:
       - execute-snapshot-build-stage
       - execute-snapshot-publish-stage
     if: always() && needs.resolve-bootstrap.result == 'success'
-    runs-on: ubuntu-26.04
+    runs-on: ${{ fromJSON(inputs['runs-on']) }}
     container:
       image: ${{ inputs['runtime-image'] }}
     permissions:

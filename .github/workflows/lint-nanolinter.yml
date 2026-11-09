@@ -53,6 +53,11 @@ on:
         required: false
         default: "secrets,sast"
         type: string
+      runs-on:
+        description: "JSON array of runner labels for the ordinary jobs, read with fromJSON. Signing, promotion and publication jobs stay on GitHub-hosted runners."
+        required: false
+        default: '["ubuntu-26.04"]'
+        type: string
       forge-ci-binary-ref:
         description: "Full approved engine commit the canonical CLI of this run was built from; the lint job receives exactly that build for its checkout, policy and SARIF commands"
         required: true
@@ -97,7 +102,7 @@ jobs:
   nanolinter-lint:
     needs: [resolve-bootstrap]
     name: Nanolinter
-    runs-on: ubuntu-26.04
+    runs-on: ${{ fromJSON(inputs['runs-on']) }}
     timeout-minutes: 30
     permissions:
       contents: read

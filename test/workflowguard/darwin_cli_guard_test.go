@@ -48,7 +48,7 @@ func TestMacOSLanesBuildTheEngineFromItsApprovedCheckout(t *testing.T) {
 		require.NoError(t, yaml.Unmarshal(reporoot.ReadFile(t, ".github/workflows/"+filepath.Base(path)), &workflow), path)
 
 		for jobName, job := range workflow.Jobs {
-			if !strings.Contains(job.RunsOn, "macos-version") {
+			if !strings.Contains(job.RunsOn, "runs-on-darwin-arm64") && !strings.HasPrefix(job.RunsOn, "macos-") {
 				continue
 			}
 

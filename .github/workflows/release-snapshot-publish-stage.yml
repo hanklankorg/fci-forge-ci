@@ -17,6 +17,11 @@ on:
       build-result-json:
         required: true
         type: string
+      runs-on:
+        description: "JSON array of runner labels for the ordinary jobs, read with fromJSON. Signing, promotion and publication jobs stay on GitHub-hosted runners."
+        required: false
+        default: '["ubuntu-26.04"]'
+        type: string
       forge-ci-binary-ref:
         required: true
         type: string
@@ -172,6 +177,7 @@ jobs:
     # sbom-cargo uses only auto-provided GITHUB_TOKEN.
     uses: ./.github/workflows/sbom-cargo.yml
     with:
+      runs-on: ${{ inputs['runs-on'] }}
       forge-ci-binary-ref: ${{ inputs['forge-ci-binary-ref'] }}
       working-directory: ${{ fromJson(inputs['snapshot-publish-stage-plan-json']).inputs.cargo_working_directory }}
       branch: ${{ fromJson(inputs['snapshot-release-plan-json']).context.release_sha }}
@@ -188,6 +194,7 @@ jobs:
     # sbom-go uses only auto-provided GITHUB_TOKEN.
     uses: ./.github/workflows/sbom-go.yml
     with:
+      runs-on: ${{ inputs['runs-on'] }}
       forge-ci-binary-ref: ${{ inputs['forge-ci-binary-ref'] }}
       working-directory: ${{ fromJson(inputs['snapshot-publish-stage-plan-json']).inputs.go_sbom_working_directory }}
       branch: ${{ fromJson(inputs['snapshot-release-plan-json']).context.release_sha }}
@@ -200,7 +207,7 @@ jobs:
     # 'skipped' means the job was gated off (non-container-first project or no
     # Build layer requested), which is fine.
     if: ${{ needs.resolve-bootstrap.result == 'success' && inputs.sboms != 'none' && (fromJson(inputs['build-result-json']).result == 'success' || fromJson(inputs['build-result-json']).result == 'skipped') && !cancelled() && needs.cargo-container-first.result != 'failure' && needs.go-container-first.result != 'failure' }}
-    runs-on: ubuntu-26.04
+    runs-on: ${{ fromJSON(inputs['runs-on']) }}
     container:
       image: ${{ inputs['runtime-image'] }}
     permissions:
@@ -246,7 +253,7 @@ jobs:
     name: Summary
     needs: [resolve-bootstrap, npm, forge-packages, maven-central, cargo-container-first, go-container-first, sbom]
     if: always() && needs.resolve-bootstrap.result == 'success'
-    runs-on: ubuntu-26.04
+    runs-on: ${{ fromJSON(inputs['runs-on']) }}
     container:
       image: ${{ inputs['runtime-image'] }}
     permissions:

@@ -99,6 +99,46 @@ on Forgejo.
 A layer that passes no `--runner-input` is not checked; the layers pass
 their runner inputs as they move to these names. The flag becomes required
 once the GitLab, Forgejo and GitHub layers all pass it.
+## GitHub runners
+
+The GitHub layer takes its runners as `workflow_call` inputs, not variables.
+Each is a JSON array of labels passed as text and read with `fromJSON`, named
+`[role-]runs-on[-<os>-<arch>]`: no role for ordinary jobs, `build-` for image
+builds, and the `RELEASE_PLATFORMS` name with `/` as `-` where a job can run
+only on that platform. Each input has its own default, today's hosted label,
+and never falls back to another input.
+
+| Input | Default | Selects |
+|---|---|---|
+| `runs-on` | `["ubuntu-26.04"]` | ordinary jobs: builds, lint, plans, SBOMs, changelogs, summaries |
+| `build-runs-on-linux-amd64` | `["ubuntu-26.04"]` | the linux/amd64 legs of `publish-container.yml` and `snapshot-images.yml` |
+| `build-runs-on-linux-arm64` | `["ubuntu-26.04-arm"]` | the linux/arm64 legs of the same image builds |
+| `runs-on-darwin-arm64` | `["macos-26"]` | the Xcode build and Swift lint jobs |
+
+A reusable workflow declares only the inputs its own jobs or callees use, and
+the orchestrators pass theirs on. An image build runner must permit the user
+namespaces Buildah needs, as [above](#what-a-job-needs).
+
+Jobs that sign, promote, publish or hold release credentials stay on the
+GitHub-hosted literal, and no input or variable moves them:
+`release-create-github.yml`'s signing and release jobs, `publish-container.yml`'s
+key check, publication, evidence and index jobs, `promote-stage.yml`,
+`release-classified-files.yml`'s `sign` and `publish`, the version bump of
+`release-prepare-stage.yml` and `version-bump.yml`,
+`validate-release-prerequisites.yml`, the `publish-*` package and store
+workflows (`publish-apple-appstore.yml` on `macos-26`), the
+`snapshot-images.yml` publisher, the OpenSSF Scorecard analysis,
+`release-binary.yml` and `build-cli.yml`. So do the trust-root jobs every
+release starts with: `resolve-forge-ci-bootstrap.yml`, which admits the engine
+commit and the runtime images, and `canonical-cli-bootstrap.yml`, which builds
+the engine every later job runs. Hosted runners are ephemeral VMs that GitHub
+starts fresh for one job and destroys after it; keyless signing binds the
+signature to the workflow identity in the job's OIDC token, and that binding
+means something only when no earlier job on the same machine could have
+touched the signer. A runner the caller chooses could be persistent or shared,
+so these jobs never take one. `slsa-attestor.yml`, which signs with the
+operator's KMS key rather than keylessly, takes `runs-on` so the operator can
+pick an isolated pool.
 
 ## Runner lending
 
