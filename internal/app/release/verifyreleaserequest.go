@@ -188,7 +188,7 @@ func requireSelfNamedTag(ctx context.Context, git releaseRequestGit, requestRef,
 		return fmt.Errorf("verify-release-request: read release request tag object: %w", err)
 	}
 
-	if name, ok := taggedName(tagObject); !ok || name != request {
+	if name, ok := domaingit.TagObjectName(tagObject); !ok || name != request {
 		return fmt.Errorf("verify-release-request: release request tag object names %q, not %s: %w", name, request, errs.ErrValidation)
 	}
 
@@ -209,21 +209,6 @@ func requireAuthorisedCommit(ctx context.Context, git releaseRequestGit, request
 	}
 
 	return requireCommit(ctx, git, "HEAD", expected, "checkout")
-}
-
-// taggedName returns the name the tag object carries in its own header.
-func taggedName(tagObject string) (string, bool) {
-	for line := range strings.SplitSeq(tagObject, "\n") {
-		if after, ok := strings.CutPrefix(line, "tag "); ok {
-			return after, true
-		}
-
-		if line == "" {
-			break
-		}
-	}
-
-	return "", false
 }
 
 // requireCommit fails unless ref peels to want.
