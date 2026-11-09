@@ -78,12 +78,66 @@ func TestGitHubSigningJobsRunOnALiteralRunner(t *testing.T) {
 
 			signing++
 
-			require.Equal(t, yaml.ScalarNode, job.RunsOn.Kind, "%s/%s holds signing material; its runs-on must be one literal label", entry.Name(), name)
-			require.NotContains(t, job.RunsOn.Value, "${{", "%s/%s holds signing material, so a caller must not choose its runner", entry.Name(), name)
+			require.True(t, githubSigningRunnerAllowed(job.RunsOn), "%s/%s holds signing material; its runs-on must be an approved hosted literal", entry.Name(), name)
 		}
 	}
 
 	require.Positive(t, signing, "no signing job found: the guard checks nothing")
+}
+
+// githubSigningRunnerAllowed is the approved GitHub signer runner policy.
+// Literal syntax alone does not rule out a persistent/self-hosted pool. Keep
+// this exact policy separate from configurable ordinary/build runner inputs.
+func githubSigningRunnerAllowed(runsOn yaml.Node) bool {
+	if runsOn.Kind != yaml.ScalarNode || runsOn.Tag != "!!str" {
+		return false
+	}
+
+	switch runsOn.Value {
+	case "ubuntu-26.04", "macos-26":
+		return true
+	default:
+		return false
+	}
+}
+
+func TestGitHubSigningRunnerPolicy(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name, selector string
+		allowed        bool
+	}{
+		{name: "approved Linux", selector: "ubuntu-26.04", allowed: true},
+		{name: "approved macOS", selector: "macos-26", allowed: true},
+		{name: "quoted Linux", selector: `'ubuntu-26.04'`, allowed: true},
+		{name: "quoted macOS", selector: `"macos-26"`, allowed: true},
+		{name: "self-hosted", selector: "self-hosted"},
+		{name: "arbitrary literal", selector: "persistent-signing-pool"},
+		{name: "unapproved hosted Linux", selector: "ubuntu-26.04-arm"},
+		{name: "unapproved hosted macOS", selector: "macos-26-intel"},
+		{name: "Linux prefix spoof", selector: "ubuntu-26.04-private"},
+		{name: "empty", selector: `''`},
+		{name: "unset"},
+		{name: "null", selector: "null"},
+		{name: "array", selector: `["ubuntu-26.04"]`},
+		{name: "self-hosted array", selector: `["self-hosted", "ubuntu-26.04"]`},
+		{name: "group", selector: `{group: persistent, labels: ubuntu-26.04}`},
+		{name: "input expression", selector: `"${{ inputs['runs-on'] }}"`},
+		{name: "variable expression", selector: `"${{ vars.SIGNING_RUNNER }}"`},
+		{name: "matrix expression", selector: `"${{ matrix.runner }}"`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			var job struct {
+				RunsOn yaml.Node `yaml:"runs-on"`
+			}
+
+			require.NoError(t, yaml.Unmarshal([]byte("runs-on: "+tc.selector+"\n"), &job))
+			require.Equal(t, tc.allowed, githubSigningRunnerAllowed(job.RunsOn), "selector %q", tc.selector)
+		})
+	}
 }
 
 func holdsSigningMaterial(text string, permissions map[string]string) bool {

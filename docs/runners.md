@@ -215,6 +215,13 @@ so these jobs never take one. `slsa-attestor.yml`, which signs with the
 operator's KMS key rather than keylessly, takes `runs-on` so the operator can
 pick an isolated pool.
 
+The signing guard discovers jobs with signing secrets or signing OIDC
+permissions and requires exactly one approved scalar label: `ubuntu-26.04`
+or `macos-26`. Arbitrary literals such as `self-hosted` or a persistent pool,
+empty values, arrays, runner groups and expressions are refused. This policy
+does not restrict the configurable ordinary/build/platform runner inputs;
+source policy is not proof of provider scheduling or runner isolation.
+
 ## Runner lending
 
 A lender starts one ephemeral runner on a machine that permits user
