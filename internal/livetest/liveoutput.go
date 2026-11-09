@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -31,6 +32,7 @@ const (
 	verdictInterrupted    = "interrupted"
 	verdictInfrastructure = "infrastructure"
 	verdictSkipped        = "skipped"
+	verdictUnadmitted     = "unadmitted"
 )
 
 // RegisterLiveScenario identifies a real live-test entrypoint, including its
@@ -38,6 +40,7 @@ const (
 // Keep this explicit in scenarios; guard helpers are also used by offline tests.
 func RegisterLiveScenario(t interface{ Name() string }) {
 	fmt.Printf("%s%s\n", liveScenarioPrefix, t.Name())
+	skipUnadmittedInPreflight(t)
 }
 
 // LiveRunResult distinguishes real scenario execution from Go's package-level
@@ -67,7 +70,9 @@ type LiveRunVerdict struct {
 	ExitCode int           `json:"exit_code"`
 	Run      LiveRunHeader `json:"run"`
 	// Tests are the leaf tests that ran, in the order they started.
-	Tests          []LeafTestResult            `json:"tests"`
+	Tests []LeafTestResult `json:"tests"`
+	// Admitted are the scenarios a preflight run admitted.
+	Admitted       []string                    `json:"admitted,omitempty"`
 	Infrastructure []LiveInfrastructureFailure `json:"infrastructure,omitempty"`
 	AdminPolicy    []LiveAdminPolicyDecision   `json:"admin_policy,omitempty"`
 }
@@ -149,7 +154,18 @@ type LiveAdminPolicyDecision struct {
 // what the log says of it. A nil log, as for a run whose log cannot be
 // opened, is classified from the status alone.
 func ReadLiveRun(log io.Reader, exitCode int) (LiveRunVerdict, error) {
+	return readLiveRun(log, exitCode, false)
+}
+
+// ReadLivePreflightRun is ReadLiveRun for a preflight run, which passes when
+// every scenario that ran was admitted and none failed.
+func ReadLivePreflightRun(log io.Reader, exitCode int) (LiveRunVerdict, error) {
+	return readLiveRun(log, exitCode, true)
+}
+
+func readLiveRun(log io.Reader, exitCode int, preflight bool) (LiveRunVerdict, error) {
 	scan := newLiveRunScan()
+	scan.preflight = preflight
 
 	if log != nil {
 		scanner := bufio.NewScanner(log)
@@ -203,8 +219,11 @@ func WriteLiveRunVerdict(dir string, verdict LiveRunVerdict) error {
 // Result is the verdict as the run script prints it: its exit status, and
 // the Live result line's wording.
 func (verdict LiveRunVerdict) Result() LiveRunResult {
-	if verdict.Verdict == verdictSkipped {
+	switch verdict.Verdict {
+	case verdictSkipped:
 		return LiveRunResult{verdict.ExitCode, "skipped: no scenario ran; the log says why"}
+	case verdictUnadmitted:
+		return LiveRunResult{verdict.ExitCode, "unadmitted: a scenario that ran was not admitted; the log says why"}
 	}
 
 	return LiveRunResult{verdict.ExitCode, verdict.Verdict}
@@ -217,6 +236,8 @@ func (scan *liveRunScan) classify(exitCode int) (int, string) {
 	switch {
 	case exitCode == 130:
 		return 130, verdictInterrupted
+	case scan.preflight && exitCode == 0 && !scan.failed && scan.active == "":
+		return scan.classifyPreflight()
 	case exitCode != 0 && scan.onlyInfrastructure():
 		return exitCode, verdictInfrastructure
 	case exitCode != 0:
@@ -228,6 +249,48 @@ func (scan *liveRunScan) classify(exitCode int) (int, string) {
 	default:
 		return 1, verdictSkipped
 	}
+}
+
+// classifyPreflight passes a clean preflight run when it registered a
+// scenario and every scenario it registered reached its admission.
+func (scan *liveRunScan) classifyPreflight() (int, string) {
+	if len(scan.registered) == 0 {
+		return 1, verdictSkipped
+	}
+
+	for _, name := range scan.registered {
+		if !scan.reachedAdmission(name) {
+			return 1, verdictUnadmitted
+		}
+	}
+
+	return 0, verdictAdmitted
+}
+
+// reachedAdmission reports whether test name reached Admitted itself, or ran
+// subtests that each reached it: a scenario with one subtest per visibility
+// is admitted only when every visibility was.
+func (scan *liveRunScan) reachedAdmission(name string) bool {
+	if slices.Contains(scan.verdict.Admitted, name) {
+		return true
+	}
+
+	children := 0
+
+	for run := range scan.runs {
+		child, isChild := strings.CutPrefix(run, name+"/")
+		if !isChild || strings.Contains(child, "/") {
+			continue
+		}
+
+		children++
+
+		if !scan.reachedAdmission(run) {
+			return false
+		}
+	}
+
+	return children != 0
 }
 
 // onlyInfrastructure reports whether the lab caused every failure in the
@@ -278,7 +341,10 @@ type liveRunScan struct {
 	failures []LeafTestResult
 	policies map[LiveAdminPolicyDecision]bool
 
-	passed, failed, broken bool
+	// registered are the scenarios that ran, as they registered.
+	registered []string
+
+	passed, failed, broken, preflight bool
 }
 
 func newLiveRunScan() *liveRunScan {
@@ -307,6 +373,11 @@ func (scan *liveRunScan) consume(line string) {
 		name := strings.TrimPrefix(line, liveScenarioPrefix)
 		if scan.active != "" && scan.runs[name] {
 			scan.scenarios[name] = true
+			scan.registered = append(scan.registered, name)
+		}
+	case strings.HasPrefix(line, liveAdmittedPrefix):
+		if name := strings.TrimPrefix(line, liveAdmittedPrefix); scan.active != "" && scan.runs[name] {
+			scan.verdict.Admitted = append(scan.verdict.Admitted, name)
 		}
 	case strings.HasPrefix(line, liveInfrastructurePrefix):
 		if test, detail, ok := strings.Cut(strings.TrimPrefix(line, liveInfrastructurePrefix), " "); ok && scan.active != "" {

@@ -85,9 +85,14 @@ spec:
     runtime-image:
       description: forge-ci runtime image carrying JDK + Maven, pinned by @sha256.
       regex: '^[^[:space:]]+@sha256:[0-9a-f]{64}$'
+    runner-tags:
+      type: array
+      default: []
+      description: Runner tags of the job, all of which one runner must carry; empty, the default, leaves it untagged. Name literal tags only, never a $VARIABLE, which a project variable could set.
 ---
 "$[[ inputs.job-name ]]":
   stage: $[[ inputs.stage ]]
+  tags: $[[ inputs.runner-tags ]]
   image: $[[ inputs.runtime-image ]]
   variables:
     RC_PROJECT_DIRECTORY: "$[[ inputs.working-directory ]]"

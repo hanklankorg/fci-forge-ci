@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"net/http"
 	"net/url"
 	"os"
 	"os/exec"
@@ -18,16 +19,21 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"testing/fstest"
 	"time"
 
 	"github.com/google/go-containerregistry/pkg/name"
 	gitlabapi "gitlab.com/gitlab-org/api/client-go"
 	"gopkg.in/yaml.v3"
 
+	appconfig "github.com/diggsweden/forge-ci/internal/app/config"
+	"github.com/diggsweden/forge-ci/internal/app/gitlabpipeline"
 	"github.com/diggsweden/forge-ci/internal/domain/imageledger"
+	"github.com/diggsweden/forge-ci/internal/domain/output"
 	"github.com/diggsweden/forge-ci/internal/domain/pipeline"
 	"github.com/diggsweden/forge-ci/internal/domain/projecttype"
 	"github.com/diggsweden/forge-ci/internal/domain/provider"
+	"github.com/diggsweden/forge-ci/internal/domain/runners"
 	"github.com/diggsweden/forge-ci/internal/livetest"
 )
 
@@ -397,7 +403,7 @@ func runGitLabReleaseScenario(t *testing.T, consumerRoot string, scenario gitlab
 
 	var consumer *livetest.Consumer
 
-	checksRunnerTags := []string{}
+	checksNeedBuildah := false
 
 	if consumerRoot != "" {
 		opened := livetest.OpenConsumer(t, target, consumerRoot)
@@ -420,7 +426,7 @@ func runGitLabReleaseScenario(t *testing.T, consumerRoot string, scenario gitlab
 				t.Fatal("the admitted Go CLI integration fixture requires runner.privileged_label for Buildah checks")
 			}
 
-			checksRunnerTags = append(checksRunnerTags, label)
+			checksNeedBuildah = true
 		}
 	}
 
@@ -494,17 +500,32 @@ func runGitLabReleaseScenario(t *testing.T, consumerRoot string, scenario gitlab
 		checks, build = []string{"test -f CHANGELOG.md"}, []string{gitlabBaseBuild}
 	}
 
-	// Buildah's image builds go to the contract's runner that permits user
-	// namespaces, with the build job; kaniko's image jobs stay on the
-	// ordinary runner, in the kaniko job image.
-	// The builder's jobs, image and export alike, resolve the selection, and
-	// a lab that cannot run it reports the scenario not covered.
+	// The consumer's checks and the image and export jobs run on
+	// build-runner-tags-linux-amd64, which is never empty: the runner the
+	// selected builder needs, a lab that cannot run it reporting the scenario
+	// not covered; the one that permits user namespaces for checks that run
+	// Buildah; else the lab's own runner label.
 	buildRunnerTags := []string{}
 	if profile.releaseImages || len(profile.export) != 0 {
 		buildRunnerTags = livetest.ChooseImageBuilder(t, target).RunnerLabels
-	} else if label := livetest.PrivilegedRunnerLabel(t, target); label != "" && consumer != nil && !profile.kaniko {
-		buildRunnerTags = append(buildRunnerTags, label)
 	}
+
+	if checksNeedBuildah {
+		buildRunnerTags = []string{livetest.PrivilegedRunnerLabel(t, target)}
+	}
+
+	if len(buildRunnerTags) == 0 {
+		buildRunnerTags = []string{livetest.RunnerLabel(t, target)}
+	}
+
+	// Consumer build commands stay on the build role, including all planned
+	// family jobs and the final release-files invocation. Do not move this
+	// capability to the ordinary/version runner to accommodate the fan-out.
+	if label := livetest.PrivilegedRunnerLabel(t, target); label != "" && consumer != nil && !profile.kaniko {
+		buildRunnerTags = []string{label}
+	}
+
+	runnerTags := []string{}
 
 	imageBuilder, builderJobImage := gitlabImageBuilder(images)
 
@@ -527,7 +548,7 @@ func runGitLabReleaseScenario(t *testing.T, consumerRoot string, scenario gitlab
 		project: project, publication: livetest.RepoSlug(target, publication), registry: registry,
 		images: images, keys: keys, gitURL: gitURL, hostKey: hostKey, requestPublic: requestPublic,
 		settings: settings, distro: consumer != nil, bases: bases,
-		checks: checks, checksRunnerTags: checksRunnerTags, build: build, buildRunnerTags: buildRunnerTags,
+		checks: checks, runnerTags: runnerTags, build: build, buildRunnerTags: buildRunnerTags,
 		releaseImages: profile.releaseImages, artifactsConfig: profile.artifactsConfig(), releasePlatforms: releasePlatforms,
 		imageBuilder: imageBuilder, builderJobImage: builderJobImage, export: profile.export, changelog: profile.changelog,
 	}
@@ -657,8 +678,19 @@ func runGitLabReleaseScenario(t *testing.T, consumerRoot string, scenario gitlab
 
 	// Read back and retain the public payloads before an independent routing
 	// assertion can end the trial and run its disposable-resource cleanup.
+	if run.SHA != request {
+		t.Fatal("release routing plan must use the exact signed request commit")
+	}
+
+	plans := gitLabReleaseRunnerPlan(t, ctx, client, project, request, profile.artifactsConfig())
+
+	expectedRunners, err := gitLabReleaseRunnerRoles(buildRunnerTags, runnerTags, profile.releaseImages, len(profile.export) != 0, plans)
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	requireGitLabReleaseRunnerRouting(t, ctx, client, project, child,
-		gitLabReleaseRunnerRoles(buildRunnerTags, checksRunnerTags, imageBuilder, profile.releaseImages, len(profile.export) != 0))
+		expectedRunners)
 
 	if consumer != nil {
 		requireGitLabPackageSignatures(t, target, repo, keys, finalTag)
@@ -854,7 +886,7 @@ type gitlabReleasePolicy struct {
 	// base fixture.
 	distro, bases                     bool
 	checks, build, export             []string
-	checksRunnerTags, buildRunnerTags []string
+	runnerTags, buildRunnerTags       []string
 	releaseImages                     bool
 	artifactsConfig, releasePlatforms string
 	imageBuilder, builderJobImage     string
@@ -878,19 +910,20 @@ func (policy gitlabReleasePolicy) include(t *testing.T, target livetest.Target, 
 		"release-git-url":              policy.gitURL, "release-git-host-key-fingerprint": policy.hostKey,
 		"request-allowed-signers": "livetest@localhost " + policy.requestPublic,
 		"bot-name":                "Layer acceptance", "bot-email": releaseBotEmail,
-		"sign-distro-packages": policy.distro,
-		"base-images":          policy.bases,
-		"checks":               policy.checks,
-		"checks-runner-tags":   policy.checksRunnerTags,
-		"build":                policy.build,
-		"build-runner-tags":    policy.buildRunnerTags,
-		"release-images":       policy.releaseImages,
-		"artifacts-config":     policy.artifactsConfig,
-		"release-platforms":    policy.releasePlatforms,
-		"image-builder":        policy.imageBuilder,
-		"builder-job-image":    policy.builderJobImage,
-		"export-files":         len(policy.export) != 0,
-		"export":               policy.export,
+		"sign-distro-packages":          policy.distro,
+		"base-images":                   policy.bases,
+		"checks":                        policy.checks,
+		"runner-tags":                   policy.runnerTags,
+		"build":                         policy.build,
+		"build-runner-tags-linux-amd64": policy.buildRunnerTags,
+		"build-runner-tags-linux-arm64": []string{},
+		"release-images":                policy.releaseImages,
+		"artifacts-config":              policy.artifactsConfig,
+		"release-platforms":             policy.releasePlatforms,
+		"image-builder":                 policy.imageBuilder,
+		"builder-job-image":             policy.builderJobImage,
+		"export-files":                  len(policy.export) != 0,
+		"export":                        policy.export,
 	}
 	maps.Copy(inputs, policy.changelog)
 
@@ -1016,28 +1049,76 @@ func createGitLabProtectedVariables(t *testing.T, client *gitlabapi.Client, proj
 	}
 }
 
-// These roles mirror the protected inputs of release-jobs.yml. Only Buildah's
-// amd64 image/export jobs inherit build-runner-tags; Kaniko stays untagged.
-func gitLabReleaseRunnerRoles(buildTags, checksTags []string, builder string, images, exports bool) map[string][]string {
-	expected := map[string][]string{"Build: release files": buildTags, "Check: consumer checks": checksTags}
+// Re-plan the same committed declaration that the trusted Release: plan job
+// admitted. No worktree/default-branch file or observed job name selects the
+// expected family set. An absent default declaration means no family, just
+// as in the existing release planner; any other read/planning failure refuses.
+func gitLabReleaseRunnerPlan(t *testing.T, ctx context.Context, client *gitlabapi.Client, project, request, declaration string) appconfig.ReleaseStagePlans {
+	t.Helper()
 
-	builderTags := []string{}
-	if builder == livetest.ImageBuilderBuildah {
-		builderTags = buildTags
+	file := declaration
+	if file == "" {
+		file = ".forge-ci/artifacts.yml"
+	}
+
+	files := fstest.MapFS{}
+
+	body, response, err := client.RepositoryFiles.GetRawFile(project, file, &gitlabapi.GetRawFileOptions{Ref: new(request)}, gitlabapi.WithContext(ctx))
+	if err != nil {
+		if declaration != "" || response == nil || response.StatusCode != http.StatusNotFound {
+			t.Fatalf("read routing declaration at signed request %s: %v", request, err)
+		}
+	} else {
+		files[file] = &fstest.MapFile{Data: body}
+	}
+
+	plans, err := appconfig.LoadReleaseStagePlans(appconfig.EmitConfigPlanInput{Path: file, FS: files}, output.Annotator{}, declaration == "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	return plans
+}
+
+// The protected template's consumer commands retain the build role, while
+// generated version jobs retain the ordinary role. The existing planner owns
+// both the selected families and their exact job names: no prefix exemption
+// or second family table may turn an unexpected build into an ordinary job.
+type gitLabReleaseRunnerRole struct {
+	tags []string
+	role runners.Role
+}
+
+func gitLabReleaseRunnerRoles(buildTags, runnerTags []string, images, exports bool, plans appconfig.ReleaseStagePlans) (map[string]gitLabReleaseRunnerRole, error) {
+	families, err := gitlabpipeline.PlanReleaseFamilies(plans.Prepare, plans.Build)
+	if err != nil {
+		return nil, err
+	}
+
+	build := gitLabReleaseRunnerRole{tags: buildTags, role: runners.Build}
+	ordinary := gitLabReleaseRunnerRole{tags: runnerTags, role: runners.Ordinary}
+	expected := map[string]gitLabReleaseRunnerRole{"Build: release files": build, "Check: consumer checks": build}
+
+	for _, name := range (gitlabpipeline.ReleaseFamilies{Version: families.Version}).JobNames() {
+		expected[name] = ordinary
+	}
+
+	for _, name := range (gitlabpipeline.ReleaseFamilies{Build: families.Build}).JobNames() {
+		expected[name] = build
 	}
 
 	if images {
-		expected["Images: build amd64"] = builderTags
+		expected["Images: build amd64"] = build
 	}
 
 	if exports {
-		expected["Build: export amd64"] = builderTags
+		expected["Build: export amd64"] = build
 	}
 
-	return expected
+	return expected, nil
 }
 
-func requireGitLabReleaseRunnerRouting(t *testing.T, ctx context.Context, client *gitlabapi.Client, project string, child int64, expected map[string][]string) {
+func requireGitLabReleaseRunnerRouting(t *testing.T, ctx context.Context, client *gitlabapi.Client, project string, child int64, expected map[string]gitLabReleaseRunnerRole) {
 	t.Helper()
 
 	jobs, response, err := client.Jobs.ListPipelineJobs(project, child, &gitlabapi.ListJobsOptions{PerPage: 100}, gitlabapi.WithContext(ctx))
@@ -1060,18 +1141,22 @@ func requireGitLabReleaseRunnerRouting(t *testing.T, ctx context.Context, client
 	}
 }
 
-func validateGitLabReleaseRunnerRouting(jobs []*gitlabapi.Job, expected map[string][]string) error {
+func validateGitLabReleaseRunnerRouting(jobs []*gitlabapi.Job, expected map[string]gitLabReleaseRunnerRole) error {
 	seen := map[string]bool{}
 	capableRunners := map[int64]bool{}
 
 	for _, job := range jobs {
-		if tags, routed := expected[job.Name]; routed {
-			if !slices.Equal(job.TagList, tags) || job.Runner.ID == 0 || job.Status != "success" {
-				return fmt.Errorf("job %q did not succeed with the requested tags %v", job.Name, tags)
+		if want, routed := expected[job.Name]; routed {
+			if seen[job.Name] {
+				return fmt.Errorf("release routing lists duplicate planned job %q", job.Name)
+			}
+
+			if !slices.Equal(job.TagList, want.tags) || job.Runner.ID == 0 || job.Status != "success" {
+				return fmt.Errorf("job %q did not succeed with the requested tags %v", job.Name, want.tags)
 			}
 
 			seen[job.Name] = true
-			if len(tags) != 0 {
+			if want.role == runners.Build {
 				capableRunners[job.Runner.ID] = true
 			}
 		} else if len(job.TagList) != 0 {
@@ -1084,8 +1169,8 @@ func validateGitLabReleaseRunnerRouting(jobs []*gitlabapi.Job, expected map[stri
 	}
 
 	for _, job := range jobs {
-		if len(expected[job.Name]) == 0 && capableRunners[job.Runner.ID] {
-			return fmt.Errorf("untagged job %q ran on a tagged capability runner %d", job.Name, job.Runner.ID)
+		if expected[job.Name].role != runners.Build && capableRunners[job.Runner.ID] {
+			return fmt.Errorf("non-build job %q ran on a build capability runner %d", job.Name, job.Runner.ID)
 		}
 	}
 

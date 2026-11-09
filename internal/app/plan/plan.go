@@ -20,6 +20,7 @@ import (
 	"github.com/diggsweden/forge-ci/internal/domain/output"
 	"github.com/diggsweden/forge-ci/internal/domain/pipeline"
 	"github.com/diggsweden/forge-ci/internal/domain/projecttype"
+	"github.com/diggsweden/forge-ci/internal/domain/runners"
 	domainversion "github.com/diggsweden/forge-ci/internal/domain/version"
 )
 
@@ -39,6 +40,9 @@ type ReleaseInput struct {
 	ChangelogCreator                string
 	ChangelogSkipVersionBump        bool
 	ReleasePlatforms                string
+	// Runners is the runner inputs the forge layer passed; see
+	// pipeline.ReleasePlanInput.Runners.
+	Runners *runners.Inputs
 }
 
 // Release composes the typed release plan outputs consumed by release workflows.
@@ -67,6 +71,7 @@ func Release(ctx context.Context, sink ci.OutputSink, summary ci.SummarySink, in
 		ChangelogCreator:                in.ChangelogCreator,
 		ChangelogSkipVersionBump:        in.ChangelogSkipVersionBump,
 		ReleasePlatforms:                in.ReleasePlatforms,
+		Runners:                         in.Runners,
 	})
 	if err != nil {
 		return nil, err
@@ -116,6 +121,7 @@ func warnSBOMConflict(ctx context.Context, summary ci.SummarySink, releaseSBOMs,
 
 // SnapshotReleaseInput drives `plan snapshot-release`.
 type SnapshotReleaseInput struct {
+	Runners               *runners.Inputs
 	ConfigPlanJSON        string
 	ProjectType           string
 	Branch                string
@@ -148,6 +154,7 @@ func SnapshotRelease(ctx context.Context, sink ci.OutputSink, in SnapshotRelease
 	}
 
 	devPlan, err := pipeline.NewSnapshotReleasePlan(pipeline.SnapshotReleasePlanInput{
+		Runners:               in.Runners,
 		ConfigPlan:            configPlan,
 		ProjectType:           projecttype.Type(in.ProjectType),
 		Branch:                in.Branch,

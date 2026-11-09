@@ -6,117 +6,238 @@
 package conformance_test
 
 import (
-	"reflect"
-	"strings"
 	"testing"
+	"testing/fstest"
 
+	"github.com/stretchr/testify/require"
 	gitlabapi "gitlab.com/gitlab-org/api/client-go"
 
-	"github.com/diggsweden/forge-ci/internal/livetest"
+	appconfig "github.com/diggsweden/forge-ci/internal/app/config"
+	"github.com/diggsweden/forge-ci/internal/domain/output"
+	"github.com/diggsweden/forge-ci/internal/domain/pipeline"
+	"github.com/diggsweden/forge-ci/internal/domain/runners"
 )
 
+// Pure fixtures use the same declaration-to-plan owner as Release: plan.
+// They never accept a target or invoke a provider, even with the live tag.
+func gitLabRoutingPlans(t *testing.T) appconfig.ReleaseStagePlans {
+	t.Helper()
+
+	const declaration = `artifacts:
+  - name: backend
+    project-type: maven
+    working-directory: backend
+  - name: frontend
+    project-type: npm
+    working-directory: frontend
+  - name: tool
+    project-type: go
+    working-directory: tool
+    config:
+      build-mode: artifact-first
+`
+
+	plans, err := appconfig.LoadReleaseStagePlans(appconfig.EmitConfigPlanInput{
+		Path: ".forge-ci/artifacts.yml",
+		FS:   fstest.MapFS{".forge-ci/artifacts.yml": {Data: []byte(declaration)}},
+	}, output.Annotator{}, false)
+	require.NoError(t, err)
+
+	return plans
+}
+
 func TestGitLabReleaseRunnerRoles(t *testing.T) {
+	t.Parallel()
+
 	for _, tc := range []struct {
 		name            string
-		builder         string
 		images, exports bool
-		want            map[string][]string
 	}{
-		{"files", livetest.ImageBuilderBuildah, false, false, map[string][]string{"Build: release files": {"build"}, "Check: consumer checks": {"checks"}}},
-		{"buildah images", livetest.ImageBuilderBuildah, true, false, map[string][]string{"Build: release files": {"build"}, "Check: consumer checks": {"checks"}, "Images: build amd64": {"build"}}},
-		{"buildah exports", livetest.ImageBuilderBuildah, false, true, map[string][]string{"Build: release files": {"build"}, "Check: consumer checks": {"checks"}, "Build: export amd64": {"build"}}},
-		{"kaniko images and exports", livetest.ImageBuilderKaniko, true, true, map[string][]string{"Build: release files": {"build"}, "Check: consumer checks": {"checks"}, "Images: build amd64": {}, "Build: export amd64": {}}},
+		{"files", false, false},
+		{"images", true, false},
+		{"exports", false, true},
+		{"images and exports", true, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := gitLabReleaseRunnerRoles([]string{"build"}, []string{"checks"}, tc.builder, tc.images, tc.exports); !reflect.DeepEqual(got, tc.want) {
-				t.Fatalf("roles: got %v, want %v", got, tc.want)
+			t.Parallel()
+
+			build := gitLabReleaseRunnerRole{tags: []string{"build"}, role: runners.Build}
+			ordinary := gitLabReleaseRunnerRole{tags: []string{"ordinary"}, role: runners.Ordinary}
+
+			want := map[string]gitLabReleaseRunnerRole{
+				"Check: consumer checks": build, "Build: release files": build,
+				"Prepare: version java": ordinary, "Prepare: version node": ordinary,
+				"Build: java": build, "Build: node": build, "Build: go": build,
+			}
+			if tc.images {
+				want["Images: build amd64"] = build
+			}
+
+			if tc.exports {
+				want["Build: export amd64"] = build
+			}
+
+			got, err := gitLabReleaseRunnerRoles(build.tags, ordinary.tags, tc.images, tc.exports, gitLabRoutingPlans(t))
+			require.NoError(t, err)
+			require.Equal(t, want, got, "all and only the planned version/build jobs must be covered")
+		})
+	}
+}
+
+func TestGitLabReleaseRunnerRolesSeparateVersionAndBuildPlans(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name           string
+		version, build bool
+		generated      []string
+	}{
+		{"version only", true, false, []string{"Prepare: version java", "Prepare: version node"}},
+		{"build only", false, true, []string{"Build: java", "Build: node", "Build: go"}},
+		{"undeclared", false, false, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			plans := gitLabRoutingPlans(t)
+
+			emptyPrepare, emptyBuild := pipeline.UndeclaredReleaseStagePlans()
+			if !tc.version {
+				plans.Prepare = emptyPrepare
+			}
+
+			if !tc.build {
+				plans.Build = emptyBuild
+			}
+
+			got, err := gitLabReleaseRunnerRoles([]string{"build"}, []string{"ordinary"}, false, false, plans)
+			require.NoError(t, err)
+			require.Equal(t, runners.Build, got["Build: release files"].role)
+			require.Equal(t, runners.Build, got["Check: consumer checks"].role)
+			delete(got, "Build: release files")
+			delete(got, "Check: consumer checks")
+			require.Len(t, got, len(tc.generated))
+
+			for _, name := range tc.generated {
+				require.Contains(t, got, name)
+
+				role := runners.Build
+				if tc.version {
+					role = runners.Ordinary
+				}
+
+				require.Equal(t, role, got[name].role)
 			}
 		})
 	}
 }
 
-// Pure oracle tests: no target, credentials, or provider calls are needed.
-func TestGitLabReleaseRunnerRoutingOracle(t *testing.T) {
-	for _, builder := range []string{livetest.ImageBuilderBuildah, livetest.ImageBuilderKaniko} {
-		for _, images := range []bool{false, true} {
-			for _, exports := range []bool{false, true} {
-				expected := gitLabReleaseRunnerRoles([]string{"privileged"}, []string{"checks"}, builder, images, exports)
-				jobs := []*gitlabapi.Job{}
+func gitLabRoutingJobs(expected map[string]gitLabReleaseRunnerRole) []*gitlabapi.Job {
+	jobs := make([]*gitlabapi.Job, 0, len(expected)+1)
 
-				for name, tags := range expected {
-					runner := int64(3)
-					if len(tags) != 0 {
-						runner = 1
-						if tags[0] == "checks" {
-							runner = 2
-						}
-					}
-
-					jobs = append(jobs, &gitlabapi.Job{Name: name, TagList: tags, Status: "success", Runner: gitlabapi.JobRunner{ID: runner}})
-				}
-
-				jobs = append(jobs, &gitlabapi.Job{Name: "Sign: release", Status: "success", Runner: gitlabapi.JobRunner{ID: 3}})
-				if err := validateGitLabReleaseRunnerRouting(jobs, expected); err != nil {
-					t.Fatalf("builder=%s images=%v exports=%v: %v", builder, images, exports, err)
-				}
-			}
+	for name, want := range expected {
+		runner := int64(2)
+		if want.role == runners.Build {
+			runner = 1
 		}
+
+		jobs = append(jobs, &gitlabapi.Job{Name: name, TagList: want.tags, Status: "success", Runner: gitlabapi.JobRunner{ID: runner}})
 	}
 
-	cases := []struct {
-		name string
-		job  gitlabapi.Job
-		want string
+	return append(jobs, &gitlabapi.Job{Name: "Sign: release", Status: "success", Runner: gitlabapi.JobRunner{ID: 3}})
+}
+
+func TestGitLabReleaseRunnerRoutingOracle(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name, target, mutation, refusal string
 	}{
-		{"wrong builder tags", gitlabapi.Job{Name: "Images: build amd64", TagList: []string{"checks"}, Status: "success", Runner: gitlabapi.JobRunner{ID: 2}}, "requested tags"},
-		{"unexecuted builder", gitlabapi.Job{Name: "Images: build amd64", TagList: []string{"privileged"}, Status: "skipped"}, "requested tags"},
-		{"failed builder", gitlabapi.Job{Name: "Images: build amd64", TagList: []string{"privileged"}, Status: "failed", Runner: gitlabapi.JobRunner{ID: 1}}, "requested tags"},
-		{"no builder runner", gitlabapi.Job{Name: "Images: build amd64", TagList: []string{"privileged"}, Status: "success"}, "requested tags"},
-		{"missing builder", gitlabapi.Job{Name: "Summary: release", Runner: gitlabapi.JobRunner{ID: 3}}, "missing successful jobs"},
-		{"tag leakage", gitlabapi.Job{Name: "Sign: release", TagList: []string{"privileged"}, Runner: gitlabapi.JobRunner{ID: 1}}, "unrelated job"},
-		{"runner leakage", gitlabapi.Job{Name: "Sign: release", Runner: gitlabapi.JobRunner{ID: 1}}, "tagged capability runner"},
-	}
-	for _, tc := range cases {
+		{name: "multi-family success"},
+		{name: "family on ordinary tags", target: "Build: go", mutation: "wrong tags", refusal: "requested tags"},
+		{name: "version on build tags", target: "Prepare: version java", mutation: "build tags", refusal: "requested tags"},
+		{name: "version on build runner", target: "Prepare: version java", mutation: "build runner", refusal: "build capability runner"},
+		{name: "release files on ordinary tags", target: "Build: release files", mutation: "wrong tags", refusal: "requested tags"},
+		{name: "missing family", target: "Build: node", mutation: "missing", refusal: "missing successful jobs"},
+		{name: "missing version", target: "Prepare: version node", mutation: "missing", refusal: "missing successful jobs"},
+		{name: "missing release files", target: "Build: release files", mutation: "missing", refusal: "missing successful jobs"},
+		{name: "skipped family", target: "Build: java", mutation: "skipped", refusal: "requested tags"},
+		{name: "failed family", target: "Build: java", mutation: "failed", refusal: "requested tags"},
+		{name: "no family runner", target: "Build: java", mutation: "no runner", refusal: "requested tags"},
+		{name: "missing image", target: "Images: build amd64", mutation: "missing", refusal: "missing successful jobs"},
+		{name: "missing export", target: "Build: export amd64", mutation: "missing", refusal: "missing successful jobs"},
+		{name: "duplicate planned job", target: "Build: go", mutation: "duplicate", refusal: "duplicate planned job"},
+		{name: "unexpected tagged build", mutation: "unexpected build", refusal: "unrelated job"},
+		{name: "unexpected untagged build capability", mutation: "unexpected capability", refusal: "build capability runner"},
+		{name: "signer capability leak", target: "Sign: release", mutation: "build runner", refusal: "build capability runner"},
+	} {
 		t.Run(tc.name, func(t *testing.T) {
-			expected := gitLabReleaseRunnerRoles([]string{"privileged"}, []string{"checks"}, livetest.ImageBuilderBuildah, true, false)
+			t.Parallel()
 
-			jobs := []*gitlabapi.Job{
-				{Name: "Build: release files", TagList: []string{"privileged"}, Status: "success", Runner: gitlabapi.JobRunner{ID: 1}},
-				{Name: "Check: consumer checks", TagList: []string{"checks"}, Status: "success", Runner: gitlabapi.JobRunner{ID: 2}},
-				&tc.job,
-			}
-			if tc.job.Name != "Images: build amd64" && tc.name != "missing builder" {
-				jobs = append(jobs, &gitlabapi.Job{Name: "Images: build amd64", TagList: []string{"privileged"}, Status: "success", Runner: gitlabapi.JobRunner{ID: 1}})
+			expected, err := gitLabReleaseRunnerRoles([]string{"build"}, []string{"ordinary"}, true, true, gitLabRoutingPlans(t))
+			require.NoError(t, err)
+
+			jobs := gitLabRoutingJobs(expected)
+
+			for i, job := range jobs {
+				if job.Name != tc.target {
+					continue
+				}
+
+				switch tc.mutation {
+				case "wrong tags":
+					job.TagList = []string{"ordinary"}
+				case "build tags":
+					job.TagList = []string{"build"}
+				case "build runner":
+					job.Runner.ID = 1
+				case "missing":
+					jobs = append(jobs[:i:i], jobs[i+1:]...)
+				case "skipped":
+					job.Status = "skipped"
+				case "failed":
+					job.Status = "failed"
+				case "no runner":
+					job.Runner.ID = 0
+				case "duplicate":
+					jobs = append(jobs, job)
+				}
+
+				break
 			}
 
-			if err := validateGitLabReleaseRunnerRouting(jobs, expected); err == nil || !strings.Contains(err.Error(), tc.want) {
-				t.Fatalf("got %v, want %q", err, tc.want)
+			if tc.mutation == "unexpected build" {
+				jobs = append(jobs, &gitlabapi.Job{Name: "Build: unplanned", TagList: []string{"build"}, Status: "success", Runner: gitlabapi.JobRunner{ID: 1}})
+			}
+
+			if tc.mutation == "unexpected capability" {
+				jobs = append(jobs, &gitlabapi.Job{Name: "Build: unplanned", Status: "success", Runner: gitlabapi.JobRunner{ID: 1}})
+			}
+
+			err = validateGitLabReleaseRunnerRouting(jobs, expected)
+			if tc.refusal == "" {
+				require.NoError(t, err)
+			} else {
+				require.ErrorContains(t, err, tc.refusal)
 			}
 		})
 	}
+}
 
-	for _, name := range []string{"Images: build amd64", "Build: export amd64"} {
-		for _, tagged := range []bool{false, true} {
-			expected := gitLabReleaseRunnerRoles([]string{"privileged"}, nil, livetest.ImageBuilderKaniko, true, true)
+func TestGitLabReleaseRunnerRoutingUntaggedBuildStillHasACapabilityBoundary(t *testing.T) {
+	t.Parallel()
 
-			jobs := []*gitlabapi.Job{
-				{Name: "Build: release files", TagList: []string{"privileged"}, Status: "success", Runner: gitlabapi.JobRunner{ID: 1}},
-				{Name: "Check: consumer checks", Status: "success", Runner: gitlabapi.JobRunner{ID: 2}},
-				{Name: "Images: build amd64", Status: "success", Runner: gitlabapi.JobRunner{ID: 2}},
-				{Name: "Build: export amd64", Status: "success", Runner: gitlabapi.JobRunner{ID: 2}},
-			}
-			for _, job := range jobs {
-				if job.Name == name {
-					job.Runner.ID = 1
-					if tagged {
-						job.TagList = []string{"privileged"}
-					}
-				}
-			}
+	expected, err := gitLabReleaseRunnerRoles(nil, []string{"ordinary"}, true, true, gitLabRoutingPlans(t))
+	require.NoError(t, err)
 
-			if err := validateGitLabReleaseRunnerRouting(jobs, expected); err == nil {
-				t.Fatalf("Kaniko role %q accepted capability leakage (tagged=%v)", name, tagged)
-			}
+	jobs := gitLabRoutingJobs(expected)
+	require.NoError(t, validateGitLabReleaseRunnerRouting(jobs, expected))
+
+	for _, job := range jobs {
+		if job.Name == "Sign: release" {
+			job.Runner.ID = 1
 		}
 	}
+
+	require.ErrorContains(t, validateGitLabReleaseRunnerRouting(jobs, expected), "build capability runner")
 }

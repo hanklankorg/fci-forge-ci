@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"time"
 
 	"codefloe.com/itiquette/forge-lab-contract/labcontract"
@@ -85,8 +86,26 @@ func CheckLiveInputs(now time.Time) (LivePreflightSummary, error) {
 	return LivePreflightSummary{
 		Selected:    selected,
 		Generation:  lab.Generation.ID,
-		Explanation: "execution_provider=" + name + "\n" + labcontract.Explain(lab, now),
+		Explanation: "execution_provider=" + name + "\n" + labcontract.Explain(usedEndpoints(lab, scope), now),
 	}, nil
+}
+
+// usedEndpoints is the contract with only the endpoints this run drives: a
+// forge of the tier in the provider scope. The explanation then says nothing,
+// credential age included, of an endpoint the run does not use; acceptTarget
+// alone judges the age of the ones it does.
+func usedEndpoints(lab *labcontract.Contract, scope provider.ForgeAPI) *labcontract.Contract {
+	used := *lab
+	used.Endpoints = nil
+
+	for _, endpoint := range lab.Endpoints {
+		forge := provider.ForgeAPI(endpoint.Kind)
+		if slices.Contains(liveForges, forge) && (scope == "" || scope == forge) {
+			used.Endpoints = append(used.Endpoints, endpoint)
+		}
+	}
+
+	return &used
 }
 
 func checkSelectedLiveForges(lab *labcontract.Contract, scope provider.ForgeAPI, now time.Time) (int, error) {
@@ -97,7 +116,7 @@ func checkSelectedLiveForges(lab *labcontract.Contract, scope provider.ForgeAPI,
 			continue
 		}
 
-		accepted, err := checkLiveForge(lab, forge, now)
+		accepted, err := checkLiveForge(lab, forge, scope, now)
 		if err != nil {
 			return 0, err
 		}
@@ -112,10 +131,15 @@ func checkSelectedLiveForges(lab *labcontract.Contract, scope provider.ForgeAPI,
 
 // checkLiveForge runs the guard for one forge exactly as Accept will, and
 // reports whether the contract carried it at all.
-func checkLiveForge(lab *labcontract.Contract, forge provider.ForgeAPI, now time.Time) (bool, error) {
+func checkLiveForge(lab *labcontract.Contract, forge, scope provider.ForgeAPI, now time.Time) (bool, error) {
 	_, err := acceptTarget(lab, forge, now)
 	if errors.Is(err, labcontract.ErrNoEndpoint) {
 		return false, nil
+	}
+
+	if errors.Is(err, labcontract.ErrLifetime) && scope == "" {
+		return false, fmt.Errorf("%s destructive guard: %w; a run that does not use %s selects the other forge with %s",
+			forge, err, forge, liveProviderEnv)
 	}
 
 	if err != nil {

@@ -214,9 +214,11 @@ func addSnapshotBuildJobs(out snapshotJobs, plan snapshotimage.Plan, in Snapshot
 		tags := in.AMD64Tags
 		if build.Arch == domaincontainer.ArchARM64 {
 			tags = in.ARM64Tags
-			if len(tags) == 0 {
-				return nil, fmt.Errorf("arm64 snapshot builds require native arm64 runner tags: %w", errs.ErrUsage)
-			}
+		}
+
+		// An untagged build could land on a runner of any platform.
+		if len(tags) == 0 {
+			return nil, fmt.Errorf("%s snapshot builds require native %s runner tags, build-runner-tags-linux-%s: %w", build.Arch, build.Arch, build.Arch, errs.ErrUsage)
 		}
 
 		name := "Snapshot: build " + build.Name + " " + build.Arch

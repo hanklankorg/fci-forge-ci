@@ -596,13 +596,9 @@ and Google Play publisher agree.
 - **Example:** `export-options-var: EXPORT_OPTIONS_BASE64`
 - **Note:** Variable should contain base64-encoded exportOptions.plist for IPA export
 
-#### `config.macos-version`
-
-- **Type:** `string`
-- **Description:** macOS runner version
-- **Default:** `macos-26`
-- **Valid values:** `macos-15`, `macos-26`
-- **Example:** `macos-version: macos-26`
+The macOS runner is not an artifact setting: the caller's workflow names it
+with the `runs-on-darwin-arm64` input of the orchestrator, default
+`["macos-26"]`. See [Runners](runners.md#github-runners).
 
 #### Direct Xcode workflow destination
 
@@ -1262,7 +1258,6 @@ artifacts:
       configuration: Release
       enable-code-signing: true
       export-options-var: EXPORT_OPTIONS_BASE64
-      macos-version: macos-26
 ```
 
 **Required Secrets:**
@@ -1309,7 +1304,6 @@ artifacts:
       configuration: Release
       enable-code-signing: true
       export-options-var: EXPORT_OPTIONS_BASE64
-      macos-version: macos-26
 ```
 
 Use `project` or `workspace` alongside XcodeGen so version detection and archive steps target the generated Xcode project explicitly.

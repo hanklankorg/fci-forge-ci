@@ -28,6 +28,7 @@ on:
       cosign-public-key-sha256: {type: string, required: true}
       package-gpg-fingerprint: {type: string, required: true}
       cosign-transparency: {type: string, default: "none"}
+      runs-on: {type: string, default: '["ubuntu-26.04"]', description: "JSON array of runner labels for the policy and producer jobs, read with fromJSON. The signing and publishing jobs stay on GitHub-hosted runners."}
     secrets:
       RELEASE_GPG_PUBLIC_KEY: {required: false}
       RELEASE_GPG_PRIVATE_KEY: {required: true}
@@ -62,7 +63,7 @@ env:
   NOTES_PATH: ${{ inputs['release-notes-path'] }}
 jobs:
   policy:
-    runs-on: ubuntu-26.04
+    runs-on: ${{ fromJSON(inputs['runs-on']) }}
     container:
       image: ${{ inputs['runtime-image'] }}
     permissions: {contents: read, actions: read}
@@ -180,7 +181,7 @@ jobs:
   producer:
     needs: [policy]
     if: ${{ success() && needs.policy.result == 'success' }}
-    runs-on: ubuntu-26.04
+    runs-on: ${{ fromJSON(inputs['runs-on']) }}
     container:
       image: ${{ inputs['runtime-image'] }}
     permissions: {contents: read, actions: read}

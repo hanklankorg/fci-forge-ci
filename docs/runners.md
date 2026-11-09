@@ -27,6 +27,63 @@ does not replace them. Helpers under `/usr/lib/podman` or `/usr/libexec/podman`
 are recognized outside `PATH`. With `--install-packages=false`, provision these
 runtime packages in the job image.
 
+## Runner roles across the forges
+
+Every forge layer chooses runners for the same roles. Each maps a role to its
+native field: `tags:` on GitLab, an array input interpolated whole; `runs-on`
+on Forgejo and GitHub, a JSON array of labels passed as text and decoded with
+`fromJSON`. A cell without an input says what decides instead. A guard,
+`TestRunnerRolesAreCoherentAcrossForges`, checks migrated input names against
+`runners.Names` and this page. Forgejo's legacy surface is frozen separately
+by `TestForgejoRunnerMigrationBoundary` until its callers migrate together.
+
+| Role | GitLab | Forgejo | GitHub |
+|---|---|---|---|
+| ordinary | `runner-tags` of `check`, `nanolinter`, `megalinter`, `build-*`, `publish-*`, `release` and `snapshot-images`; default `[]`, untagged | `runner-label` of every reusable workflow; required, no default; callers pass `vars.CI_RUNNER_LABEL` | `runs-on` of ordinary jobs; default `["ubuntu-26.04"]` |
+| image-build | `build-runner-tags-linux-amd64` of `release` and `snapshot-images`, which the release's consumer checks take too; required, never empty | `runner-label` of `release-images.yml` and `snapshot-images.yml`, which callers pass `CI_RUNNER_LABEL_CONTAINER` or the pool; `runner-label-container` of `runtime-images.yml` | `build-runs-on-linux-amd64`, default `["ubuntu-26.04"]` |
+| image-build-arm64 | `build-runner-tags-linux-arm64` of `release` and `snapshot-images`; required when arm64 is planned, never `[]` then | `runner-label-arm64` of `release-images.yml`, `snapshot-images.yml` and `runtime-images.yml`; `runner-label-container-arm64` of `runtime-images.yml`; default empty | `build-runs-on-linux-arm64`, default `["ubuntu-26.04-arm"]` |
+| signer | `signer-runner-tags` of `release`; default `[]`; a literal of the separately pinned policy project | `runner-label` of `sign-and-publish-release.yml` and `sign-container-images.yml`, set by the caller workflow | none: the hosted `ubuntu-26.04` literal of the layer, which no caller input or variable changes |
+| macos | `runner-tags-darwin-arm64` of `publish-apple-appstore`; default `[saas-macos-medium-m1]` | none: the Forgejo layer has no Apple workflows | `runs-on-darwin-arm64` for unsigned Xcode and Swift lint, default `["macos-26"]`; signed Xcode and App Store publication stay on literal `macos-26` |
+
+Every runner input is named `[role-]<keyword>[-<os>-<arch>]`: the role
+when it is not the ordinary one, the forge's keyword, and the platform when
+the role's runner is bound to one, as `build-runner-tags-linux-arm64` and
+`runner-tags-darwin-arm64` are. An input bound to a platform has no
+default and is never empty where its platform is planned: an untagged job
+could land on a runner of any platform. Each job takes its own role's
+input, and none falls back to another's: GitLab's kaniko image jobs take the
+build inputs as Buildah's do, the release's consumer checks, which may run
+Buildah, take `build-runner-tags-linux-amd64`. Its family builds and release
+files run the consumer's build commands on that build input too; generated
+version jobs retain ordinary `runner-tags`.
+
+Where the names differ, each has a reason:
+
+- GitLab names each role's input, `build-runner-tags-linux-amd64` beside `runner-tags`,
+  because one component holds jobs of several roles. Forgejo passes one
+  `runner-label` per call, because each reusable workflow serves one role,
+  and the caller picks the pool or the container runners for it.
+- GitLab takes arrays and Forgejo and GitHub JSON-array strings, because a
+  GitLab input can be an array and a `workflow_call` input cannot.
+- GitLab says tags and Forgejo labels: each forge's own word for the field.
+- `runner-label-container` exists on `runtime-images.yml` alone, because only
+  that workflow mixes pool jobs and image builds in one call.
+
+Who chooses the signer runner differs by forge. GitLab runs the signer jobs
+from a component the policy project includes, so their tags are that
+project's literals; a tag written as a `$VARIABLE` would let a project
+variable choose the runner that sees the credentials, and the components take
+tags only from inputs. GitHub fixes the hosted runner in the layer. Forgejo
+has no policy project: the caller's release workflow passes `runner-label`,
+and the examples pass the repository variable `CI_RUNNER_LABEL`, so whoever
+may set repository variables chooses the runner the signing jobs run on. The
+Forgejo layer has no separate signer runner setting yet.
+
+GitHub threads its role-specific inputs through the orchestrators. Its
+signing, trust-root and publication jobs retain hosted literals; see
+[GitHub runners](#github-runners). The Forgejo names and fallback behavior
+below describe its legacy interface, not the target domain naming table.
+
 ## How a workflow names its runners
 
 Runner selection is a repository or organization variable, never a literal in
@@ -55,6 +112,116 @@ Where image builds run is the installation's choice:
 | the pool denies them; build with kaniko | unset | unset |
 | your own runners with rootless Podman | their labels | unset |
 | a hosted pool that denies them; borrow a runner | the labels the lender registers, e.g. `["gh-vm","arch=amd64"]` | `github` |
+
+## A planned platform needs its runner
+
+Every runner input is named `[role-]<keyword>[-<os>-<arch>]`:
+
+- the role: none for ordinary jobs, `build-` for privileged image builds,
+  `signer-` for the jobs that hold the signing credentials;
+- the keyword: `runner-tags` on GitLab, `runs-on` on Forgejo and GitHub;
+- the platform, only on an input whose jobs run on that one platform: its
+  `RELEASE_PLATFORMS` name with `/` turned into `-`, such as `linux-arm64` or
+  `darwin-arm64`.
+
+So `build-runner-tags-linux-arm64` chooses GitLab's arm64 image build runner
+and `runs-on-darwin-arm64` the Forgejo or GitHub macOS runner. The engine owns
+this table (`internal/domain/runners`); the layers and their guards take the
+names from it, and `runners.Names` lists every valid name per forge. GitHub
+has no `signer-` input: its signer jobs run on a hosted literal that no
+caller input changes.
+
+`forge-ci plan release`, `forge-ci plan snapshot-release` and
+`forge-ci container release-images plan` take
+each runner input of the calling layer with `--runner-input name=value`, as
+the layer passed it after its own defaults. The plan is refused when one of
+its jobs has no runner:
+
+- an image build for a platform the plan includes after `RELEASE_PLATFORMS`
+  narrowed it, whose `build-` input of that platform has no value;
+- an Xcode or App Store job, whose ordinary `darwin-arm64` input has no value.
+
+The refusal names the input, the platform and the forge. There is no
+fallback across platforms or roles: an arm64 build never runs on the amd64
+runner, and an image build never on the ordinary one. A default counts as a
+value. An empty value or an empty list `[]` counts as missing, with one
+exception: GitLab's unsuffixed `runner-tags` and `signer-runner-tags`, where
+`[]` means untagged. In a platform-bound input an untagged job could land on
+a runner of any platform, an image build needs a runner that permits it, and
+on Forgejo and GitHub an empty label list selects no runner. The refusal
+says to set the input to a JSON list that selects a runner of that
+platform. The refusal therefore fires where the forge has no default and
+none was given, and for macOS jobs where the forge has no macOS runner, as
+on Forgejo.
+
+GitHub's release and snapshot orchestrators pass every declared runner input
+through environment variables to `--runner-input`; empty caller values are
+not replaced by another role or architecture's input. This is an admission
+check, not proof that a registered runner has the promised capabilities.
+GitLab's release-image request check and image planning job likewise pass all
+of the release component's runner inputs from readonly policy bindings. The
+same image planner admits both phases: a missing native build runner is
+refused before a frozen plan is written, including when the ordinary runner
+has matching architecture tags. `release-platforms`, not runner availability,
+selects the images' platforms. Unselected build inputs may remain empty.
+A layer that passes no `--runner-input` is not checked. The flag remains
+optional for compatibility until all layers pass their inputs. GitLab export
+and base planning and Forgejo retain their existing architecture checks until
+their own admission migration replaces them; image-plan wiring alone does
+not authorize deleting those separate checks.
+## GitHub runners
+
+The GitHub layer takes its runners as `workflow_call` inputs, not variables.
+Each is a JSON array of labels passed as text and read with `fromJSON`, named
+`[role-]runs-on[-<os>-<arch>]`: no role for ordinary jobs, `build-` for image
+builds, and the `RELEASE_PLATFORMS` name with `/` as `-` where a job can run
+only on that platform. Each input has its own default, today's hosted label,
+and never falls back to another input.
+
+| Input | Default | Selects |
+|---|---|---|
+| `runs-on` | `["ubuntu-26.04"]` | ordinary jobs: builds, lint, plans, SBOMs, changelogs, summaries |
+| `build-runs-on-linux-amd64` | `["ubuntu-26.04"]` | the linux/amd64 legs of `publish-container.yml` and `snapshot-images.yml`; each leg reads the input of its own arch, so a missing or empty one fails the leg instead of falling back |
+| `build-runs-on-linux-arm64` | `["ubuntu-26.04-arm"]` | the linux/arm64 legs of the same image builds |
+| `runs-on-darwin-arm64` | `["macos-26"]` | the unsigned Xcode build and the Swift lint jobs |
+
+A reusable workflow declares only the inputs its own jobs or callees use, and
+the orchestrators pass theirs on. An image build runner must permit the user
+namespaces Buildah needs, as [above](#what-a-job-needs).
+
+Jobs that sign, promote, publish or hold release credentials stay on the
+GitHub-hosted literal, and no input or variable moves them:
+`release-create-github.yml`'s signing and release jobs, `publish-container.yml`'s
+key check, publication, evidence and index jobs, `promote-stage.yml`,
+`release-classified-files.yml`'s `sign` and `publish`, the version bump of
+`release-prepare-stage.yml` and `version-bump.yml`,
+`validate-release-prerequisites.yml`, the `publish-*` package and store
+workflows (`publish-apple-appstore.yml` on `macos-26`), the
+`snapshot-images.yml` publisher, the OpenSSF Scorecard analysis,
+`release-binary.yml`, `build-cli.yml`, and the signing builds: an Android
+application build with `enable-signing` and an Xcode build with
+`enable-code-signing` run as a separate `build-variants-signed` job on
+`ubuntu-26.04` and `macos-26`, while unsigned and library builds take
+`runs-on` and `runs-on-darwin-arm64`. A guard,
+`TestGitHubSigningJobsRunOnALiteralRunner`, refuses a reusable job that
+receives a signing secret or an OIDC token on any other runner. So do the trust-root jobs every
+release starts with: `resolve-forge-ci-bootstrap.yml`, which admits the engine
+commit and the runtime images, and `canonical-cli-bootstrap.yml`, which builds
+the engine every later job runs. Hosted runners are ephemeral VMs that GitHub
+starts fresh for one job and destroys after it; keyless signing binds the
+signature to the workflow identity in the job's OIDC token, and that binding
+means something only when no earlier job on the same machine could have
+touched the signer. A runner the caller chooses could be persistent or shared,
+so these jobs never take one. `slsa-attestor.yml`, which signs with the
+operator's KMS key rather than keylessly, takes `runs-on` so the operator can
+pick an isolated pool.
+
+The signing guard discovers jobs with signing secrets or signing OIDC
+permissions and requires exactly one approved scalar label: `ubuntu-26.04`
+or `macos-26`. Arbitrary literals such as `self-hosted` or a persistent pool,
+empty values, arrays, runner groups and expressions are refused. This policy
+does not restrict the configurable ordinary/build/platform runner inputs;
+source policy is not proof of provider scheduling or runner isolation.
 
 ## Runner lending
 
@@ -231,8 +398,14 @@ is that job.
 
 On GitLab the trusted policy selects the builder, not a project variable: the
 `release` and `snapshot-images` components take `image-builder: kaniko` and
-`builder-job-image`, the kaniko job image. The release's image jobs run in it
-on untagged runners; the snapshot components take it as their `build-image`.
+`builder-job-image`, the kaniko job image. Both builders select their image
+runners through the exact per-platform build inputs. Kaniko may name a pool
+without Buildah's user namespaces, but still supplies that pool's tags in
+`build-runner-tags-linux-amd64` or `build-runner-tags-linux-arm64` for each
+planned native platform. The snapshot components take the kaniko job image as
+their `build-image`. Ordinary `runner-tags` and `signer-runner-tags` may still
+use `[]` for untagged jobs; that is not the platform-bound build selection.
+Forgejo's separate legacy runner interface remains unmigrated.
 With Buildah the release's image jobs run in `builder-job-image` too: the
 Buildah job image of
 [containers/buildah-job/Containerfile](../containers/buildah-job/Containerfile).

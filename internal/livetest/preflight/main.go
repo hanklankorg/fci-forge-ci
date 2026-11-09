@@ -98,7 +98,12 @@ func classifyRun(status int, path string) (livetest.LiveRunResult, error) {
 	}
 
 	// A log that breaks off fails a clean exit; a failed one keeps its status.
-	verdict, err := livetest.ReadLiveRun(log, status)
+	read := livetest.ReadLiveRun
+	if livetest.PreflightRun() {
+		read = livetest.ReadLivePreflightRun
+	}
+
+	verdict, err := read(log, status)
 	if err != nil && status == 0 {
 		return livetest.LiveRunResult{}, err
 	} else if err != nil {

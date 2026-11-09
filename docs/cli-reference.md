@@ -2262,6 +2262,9 @@ build and publish on a forge whose jobs take no multiline outputs, and only
 registry-user is emitted. --runner-archs then names the architectures a native
 build job exists for; a container building another is refused here.
 
+The layer passes its runner inputs with --runner-input; a build of a platform
+whose image build runner input has no value is refused here.
+
 EXAMPLE:
    forge-ci container release-images plan --image-repository ghcr.io/owner/app --registry-username owner --release-tag v1.2.3
 ```
@@ -2278,6 +2281,7 @@ EXAMPLE:
 | `--label` | key=value label every image carries after the standard ones, such as org.opencontainers.image.licenses=MIT (repeatable); a standard provenance label is refused | string | `""` | n/a |
 | `--output` | write the builds/images plan to this file instead of the builds, images and image-names outputs | string | `""` | n/a |
 | `--runner-archs` | with --output: comma-separated architectures that have a native build job; empty admits every one | string | `""` | n/a |
+| `--runner-input` | runner input of the calling layer as it passed it, name=value, such as build-runs-on-linux-arm64=["arm64"] (repeatable); a planned platform whose input has no value is refused; none passed checks nothing | string | `""` | n/a |
 | `--registry-username` | user the registry token logs in as, written to the registry-user output; empty is the --repository owner on the forge's own registry and refused on another one | string | `""` | `$REGISTRY_USER` |
 
 #### `forge-ci container release-images promote`
@@ -3160,6 +3164,10 @@ EXAMPLE:
      --tag v1.2.3 --branch main --repository-visibility public
 
 Composition does not execute a release or establish signing/publication readiness.
+
+The layer passes its runner inputs with --runner-input. The plan is then
+refused when a platform its containers build, or its Xcode jobs, has no
+runner: the input of that role and platform has no value.
 ```
 
 | Flag | Description | Type | Default | Env vars |
@@ -3178,6 +3186,7 @@ Composition does not execute a release or establish signing/publication readines
 | `--changelog-creator` | changelog renderer: git-cliff, the only one the GitHub release runs, or empty for no changelog | string | `""` | `$CHANGELOG_CREATOR` |
 | `--changelog-skip-version-bump` | skip the version-bump commit (caller already committed) | bool | `false` | `$CHANGELOG_SKIP_VERSION_BUMP` |
 | `--release-platforms` | comma-separated subset of each container's platforms this run builds; empty plans every declared platform | string | `""` | `$RELEASE_PLATFORMS` |
+| `--runner-input` | runner input of the calling layer as it passed it, name=value, such as build-runs-on-linux-arm64=["arm64"] (repeatable); a planned platform whose input has no value is refused; none passed checks nothing | string | `""` | n/a |
 
 ### `forge-ci plan release-exports`
 
@@ -3245,6 +3254,9 @@ EXAMPLE:
    config_plan="$(printf '%s\n' "$config_output" | jq -er '."config-plan-json"')" &&
    CONFIG_PLAN_JSON="$config_plan" forge-ci --runner local --json plan snapshot-release \
      --project-type go --branch main
+
+Pass --runner-input name=value for each runner input of the calling layer.
+The plan refuses a planned image or Xcode platform without its own runner.
 ```
 
 | Flag | Description | Type | Default | Env vars |
@@ -3259,7 +3271,7 @@ EXAMPLE:
 | `--java-version` | JDK version installed by the publish job (Maven/Gradle paths) | string | `""` | `$JAVA_VERSION` |
 | `--node-version` | Node.js version installed by the publish job (npm path) | string | `""` | `$NODE_VERSION` |
 | `--rust-toolchain` | Rust toolchain installed by the publish job (cargo path) | string | `"stable"` | `$RUST_TOOLCHAIN` |
-| `--registry` | registry forwarded to the snapshot plan context (snapshot flow builds no containers) | string | `""` | `$REGISTRY` |
+| `--registry` | registry forwarded to the snapshot plan context | string | `""` | `$REGISTRY` |
 | `--forge-ci-binary-ref` | git ref of the forge-ci binary used in the plan | string | `""` | `$FORGE_CI_BINARY_REF` |
 | `--npm-registry` | npm registry URL the dev tarball is published to | string | `""` | `$NPM_REGISTRY` |
 | `--scope` | npm package scope (e.g. @examplescope) routed to the registry | string | `""` | `$SCOPE`, `$PACKAGE_SCOPE` |
@@ -3267,6 +3279,7 @@ EXAMPLE:
 | `--publish-npm` | include the npm dev-publish step in the plan | bool | `true` | `$PUBLISH_NPM` |
 | `--publish-maven-snapshots` | opt into Maven-format snapshot publication for Maven, Gradle JVM and Android libraries | bool | `false` | `$PUBLISH_MAVEN_SNAPSHOTS` |
 | `--use-ci-token` | use the CI platform token in place of an explicit registry password | bool | `true` | `$USE_CI_TOKEN` |
+| `--runner-input` | runner input of the calling layer as it passed it, name=value, such as build-runs-on-linux-arm64=["arm64"] (repeatable); a planned platform whose input has no value is refused; none passed checks nothing | string | `""` | n/a |
 
 ### `forge-ci plan validate-classified-files`
 

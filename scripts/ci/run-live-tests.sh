@@ -81,6 +81,17 @@ all | gitlab | forgejo) ;;
   ;;
 esac
 export FORGE_CI_LIVE_PROVIDER="$provider_scope"
+# FORGE_CI_LIVE_PREFLIGHT=1 makes the run a preflight: each scenario runs its
+# admission, every check it makes before an effect, and stops there; one that
+# declares no admission boundary does not run. It writes nothing to the lab.
+preflight=${FORGE_CI_LIVE_PREFLIGHT:-}
+case "$preflight" in
+'' | 1) ;;
+*)
+  printf 'live: FORGE_CI_LIVE_PREFLIGHT must be 1 or unset\n' >&2
+  exit 2
+  ;;
+esac
 
 # Preflight first, before anything is built: it locates the contract for this
 # suite's lab account (LAB_TARGETS_FILE overrides the default path) and
@@ -100,21 +111,27 @@ printf '%s\n' "$preflight_report"
 # overlap, while fixed same-provider repositories and mixed old/new runs cannot.
 # Locks stay at fixed state paths and are never unlinked. The shell alone holds
 # them through test cleanup; changing the evidence directory cannot split them.
+# A preflight writes nothing to the lab, so it takes no lock and may run beside
+# another run.
 lock_dir=${XDG_STATE_HOME:-$HOME/.local/state}/forge-ci
 install -d -m 0700 -- "$lock_dir"
-exec 9>"$lock_dir/live.lock"
-lock_mode=-x
-[[ "$provider_scope" == all ]] || lock_mode=-s
-flock "$lock_mode" -n 9 || {
-  printf 'live: another live run holds %s; wait for it to finish\n' "$lock_dir/live.lock" >&2
-  exit 2
-}
-if [[ "$provider_scope" != all ]]; then
-  exec 7>"$lock_dir/live-$provider_scope.lock"
-  flock -n 7 || {
-    printf 'live: another %s live run holds %s; wait for it to finish\n' "$provider_scope" "$lock_dir/live-$provider_scope.lock" >&2
+if [[ -n "$preflight" ]]; then
+  printf 'live: preflight: each scenario stops at its admission; nothing is written to the lab\n'
+else
+  exec 9>"$lock_dir/live.lock"
+  lock_mode=-x
+  [[ "$provider_scope" == all ]] || lock_mode=-s
+  flock "$lock_mode" -n 9 || {
+    printf 'live: another live run holds %s; wait for it to finish\n' "$lock_dir/live.lock" >&2
     exit 2
   }
+  if [[ "$provider_scope" != all ]]; then
+    exec 7>"$lock_dir/live-$provider_scope.lock"
+    flock -n 7 || {
+      printf 'live: another %s live run holds %s; wait for it to finish\n' "$provider_scope" "$lock_dir/live-$provider_scope.lock" >&2
+      exit 2
+    }
+  fi
 fi
 
 # Redacts credentials by shape, because the log is written before any
@@ -199,6 +216,7 @@ source_commit=$(git -C "$repo_root" rev-parse --verify HEAD 2>/dev/null || print
   printf 'profile=%s\n' "$profile"
   printf 'provider=%s\n' "$provider_scope"
   printf 'scenario=%q\n' "$scenario"
+  [[ -z "$preflight" ]] || printf 'preflight=1\n'
   # What a consumer recipe was given, so the run can be repeated from its
   # log. A setting names a variable or a secret and never carries a secret.
   # An external registry's token stays in its file; its path and user are logged.

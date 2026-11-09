@@ -9,7 +9,6 @@ import (
 	"testing"
 
 	gitlabpipeline "github.com/diggsweden/forge-ci/internal/app/gitlabpipeline"
-	"github.com/diggsweden/forge-ci/internal/domain/config"
 	"github.com/diggsweden/forge-ci/internal/domain/errs"
 	"github.com/diggsweden/forge-ci/internal/domain/pipeline"
 	"github.com/diggsweden/forge-ci/internal/domain/projecttype"
@@ -144,28 +143,5 @@ func TestPublishStagePipeline_RejectsUnsupportedForgePackageProjectType(t *testi
 	})
 	if !errors.Is(err, errs.ErrUnsupported) || !strings.Contains(err.Error(), `cannot represent project type "go"`) {
 		t.Fatalf("err = %v, want ErrUnsupported naming the unsupported project type", err)
-	}
-}
-
-func TestPublishStagePipeline_RefusesGitHubSpecificMacOSVersion(t *testing.T) {
-	t.Parallel()
-
-	plan := pipeline.ReleasePublishStagePlan{Targets: pipeline.ReleasePublishTargets{
-		XcodeIOS: pipeline.TargetPlan[pipeline.PlannedArtifact]{
-			Runs: true,
-			Items: []pipeline.PlannedArtifact{{
-				Name: "ios", ProjectType: projecttype.XcodeIOS,
-				XcodeIOS: &config.XcodeIOSConfig{MacOSVersion: "macos-26"},
-			}},
-		},
-	}}
-
-	_, err := gitlabpipeline.PublishStagePipeline(plan, gitlabpipeline.BuildPipelineOptions{
-		ComponentBase: "$CI_SERVER_FQDN/diggsweden/forge-ci",
-		RuntimeImages: testRuntimeImages,
-		ComponentRef:  "1.0.0",
-	})
-	if !errors.Is(err, errs.ErrUnsupported) || !strings.Contains(err.Error(), "macos-version") {
-		t.Fatalf("err = %v, want ErrUnsupported naming the untranslatable runner setting", err)
 	}
 }

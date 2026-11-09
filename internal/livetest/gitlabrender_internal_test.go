@@ -104,7 +104,7 @@ func TestGitLabDemosStructurallyRenderForBothBuildersAndEvents(t *testing.T) {
 						"export-files": len(exports) != 0, "export": exportInputs,
 					}
 					if builder == ImageBuilderBuildah {
-						inputs["build-runner-tags"] = []any{"privileged"}
+						inputs["build-runner-tags-linux-amd64"] = []any{"privileged"}
 					}
 
 					for _, problem := range gitlabrender.Problems(t, "templates/release.yml", inputs) {

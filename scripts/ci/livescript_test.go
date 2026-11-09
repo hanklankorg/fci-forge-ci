@@ -650,6 +650,43 @@ func TestRunLiveTests_RefusesWhileAnotherRunHoldsTheLock(t *testing.T) {
 	requireNoEvidence(t, run)
 }
 
+// A preflight writes nothing to the lab, so it runs beside a run that holds
+// the lock, and its log says it was a preflight.
+func TestRunLiveTests_PreflightRunsBesideAHeldLock(t *testing.T) {
+	t.Parallel()
+	run := newLiveRun(t, "FORGE_CI_LIVE_PREFLIGHT=1")
+
+	lockDir := filepath.Join(run.stateHome, "forge-ci")
+	if err := os.MkdirAll(lockDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	held, err := os.OpenFile(filepath.Join(lockDir, "live.lock"), os.O_CREATE|os.O_WRONLY, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Cleanup(func() { _ = held.Close() })
+
+	if err := syscall.Flock(int(held.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		t.Fatal(err)
+	}
+
+	stdout, stderr, status := run.exec(t, "full")
+	if status != 0 || !strings.Contains(stdout, "live: preflight: each scenario stops at its admission") {
+		t.Fatalf("status %d\nstdout:\n%s\nstderr:\n%s", status, stdout, stderr)
+	}
+
+	if _, log := run.logFile(t); !strings.Contains(log, "\npreflight=1\n") {
+		t.Fatalf("the log header does not mark the preflight:\n%s", log)
+	}
+
+	invalid := newLiveRun(t, "FORGE_CI_LIVE_PREFLIGHT=yes")
+	if _, stderr, status := invalid.exec(t, "full"); status != 2 || !strings.Contains(stderr, "FORGE_CI_LIVE_PREFLIGHT must be 1 or unset") {
+		t.Fatalf("an invalid preflight setting ran: %d, %s", status, stderr)
+	}
+}
+
 func TestRunLiveTests_ProviderLanesOverlapAndConflictingScopesRefuse(t *testing.T) {
 	root := t.TempDir()
 	ready, release := filepath.Join(root, "ready"), filepath.Join(root, "release")

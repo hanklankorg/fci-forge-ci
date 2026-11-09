@@ -66,17 +66,20 @@ spec:
     checks:
       type: array
       description: Required checks on the request commit, without signing or publication secrets.
-    checks-runner-tags:
+    runner-tags:
       type: array
       default: []
-      description: Runner tags for consumer checks only, after restricted signed-request authorization.
+      description: Runner tags of every job that names none of its own below; empty leaves them untagged.
+    signer-runner-tags:
+      type: array
+      default: []
+      description: Runner tags of the jobs in signer-image, which hold the signing and publication credentials; empty leaves them untagged.
     build:
       type: array
       description: Consumer build commands, run in each family build job and then in the release files job, which writes dist/release-files.json and release-notes.md.
-    build-runner-tags:
+    build-runner-tags-linux-amd64:
       type: array
-      default: []
-      description: Runner tags of the build jobs, and with buildah of the amd64 image job; empty leaves them untagged.
+      description: Runner tags of the consumer checks, family builds, release files and amd64 image and export jobs, whichever the image builder; required, and never empty.
     release-images:
       type: boolean
       default: false
@@ -97,10 +100,9 @@ spec:
     builder-job-image:
       regex: '^$|^[^[:space:]]+@sha256:[0-9a-f]{64}$'
       default: ''
-    build-runner-tags-arm64:
+    build-runner-tags-linux-arm64:
       type: array
-      default: []
-      description: Runner tags of a native arm64 runner; the arm64 image and export jobs exist only when they are set.
+      description: Runner tags of a native arm64 runner; required, [] when there is none, and the arm64 image and export jobs exist only when they are set.
     export-files:
       type: boolean
       default: false
@@ -147,6 +149,10 @@ stages: [check, prepare, build, images, sign, publish]
       user: $RC_JOB_USER
     kubernetes:
       user: $RC_JOB_USER
+  # Every job not given its own tags below runs on runner-tags; the signer
+  # jobs on signer-runner-tags. Both are literal inputs of the policy: a tag
+  # GitLab expanded from a variable would let a project choose the runner.
+  tags: $[[ inputs.runner-tags ]]
   cache: []
   interruptible: false
   # Only what the runner reads before the job's shell is a job variable; the
@@ -161,6 +167,7 @@ stages: [check, prepare, build, images, sign, publish]
 .forge-ci-release-signer:
   extends: .forge-ci-release
   image: $[[ inputs.signer-image ]]
+  tags: $[[ inputs.signer-runner-tags ]]
   variables:
     RC_JOB_USER: ''
 # Each job's start, its before_script, is its role, then this. A project,
@@ -219,6 +226,22 @@ stages: [check, prepare, build, images, sign, publish]
       echo "ERROR: GIT_STRATEGY is '${GIT_STRATEGY-}' and GIT_SUBMODULE_STRATEGY '${GIT_SUBMODULE_STRATEGY-}', not empty and none; remove the variables that set them." >&2
       exit 1
     fi
+    # signer-runner-tags choose the runner that sees the release
+    # credentials, and GitLab expands a variable in a tag: a tag written as
+    # one would let a project choose that runner. Every job refuses it, so
+    # the release stops at its first job.
+    case '$[[ inputs.signer-runner-tags ]]' in
+      *'$'*)
+        echo "ERROR: signer-runner-tags names a \$variable; name literal tags in the release policy." >&2
+        exit 1
+        ;;
+    esac
+    # An untagged job on a platform-bound input could land on a runner of
+    # any platform, or none that permits user namespaces.
+    if [ '$[[ inputs.build-runner-tags-linux-amd64 ]]' = '[]' ]; then
+      echo "ERROR: build-runner-tags-linux-amd64 is empty; name the tags of the amd64 runner the checks and image builds run on." >&2
+      exit 1
+    fi
     # The policy, from the inputs as written. Each replaces any variable of
     # its name; the inputs' regexes and options keep quotes out of them.
     readonly RC_RELEASE_POLICY='$[[ inputs.release-policy ]]' \
@@ -227,6 +250,10 @@ stages: [check, prepare, build, images, sign, publish]
       RC_SERVER_URL='$[[ inputs.server-url ]]' \
       RC_REGISTRY='$[[ inputs.registry ]]' \
       RC_IMAGE_LABELS='$[[ inputs.labels ]]' \
+      RC_RUNNER_TAGS='$[[ inputs.runner-tags ]]' \
+      RC_SIGNER_RUNNER_TAGS='$[[ inputs.signer-runner-tags ]]' \
+      RC_BUILD_RUNNER_TAGS_LINUX_AMD64='$[[ inputs.build-runner-tags-linux-amd64 ]]' \
+      RC_BUILD_RUNNER_TAGS_LINUX_ARM64='$[[ inputs.build-runner-tags-linux-arm64 ]]' \
       RC_PUBLICATION_PROJECT='$[[ inputs.publication-project ]]' \
       RC_PUBLICATION_IMAGE_REPOSITORY='$[[ inputs.publication-image-repository ]]' \
       RC_PUBLIC_KEY_SHA256='$[[ inputs.cosign-public-key-sha256 ]]' \
@@ -376,18 +403,20 @@ stages: [check, prepare, build, images, sign, publish]
       optional: true
   script:
     - rc_request_checkout
-    - rc_check_release_images '$[[ inputs.release-images ]]' '$[[ inputs.image-builder ]]' '$[[ inputs.builder-job-image ]]' '$[[ inputs.artifacts-config ]]' '$[[ inputs.release-platforms ]]' '$[[ inputs.build-runner-tags-arm64 ]]'
+    - rc_check_release_images '$[[ inputs.release-images ]]' '$[[ inputs.image-builder ]]' '$[[ inputs.builder-job-image ]]' '$[[ inputs.artifacts-config ]]' '$[[ inputs.release-platforms ]]'
     # The export commands as data, never run here: set without export-files
     # they would have no effect, and are refused.
     - |
-      rc_check_exports '$[[ inputs.export-files ]]' '$[[ inputs.builder-job-image ]]' '$[[ inputs.release-platforms ]]' '$[[ inputs.build-runner-tags-arm64 ]]' <<'RC_EXPORT_COMMANDS'
+      rc_check_exports '$[[ inputs.export-files ]]' '$[[ inputs.builder-job-image ]]' '$[[ inputs.release-platforms ]]' '$[[ inputs.build-runner-tags-linux-arm64 ]]' <<'RC_EXPORT_COMMANDS'
       $[[ inputs.export ]]
       RC_EXPORT_COMMANDS
 "Check: consumer checks":
   extends: .forge-ci-release
   stage: check
   before_script: [readonly rc_job_role=checks, *forge-ci-release-start]
-  tags: $[[ inputs.checks-runner-tags ]]
+  # Checks may run Buildah, as the image builds do; the request check,
+  # which runs no consumer command, stays on runner-tags.
+  tags: $[[ inputs.build-runner-tags-linux-amd64 ]]
   needs:
     - job: "Check: release request"
       artifacts: false
@@ -487,7 +516,7 @@ stages: [check, prepare, build, images, sign, publish]
   extends: .forge-ci-release
   stage: build
   before_script: [readonly rc_job_role=build, *forge-ci-release-start]
-  tags: $[[ inputs.build-runner-tags ]]
+  tags: $[[ inputs.build-runner-tags-linux-amd64 ]]
   variables:
     RC_JOB_USER: ''
   needs:
@@ -566,7 +595,7 @@ stages: [check, prepare, build, images, sign, publish]
   stage: build
   before_script: [readonly rc_job_role=release-files, *forge-ci-release-start]
   after_script: [rc_handoff=_release-build, *forge-ci-release-handoff]
-  tags: $[[ inputs.build-runner-tags ]]
+  tags: $[[ inputs.build-runner-tags-linux-amd64 ]]
   needs:
     - job: "Prepare: release commit and tag"
       artifacts: false
@@ -617,13 +646,13 @@ stages: [check, prepare, build, images, sign, publish]
     name: $[[ inputs.job-image ]]
 .forge-ci-release-export-builder:
   extends: ".forge-ci-release-export-job-$[[ inputs.export-files ]]"
+  tags: $[[ inputs.build-runner-tags-linux-amd64 ]]
   image:
     entrypoint: [""]
   variables:
     RC_JOB_USER: ''
 .forge-ci-release-export-builder-buildah:
   extends: .forge-ci-release-export-builder
-  tags: $[[ inputs.build-runner-tags ]]
 .forge-ci-release-export-builder-kaniko:
   extends: .forge-ci-release-export-builder
 "Build: export amd64":
@@ -645,10 +674,10 @@ stages: [check, prepare, build, images, sign, publish]
   extends: [.forge-ci-release-exports, ".forge-ci-release-export-builder-$[[ inputs.image-builder ]]"]
   before_script: [readonly rc_job_role=export, *forge-ci-release-start]
   after_script: [rc_handoff=_release-export-arm64, *forge-ci-release-handoff]
-  tags: $[[ inputs.build-runner-tags-arm64 ]]
+  tags: $[[ inputs.build-runner-tags-linux-arm64 ]]
   rules:
     - if: >-
-        '$[[ inputs.export-files ]]' == 'true' && '$[[ inputs.build-runner-tags-arm64 ]]' != '[]'
+        '$[[ inputs.export-files ]]' == 'true' && '$[[ inputs.build-runner-tags-linux-arm64 ]]' != '[]'
   needs:
     - job: "Prepare: release commit and tag"
       artifacts: false
@@ -671,7 +700,7 @@ stages: [check, prepare, build, images, sign, publish]
   rules:
     - if: '"$[[ inputs.release-images ]]" == "true"'
 # The builder is a setting, and builder-job-image its job image, as root:
-# Buildah on the build runner, or kaniko, admitted, on an ordinary one.
+# Buildah, or kaniko, admitted, both on the build runner inputs.
 # GitLab refuses a job with an empty image name before it reads the job's
 # rules, so without release images, when builder-job-image may be empty and
 # the image jobs never run, they name job-image instead.
@@ -683,13 +712,13 @@ stages: [check, prepare, build, images, sign, publish]
     name: $[[ inputs.job-image ]]
 .forge-ci-release-image-builder:
   extends: ".forge-ci-release-image-job-$[[ inputs.release-images ]]"
+  tags: $[[ inputs.build-runner-tags-linux-amd64 ]]
   image:
     entrypoint: [""]
   variables:
     RC_JOB_USER: ''
 .forge-ci-release-image-builder-buildah:
   extends: .forge-ci-release-image-builder
-  tags: $[[ inputs.build-runner-tags ]]
 .forge-ci-release-image-builder-kaniko:
   extends: .forge-ci-release-image-builder
 "Images: plan":
@@ -700,7 +729,7 @@ stages: [check, prepare, build, images, sign, publish]
     - job: "Prepare: release commit and tag"
       artifacts: false
   script:
-    - rc_images_plan '$[[ inputs.artifacts-config ]]' '$[[ inputs.release-platforms ]]' '$[[ inputs.build-runner-tags-arm64 ]]'
+    - rc_images_plan '$[[ inputs.artifacts-config ]]' '$[[ inputs.release-platforms ]]'
   artifacts:
     expire_in: 1 day
     paths: [_release-images-plan/]
@@ -722,10 +751,10 @@ stages: [check, prepare, build, images, sign, publish]
   extends: [.forge-ci-release-images, ".forge-ci-release-image-builder-$[[ inputs.image-builder ]]"]
   before_script: [readonly rc_job_role=image-build, *forge-ci-release-start]
   after_script: [rc_handoff=_release-images-arm64, *forge-ci-release-handoff]
-  tags: $[[ inputs.build-runner-tags-arm64 ]]
+  tags: $[[ inputs.build-runner-tags-linux-arm64 ]]
   rules:
     - if: >-
-        '$[[ inputs.release-images ]]' == 'true' && '$[[ inputs.build-runner-tags-arm64 ]]' != '[]'
+        '$[[ inputs.release-images ]]' == 'true' && '$[[ inputs.build-runner-tags-linux-arm64 ]]' != '[]'
   needs:
     - job: "Images: plan"
       artifacts: true
@@ -837,4 +866,4 @@ stages: [check, prepare, build, images, sign, publish]
     - job: "Publish: tidy up"
       artifacts: false
   script:
-    - rc_release_summary '$[[ inputs.release-images ]]' '$[[ inputs.build-runner-tags-arm64 ]]'
+    - rc_release_summary '$[[ inputs.release-images ]]' '$[[ inputs.build-runner-tags-linux-arm64 ]]'

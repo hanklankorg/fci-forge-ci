@@ -85,7 +85,6 @@ type XcodeIOSConfig struct {
 	ExportOptionsVar  string `json:"export_options_var,omitempty"  yaml:"export-options-var,omitempty"`
 	UseXcodegen       bool   `json:"use_xcodegen,omitempty"        yaml:"use-xcodegen,omitempty"`
 	XcodegenSpec      string `json:"xcodegen_spec,omitempty"       yaml:"xcodegen-spec,omitempty"`
-	MacOSVersion      string `json:"macos_version,omitempty"       yaml:"macos-version,omitempty"`
 	BuildNumber       string `json:"build_number,omitempty"        yaml:"build-number,omitempty"`
 	SubmitForReview   bool   `json:"submit_for_review,omitempty"   yaml:"submit-for-review,omitempty"`
 	SkipValidation    bool   `json:"skip_validation,omitempty"     yaml:"skip-validation,omitempty"`

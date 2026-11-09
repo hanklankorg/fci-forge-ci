@@ -57,12 +57,12 @@ spec:
     runner-tags:
       type: array
       default: []
-    build-runner-tags:
+    build-runner-tags-linux-amd64:
       type: array
-      default: []
-    build-runner-tags-arm64:
+      description: Runner tags of the amd64 image builds; required, and a snapshot that builds for amd64 is refused without tags.
+    build-runner-tags-linux-arm64:
       type: array
-      default: []
+      description: Runner tags of a native arm64 runner; required, [] when there is none, and a snapshot that builds for arm64 is then refused.
     enforce-application-tests:
       type: boolean
       default: false
@@ -117,8 +117,8 @@ include:
         SNAPSHOT_ARTIFACT_IMAGE_RUST='$[[ inputs.artifact-job-image-rust ]]' \
         SNAPSHOT_CONTEXT_JOB='$[[ inputs.context-job ]]' \
         SNAPSHOT_RUNNER_TAGS='$[[ inputs.runner-tags ]]' \
-        SNAPSHOT_AMD64_TAGS='$[[ inputs.build-runner-tags ]]' \
-        SNAPSHOT_ARM64_TAGS='$[[ inputs.build-runner-tags-arm64 ]]'
+        SNAPSHOT_AMD64_TAGS='$[[ inputs.build-runner-tags-linux-amd64 ]]' \
+        SNAPSHOT_ARM64_TAGS='$[[ inputs.build-runner-tags-linux-arm64 ]]'
     - command -v jq >/dev/null || { echo 'GitLab snapshot job-image requires jq for native child-pipeline generation' >&2; exit 69; }
     - snapshot_plan
     - snapshot_gitlab_generate snapshot-plan.json snapshot-child.yml

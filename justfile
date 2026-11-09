@@ -833,9 +833,11 @@ hook-uninstall: (_require-tool "nanolinter" nanolinter_hint)
 # tests, and handed over by path. A credential-redacted log of each run is kept
 # under the XDG state directory; the script prints its path at the end.
 #
-# Credentials are the producer's to retire: `just targets --account forgeci gitlab
-# forgejo` in Forge Lab mints a fresh generation (LAB_ROAD=k3s on that road)
-# for the account, and the suite refuses a stale one.
+# Credentials are the producer's to retire, and the suite refuses a stale one.
+# Other sessions may hold the shared account contract, and emitting it again in
+# place revokes their tokens: mint a contract of your own beside it in Forge Lab
+# with `LAB_TARGETS_FILE=/absolute/path/own.json just targets --account forgeci
+# gitlab forgejo` (LAB_ROAD=k3s on that road) and set LAB_TARGETS_FILE to it.
 # Replace the recipe shell so Just forwards signals to the cleanup-aware launcher.
 [arg('scenario', help='Optional Go test-name regular expression; omit for the full live profile. Mutates disposable lab resources.')]
 [doc('Live; container, network, destructive')]
@@ -843,19 +845,22 @@ hook-uninstall: (_require-tool "nanolinter" nanolinter_hint)
 test-live scenario="":
     @if [ -z "$1" ]; then exec bash scripts/ci/run-live-tests.sh full; else exec bash scripts/ci/run-live-tests.sh focused "$1"; fi
 
-# Check the lab contract and its CA, and nothing else: the first thing every
-# live recipe does, on its own, in seconds. Run it before Forge Lab's
-# full-release wrapper, which swaps the runner in before the launcher's own
-# preflight can refuse a stale contract; a refusal here costs no runner swap.
-# The profile is `full` or `focused`, as the run you are about to start.
+# Preflight the live run the same arguments start, and write nothing to the
+# lab: the contract and its CA, the credentials of the endpoints the run uses,
+# the host tools and the build, then each scenario up to its admission, the
+# checks it makes before its first effect, where it stops. A scenario
+# that declares no admission boundary does not run and fails the preflight as
+# unadmitted. It takes no live lock. Run it before Forge Lab's full-release
+# wrapper, which swaps the runner in before the run's own preflight can refuse;
+# a refusal here costs no runner swap.
 #
 #   just test-live-preflight
-#   just test-live-preflight full
-[arg('profile', help='full or focused, as the run you are about to start; focused when left out')]
-[doc('Live; check the lab contract only')]
+#   just test-live-preflight 'TestGitLabLayer_ConsumerTrial'
+[arg('scenario', help='Optional Go test-name regular expression, as for test-live; omit for the full live profile')]
+[doc('Live; preflight a run, no lab writes')]
 [group('live')]
-test-live-preflight profile="focused":
-    @FORGE_CI_LIVE_PROFILE="$1" exec go run ./internal/livetest/preflight
+test-live-preflight scenario="":
+    @if [ -z "$1" ]; then FORGE_CI_LIVE_PREFLIGHT=1 exec bash scripts/ci/run-live-tests.sh full; else FORGE_CI_LIVE_PREFLIGHT=1 exec bash scripts/ci/run-live-tests.sh focused "$1"; fi
 
 # Metadata-only: run before minting a contract for a signed-base reuse trial.
 [doc('Live; check restored signing inputs, no provider')]

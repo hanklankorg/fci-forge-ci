@@ -32,7 +32,7 @@ func TestReleaseExportCheckRefusesWhatTheJobsWouldNotCarryOut(t *testing.T) {
 		"commands without the flag": {args: "false '' '' '[]'", commands: `["bash .gitlab/export.sh"]`, refusal: "export-files is false"},
 		"no builder job image":      {args: "true '' '' '[]'", commands: `["x"]`, refusal: "builder-job-image"},
 		"amd64 by default":          {args: "true '" + pinnedBuilderImage + "' '' '[]'", commands: `["x"]`},
-		"arm64 without its runner":  {args: "true '" + pinnedBuilderImage + "' 'linux/amd64,linux/arm64' '[]'", commands: `["x"]`, refusal: "build-runner-tags-arm64"},
+		"arm64 without its runner":  {args: "true '" + pinnedBuilderImage + "' 'linux/amd64,linux/arm64' '[]'", commands: `["x"]`, refusal: "build-runner-tags-linux-arm64"},
 		"arm64 with its runner":     {args: "true '" + pinnedBuilderImage + "' 'linux/arm64' '[\"arm64\"]'", commands: `["x"]`},
 		"a runner selects nothing":  {args: "true '" + pinnedBuilderImage + "' '' '[\"arm64\"]'", commands: `["x"]`},
 		"an unknown export-files":   {args: "maybe '' '' '[]'", commands: "[]", refusal: "true or false"},

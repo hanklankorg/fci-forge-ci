@@ -136,10 +136,6 @@ func representableAppStoreItems(items []pipeline.PlannedArtifact) error {
 		if artifact.XcodeIOS.SubmitForReview {
 			return fmt.Errorf("GitLab publish target apple-appstore cannot represent submit-for-review: %w", errs.ErrUnsupported)
 		}
-
-		if artifact.XcodeIOS.MacOSVersion != "" {
-			return fmt.Errorf("GitLab publish target apple-appstore cannot translate macos-version %q to a GitLab runner image: %w", artifact.XcodeIOS.MacOSVersion, errs.ErrUnsupported)
-		}
 	}
 
 	return nil
