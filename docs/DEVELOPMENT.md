@@ -213,8 +213,8 @@ the recipe also explicitly disables signing, which snapshot mode alone does not.
 `just clean` removes `bin/` and `dist/` before asking whether to clear caches.
 Declining keeps the caches only. `clean-caches` clears the configured Go
 module/build/test/fuzz caches, shared across checkouts by default, and the
-configured golangci-lint cache. Just defaults that cache to
-`.golangci-lint-cache/` in each checkout so linked worktrees do not replay
+configured golangci-lint cache. Just and the `.mise.toml` environment default
+that cache to `.golangci-lint-cache/` in each checkout so linked worktrees do not replay
 each other's diagnostic paths. `GOLANGCI_LINT_CACHE` overrides the location.
 
 ### Known lint gaps
