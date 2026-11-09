@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -277,12 +278,30 @@ func loadConfig(in EmitConfigPlanInput, annot output.Annotator) (*config.Config,
 	return cfg, nil
 }
 
-// readArtifactsFile reads the declaration. A declaration that is a symbolic
-// link is refused: the plan it decides must be the file the repository
-// holds, not one a link names elsewhere.
+// readArtifactsFile reads the declaration. The plan it decides must be the
+// file the repository holds, so a relative path, which is what every release
+// workflow passes, is read inside the working directory: a symbolic link
+// above it that leads out, or a declaration that is itself a link, is
+// refused. An absolute path is a file the operator named outright, read at
+// its own directory with the same refusal of a link.
 func readArtifactsFile(in EmitConfigPlanInput) ([]byte, error) {
 	if in.FS == nil {
-		return cliio.ReadFileNoFollow(in.Path)
+		if in.Path == cliio.StdSentinel {
+			return cliio.ReadFile(in.Path)
+		}
+
+		dir, name := ".", in.Path
+		if filepath.IsAbs(in.Path) {
+			dir, name = filepath.Split(in.Path)
+		}
+
+		root, err := os.OpenRoot(dir)
+		if err != nil {
+			return nil, err
+		}
+		defer func() { _ = root.Close() }()
+
+		return cliio.ReadFileInRootNoFollow(root, name)
 	}
 	// An in-memory fs.FS doesn't carry stdin semantics; only honour
 	// the "-" sentinel when reading from the real filesystem above.

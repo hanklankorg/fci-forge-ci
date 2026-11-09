@@ -1593,8 +1593,9 @@ reviewed as one set.
   project's copy, is admitted only as a regular file at its parent's mode,
   never a link; a text version file only with the bytes and the mode the
   engine's bump writes; and a commit that edits the declaration itself is
-  refused, since the declaration is no version file. A declaration that is a
-  symbolic link plans nothing.
+  refused, since the declaration is no version file. A declaration reached
+  through a symbolic link, the file or a directory above it, plans nothing:
+  it must be a file of the repository.
 - **The declaration is the prepare job's.** `prepare-release.yml` outputs
   the validated `artifacts-config` it planned the bump from, and the signer
   takes it as `${{ needs.prepare.outputs.artifacts-config }}`, the way it

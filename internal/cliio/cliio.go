@@ -68,23 +68,6 @@ func ReadRegularFile(path string) ([]byte, error) {
 	return readRegularFile(file, path)
 }
 
-// ReadFileNoFollow reads path as ReadFile does, "-" as stdin, but refuses a
-// path whose last element is a symbolic link, for an input whose meaning is
-// the file the repository holds rather than one a link names elsewhere.
-func ReadFileNoFollow(path string) ([]byte, error) {
-	if path == StdSentinel {
-		return readStdin(os.Stdin)
-	}
-
-	file, err := openReadFileNoFollow(path)
-	if err != nil {
-		return nil, classifyReadError(err)
-	}
-	defer func() { _ = file.Close() }()
-
-	return readRegularFile(file, path)
-}
-
 // ReadFileInRoot applies the regular-file and size policy without reopening a
 // caller's confined input by an ambient pathname. It never interprets stdin.
 func ReadFileInRoot(root *os.Root, path string) ([]byte, error) {
@@ -93,6 +76,35 @@ func ReadFileInRoot(root *os.Root, path string) ([]byte, error) {
 		return nil, classifyReadError(err)
 	}
 	defer func() { _ = file.Close() }()
+
+	return readRegularFile(file, path)
+}
+
+// ReadFileInRootNoFollow reads path inside root as ReadFileInRoot does, and
+// refuses a path whose last element is a symbolic link, for an input whose
+// meaning is the file the repository holds. The root refuses a link above it
+// that leads out; the leaf is checked against the opened file, since the
+// root follows a leaf link that stays inside it.
+func ReadFileInRootNoFollow(root *os.Root, path string) ([]byte, error) {
+	file, err := openRootReadFile(root, path)
+	if err != nil {
+		return nil, classifyReadError(err)
+	}
+	defer func() { _ = file.Close() }()
+
+	opened, err := file.Stat()
+	if err != nil {
+		return nil, classifyReadError(err)
+	}
+
+	leaf, err := root.Lstat(path)
+	if err != nil {
+		return nil, classifyReadError(err)
+	}
+
+	if leaf.Mode()&fs.ModeSymlink != 0 || !os.SameFile(opened, leaf) {
+		return nil, fmt.Errorf("%q is a symbolic link, not a regular input file: %w", path, errs.ErrMissingInput)
+	}
 
 	return readRegularFile(file, path)
 }

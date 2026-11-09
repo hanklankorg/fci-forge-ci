@@ -72,13 +72,34 @@ func TestLoadReleaseStagePlans_RefusesALinkedDeclaration(t *testing.T) {
 	dir := t.TempDir()
 	target, link := filepath.Join(dir, "elsewhere.yml"), filepath.Join(dir, "artifacts.yml")
 	require.NoError(t, os.WriteFile(target, []byte(releaseStageDeclaration), 0o600))
-	require.NoError(t, os.Symlink(target, link))
+	require.NoError(t, os.Symlink("elsewhere.yml", link))
 
 	_, err = appconfig.LoadReleaseStagePlans(appconfig.EmitConfigPlanInput{Path: link}, output.Annotator{}, true)
 	require.ErrorIs(t, err, errs.ErrMissingInput)
 	require.ErrorContains(t, err, "symbolic link")
 
 	plans, err := appconfig.LoadReleaseStagePlans(appconfig.EmitConfigPlanInput{Path: target}, output.Annotator{}, false)
+	require.NoError(t, err)
+	assert.True(t, plans.Prepare.Targets.VersionBump.Runs)
+}
+
+// A relative declaration is read inside the working directory, the
+// repository: a symbolic link above it that leads out of the repository
+// is refused, not followed to a file the repository does not hold.
+func TestLoadReleaseStagePlans_RefusesADeclarationOutsideTheRepository(t *testing.T) {
+	repo, outside := t.TempDir(), t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(outside, "artifacts.yml"), []byte(releaseStageDeclaration), 0o600))
+	require.NoError(t, os.Symlink(outside, filepath.Join(repo, ".forge-ci")))
+	t.Chdir(repo)
+
+	_, err := appconfig.LoadReleaseStagePlans(appconfig.EmitConfigPlanInput{Path: ".forge-ci/artifacts.yml"}, output.Annotator{}, true)
+	require.ErrorContains(t, err, "escapes")
+
+	require.NoError(t, os.Remove(filepath.Join(repo, ".forge-ci")))
+	require.NoError(t, os.Mkdir(filepath.Join(repo, ".forge-ci"), 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(repo, ".forge-ci", "artifacts.yml"), []byte(releaseStageDeclaration), 0o600))
+
+	plans, err := appconfig.LoadReleaseStagePlans(appconfig.EmitConfigPlanInput{Path: ".forge-ci/artifacts.yml"}, output.Annotator{}, false)
 	require.NoError(t, err)
 	assert.True(t, plans.Prepare.Targets.VersionBump.Runs)
 }

@@ -40,3 +40,26 @@ func TestRootReadBoundary_PreservesConfinementAndSizeLimit(t *testing.T) {
 	require.ErrorIs(t, err, errs.ErrMalformedInput)
 	require.Empty(t, body)
 }
+
+// A leaf link the root would follow inside itself is refused by the
+// no-follow read; the file it names reads as before.
+func TestReadFileInRootNoFollow_RefusesALeafLink(t *testing.T) {
+	t.Parallel()
+
+	root, err := os.OpenRoot(t.TempDir())
+	require.NoError(t, err)
+
+	defer func() { _ = root.Close() }()
+
+	require.NoError(t, root.WriteFile("input", []byte("owned"), 0o600))
+	require.NoError(t, root.Symlink("input", "alias"))
+
+	body, err := cliio.ReadFileInRootNoFollow(root, "alias")
+	require.ErrorIs(t, err, errs.ErrMissingInput)
+	require.ErrorContains(t, err, "symbolic link")
+	require.Empty(t, body)
+
+	body, err = cliio.ReadFileInRootNoFollow(root, "input")
+	require.NoError(t, err)
+	require.Equal(t, "owned", string(body))
+}
