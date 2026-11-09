@@ -44,13 +44,20 @@ var (
 // in; the source branch; the readiness URL; and Fixture, an optional CI-side
 // script producing trial-runtime/runtime.env and optional files, run at the
 // selected source on the container runner, never on the controller or in the
-// source checkout.
+// source checkout. Images selects the snapshot event's scope, every image
+// the planner plans from the declaration, in place of the lifecycle's one
+// service; the readiness then runs only where ServiceReadiness says.
 type ServiceDevelopmentConfig struct {
 	RecipeDirectory, Declaration, JobImage, Branch, ReadinessURL, Fixture string
+	Images                                                                bool
 }
 
 //go:embed testdata/service-development.yml.tmpl
 var serviceDevelopmentRecipe string
+
+// serviceReadinessJob opens the readiness job of serviceDevelopmentRecipe,
+// its last.
+const serviceReadinessJob = "  readiness:\n"
 
 // NewServiceDevelopmentFixture overlays the service development route in
 // Consumer's private index alone: the service snapshot's declaration, the
@@ -80,7 +87,12 @@ func serviceDevelopmentFixture(ctx context.Context, source Consumer, config Serv
 		return source, errServiceSourceBranch
 	}
 
-	service, err := serviceSnapshotDeclaration(ctx, source, cmp.Or(config.Declaration, GitLabDefaultArtifactsConfig))
+	scope := serviceScope
+	if config.Images {
+		scope = snapshotImagesScope
+	}
+
+	service, err := serviceSnapshotDeclaration(ctx, source, cmp.Or(config.Declaration, GitLabDefaultArtifactsConfig), scope)
 	if err != nil {
 		return source, err
 	}
@@ -104,6 +116,10 @@ func serviceDevelopmentFixture(ctx context.Context, source Consumer, config Serv
 
 	workflow := strings.NewReplacer("@ACTIONS@", pin.Actions, "@WORKFLOWS@", pin.Workflows, "@PIN@", pin.Commit,
 		"@BRANCH@", quote(config.Branch), "@URL@", quote(config.ReadinessURL)).Replace(serviceDevelopmentRecipe)
+	// A plan without a service to probe takes the snapshot job alone.
+	if !ServiceReadiness(service.plan) {
+		workflow, _, _ = strings.Cut(workflow, serviceReadinessJob)
+	}
 
 	staged, err := service.stageFiles(ctx, map[string]string{
 		forgejoDevelopmentWorkflow:     workflow,

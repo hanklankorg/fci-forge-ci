@@ -28,8 +28,37 @@ import (
 // declaration is admitted by planning it. The harness adds its own acceptance
 // scope alone, serviceSnapshotScope. A consumer whose declaration the planner
 // refuses has no development route, and a lifecycle refuses it.
+//
+// The snapshot event takes the same route over every image the planner
+// plans from the declaration, under snapshotImagesScope: the trial judges
+// each planned image's receipt, and the plan, not the case, says which
+// images those are.
 
-var errServiceDeclaration = errors.New("the trial judges one container of the root Containerfile and context, planned for amd64, without image name, tag suffix or declared provenance, from at most one artifact")
+var (
+	errServiceDeclaration = errors.New("the trial judges one container of the root Containerfile and context, planned for amd64, without image name, tag suffix or declared provenance, from at most one artifact")
+	errSnapshotImages     = errors.New("the trial judges every planned image in the run's one image repository, each planned for amd64, without image name or declared provenance")
+)
+
+// snapshotScope is a trial's acceptance scope over a declaration the planner
+// plans: the declarations it admits, and its refusal of the others.
+type snapshotScope struct {
+	admits  func(cfg *config.Config) bool
+	refusal error
+	// rootContainerfile is whether the scope builds from the root
+	// Containerfile, which a consumer must then have.
+	rootContainerfile bool
+}
+
+var (
+	// serviceScope is the lifecycle's: one service, serviceSnapshotScope.
+	serviceScope = snapshotScope{
+		admits:            func(cfg *config.Config) bool { return serviceSnapshotScope(cfg) == nil },
+		refusal:           errServiceDeclaration,
+		rootContainerfile: true,
+	}
+	// snapshotImagesScope is the snapshot event's: every planned image.
+	snapshotImagesScope = snapshotScope{admits: snapshotImagesAdmitted, refusal: errSnapshotImages}
+)
 
 // ServiceSnapshotDeclarationFile is the consumer path of the service
 // snapshot's declaration: the consumer's own declaration, overlaid for the
@@ -58,11 +87,14 @@ type serviceSnapshot struct {
 	plan        snapshotimage.Plan
 }
 
-// serviceSnapshotDeclaration admits the consumer for a service snapshot: a
-// root Containerfile, and at source a declaration the planner plans.
-func serviceSnapshotDeclaration(ctx context.Context, consumer Consumer, source string) (serviceSnapshot, error) {
-	if _, err := githubWorkflow(ctx, consumer, "Containerfile"); err != nil {
-		return serviceSnapshot{}, err
+// serviceSnapshotDeclaration admits the consumer for a snapshot in scope: at
+// source a declaration the planner plans, and the root Containerfile where
+// the scope builds from it.
+func serviceSnapshotDeclaration(ctx context.Context, consumer Consumer, source string, scope snapshotScope) (serviceSnapshot, error) {
+	if scope.rootContainerfile {
+		if _, err := githubWorkflow(ctx, consumer, "Containerfile"); err != nil {
+			return serviceSnapshot{}, err
+		}
 	}
 
 	declared, err := githubWorkflow(ctx, consumer, source)
@@ -70,7 +102,7 @@ func serviceSnapshotDeclaration(ctx context.Context, consumer Consumer, source s
 		return serviceSnapshot{}, err
 	}
 
-	declaration, plan, err := serviceSnapshotDeclarationOverlay(declared)
+	declaration, plan, err := snapshotDeclarationOverlay(declared, scope)
 	if err != nil {
 		return serviceSnapshot{}, err
 	}
@@ -109,10 +141,25 @@ func (snapshot serviceSnapshot) stageFiles(ctx context.Context, files map[string
 func (consumer Consumer) WithServiceSnapshotDeclaration(tb TB, source string) Consumer {
 	tb.Helper()
 
+	return consumer.withSnapshotDeclaration(tb, source, serviceScope)
+}
+
+// WithSnapshotImagesDeclaration is WithServiceSnapshotDeclaration for the
+// snapshot event: the declaration overlaid for every image the planner plans
+// from it (snapshotImagesScope).
+func (consumer Consumer) WithSnapshotImagesDeclaration(tb TB, source string) Consumer {
+	tb.Helper()
+
+	return consumer.withSnapshotDeclaration(tb, source, snapshotImagesScope)
+}
+
+func (consumer Consumer) withSnapshotDeclaration(tb TB, source string, scope snapshotScope) Consumer {
+	tb.Helper()
+
 	ctx, cancel := context.WithTimeout(Context(tb), timeoutLayerPush)
 	defer cancel()
 
-	declared, err := serviceSnapshotDeclaration(ctx, consumer, source)
+	declared, err := serviceSnapshotDeclaration(ctx, consumer, source, scope)
 	if err == nil {
 		declared, err = declared.stageFiles(ctx, map[string]string{ServiceSnapshotDeclarationFile: declared.declaration})
 	}
@@ -183,20 +230,26 @@ func serviceSnapshotStandInInput() (snapshotimage.Input, error) {
 	}, nil
 }
 
-// serviceSnapshotDeclarationOverlay preserves the declared build graph and
-// raw ecosystem settings. Only the trial's native platform and unsigned
-// policy are overlaid; release signing settings remain in the original
-// declaration. The overlay is then planned as the snapshot will plan it, and
-// the planner's refusal is the declaration's. It returns the overlay and its
-// plan.
+// serviceSnapshotDeclarationOverlay is snapshotDeclarationOverlay in the
+// lifecycle's scope, one service.
 func serviceSnapshotDeclarationOverlay(body string) (string, snapshotimage.Plan, error) {
+	return snapshotDeclarationOverlay(body, serviceScope)
+}
+
+// snapshotDeclarationOverlay preserves the declared build graph and raw
+// ecosystem settings. Only the trial's native platform and unsigned policy
+// are overlaid; release signing settings remain in the original declaration.
+// The overlay is then planned as the snapshot will plan it, and the
+// planner's refusal is the declaration's; the scope's refusal is the
+// trial's. It returns the overlay and its plan.
+func snapshotDeclarationOverlay(body string, scope snapshotScope) (string, snapshotimage.Plan, error) {
 	cfg, err := parseServiceDeclaration(body)
 	if err != nil {
 		return "", snapshotimage.Plan{}, err
 	}
 
-	if err = serviceSnapshotScope(cfg); err != nil {
-		return "", snapshotimage.Plan{}, err
+	if !scope.admits(cfg) {
+		return "", snapshotimage.Plan{}, scope.refusal
 	}
 
 	in, err := serviceSnapshotStandInInput()
@@ -211,11 +264,16 @@ func serviceSnapshotDeclarationOverlay(body string) (string, snapshotimage.Plan,
 		return "", snapshotimage.Plan{}, err
 	}
 
-	if len(original.Images) != 1 || !slices.Contains(original.Images[0].Platforms, build.DefaultPlatform) {
-		return "", snapshotimage.Plan{}, errServiceDeclaration
+	if len(original.Images) == 0 || slices.ContainsFunc(original.Images, func(image snapshotimage.Image) bool {
+		return !slices.Contains(image.Platforms, build.DefaultPlatform)
+	}) {
+		return "", snapshotimage.Plan{}, scope.refusal
 	}
 
-	cfg.Containers[0].Platforms = build.DefaultPlatform
+	for i := range cfg.Containers {
+		cfg.Containers[i].Platforms = build.DefaultPlatform
+	}
+
 	cfg = snapshotView(cfg)
 	// Artifact's typed ecosystem fields are not YAML-marshallable. Keep their
 	// original nodes after the strict shared parser has admitted the whole input.
@@ -285,6 +343,27 @@ func serviceSnapshotScope(cfg *config.Config) error {
 	}
 
 	return nil
+}
+
+// snapshotImagesAdmitted is the snapshot event's acceptance scope, not a
+// product rule: the planner decides what a snapshot builds, and the trial
+// judges every image it plans, each under the run's one image repository,
+// so no container names an image of its own. The overlay narrows every
+// image's platforms to native amd64, and turns a release's default
+// provenance off; a declared request for provenance is refused instead, as
+// in serviceSnapshotScope.
+func snapshotImagesAdmitted(cfg *config.Config) bool {
+	return !slices.ContainsFunc(cfg.Containers, func(ctr config.Container) bool {
+		return ctr.ImageName != "" || (ctr.EnableSLSA != nil && *ctr.EnableSLSA)
+	})
+}
+
+// ServiceReadiness is whether a snapshot of the plan checks a service's
+// readiness: where the plan's one image is the service. A plan of several
+// images declares no primary service among them, so none is probed, and the
+// snapshot is judged by its receipts alone.
+func ServiceReadiness(plan snapshotimage.Plan) bool {
+	return len(plan.Images) == 1
 }
 
 // serviceSnapshotFamilies lists the toolchain families of a plan's producers,

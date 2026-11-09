@@ -62,11 +62,14 @@ const (
 
 // The events a trial can start a consumer's workflows with: one workflow
 // each, or lifecycle, the linked flow of a pull request merged natively, a
-// development run on the merged main and a signed release request from it.
+// development run on the merged main and a signed release request from it,
+// or snapshot, that development run alone over every image the planner plans
+// from the consumer's declaration.
 const (
 	TrialPullRequest = "pull-request"
 	TrialRelease     = "release"
 	TrialLifecycle   = "lifecycle"
+	TrialSnapshot    = "snapshot"
 )
 
 // ConsumerTrial is the scenario name of a Forgejo consumer trial's scratch
@@ -76,10 +79,12 @@ const (
 // from the trial's layer repository: a run admits a kaniko job image only
 // for the repository its source label names, and the campaign prepares one,
 // labelled for that repository (ConsumerTrialLayerURL), so every event of a
-// consumer trial runs its workflows from it.
+// consumer trial runs its workflows from it, a snapshot's too.
+// ServiceSnapshotScenario names a snapshot's consumer copy, on either forge.
 const (
-	ConsumerTrial     = "consumer-trial"
-	ConsumerLifecycle = "consumer-lifecycle"
+	ConsumerTrial           = "consumer-trial"
+	ConsumerLifecycle       = "consumer-lifecycle"
+	ServiceSnapshotScenario = "service-snapshot"
 )
 
 // LayerScenario is the scenario name of the scratch repository a scenario
@@ -175,7 +180,8 @@ const (
 //
 // A lifecycle's three workflows are fixed, so it takes no workflow=; it
 // requests one release, so it takes version= and image= but no next-version=
-// or interrupt-after=.
+// or interrupt-after=. A snapshot's one workflow is the harness's and it
+// releases nothing, so it takes none of these.
 //
 // No word carries a secret. A caller can ask for the lab account's token, by
 // naming the repository secret that receives it, and for a token from one of
@@ -190,13 +196,14 @@ func ParseTrialSettings(event string, words []string) (TrialSettings, error) {
 		settings.Workflow = trialPullRequestWorkflow
 	case TrialRelease, TrialLifecycle:
 		settings.Workflow, settings.Version = trialReleaseWorkflow, "0.0.1"
+	case TrialSnapshot:
 	default:
-		return TrialSettings{}, fmt.Errorf("the event is %q, want %s, %s or %s: %w", event, TrialPullRequest, TrialRelease, TrialLifecycle, errs.ErrValidation)
+		return TrialSettings{}, fmt.Errorf("the event is %q, want %s, %s, %s or %s: %w", event, TrialPullRequest, TrialRelease, TrialLifecycle, TrialSnapshot, errs.ErrValidation)
 	}
 
 	for _, word := range words {
 		if key, value, _ := strings.Cut(word, "="); value == "" || !settings.set(key, value) {
-			return TrialSettings{}, fmt.Errorf("setting %q is none of %s=<file>.yml (not lifecycle), %s=<X.Y.Z> (release or lifecycle), %s=<X.Y.Z> (second release), %s=<SECRET_NAME>, "+
+			return TrialSettings{}, fmt.Errorf("setting %q is none of %s=<file>.yml (not lifecycle or snapshot), %s=<X.Y.Z> (release or lifecycle), %s=<X.Y.Z> (second release), %s=<SECRET_NAME>, "+
 				settingSecretFile+"=<SECRET_NAME>:<absolute file>, "+
 				"%s=<registry>/<repository>[:<tag>] (release or lifecycle), %s=<job name> (release only) or <VARIABLE_NAME>=<value>, "+
 				"each name once, where a value starting with @ is %s or %s: %w",
@@ -208,7 +215,7 @@ func ParseTrialSettings(event string, words []string) (TrialSettings, error) {
 		return TrialSettings{}, fmt.Errorf("next-version requires an increasing release version and cannot accompany interrupt-after: %w", errs.ErrValidation)
 	}
 
-	if settings.Event == TrialLifecycle {
+	if settings.fixedWorkflows() {
 		if err := settings.lifecycleImages(); err != nil {
 			return TrialSettings{}, err
 		}
@@ -244,8 +251,8 @@ func (settings *TrialSettings) ResolvedVariables(layerCommit, requestCommit stri
 	return resolved
 }
 
-// lifecycleImages holds a lifecycle to the images its development phase
-// builds with, before anything is created: the job image pinned by
+// lifecycleImages holds a lifecycle, or a snapshot, to the images its
+// development phase builds with, before anything is created: the job image pinned by
 // digest, and under kaniko, the consumer's CI_IMAGE_BUILDER as in every
 // consumer trial event, the kaniko job image pinned by digest too. The run
 // then admits that image by its digest and source label in the development
@@ -253,14 +260,26 @@ func (settings *TrialSettings) ResolvedVariables(layerCommit, requestCommit stri
 // two phases before it.
 func (settings *TrialSettings) lifecycleImages() error {
 	if !container.ValidDigestReference(settings.Variables[lifecycleJobImage]) {
-		return fmt.Errorf("%s requires %s=<digest reference>: a nanolinter image of the consumer's toolchain flavour, the image its lint and build jobs run in and its development phase builds the service's producers in: %w", TrialLifecycle, lifecycleJobImage, errs.ErrValidation)
+		return fmt.Errorf("%s requires %s=<digest reference>: a nanolinter image of the consumer's toolchain flavour, the image its lint and build jobs run in and its development phase builds the service's producers in: %w", settings.Event, lifecycleJobImage, errs.ErrValidation)
 	}
 
 	if settings.Variables["CI_IMAGE_BUILDER"] == ImageBuilderKaniko && !container.ValidDigestReference(settings.Variables["CI_IMAGE_BUILDER_JOB_IMAGE"]) {
-		return fmt.Errorf("%s with CI_IMAGE_BUILDER=kaniko requires CI_IMAGE_BUILDER_JOB_IMAGE=<digest reference>, the kaniko job image its development phase builds the image in: %w", TrialLifecycle, errs.ErrValidation)
+		return fmt.Errorf("%s with CI_IMAGE_BUILDER=kaniko requires CI_IMAGE_BUILDER_JOB_IMAGE=<digest reference>, the kaniko job image its development phase builds the image in: %w", settings.Event, errs.ErrValidation)
 	}
 
 	return nil
+}
+
+// fixedWorkflows is whether the event's workflows are fixed, so it takes no
+// workflow=: a lifecycle's three, a snapshot's harness workflow.
+func (settings *TrialSettings) fixedWorkflows() bool {
+	return settings.Event == TrialLifecycle || settings.Event == TrialSnapshot
+}
+
+// requestsRelease is whether the event requests a release, so it takes
+// version= and image=.
+func (settings *TrialSettings) requestsRelease() bool {
+	return settings.Event == TrialRelease || settings.Event == TrialLifecycle
 }
 
 // set takes one setting and reports whether it is one.
@@ -269,7 +288,7 @@ func (settings *TrialSettings) set(key, value string) bool {
 	case settingWorkflow:
 		settings.Workflow = value
 
-		return settings.Event != TrialLifecycle && trialWorkflow.MatchString(value)
+		return !settings.fixedWorkflows() && trialWorkflow.MatchString(value)
 	case settingToken:
 		_, fromFile := settings.FileSecrets[value]
 
@@ -286,7 +305,7 @@ func (settings *TrialSettings) set(key, value string) bool {
 
 		return true
 	case settingVersion, settingImage:
-		return settings.Event != TrialPullRequest && settings.setReleaseOnly(key, value)
+		return settings.requestsRelease() && settings.setReleaseOnly(key, value)
 	case settingNextVersion, settingInterrupt:
 		return settings.Event == TrialRelease && settings.setReleaseOnly(key, value)
 	}

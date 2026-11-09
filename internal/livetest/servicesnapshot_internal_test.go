@@ -4,6 +4,7 @@
 package livetest
 
 import (
+	"errors"
 	"path/filepath"
 	"reflect"
 	"slices"
@@ -186,6 +187,50 @@ func TestServiceSnapshotSourceOfTheDemos(t *testing.T) {
 
 			if families := serviceSnapshotFamilies(plan); !slices.Equal(families, want.families) {
 				t.Fatalf("families %v, want %v", families, want.families)
+			}
+		})
+	}
+}
+
+// The snapshot event's scope admits what the planner plans, every image in
+// the run's one repository: the multi-image demos' declarations, each image
+// narrowed to native amd64, with their producers' families. It refuses an
+// image of its own repository, declared provenance, an image without amd64
+// and a declaration without one.
+func TestSnapshotImagesDeclarationPlansEveryImage(t *testing.T) {
+	for demo, families := range map[string][]string{
+		"hello-cargo-workspace": {},
+		"hello-monorepo":        {snapshotimage.FamilyJava, snapshotimage.FamilyNode},
+	} {
+		t.Run(demo, func(t *testing.T) {
+			consumer := filepath.Join(reporoot.Path(t), "test/live/demos", demo, "consumer")
+
+			plan, err := snapshotImagesAdmission(consumer)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if len(plan.Images) != 2 || len(plan.Builds) != 2 || slices.ContainsFunc(plan.Images, func(image snapshotimage.Image) bool {
+				return !slices.Equal(image.Platforms, []string{"linux/amd64"}) || image.TagSuffix == ""
+			}) {
+				t.Fatalf("want two suffixed native amd64 images: %+v", plan)
+			}
+
+			if got := serviceSnapshotFamilies(plan); !slices.Equal(got, families) {
+				t.Fatalf("families %v, want %v", got, families)
+			}
+		})
+	}
+
+	for name, body := range map[string]string{
+		"no container":    "artifacts: [{name: app, project-type: maven}]",
+		"own repository":  "containers: [{name: a, tag-suffix: -a}, {name: b, tag-suffix: -b, image-name: other/image}]",
+		"provenance":      "containers: [{name: a, tag-suffix: -a}, {name: b, tag-suffix: -b, enable-slsa: true}]",
+		"no native amd64": "containers: [{name: a, tag-suffix: -a}, {name: b, tag-suffix: -b, platforms: linux/arm64}]",
+	} {
+		t.Run(name, func(t *testing.T) {
+			if overlay, _, err := snapshotDeclarationOverlay(body, snapshotImagesScope); !errors.Is(err, errSnapshotImages) || overlay != "" {
+				t.Fatalf("%q, %v; want the snapshot scope's refusal", overlay, err)
 			}
 		})
 	}

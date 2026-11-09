@@ -216,13 +216,13 @@ func runForgejoConsumerLifecycle(t *testing.T, root string, private bool) {
 
 	development := livetest.WaitForConsumerRunAfter(t, target, repo, developmentWorkflow, "workflow_dispatch", review.ID)
 	scenario.logJobs(t, livetest.RunJobs(t, target, repo, development.ID), facts.Secrets, plan.Secrets)
-	receipt, producers := requireServiceDevelopment(t, target, repo, development, consumer, config, head, image)
+	receipts, producers := requireServiceDevelopment(t, target, repo, development, consumer, config, head, image)
 	requireRunIDs(t, target, repo, review.ID, development.ID)
 	scenario.requireNone(t, "/tags", "/releases")
 	// The snapshot moves neither branch: main stays the merge, the source the
 	// reviewed head.
 	scenario.requireBranches(t, map[string]string{layerMain: request, lifecycleBranch: head})
-	t.Logf("lifecycle phase 3 development: run %d dispatched on %s@%s snapshots %s@%s as %s; producers %d", development.ID, layerMain, request, lifecycleBranch, head, receipt.Ref, producers)
+	t.Logf("lifecycle phase 3 development: run %d dispatched on %s@%s snapshots %s@%s as %s; producers %d", development.ID, layerMain, request, lifecycleBranch, head, receipts[0].Ref, producers)
 
 	// Phase 4: the signed release request at the merged main. The release's
 	// authority is given now and not before.

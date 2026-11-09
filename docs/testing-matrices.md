@@ -66,14 +66,14 @@ the planned artifacts; "container-first" builds from the declared container.
 |---|---|---|---|---|---|
 | hello-android (gradle-android · no container · no image) | ⬚ / 📝 / 📝 | — | — | — / — / — | ⛔ / — / ⛔ |
 | hello-cargo-container (rust · container-first · one image) | ✅ (2026-11-02) / ✅ (2026-11-02) / ✅ (2026-11-04) | — | ◐ (fixture consumer proven, run 520; the demo's own lifecycle line awaits a live run) / 📝 lifecycle / admitted | ✅ (2026-11-02) / ✅ (2026-11-02) / 📝 | 📝 / 📝 / ⬚ (admitted, no line) |
-| hello-cargo-workspace (rust · container-first · 2 images) | ✅ (2026-11-02) / ✅ (2026-11-02) / ✅ (2026-11-04) | — | ⛔ / ⛔ / ⛔ | ✅ (2026-11-02) / ✅ (2026-11-02) / ✅ (2026-11-04) | ⛔ / ⛔ / ⛔ |
+| hello-cargo-workspace (rust · container-first · 2 images) | ✅ (2026-11-02) / ✅ (2026-11-02) / ✅ (2026-11-04) | — | 📝 snapshot / 📝 snapshot / ⛔ | ✅ (2026-11-02) / ✅ (2026-11-02) / ✅ (2026-11-04) | ⛔ / ⛔ / ⛔ |
 | hello-go-cli (go · no container · no image) | ✅ (2026-11-02) / ✅ (2026-11-02) / ✅ (2026-11-04) | — | — | ✅ (2026-11-02) / — / ✅ (GPG, hosted, run 42490898439 on a copy of the demo, E c-hosted-retry-6b89-20261108T143500Z (matrix 1b, C)) | ⛔ / — / ⛔ |
-| hello-go-service (go · container-first · one image) | ✅ (2026-11-02) / ✅ (2026-11-02) / ✅ (2026-11-04) | — | 📝 lifecycle / — / admitted | ✅ (2026-11-02) / — / 📝 | 📝 / — / ⬚ (admitted, no line) |
+| hello-go-service (go · container-first · one image) | ✅ (2026-11-02) / ✅ (2026-11-02) / ✅ (2026-11-04) | — | 📝 lifecycle / admitted / admitted | ✅ (2026-11-02) / — / 📝 | 📝 / — / ⬚ (admitted, no line) |
 | hello-gradle (java · no container · no image) | ⬚ / ✅ (2026-11-02) / 📝 | — | — | — / — / ◐ (2026-11-04, L github-gradle-c3b23772: passed, 0 Cosign bundles verified (5 GPG signatures)) | ⛔ / — / ⛔ |
 | hello-ios (xcode-ios · no container · no image) | ⬚ / ⬚ / 📝 | — | — | — / — / — | ⛔ / — / ⛔ |
 | hello-maven (java · no container · no image) | ✅ (2026-11-02) / ✅ (2026-11-02) / ✅ (2026-11-04) | — | — | ✅ (2026-11-02) / ✅ (2026-11-02) / ✅ (2026-11-04) | ⛔ / ⛔ / ⛔ |
 | hello-maven-service (java · artifact-first · one image) | ✅ (2026-11-02) / ✅ (2026-11-02) / ✅ (2026-11-04) | ✅ (A run 517, the retired published snapshot) / ✅ (lifecycle phase 3, E gitlab-lifecycle-campaign-22ddcfd9) / 📝 lifecycle | — | ✅ (2026-11-02) / ✅ (2026-11-02) / 📝 | ✅ (E forgejo-lifecycle-campaign-3c178f94) / ◐ (phases 1–4 run 4, E gitlab-lifecycle-campaign-ec2380ef; phase 5 oracle fixed 4651b638, run 5 failed phase 1 (E gitlab-lifecycle-campaign-4651b638)) / 📝 |
-| hello-monorepo (java, node · artifact-first · nested artifacts (monorepo)) | ⬚ / ✅ (2026-11-02) / ⬚ | ⛔ / — / ⛔ | — | — / — / — | ⛔ / — / ⛔ |
+| hello-monorepo (java, node · artifact-first · nested artifacts (monorepo)) | ⬚ / ✅ (2026-11-02) / ⬚ | ⛔ / 📝 snapshot / ⛔ | — | — / — / — | ⛔ / — / ⛔ |
 | hello-npm-package (node · no container · no image) | ✅ (2026-11-02) / ✅ (2026-11-02) / ✅ (2026-11-04) | — | — | ✅ (2026-11-02) / ✅ (2026-11-02) / ✅ (2026-11-04) | ⛔ / ⛔ / ⛔ |
 | hello-npm-service (node · artifact-first · one image) | ✅ (2026-11-02) / ✅ (2026-11-02) / ✅ (2026-11-04) | 📝 lifecycle / 📝 lifecycle / admitted | — | ✅ (2026-11-02) / ✅ (2026-11-02) / 📝 | 📝 / 📝 / ⬚ (admitted, no line) |
 
@@ -84,6 +84,7 @@ Outside the live harness's scope, the trial's acceptance and not a product rule:
 - hello-cargo-workspace, github: .forge-ci/release-images.yml is not a service snapshot's declaration, so the demo has no development route: the trial judges one container of the root Containerfile and context, planned for amd64, without image name, tag suffix or declared provenance, from at most one artifact
 - hello-monorepo, forgejo: the demo has no root Containerfile, so no service snapshot and no development route
 - hello-monorepo, github: the demo has no root Containerfile, so no service snapshot and no development route
+- hello-monorepo, forgejo snapshot: the demo has no .forgejo/workflows/release.yml to pin the harness's development workflow by, so no service snapshot and no development route
 
 <!-- /generated:project-kinds -->
 
