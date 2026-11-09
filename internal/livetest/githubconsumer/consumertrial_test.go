@@ -287,6 +287,14 @@ func runTrial(t *testing.T, trial *livetest.GitHubTrial, engine livetest.GitHubE
 		repo = trial.NewConsumerRepository(consumerRepositoryName(root, visibility.Name, settings.Event, settings.Workflow), visibility.Private)
 	}
 
+	// A development fixture that snapshots the service snapshot's
+	// declaration gets it staged, as the lifecycle does, and is judged by
+	// the snapshot oracle.
+	snapshot := settings.Event == livetest.TrialDevRelease && snapshotFixture(t, root, fixtures, settings.Workflow)
+	if snapshot {
+		trial = trial.WithFile(livetest.ServiceSnapshotDeclarationFile, livetest.ServiceSnapshotOverlay(t, root))
+	}
+
 	tree := trial.PushConsumer(repo, root, fixtures, engine, signing.overrides)
 	trial.SetVariable(repo, "FORGE_CI_REPOSITORY", engine.Owner+"/"+engine.Repository)
 	trial.SetVariable(repo, "RELEASE_PLATFORMS", settings.Platforms)
@@ -302,6 +310,10 @@ func runTrial(t *testing.T, trial *livetest.GitHubTrial, engine livetest.GitHubE
 	}
 
 	if settings.Event == livetest.TrialDevRelease {
+		if snapshot && demo == "" {
+			trial.RemoveSnapshotPackageAfter(repo, trial.RepositoryID(repo))
+		}
+
 		dispatched := trial.DispatchDevelopment(repo, settings.Workflow, nil)
 
 		run := judge(t, trial, repo, settings.Workflow, "workflow_dispatch", tree.Main)
@@ -310,6 +322,10 @@ func runTrial(t *testing.T, trial *livetest.GitHubTrial, engine livetest.GitHubE
 		}
 
 		trial.CheckDevelopmentRelease(repo, tree.Main, run.GetID())
+
+		if snapshot {
+			t.Logf("development snapshot of main@%s: %s", tree.Main, receiptRefs(judgeSnapshot(t, trial, repo, tree, run.GetID(), "main", tree.Main)))
+		}
 
 		return
 	}
@@ -456,6 +472,19 @@ func judge(t *testing.T, trial *livetest.GitHubTrial, repo, workflow, event, hea
 	}
 
 	return run
+}
+
+// snapshotFixture reports whether the consumer's fixture workflow names the
+// service snapshot's declaration, and so snapshots it.
+func snapshotFixture(t *testing.T, root, fixtures, workflow string) bool {
+	t.Helper()
+
+	body, err := os.ReadFile(filepath.Join(root, fixtures, "workflows", workflow))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	return strings.Contains(string(body), livetest.ServiceSnapshotDeclarationFile)
 }
 
 // fixtureDir is the consumer's GitHub fixture directory: the setting, or the

@@ -334,11 +334,16 @@ commit, and the merge is read back as on the lab forges: `main` at it and
 `development` still at the change, through the API, then, in the working
 copy fetched to `main`, its parents the base and the change and its tree the
 change's. The development
-phase's acceptance is the development build's (a green run, its artifacts
-delivered, `main`, tags and releases unchanged) and the snapshot image
-published to the repository's container package, which is removed with the
-repository; the engine's snapshot inventory is read from the run's artifacts
-by the standalone snapshot trial, not claimed here. The release is judged as
+phase snapshots the service snapshot's declaration the trial stages into
+the pushed tree, `.forge-ci/service-development.yml`, overlaid unsigned and
+native amd64 as on the lab forges (`livetest.ServiceSnapshotOverlay`). Its
+acceptance is the development build's (a green run, its artifacts
+delivered, `main`, tags and releases unchanged) and the same snapshot oracle
+the lab forges use (`livetest.RequireSnapshotImages`): the frozen plan from
+the run's `snapshot-images-inputs` artifact equal to the planner's, the
+receipts from its `snapshot-images` artifact collected against it, and each
+image read from the repository's container package on GHCR, which is
+removed with the repository. The release is judged as
 the GitHub release trial's. The snapshot publishes with the workflow's own
 token; the release secrets are set at the release phase and not before. It
 runs outside the campaign route, inside Forge Lab's hosted session:

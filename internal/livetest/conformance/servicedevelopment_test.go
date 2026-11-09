@@ -7,9 +7,7 @@ package conformance_test
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"reflect"
 	"slices"
 	"testing"
 
@@ -104,56 +102,18 @@ func requireServiceSnapshot(ctx context.Context, t *testing.T, target livetest.T
 func requireSnapshotImages(ctx context.Context, t *testing.T, target livetest.Target, repo string, consumer livetest.Consumer, branch, head, image string, plan, receipts []byte) ([]snapshotimage.Receipt, snapshotimage.Plan) {
 	t.Helper()
 
-	var frozen snapshotimage.Plan
-	if err := json.Unmarshal(plan, &frozen); err != nil {
-		t.Fatal(err)
+	registry := livetest.LabSnapshotRegistry(t, target, repo)
+	if registry.Image() != image {
+		t.Fatalf("the run's image repository is %s, the registry's %s", image, registry.Image())
 	}
 
-	expected := livetest.ServiceSnapshotPlan(ctx, t, consumer, snapshotimage.Input{
-		SourceSHA: head, SourceBranch: branch, Tag: frozen.Tag, ImageRepository: image,
-		SourceDateEpoch: frozen.SourceDateEpoch, Publish: true,
-	})
-	if err := frozen.Validate(); err != nil || frozen.SourceSHA != head || frozen.SourceBranch != branch ||
-		!reflect.DeepEqual(frozen, expected) || len(frozen.Builds) != len(frozen.Images) ||
-		slices.ContainsFunc(frozen.Builds, func(build snapshotimage.Build) bool { return build.Arch != "amd64" }) {
-		t.Fatalf("wrong frozen snapshot plan: %+v: %v", frozen, err)
-	}
+	run := livetest.SnapshotRun{Declaration: livetest.ServiceSnapshotDeclaration(ctx, t, consumer), Branch: branch, Head: head, Plan: plan, Receipts: receipts}
 
-	var published []snapshotimage.Receipt
-	if err := json.Unmarshal(receipts, &published); err != nil {
-		t.Fatalf("missing snapshot receipts: %v", err)
-	}
+	published, expected := livetest.RequireSnapshotImages(ctx, t, run, registry)
 
-	published, err := snapshotimage.Collect(frozen, published)
-	if err != nil {
-		t.Fatalf("the receipts do not bind the selected source and every planned image: %v", err)
-	}
-
-	tags := map[string]bool{}
-
-	for _, receipt := range published {
-		if receipt.ImageRepository != image {
-			t.Fatalf("the receipt of %s names %s, not the run's image repository %s", receipt.Name, receipt.ImageRepository, image)
-		}
-
-		imageConfig := livetest.ImageConfig(t, target, repo, receipt.Digest) //nolint:contextcheck // registry helper derives a bounded context from the test owner.
-		if imageConfig.OS != "linux" || imageConfig.Architecture != "amd64" ||
-			imageConfig.Config.Labels["org.opencontainers.image.revision"] != head ||
-			imageConfig.Config.Labels["org.opencontainers.image.ref.name"] != branch {
-			t.Fatalf("published image %s does not match the selected architecture, source and branch", receipt.Name)
-		}
-
-		if digest, found := livetest.ImageDigestContext(ctx, t, target, repo, receipt.Tag); !found || digest != receipt.Digest {
-			t.Fatalf("snapshot tag %s does not resolve to receipt digest: %s", receipt.Tag, digest)
-		}
-
-		tags[receipt.Tag], tags[receipt.Tag+"-amd64"] = true, true
-	}
-
-	for tag := range livetest.RegistrySnapshot(t, target, repo) { //nolint:contextcheck // registry helper derives a bounded context from the test owner.
-		if !tags[tag] {
-			t.Errorf("unexpected registry alias %s", tag)
-		}
+	// The trial's overlay plans every build native amd64.
+	if slices.ContainsFunc(expected.Builds, func(build snapshotimage.Build) bool { return build.Arch != "amd64" }) {
+		t.Fatalf("the snapshot plan builds beyond native amd64: %+v", expected.Builds)
 	}
 
 	return published, expected

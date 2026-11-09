@@ -88,17 +88,106 @@ func (trial *GitHubTrial) RemoveSnapshotPackageAfter(repo string, repositoryID i
 	})
 }
 
-// CheckSnapshotPackage checks that a development run published the consumer's
-// snapshot image as a container package of its own repository.
-func (trial *GitHubTrial) CheckSnapshotPackage(repo string, repositoryID int64) GitHubPackageIdentity {
+// GitHubSnapshotPlanArtifact and GitHubSnapshotArtifact are the artifacts
+// the snapshot-images workflow uploads under its default artifact name: the
+// plan job's inputs, holding the frozen plan, and the collect job's receipts.
+const (
+	GitHubSnapshotPlanArtifact = "snapshot-images-inputs"
+	GitHubSnapshotArtifact     = "snapshot-images"
+)
+
+// SnapshotRun reads what a development run of repo left for the snapshot
+// oracle (RequireSnapshotImages): the declaration it planned, the one the
+// trial staged at the selected head, the frozen plan and the receipts.
+func (trial *GitHubTrial) SnapshotRun(repo string, tree GitHubConsumerTree, runID int64, branch, head string) SnapshotRun {
 	trial.tb.Helper()
 
-	identity, err := trial.ReadContainerPackageIdentity(trial.tb.Context(), strings.ToLower(repo), repositoryID)
-	if err != nil {
-		trial.tb.Fatalf("livetest: the development run published no snapshot image package %s of %s: %v", strings.ToLower(repo), repo, err)
+	return SnapshotRun{
+		Declaration: trial.git(tree.Dir, "show", head+":"+ServiceSnapshotDeclarationFile),
+		Branch:      branch, Head: head,
+		Plan:     trial.runArtifactFile(repo, runID, GitHubSnapshotPlanArtifact, "snapshot-plan.json"),
+		Receipts: trial.runArtifactFile(repo, runID, GitHubSnapshotArtifact, "container-images.json"),
+	}
+}
+
+// runArtifactFile downloads the run's one artifact called artifactName and
+// returns its member file.
+func (trial *GitHubTrial) runArtifactFile(repo string, runID int64, artifactName, file string) []byte {
+	trial.tb.Helper()
+
+	options := &githubapi.ListOptions{PerPage: 100}
+
+	var selected *githubapi.Artifact
+
+	for {
+		artifacts, response, err := trial.api.Actions.ListWorkflowRunArtifacts(trial.tb.Context(), trial.org, repo, runID, options)
+		if err != nil {
+			trial.tb.Fatalf("list the artifacts of run %d: %v", runID, err)
+		}
+
+		for _, artifact := range artifacts.Artifacts {
+			if artifact.GetName() == artifactName {
+				if selected != nil || artifact.GetExpired() {
+					trial.tb.Fatalf("run %d has duplicate or expired artifact %s", runID, artifactName)
+				}
+
+				selected = artifact
+			}
+		}
+
+		if response.NextPage == 0 {
+			break
+		}
+
+		options.Page = response.NextPage
 	}
 
-	return identity
+	if selected == nil {
+		trial.tb.Fatalf("run %d left no artifact %s", runID, artifactName)
+	}
+
+	archive, _ := trial.downloadArtifact(repo, selected)
+
+	return trial.archiveMember(archive, selected.GetID(), file)
+}
+
+// archiveMember reads one member of a downloaded artifact archive, within
+// the artifact budget.
+func (trial *GitHubTrial) archiveMember(archiveFile string, artifactID int64, member string) []byte {
+	trial.tb.Helper()
+
+	archive, err := zip.OpenReader(archiveFile)
+	if err != nil {
+		trial.tb.Fatalf("artifact %d is not a valid ZIP: %v", artifactID, err)
+	}
+
+	defer func() { _ = archive.Close() }()
+
+	matches := 0
+
+	for _, file := range archive.File {
+		if file.Name == member {
+			matches++
+		}
+	}
+
+	if matches != 1 {
+		trial.tb.Fatalf("artifact %d must contain exactly one %s, found %d", artifactID, member, matches)
+	}
+
+	reader, err := archive.Open(member)
+	if err != nil {
+		trial.tb.Fatalf("artifact %d has no %s: %v", artifactID, member, err)
+	}
+
+	defer func() { _ = reader.Close() }()
+
+	body, err := io.ReadAll(io.LimitReader(reader, maxDevelopmentArtifactBytes+1))
+	if err != nil || len(body) > maxDevelopmentArtifactBytes {
+		trial.tb.Fatalf("artifact %d member %s is damaged or over budget", artifactID, member)
+	}
+
+	return body
 }
 
 // CheckDevelopmentRelease proves artifact transport and that a branch build
@@ -171,6 +260,14 @@ func (trial *GitHubTrial) checkDevelopmentArtifacts(repo string, runID int64) in
 const maxDevelopmentArtifactBytes = 1 << 30
 
 func (trial *GitHubTrial) checkDevelopmentArtifact(repo string, artifact *githubapi.Artifact) {
+	file, downloaded := trial.downloadArtifact(repo, artifact)
+	files := trial.checkDevelopmentArchive(file, artifact.GetID())
+	trial.tb.Logf("development artifact %d %q: %d bytes downloaded, %d files verified", artifact.GetID(), artifact.GetName(), downloaded, files)
+}
+
+// downloadArtifact downloads an artifact archive within the 1 GiB budget,
+// checks it against GitHub's digest and returns its file and size.
+func (trial *GitHubTrial) downloadArtifact(repo string, artifact *githubapi.Artifact) (string, int64) {
 	location, _, err := trial.api.Actions.DownloadArtifact(trial.tb.Context(), trial.org, repo, artifact.GetID(), 3)
 	if err != nil || location == nil {
 		trial.tb.Fatalf("could not obtain download location for development artifact %d", artifact.GetID())
@@ -211,8 +308,7 @@ func (trial *GitHubTrial) checkDevelopmentArtifact(repo string, artifact *github
 		trial.tb.Fatalf("development artifact %d digest differs from GitHub metadata", artifact.GetID())
 	}
 
-	files := trial.checkDevelopmentArchive(file, artifact.GetID())
-	trial.tb.Logf("development artifact %d %q: %d bytes downloaded, %d files verified", artifact.GetID(), artifact.GetName(), downloaded, files)
+	return file, downloaded
 }
 
 func (trial *GitHubTrial) checkDevelopmentArchive(file string, artifactID int64) int {
