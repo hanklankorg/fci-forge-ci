@@ -150,7 +150,7 @@ on:
         default: ""
       artifacts-config:
         description: >-
-          The artifacts-config the release's prepare-release.yml call was given. Every job re-checks the release commit against the release plan of that declaration: it may change CHANGELOG.md and the planned version bump, nothing else. Empty reads .forge-ci/artifacts.yml.
+          The prepare job's artifacts-config output (needs.prepare.outputs.artifacts-config), which check-l3-isolation requires: the declaration the release planned its bump from. Every job re-checks the release commit against the release plan of that declaration: it may change CHANGELOG.md and the planned version bump, nothing else. Empty reads .forge-ci/artifacts.yml.
         type: string
         required: false
         default: ''

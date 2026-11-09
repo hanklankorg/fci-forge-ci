@@ -5741,7 +5741,7 @@ EXAMPLE:
 | `--workflow` | path to the workflow file to check (required) | string | `""` | n/a |
 | `--build-job` | the artifact-producing job that must not see signing secrets | string | `"build"` | n/a |
 | `--sign-job` | cross-repo signing workflow call-site job; enables Forgejo release-signing channel checks | string | `""` | n/a |
-| `--prepare-job` | job that emits release-tag/release-sha and may check signing-secret presence before checkout | string | `""` | n/a |
+| `--prepare-job` | job that emits release-tag, release-sha and artifacts-config and may check signing-secret presence before checkout | string | `""` | n/a |
 | `--dist-digest-output` | build job output carrying the dist-digest passed to the signer | string | `""` | n/a |
 | `--single-pin-subject` | subject whose @<sha> refs must agree across the workflow directory (for example, example/provider-workflows) | string | `""` | n/a |
 | `--single-pin-input` | input of the subject's reusable workflows that repeats their commit pin (for example, forge-ci-sha); needs --single-pin-subject | string | `""` | n/a |

@@ -116,7 +116,7 @@ func releaseCaseVersion(t *testing.T, provider, consumer string, words []string)
 
 	// The Forgejo release bumps what the plan of the declaration its
 	// prepare-release.yml call names bumps.
-	bumps, err := PlannedVersionBumps(consumer, forgejoPrepareArtifactsConfig(t, filepath.Join(consumer, ".forgejo", "workflows", parsed.Workflow)))
+	bumps, err := PlannedVersionBumps(consumer, forgejoArtifactsConfig(t, filepath.Join(consumer, ".forgejo", "workflows", parsed.Workflow), "prepare-release.yml"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -124,12 +124,12 @@ func releaseCaseVersion(t *testing.T, provider, consumer string, words []string)
 	return parsed.Version, len(bumps) != 0
 }
 
-// forgejoPrepareArtifactsConfig is the artifacts-config input a Forgejo
-// release workflow passes prepare-release.yml, "" for the default.
-func forgejoPrepareArtifactsConfig(t *testing.T, path string) string {
+// forgejoArtifactsConfig is the artifacts-config input a Forgejo release
+// workflow passes the layer's called workflow, "" for the default.
+func forgejoArtifactsConfig(t *testing.T, path, called string) string {
 	t.Helper()
 
-	body, err := os.ReadFile(path) //nolint:gosec // G304: a checked-in demo workflow.
+	body, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -145,12 +145,12 @@ func forgejoPrepareArtifactsConfig(t *testing.T, path string) string {
 	}
 
 	for _, job := range workflow.Jobs {
-		if strings.Contains(job.Uses, "/.forgejo/workflows/prepare-release.yml@") {
+		if strings.Contains(job.Uses, "/.forgejo/workflows/"+called+"@") {
 			return job.With["artifacts-config"]
 		}
 	}
 
-	t.Fatalf("%s calls no prepare-release.yml", path)
+	t.Fatalf("%s calls no %s", path, called)
 
 	return ""
 }

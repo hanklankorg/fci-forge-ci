@@ -27,8 +27,9 @@ type IsolationConfig struct {
 	// backwards-compatible for workflows that only want the core release-isolation
 	// checks.
 	SignJob string
-	// PrepareJob is the job that produces release-tag/release-sha and may run
-	// fail-fast signing-secret presence checks before the consumer checkout.
+	// PrepareJob is the job that produces release-tag, release-sha and
+	// artifacts-config, and may run fail-fast signing-secret presence checks
+	// before the consumer checkout.
 	PrepareJob string
 	// DistDigestOutput is the build job output carrying the build-to-sign digest.
 	// Empty disables the dist-digest channel check.
@@ -259,10 +260,16 @@ func signCallSiteViolations(jobs map[string]yaml.Node, cfg IsolationConfig) []Is
 
 // releaseTagOutput and releaseSHAOutput are the prepare-job output names the
 // release-identity check requires and pins the sign job's inputs to.
+// artifactsConfigOutput is the declaration the prepare job planned the bump
+// from: the sign job re-checks the release commit against the same one.
 const (
-	releaseTagOutput = "release-tag"
-	releaseSHAOutput = "release-sha"
+	releaseTagOutput      = "release-tag"
+	releaseSHAOutput      = "release-sha"
+	artifactsConfigOutput = "artifacts-config"
 )
+
+// releaseIdentityOutputs are the prepare outputs the sign job must take.
+var releaseIdentityOutputs = []string{releaseTagOutput, releaseSHAOutput, artifactsConfigOutput}
 
 func releaseIdentityViolations(jobs map[string]yaml.Node, cfg IsolationConfig) []IsolationViolation {
 	if cfg.SignJob == "" || cfg.PrepareJob == "" {
@@ -289,7 +296,7 @@ func releaseIdentityViolations(jobs map[string]yaml.Node, cfg IsolationConfig) [
 	// below apply to both shapes.
 	if mappingValue(&prepare, "uses") == nil {
 		prepareOutputs := mappingValue(&prepare, "outputs")
-		for _, outputName := range []string{releaseTagOutput, releaseSHAOutput} {
+		for _, outputName := range releaseIdentityOutputs {
 			if mappingValue(prepareOutputs, outputName) == nil {
 				violations = append(violations, IsolationViolation{
 					Line: prepare.Line,
@@ -301,13 +308,12 @@ func releaseIdentityViolations(jobs map[string]yaml.Node, cfg IsolationConfig) [
 
 	signWith := mappingValue(&sign, "with")
 
-	checks := map[string]string{releaseTagOutput: releaseTagOutput, releaseSHAOutput: releaseSHAOutput}
-	for inputName, outputName := range checks {
-		val := scalarValue(mappingValue(signWith, inputName))
-		if !referencesNeedOutput(val, cfg.PrepareJob, outputName) {
+	for _, name := range releaseIdentityOutputs {
+		val := scalarValue(mappingValue(signWith, name))
+		if !referencesNeedOutput(val, cfg.PrepareJob, name) {
 			violations = append(violations, IsolationViolation{
 				Line: sign.Line,
-				Msg:  fmt.Sprintf("sign job %q must pass %s from needs.%s.outputs.%s", cfg.SignJob, inputName, cfg.PrepareJob, outputName),
+				Msg:  fmt.Sprintf("sign job %q must pass %s from needs.%s.outputs.%s", cfg.SignJob, name, cfg.PrepareJob, name),
 			})
 		}
 	}

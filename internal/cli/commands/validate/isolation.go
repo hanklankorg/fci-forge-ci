@@ -53,7 +53,7 @@ EXAMPLE:
 			&cli.StringFlag{Name: flagWorkflow, Required: true, Usage: "path to the workflow file to check"},
 			&cli.StringFlag{Name: "build-job", Value: "build", Usage: "the artifact-producing job that must not see signing secrets"},
 			&cli.StringFlag{Name: "sign-job", Usage: "cross-repo signing workflow call-site job; enables Forgejo release-signing channel checks"},
-			&cli.StringFlag{Name: "prepare-job", Usage: "job that emits release-tag/release-sha and may check signing-secret presence before checkout"},
+			&cli.StringFlag{Name: "prepare-job", Usage: "job that emits release-tag, release-sha and artifacts-config and may check signing-secret presence before checkout"},
 			&cli.StringFlag{Name: "dist-digest-output", Usage: "build job output carrying the dist-digest passed to the signer"},
 			&cli.StringFlag{Name: "single-pin-subject", Usage: "subject whose @<sha> refs must agree across the workflow directory (for example, example/provider-workflows)"},
 			&cli.StringFlag{Name: "single-pin-input", Usage: "input of the subject's reusable workflows that repeats their commit pin (for example, forge-ci-sha); needs --single-pin-subject"},

@@ -247,6 +247,7 @@ jobs:
       runner-label: ${{ vars.CI_RUNNER_LABEL }}
       release-tag: ${{ needs.prepare.outputs.release-tag }}
       release-sha: ${{ needs.prepare.outputs.release-sha }}
+      artifacts-config: ${{ needs.prepare.outputs.artifacts-config }}
       release-request-sha: ${{ forgejo.sha }}
       dist-digest: ${{ needs.handoff.outputs['dist_digest'] }}
       artifact-name: build-dist

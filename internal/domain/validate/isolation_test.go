@@ -529,7 +529,10 @@ func TestCheckIsolation_ActionNamesMatchCaseInsensitively(t *testing.T) {
 // job's checkout-consumer step orders the secret check like actions/checkout;
 // a sign job called from the same repository is refused; bracketed
 // needs.<job>.outputs['x'] spellings satisfy the identity check; and a build
-// job that does not declare the dist-digest output is refused.
+// job that does not declare the dist-digest output is refused. A sign job
+// that takes its declaration from anywhere but the prepare job's
+// artifacts-config output is refused: it would re-check the release commit
+// against another plan than the one the release bumped.
 func TestCheckIsolation_ReleaseCallSiteInvariants(t *testing.T) {
 	t.Parallel()
 
@@ -542,13 +545,15 @@ func TestCheckIsolation_ReleaseCallSiteInvariants(t *testing.T) {
 
 	base := func(signUses, prepareSteps, withBlock, buildOutputs string) string {
 		return "jobs:\n" +
-			"  prepare:\n    runs-on: x\n    outputs:\n      release-tag: v1\n      release-sha: abc\n    steps:\n" + prepareSteps +
+			"  prepare:\n    runs-on: x\n    outputs:\n      release-tag: v1\n      release-sha: abc\n      artifacts-config: ''\n    steps:\n" + prepareSteps +
 			"  build:\n    runs-on: x\n" + buildOutputs + "    steps: []\n" +
 			"  sign:\n    uses: " + signUses + "\n    secrets:\n      RELEASE_GPG_PRIVATE_KEY: ${{ secrets.RELEASE_GPG_PRIVATE_KEY }}\n    with:\n" + withBlock
 	}
 
-	dotWith := "      release-tag: ${{ needs.prepare.outputs.release-tag }}\n      release-sha: ${{ needs.prepare.outputs.release-sha }}\n      dist-digest: ${{ needs.build.outputs.dist-digest }}\n"
-	bracketWith := "      release-tag: ${{ needs.prepare.outputs['release-tag'] }}\n      release-sha: ${{ needs.prepare.outputs[\"release-sha\"] }}\n      dist-digest: ${{ needs.build.outputs['dist-digest'] }}\n"
+	dotWith := "      release-tag: ${{ needs.prepare.outputs.release-tag }}\n      release-sha: ${{ needs.prepare.outputs.release-sha }}\n" +
+		"      artifacts-config: ${{ needs.prepare.outputs.artifacts-config }}\n      dist-digest: ${{ needs.build.outputs.dist-digest }}\n"
+	bracketWith := "      release-tag: ${{ needs.prepare.outputs['release-tag'] }}\n      release-sha: ${{ needs.prepare.outputs[\"release-sha\"] }}\n" +
+		"      artifacts-config: ${{ needs.prepare.outputs['artifacts-config'] }}\n      dist-digest: ${{ needs.build.outputs['dist-digest'] }}\n"
 	safeSteps := "      - run: test -n \"${{ secrets.RELEASE_GPG_PRIVATE_KEY }}\"\n      - uses: org/forge-ci/checkout-consumer@0123456789abcdef0123456789abcdef01234567\n        with:\n          persist-credentials: false\n"
 	lateSteps := "      - uses: org/forge-ci/checkout-consumer@0123456789abcdef0123456789abcdef01234567\n        with:\n          persist-credentials: false\n      - run: test -n \"${{ secrets.RELEASE_GPG_PRIVATE_KEY }}\"\n"
 	digestOutput := "    outputs:\n      dist-digest: ${{ steps.d.outputs.digest }}\n"
@@ -562,6 +567,10 @@ func TestCheckIsolation_ReleaseCallSiteInvariants(t *testing.T) {
 		"secret after consumer checkout": {body: base(remote, lateSteps, dotWith, digestOutput), want: "at/after checkout"},
 		"local sign job":                 {body: base("./.github/workflows/sign.yml", safeSteps, dotWith, digestOutput), want: "cross-repo workflow_call"},
 		"no dist-digest output":          {body: base(remote, safeSteps, dotWith, ""), want: `does not declare "dist-digest" output`},
+		"declaration not from prepare": {
+			body: base(remote, safeSteps, strings.Replace(dotWith, "${{ needs.prepare.outputs.artifacts-config }}", ".forge-ci/other.yml", 1), digestOutput),
+			want: "must pass artifacts-config from needs.prepare.outputs.artifacts-config",
+		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()

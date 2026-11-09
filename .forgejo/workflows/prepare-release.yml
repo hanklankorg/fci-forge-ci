@@ -146,6 +146,10 @@ on:
       release-sha:
         description: Final commit SHA the release tag points to after preparation.
         value: ${{ jobs.prepare.outputs.release-sha }}
+      artifacts-config:
+        description: >-
+          The validated artifacts-config this release planned its bump from, empty for the default. Pass it to sign-and-publish-release.yml, whose jobs re-check the release commit against the same declaration; check-l3-isolation requires that flow.
+        value: ${{ jobs.coordinates.outputs.artifacts_config }}
 
 jobs:
   coordinates:

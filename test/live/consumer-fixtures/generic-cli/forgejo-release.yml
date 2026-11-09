@@ -134,6 +134,8 @@ jobs:
       runner-label: ${{ vars.CI_RUNNER_LABEL }}
       release-tag: ${{ needs.prepare.outputs.release-tag }}
       release-sha: ${{ needs.prepare.outputs.release-sha }}
+      # The declaration prepare read: every signer job admits exactly its bump.
+      artifacts-config: ${{ needs.prepare.outputs.artifacts-config }}
       release-request-sha: ${{ forgejo.sha }}
       dist-digest: ${{ needs.build.outputs.dist-digest }}
       artifact-name: build-dist
@@ -141,8 +143,6 @@ jobs:
       caller-workflow: release.yml
       forge-ci-repository: examplescope/forge-ci
       forge-ci-sha: ENGINE_SHA
-      # The declaration prepare read: every signer job admits exactly its bump.
-      artifacts-config: ARTIFACTS_CONFIG
       sign-distro-packages: 'false'
       signer-image: fixture.invalid/forge-ci/signer@sha256:0000000000000000000000000000000000000000000000000000000000000000
       cosign-public-key: ${{ vars.COSIGN_PUBLIC_KEY }}

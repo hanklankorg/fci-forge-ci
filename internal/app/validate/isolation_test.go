@@ -93,6 +93,7 @@ const forgejoIsolationCleanWorkflow = `jobs:
     outputs:
       release-tag: ${{ steps.prepare.outputs.release-tag }}
       release-sha: ${{ steps.prepare.outputs.release-sha }}
+      artifacts-config: ${{ steps.prepare.outputs.artifacts-config }}
     steps:
       - name: Check secrets before checkout
         env:
@@ -109,6 +110,7 @@ const forgejoIsolationCleanWorkflow = `jobs:
     with:
       release-tag: ${{ needs.prepare.outputs.release-tag }}
       release-sha: ${{ needs.prepare.outputs.release-sha }}
+      artifacts-config: ${{ needs.prepare.outputs.artifacts-config }}
       dist-digest: ${{ needs.build-and-release.outputs.dist-digest }}
     secrets:
       COSIGN_SIGNING_KEY: ${{ secrets.COSIGN_SIGNING_KEY }}
@@ -325,6 +327,7 @@ func TestIsolation_CalledPrepareJobPasses(t *testing.T) {
     with:
       release-tag: ${{ needs.prepare.outputs.release-tag }}
       release-sha: ${{ needs.prepare.outputs.release-sha }}
+      artifacts-config: ${{ needs.prepare.outputs.artifacts-config }}
       dist-digest: ${{ needs.build-and-release.outputs.dist-digest }}
     secrets:
       COSIGN_SIGNING_KEY: ${{ secrets.COSIGN_SIGNING_KEY }}
@@ -407,6 +410,7 @@ const otherSubjectWorkflow = `jobs:
     outputs:
       release-tag: ${{ steps.prepare.outputs.release-tag }}
       release-sha: ${{ steps.prepare.outputs.release-sha }}
+      artifacts-config: ${{ steps.prepare.outputs.artifacts-config }}
     steps:
       - uses: actions/checkout@1111111111111111111111111111111111111111
         with:
@@ -420,6 +424,7 @@ const otherSubjectWorkflow = `jobs:
     with:
       release-tag: ${{ needs.prepare.outputs.release-tag }}
       release-sha: ${{ needs.prepare.outputs.release-sha }}
+      artifacts-config: ${{ needs.prepare.outputs.artifacts-config }}
       dist-digest: ${{ needs.build-and-release.outputs.dist-digest }}
 %s    secrets:
       COSIGN_SIGNING_KEY: ${{ secrets.COSIGN_SIGNING_KEY }}
