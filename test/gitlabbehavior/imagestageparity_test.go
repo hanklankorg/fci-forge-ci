@@ -106,13 +106,14 @@ func TestReleaseImageStageMatchesTheForgejoWorkflow(t *testing.T) {
 			// run, in the image it runs in, on a native runner of the arch.
 			forgejoBuilder, forgejoContainer := forgejoBuilderSelection(t, builder)
 
-			// GitLab runs every job in an image: the builder's job image.
-			wantImage, wantAMD64Tags := parityBuildahImage, []string{"privileged"}
+			// GitLab runs every job in an image: the builder's job image, on
+			// the build runner of the arch, whichever the builder.
+			wantImage := parityBuildahImage
 			if builder == "kaniko" {
-				wantImage, wantAMD64Tags = parityKanikoImage, nil
+				wantImage = parityKanikoImage
 			}
 
-			for arch, tags := range map[string][]string{"amd64": wantAMD64Tags, "arm64": {"arm64"}} {
+			for arch, tags := range map[string][]string{"amd64": {"privileged"}, "arm64": {"arm64"}} {
 				job := gitlab["Images: build "+arch]
 				if job.builder != forgejoBuilder {
 					t.Fatalf("GitLab %s builds with %s, Forgejo with %s", arch, job.builder, forgejoBuilder)
@@ -268,7 +269,7 @@ func renderGitLabImageStage(t *testing.T, releaseImages, builder, arm64Tags stri
 
 	for name, value := range map[string]string{
 		"release-images": releaseImages, "image-builder": builder, "builder-job-image": builderImage,
-		"build-image": parityBuildImage, "build-runner-tags": `["privileged"]`, "build-runner-tags-arm64": arm64Tags,
+		"build-image": parityBuildImage, "build-runner-tags-linux-amd64": `["privileged"]`, "build-runner-tags-linux-arm64": arm64Tags,
 	} {
 		text = strings.ReplaceAll(text, "$[[ inputs."+name+" ]]", value)
 	}

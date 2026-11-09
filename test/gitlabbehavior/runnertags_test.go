@@ -21,7 +21,7 @@ import (
 
 // runnerTagsInput is how a component's job names its runner: one array
 // input, interpolated whole.
-var runnerTagsInput = regexp.MustCompile(`^\$\[\[ inputs\.((?:[a-z0-9]+-)*runner-tags(?:-arm64)?) \]\]$`)
+var runnerTagsInput = regexp.MustCompile(`^\$\[\[ inputs\.((?:[a-z0-9]+-)*runner-tags(?:-(?:linux|darwin)-(?:amd64|arm64))?) \]\]$`)
 
 // runnerTagsProblems is every job of one component whose tags are not one
 // array input of the component. GitLab expands a CI variable in a tag when
@@ -72,8 +72,19 @@ func runnerTagsProblems(path, text string) []string {
 			continue
 		}
 
-		if input := spec.Spec.Inputs[match[1]]; input["type"] != "array" || !reflect.DeepEqual(input["default"], []any{}) {
-			problems = append(problems, fmt.Sprintf("%s: job %s: input %s must be an array that defaults to untagged", path, name, match[1]))
+		// An input bound to a platform has no default, since an untagged job
+		// could land on a runner of any platform; any other defaults to
+		// untagged.
+		input := spec.Spec.Inputs[match[1]]
+		defaulted, hasDefault := input["default"]
+
+		switch {
+		case input["type"] != "array":
+			problems = append(problems, fmt.Sprintf("%s: job %s: input %s must be an array", path, name, match[1]))
+		case strings.Contains(match[1], "-linux-") && hasDefault:
+			problems = append(problems, fmt.Sprintf("%s: job %s: platform-bound input %s must have no default", path, name, match[1]))
+		case !strings.Contains(match[1], "-linux-") && !reflect.DeepEqual(defaulted, []any{}):
+			problems = append(problems, fmt.Sprintf("%s: job %s: input %s must default to untagged", path, name, match[1]))
 		}
 	}
 
@@ -159,18 +170,19 @@ func TestGitLabComponentJobsRunOnTheirRunnerTags(t *testing.T) {
 // The release's signer jobs, those in signer-image that hold the signing and
 // publication credentials, run on the policy's signer-runner-tags and no
 // other job does; every other job keeps its own role's tags. By default
-// every job is untagged, as before the inputs existed.
+// every job but those on the required build tags is untagged.
 func TestGitLabReleaseSignerJobsRunOnlyOnSignerRunnerTags(t *testing.T) {
 	t.Parallel()
 
 	signerImage, _ := gitlabrender.FixtureValue("signer-image")
+	buildTags, _ := gitlabrender.FixtureValue("build-runner-tags-linux-amd64")
 
 	for _, custom := range []bool{false, true} {
 		given := map[string]any{}
 		if custom {
 			given = map[string]any{
-				"runner-tags": []any{"ordinary"}, "signer-runner-tags": []any{"signer", "release"}, "checks-runner-tags": []any{"checks"},
-				"build-runner-tags": []any{"privileged"}, "build-runner-tags-arm64": []any{"arm64"},
+				"runner-tags": []any{"ordinary"}, "signer-runner-tags": []any{"signer", "release"},
+				"build-runner-tags-linux-amd64": []any{"privileged"}, "build-runner-tags-linux-arm64": []any{"arm64"},
 			}
 		}
 
@@ -181,8 +193,8 @@ func TestGitLabReleaseSignerJobsRunOnlyOnSignerRunnerTags(t *testing.T) {
 
 			switch {
 			case !custom:
-				if !reflect.DeepEqual(tags, []any{}) {
-					t.Errorf("job %s runs on %v by default, want untagged", name, tags)
+				if !reflect.DeepEqual(tags, []any{}) && !reflect.DeepEqual(tags, buildTags) {
+					t.Errorf("job %s runs on %v by default, want untagged or the build tags", name, tags)
 				}
 			case job["image"] == signerImage:
 				signers++
@@ -192,7 +204,7 @@ func TestGitLabReleaseSignerJobsRunOnlyOnSignerRunnerTags(t *testing.T) {
 				}
 			case reflect.DeepEqual(tags, given["signer-runner-tags"]):
 				t.Errorf("job %s, outside signer-image, runs on signer-runner-tags", name)
-			case !slices.ContainsFunc([]string{"runner-tags", "checks-runner-tags", "build-runner-tags", "build-runner-tags-arm64"},
+			case !slices.ContainsFunc([]string{"runner-tags", "build-runner-tags-linux-amd64", "build-runner-tags-linux-arm64"},
 				func(input string) bool { return reflect.DeepEqual(tags, given[input]) }):
 				t.Errorf("job %s runs on %v, which no runner input names", name, tags)
 			}

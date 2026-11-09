@@ -54,8 +54,8 @@ var runnerRoles = []runnerRole{
 	{
 		name: "image-build",
 		gitlab: runnerChoice{inputs: []string{
-			"templates/release.yml:build-runner-tags", "templates/release-jobs.yml:build-runner-tags",
-			"templates/snapshot-images.yml:build-runner-tags",
+			"templates/release.yml:build-runner-tags-linux-amd64", "templates/release-jobs.yml:build-runner-tags-linux-amd64",
+			"templates/snapshot-images.yml:build-runner-tags-linux-amd64",
 		}},
 		forgejo: runnerChoice{inputs: []string{
 			".forgejo/workflows/release-images.yml:runner-label", ".forgejo/workflows/snapshot-images.yml:runner-label",
@@ -66,20 +66,14 @@ var runnerRoles = []runnerRole{
 	{
 		name: "image-build-arm64",
 		gitlab: runnerChoice{inputs: []string{
-			"templates/release.yml:build-runner-tags-arm64", "templates/release-jobs.yml:build-runner-tags-arm64",
-			"templates/snapshot-images.yml:build-runner-tags-arm64",
+			"templates/release.yml:build-runner-tags-linux-arm64", "templates/release-jobs.yml:build-runner-tags-linux-arm64",
+			"templates/snapshot-images.yml:build-runner-tags-linux-arm64",
 		}},
 		forgejo: runnerChoice{inputs: []string{
 			".forgejo/workflows/release-images.yml:runner-label-arm64", ".forgejo/workflows/snapshot-images.yml:runner-label-arm64",
 			".forgejo/workflows/runtime-images.yml:runner-label-arm64", ".forgejo/workflows/runtime-images.yml:runner-label-container-arm64",
 		}},
 		github: runnerChoice{none: "the hosted ubuntu-26.04-arm literal"},
-	},
-	{
-		name:    "checks",
-		gitlab:  runnerChoice{inputs: []string{"templates/release.yml:checks-runner-tags", "templates/release-jobs.yml:checks-runner-tags"}},
-		forgejo: runnerChoice{none: "the checks are jobs of the caller's own workflow"},
-		github:  runnerChoice{none: "the checks are jobs of the caller's own workflow"},
 	},
 	{
 		name:   "signer",
@@ -91,7 +85,7 @@ var runnerRoles = []runnerRole{
 	},
 	{
 		name:    "macos",
-		gitlab:  runnerChoice{inputs: []string{"templates/publish-apple-appstore.yml:runner-tags"}},
+		gitlab:  runnerChoice{inputs: []string{"templates/publish-apple-appstore.yml:runner-tags-darwin-arm64"}},
 		forgejo: runnerChoice{none: "the Forgejo layer has no Apple workflows"},
 		github: runnerChoice{inputs: []string{
 			".github/workflows/build-xcode-ios.yml:macos-version", ".github/workflows/lint-swift.yml:macos-version",
@@ -102,7 +96,43 @@ var runnerRoles = []runnerRole{
 
 // runnerInputName is a runner input of any layer by its name: GitLab's
 // *runner-tags*, Forgejo's runner-label*, GitHub's runs-on and macos-version.
-var runnerInputName = regexp.MustCompile(`^((?:[a-z0-9]+-)*runner-tags(?:-arm64)?|runner-label(?:-[a-z0-9-]+)?|runs-on|macos-version)$`)
+var runnerInputName = regexp.MustCompile(`^((?:[a-z0-9]+-)*runner-tags(?:-[a-z0-9-]+)?|runner-label(?:-[a-z0-9-]+)?|runs-on|macos-version)$`)
+
+// gitLabRunnerInputName is the one shape a GitLab runner input may take,
+// [role-]runner-tags[-<os>-<arch>]: the role when it is not the ordinary
+// one, and the platform when the role's runner is bound to one, as an image
+// build's always is.
+var gitLabRunnerInputName = regexp.MustCompile(`^(?:signer-)?runner-tags(?:-(?:linux|darwin)-(?:amd64|arm64))?$|^build-runner-tags-linux-(?:amd64|arm64)$`)
+
+// Every runner input of a GitLab component follows the naming pattern of
+// docs/runners.md, and none goes by an older name.
+func TestGitLabRunnerInputsFollowTheNamingPattern(t *testing.T) {
+	t.Parallel()
+
+	entries, err := os.ReadDir(filepath.Join(reporoot.Path(t), "templates"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, entry := range entries {
+		if filepath.Ext(entry.Name()) != ".yml" {
+			continue
+		}
+
+		path := "templates/" + entry.Name()
+		for _, name := range declaredInputs(t, path) {
+			if strings.Contains(name, "runner") && !gitLabRunnerInputName.MatchString(name) {
+				t.Errorf("%s: runner input %s is not named [role-]runner-tags[-<os>-<arch>]", path, name)
+			}
+		}
+	}
+
+	for _, name := range []string{"build-runner-tags", "build-runner-tags-arm64", "checks-runner-tags", "runner-tags-macos", "privileged-runner-tags"} {
+		if gitLabRunnerInputName.MatchString(name) {
+			t.Errorf("the naming pattern admits %s", name)
+		}
+	}
+}
 
 // Every role has a runner choice on every forge, an input or the reason
 // there is none; every runner input of any layer belongs to a role; and the

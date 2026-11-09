@@ -383,7 +383,7 @@ func runGitLabReleaseScenario(t *testing.T, consumerRoot string, scenario gitlab
 
 	var consumer *livetest.Consumer
 
-	checksRunnerTags := []string{}
+	checksNeedBuildah := false
 
 	if consumerRoot != "" {
 		opened := livetest.OpenConsumer(t, target, consumerRoot)
@@ -406,7 +406,7 @@ func runGitLabReleaseScenario(t *testing.T, consumerRoot string, scenario gitlab
 				t.Fatal("the admitted Go CLI integration fixture requires runner.privileged_label for Buildah checks")
 			}
 
-			checksRunnerTags = append(checksRunnerTags, label)
+			checksNeedBuildah = true
 		}
 	}
 
@@ -480,16 +480,30 @@ func runGitLabReleaseScenario(t *testing.T, consumerRoot string, scenario gitlab
 		checks, build = []string{"test -f CHANGELOG.md"}, []string{gitlabBaseBuild}
 	}
 
-	// Buildah's image builds go to the contract's runner that permits user
-	// namespaces, with the build job; kaniko's image jobs stay on the
-	// ordinary runner, in the kaniko job image.
-	// The builder's jobs, image and export alike, resolve the selection, and
-	// a lab that cannot run it reports the scenario not covered.
+	// The consumer's checks and the image and export jobs run on
+	// build-runner-tags-linux-amd64, which is never empty: the runner the
+	// selected builder needs, a lab that cannot run it reporting the scenario
+	// not covered; the one that permits user namespaces for checks that run
+	// Buildah; else the lab's own runner label.
 	buildRunnerTags := []string{}
 	if profile.releaseImages || len(profile.export) != 0 {
 		buildRunnerTags = livetest.ChooseImageBuilder(t, target).RunnerLabels
-	} else if label := livetest.PrivilegedRunnerLabel(t, target); label != "" && consumer != nil && !profile.kaniko {
-		buildRunnerTags = append(buildRunnerTags, label)
+	}
+
+	if checksNeedBuildah {
+		buildRunnerTags = []string{livetest.PrivilegedRunnerLabel(t, target)}
+	}
+
+	if len(buildRunnerTags) == 0 {
+		buildRunnerTags = []string{livetest.RunnerLabel(t, target)}
+	}
+
+	// The release's ordinary jobs run on runner-tags. A consumer's build runs
+	// Buildah under the Buildah builder, so they go to the runner that
+	// permits user namespaces then.
+	runnerTags := []string{}
+	if label := livetest.PrivilegedRunnerLabel(t, target); label != "" && consumer != nil && !profile.kaniko {
+		runnerTags = []string{label}
 	}
 
 	imageBuilder, builderJobImage := gitlabImageBuilder(images)
@@ -513,7 +527,7 @@ func runGitLabReleaseScenario(t *testing.T, consumerRoot string, scenario gitlab
 		project: project, publication: livetest.RepoSlug(target, publication), registry: registry,
 		images: images, keys: keys, gitURL: gitURL, hostKey: hostKey, requestPublic: requestPublic,
 		settings: settings, distro: consumer != nil, bases: bases,
-		checks: checks, checksRunnerTags: checksRunnerTags, build: build, buildRunnerTags: buildRunnerTags,
+		checks: checks, runnerTags: runnerTags, build: build, buildRunnerTags: buildRunnerTags,
 		releaseImages: profile.releaseImages, artifactsConfig: profile.artifactsConfig(), releasePlatforms: releasePlatforms,
 		imageBuilder: imageBuilder, builderJobImage: builderJobImage, export: profile.export, changelog: profile.changelog,
 	}
@@ -644,7 +658,7 @@ func runGitLabReleaseScenario(t *testing.T, consumerRoot string, scenario gitlab
 	// Read back and retain the public payloads before an independent routing
 	// assertion can end the trial and run its disposable-resource cleanup.
 	requireGitLabReleaseRunnerRouting(t, ctx, client, project, child,
-		gitLabReleaseRunnerRoles(buildRunnerTags, checksRunnerTags, imageBuilder, profile.releaseImages, len(profile.export) != 0))
+		gitLabReleaseRunnerRoles(buildRunnerTags, runnerTags, profile.releaseImages, len(profile.export) != 0))
 
 	if consumer != nil {
 		requireGitLabPackageSignatures(t, target, repo, keys, finalTag)
@@ -840,7 +854,7 @@ type gitlabReleasePolicy struct {
 	// base fixture.
 	distro, bases                     bool
 	checks, build, export             []string
-	checksRunnerTags, buildRunnerTags []string
+	runnerTags, buildRunnerTags       []string
 	releaseImages                     bool
 	artifactsConfig, releasePlatforms string
 	imageBuilder, builderJobImage     string
@@ -861,20 +875,21 @@ func (policy gitlabReleasePolicy) include(t *testing.T, target livetest.Target, 
 		"release-git-url":              policy.gitURL, "release-git-host-key-fingerprint": policy.hostKey,
 		"request-allowed-signers": "livetest@localhost " + policy.requestPublic,
 		"bot-name":                "Layer acceptance", "bot-email": releaseBotEmail,
-		"sign-distro-packages": policy.distro,
-		"version-bump":         policy.settings.VersionBump,
-		"base-images":          policy.bases,
-		"checks":               policy.checks,
-		"checks-runner-tags":   policy.checksRunnerTags,
-		"build":                policy.build,
-		"build-runner-tags":    policy.buildRunnerTags,
-		"release-images":       policy.releaseImages,
-		"artifacts-config":     policy.artifactsConfig,
-		"release-platforms":    policy.releasePlatforms,
-		"image-builder":        policy.imageBuilder,
-		"builder-job-image":    policy.builderJobImage,
-		"export-files":         len(policy.export) != 0,
-		"export":               policy.export,
+		"sign-distro-packages":          policy.distro,
+		"version-bump":                  policy.settings.VersionBump,
+		"base-images":                   policy.bases,
+		"checks":                        policy.checks,
+		"runner-tags":                   policy.runnerTags,
+		"build":                         policy.build,
+		"build-runner-tags-linux-amd64": policy.buildRunnerTags,
+		"build-runner-tags-linux-arm64": []string{},
+		"release-images":                policy.releaseImages,
+		"artifacts-config":              policy.artifactsConfig,
+		"release-platforms":             policy.releasePlatforms,
+		"image-builder":                 policy.imageBuilder,
+		"builder-job-image":             policy.builderJobImage,
+		"export-files":                  len(policy.export) != 0,
+		"export":                        policy.export,
 	}
 	maps.Copy(inputs, policy.changelog)
 
@@ -1000,22 +1015,18 @@ func createGitLabProtectedVariables(t *testing.T, client *gitlabapi.Client, proj
 	}
 }
 
-// These roles mirror the protected inputs of release-jobs.yml. Only Buildah's
-// amd64 image/export jobs inherit build-runner-tags; Kaniko stays untagged.
-func gitLabReleaseRunnerRoles(buildTags, checksTags []string, builder string, images, exports bool) map[string][]string {
-	expected := map[string][]string{"Build: release files": buildTags, "Check: consumer checks": checksTags}
-
-	builderTags := []string{}
-	if builder == livetest.ImageBuilderBuildah {
-		builderTags = buildTags
-	}
+// These roles mirror the protected inputs of release-jobs.yml: the build job
+// runs on runner-tags, and the consumer checks and the amd64 image and export
+// jobs on build-runner-tags-linux-amd64, whichever the builder.
+func gitLabReleaseRunnerRoles(buildTags, runnerTags []string, images, exports bool) map[string][]string {
+	expected := map[string][]string{"Build: release files": runnerTags, "Check: consumer checks": buildTags}
 
 	if images {
-		expected["Images: build amd64"] = builderTags
+		expected["Images: build amd64"] = buildTags
 	}
 
 	if exports {
-		expected["Build: export amd64"] = builderTags
+		expected["Build: export amd64"] = buildTags
 	}
 
 	return expected

@@ -108,7 +108,7 @@ func TestReleaseWithImagesRendersAValidConfiguration(t *testing.T) {
 				}
 
 				if builder == "buildah" {
-					inputs["build-runner-tags"] = []any{"privileged"}
+					inputs["build-runner-tags-linux-amd64"] = []any{"privileged"}
 				}
 
 				if problems := gitlabrender.Problems(t, "templates/release.yml", inputs); len(problems) != 0 {

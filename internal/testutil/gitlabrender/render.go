@@ -60,6 +60,10 @@ var requiredInputFixtures = map[string]any{
 	"runtime-image":                    "registry.invalid/team/runtime@sha256:" + strings.Repeat("9", 64),
 	"branch":                           "main",
 	"image-repository":                 "registry.invalid/team/app",
+	// The build runners, platform-bound, have no default: amd64 is named,
+	// and [] states there is no arm64 runner.
+	"build-runner-tags-linux-amd64": []any{"build-amd64"},
+	"build-runner-tags-linux-arm64": []any{},
 	// The administrator settings of a child component, forwarded by its
 	// parent: not the defaults, so a literal shows which value it took.
 	"enforce-lint":                false,

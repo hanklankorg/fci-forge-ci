@@ -130,6 +130,11 @@ func TestSnapshotNativeEmptyPlanStillCollectsAndMissingArmRunnerRefuses(t *testi
 	if err == nil || !strings.Contains(output, "native arm64 runner") {
 		t.Fatalf("missing arm runner must refuse: %v\n%s", err, output)
 	}
+
+	_, output, err = generateSnapshot(t, `{"builds":[{"name":"api","arch":"amd64"}],"images":[{"name":"api"}]}`, "SNAPSHOT_AMD64_TAGS=[]")
+	if err == nil || !strings.Contains(output, "build-runner-tags-linux-amd64") {
+		t.Fatalf("an untagged amd64 build must refuse: %v\n%s", err, output)
+	}
 }
 
 func TestSnapshotNativeAutomaticArtifactsUseToolchainFamiliesAndCompleteGatherBarrier(t *testing.T) {

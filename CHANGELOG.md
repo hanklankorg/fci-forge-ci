@@ -25,8 +25,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `check`, `nanolinter`, `megalinter`, `build-*`, `publish-maven-central`,
   `publish-forge-packages` and `release`, and `signer-runner-tags` on
   `release` for the jobs in `signer-image`. Each defaults to `[]`, untagged,
-  as before. No runner input was renamed. docs/runners.md gains one table of
-  the runner roles and their input on each forge.
+  as before. docs/runners.md gains one table of the runner roles and their
+  input on each forge.
+- **BREAKING**: GitLab runner inputs follow one pattern,
+  `[role-]runner-tags[-<os>-<arch>]`, with no aliases for the old names.
+  `release` and `snapshot-images` rename `build-runner-tags` to
+  `build-runner-tags-linux-amd64` and `build-runner-tags-arm64` to
+  `build-runner-tags-linux-arm64`; `publish-apple-appstore` renames
+  `runner-tags` to `runner-tags-darwin-arm64`. An include that passes an old
+  name fails, because GitLab refuses an undeclared input; rename it in the
+  policy project. `release` drops `checks-runner-tags`: the consumer checks
+  and the amd64 image and export jobs run on `build-runner-tags-linux-amd64`,
+  whichever the builder, kaniko included, and the build job on
+  `runner-tags`. Each job takes its own role's input; none falls back to
+  another's.
+- **BREAKING**: `build-runner-tags-linux-amd64` and
+  `build-runner-tags-linux-arm64` of `release` and `snapshot-images` have no
+  default. Every policy names them: the amd64 tags of a real runner, such as
+  `[privileged]` or a GitLab.com `saas-linux-*` tag, and the arm64 runner's or
+  `[]` for none. The release refuses empty amd64 tags at its first job, and a
+  snapshot refuses an amd64 or arm64 build without tags. An untagged build
+  could land on a runner of any platform.
+- **BREAKING**: GitLab release jobs refuse a `signer-runner-tags` that names a
+  `$variable`: GitLab expands a variable in a tag, which would let a project
+  choose the runner that sees the release credentials.
 - Add credential-free root-only plan and canonical-payload admission against
   independently approved exact plan bytes and explicit producer source facts.
   Verify retained producer SBOM pins without regeneration; content revisions

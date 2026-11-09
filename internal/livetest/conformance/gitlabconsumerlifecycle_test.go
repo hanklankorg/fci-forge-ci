@@ -133,6 +133,13 @@ func runGitLabConsumerLifecycle(t *testing.T, root string, private bool) {
 	target := livetest.Accept(t, provider.ForgeGitLab)
 	builder := livetest.ChooseImageBuilder(t, target)
 
+	// build-runner-tags-linux-amd64 is never empty: the selected builder's
+	// runner, else, for kaniko on GitLab, the lab's own runner label.
+	buildTags := builder.RunnerLabels
+	if len(buildTags) == 0 {
+		buildTags = []string{livetest.RunnerLabel(t, target)}
+	}
+
 	if platforms := settings.Variables["RELEASE_PLATFORMS"]; platforms != "linux/amd64" {
 		livetest.NotCoveredf(t, "the snapshot and the release build images for %s only on tagged arm64 runners, which the lab has none of", platforms)
 	}
@@ -205,8 +212,8 @@ func runGitLabConsumerLifecycle(t *testing.T, root string, private bool) {
 		project: project, publication: livetest.RepoSlug(target, publication), registry: registry,
 		images: images, keys: keys, gitURL: gitURL, hostKey: hostKey, requestPublic: requestPublic,
 		settings: settings, distro: true,
-		checks: []string{"bash .gitlab/check-release.sh"}, checksRunnerTags: []string{},
-		build: []string{profile.build}, buildRunnerTags: builder.RunnerLabels,
+		checks: []string{"bash .gitlab/check-release.sh"}, runnerTags: []string{},
+		build: []string{profile.build}, buildRunnerTags: buildTags,
 		releaseImages: profile.releaseImages, artifactsConfig: profile.artifactsConfig(), releasePlatforms: "linux/amd64",
 		imageBuilder: imageBuilder, builderJobImage: builderJobImage, export: profile.export, changelog: profile.changelog,
 	}
@@ -222,7 +229,7 @@ func runGitLabConsumerLifecycle(t *testing.T, root string, private bool) {
 		"server-url": target.BaseURL(), "registry": registry,
 		"job-image": images.job, "build-image": builderJobImage,
 		"image-builder": imageBuilder, "builder-job-image": builderJobImage,
-		"runner-tags": []string{}, "build-runner-tags": builder.RunnerLabels,
+		"runner-tags": []string{}, "build-runner-tags-linux-amd64": buildTags, "build-runner-tags-linux-arm64": []string{},
 	}
 
 	for _, family := range families {
@@ -313,7 +320,7 @@ func runGitLabConsumerLifecycle(t *testing.T, root string, private bool) {
 	released := requireReleaseGit(t, target, repo, keys, request, profile.requestTag, profile.finalTag)
 	verified := requireGitLabReleaseBundles(t, client, target, repo, child, run.SHA, keys, profile.finalTag, profile.releaseImages)
 	requireGitLabReleaseRunnerRouting(t, ctx, client, project, child,
-		gitLabReleaseRunnerRoles(builder.RunnerLabels, []string{}, imageBuilder, profile.releaseImages, len(profile.export) != 0))
+		gitLabReleaseRunnerRoles(buildTags, []string{}, profile.releaseImages, len(profile.export) != 0))
 	requireGitLabPackageSignatures(t, target, repo, keys, profile.finalTag)
 	requireGitLabPublishedImages(t, client, target, repo, publication, child, keys)
 	t.Logf("lifecycle phase 4 release: %s requested at %s, release commit %s, pipeline %d, child %d, %d verified bundles", profile.finalTag, request, released, run.ID, child, verified)

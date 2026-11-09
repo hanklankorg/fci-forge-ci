@@ -39,15 +39,25 @@ its source and the workflows' inputs to each other.
 | Role | GitLab | Forgejo | GitHub |
 |---|---|---|---|
 | ordinary | `runner-tags` of `check`, `nanolinter`, `megalinter`, `build-*`, `publish-*`, `release` and `snapshot-images`; default `[]`, untagged | `runner-label` of every reusable workflow; required, no default; callers pass `vars.CI_RUNNER_LABEL` | `runs-on` of `slsa-attestor.yml`, default `["ubuntu-26.04"]`; every other job is the hosted `ubuntu-26.04` literal |
-| image-build | `build-runner-tags` of `release` and `snapshot-images`; default `[]` | `runner-label` of `release-images.yml` and `snapshot-images.yml`, which callers pass `CI_RUNNER_LABEL_CONTAINER` or the pool; `runner-label-container` of `runtime-images.yml` | none: the hosted `ubuntu-26.04` literal, whose VMs permit the user namespaces Buildah needs |
-| image-build-arm64 | `build-runner-tags-arm64` of `release` and `snapshot-images`; default `[]`, no arm64 jobs | `runner-label-arm64` of `release-images.yml`, `snapshot-images.yml` and `runtime-images.yml`; `runner-label-container-arm64` of `runtime-images.yml`; default empty | none: the hosted `ubuntu-26.04-arm` literal |
-| checks | `checks-runner-tags` of `release`; default `[]` | none: the checks are jobs of the caller's own workflow, which names their `runs-on` | none, as on Forgejo |
+| image-build | `build-runner-tags-linux-amd64` of `release` and `snapshot-images`, which the release's consumer checks take too; required, never empty | `runner-label` of `release-images.yml` and `snapshot-images.yml`, which callers pass `CI_RUNNER_LABEL_CONTAINER` or the pool; `runner-label-container` of `runtime-images.yml` | none: the hosted `ubuntu-26.04` literal, whose VMs permit the user namespaces Buildah needs |
+| image-build-arm64 | `build-runner-tags-linux-arm64` of `release` and `snapshot-images`; required, `[]` states there is no arm64 runner and plans no arm64 jobs | `runner-label-arm64` of `release-images.yml`, `snapshot-images.yml` and `runtime-images.yml`; `runner-label-container-arm64` of `runtime-images.yml`; default empty | none: the hosted `ubuntu-26.04-arm` literal |
 | signer | `signer-runner-tags` of `release`; default `[]`; a literal of the separately pinned policy project | `runner-label` of `sign-and-publish-release.yml` and `sign-container-images.yml`, set by the caller workflow | none: the hosted `ubuntu-26.04` literal of the layer, which no caller input or variable changes |
-| macos | `runner-tags` of `publish-apple-appstore`; default `[saas-macos-medium-m1]` | none: the Forgejo layer has no Apple workflows | `macos-version` of `build-xcode-ios.yml`, `lint-swift.yml` and `publish-apple-appstore.yml`; default `macos-26` |
+| macos | `runner-tags-darwin-arm64` of `publish-apple-appstore`; default `[saas-macos-medium-m1]` | none: the Forgejo layer has no Apple workflows | `macos-version` of `build-xcode-ios.yml`, `lint-swift.yml` and `publish-apple-appstore.yml`; default `macos-26` |
+
+Every runner input is named `[role-]<keyword>[-<os>-<arch>]`: the role
+when it is not the ordinary one, the forge's keyword, and the platform when
+the role's runner is bound to one, as `build-runner-tags-linux-arm64` and
+`runner-tags-darwin-arm64` are. An input bound to a platform has no
+default and is never empty where its platform is planned: an untagged job
+could land on a runner of any platform. Each job takes its own role's
+input, and none falls back to another's: GitLab's kaniko image jobs take the
+build inputs as Buildah's do, the release's consumer checks, which may run
+Buildah, take `build-runner-tags-linux-amd64`, and its build job takes
+`runner-tags`.
 
 Where the names differ, each has a reason:
 
-- GitLab names each role's input, `build-runner-tags` beside `runner-tags`,
+- GitLab names each role's input, `build-runner-tags-linux-amd64` beside `runner-tags`,
   because one component holds jobs of several roles. Forgejo passes one
   `runner-label` per call, because each reusable workflow serves one role,
   and the caller picks the pool or the container runners for it.

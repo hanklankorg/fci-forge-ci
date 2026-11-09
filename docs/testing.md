@@ -780,7 +780,7 @@ failure: the fixture's first job, `Check that a job can build an image`, is
 the layer's `setup-buildah` alone, so the failure names the runner and not the
 release. Forge Lab's k3s road publishes no such runner, so they skip there.
 The GitLab image scenarios take the same runner through the release policy's
-`build-runner-tags`, or build with kaniko on the ordinary runner under
+`build-runner-tags-linux-amd64`, or build with kaniko, untagged, under
 `FORGE_CI_LIVE_GITLAB_IMAGE_BUILDER=kaniko`; see
 [Image builds with kaniko](#image-builds-with-kaniko).
 
@@ -1940,7 +1940,7 @@ FORGE_CI_LIVE_KANIKO_JOB_IMAGE_ARCHIVE=/absolute/images/kaniko-job.tar \
 ```
 
 The release policy then takes `image-builder: kaniko`, the pushed kaniko job
-image as `builder-job-image`, and no `build-runner-tags`. The lab's runners
+image as `builder-job-image`, and no `build-runner-tags-linux-amd64`. The lab's runners
 are of one architecture, so a release on an arm64 lab, whose image job needs
 tagged runners, is not covered. A development scenario that builds images
 runs its job in its consumer image archive, which must then be a kaniko job
