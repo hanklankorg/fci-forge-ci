@@ -15,6 +15,24 @@ import (
 	"github.com/diggsweden/forge-ci/internal/testutil/testfs"
 )
 
+// Generated headers must remain valid metadata in the producer script too;
+// quoted printf arguments can otherwise turn following arguments into an
+// apparent license expression when the script is scanned by REUSE.
+func TestPrepareScriptREUSE(t *testing.T) {
+	t.Parallel()
+
+	script, err := filepath.Abs("prepare.sh")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	command := exec.CommandContext(t.Context(), fixtureTool(t, "reuse"), "lint-file", script)
+	// lint-file reports line findings even when its process exits zero.
+	if output, err := command.CombinedOutput(); err != nil || strings.TrimSpace(string(output)) != "" {
+		t.Fatalf("preparation script REUSE: %v\n%s", err, output)
+	}
+}
+
 // Only synthetic repositories are written. No application, forge or compiler is
 // invoked; commit-tree creates disposable fixture objects, never project commits.
 func TestPrepareMaterializesPrivateSnapshot(t *testing.T) {
