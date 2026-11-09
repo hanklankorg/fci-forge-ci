@@ -105,9 +105,11 @@ func mergeGitLabNextCandidate(t *testing.T, client *gitlabapi.Client, target liv
 		t.Fatal(err)
 	}
 
-	mr, _, err := client.MergeRequests.CreateMergeRequest(project, &gitlabapi.CreateMergeRequestOptions{
+	waitGitLabPush(t, ctx, client, project, branch, commit.ID)
+
+	mr, err := livetest.CreateGitLabMergeRequest(ctx, client, project, &gitlabapi.CreateMergeRequestOptions{
 		SourceBranch: gitlabapi.Ptr(branch), TargetBranch: new("main"), Title: new("Request next release candidate"),
-	}, gitlabapi.WithContext(ctx))
+	})
 	if err != nil {
 		t.Fatal(err)
 	}

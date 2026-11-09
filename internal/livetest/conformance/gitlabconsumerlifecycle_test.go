@@ -264,7 +264,10 @@ func runGitLabConsumerLifecycle(t *testing.T, root string, private bool) {
 	// Nothing runs for these two pushes, whenever GitLab evaluates them: they
 	// create main and the change branch, which no rule of the policy admits.
 	useGitLabAdminPolicy(ctx, t, client, project, gitlabLifecyclePolicyFile+"@"+policyProject+":"+policy.ID)
-	waitGitLabBranch(t, ctx, client, project, lifecycleBranch, head)
+	// The merge request waits for GitLab to process both pushes: one it
+	// processed later would refresh the open merge request.
+	waitGitLabPush(t, ctx, client, project, layerMain, base)
+	waitGitLabPush(t, ctx, client, project, lifecycleBranch, head)
 
 	mr, err := livetest.CreateGitLabMergeRequest(ctx, client, project, &gitlabapi.CreateMergeRequestOptions{
 		SourceBranch: new(lifecycleBranch), TargetBranch: new(layerMain), Title: new("test: consumer lifecycle"),

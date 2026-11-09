@@ -18,10 +18,8 @@ import (
 
 	gitlabapi "gitlab.com/gitlab-org/api/client-go"
 
-	"github.com/diggsweden/forge-ci/internal/domain/errs"
 	"github.com/diggsweden/forge-ci/internal/domain/provider"
 	"github.com/diggsweden/forge-ci/internal/livetest"
-	"github.com/diggsweden/forge-ci/internal/retry"
 )
 
 // The consumer's real MR gate runs on its committed source. An inert misplaced
@@ -104,7 +102,8 @@ func runGitLabConsumerTrial(t *testing.T, root string, private bool) {
 
 	livetest.RetainGitLabJobLogsAfter(t, target, repo, map[string]string{variable: canary})
 
-	waitGitLabBranch(t, ctx, client, project, trialBranch, head)
+	waitGitLabPush(t, ctx, client, project, "main", main)
+	waitGitLabPush(t, ctx, client, project, trialBranch, head)
 
 	mr, err := livetest.CreateGitLabMergeRequest(ctx, client, project, &gitlabapi.CreateMergeRequestOptions{
 		SourceBranch: new(trialBranch), TargetBranch: new("main"), Title: new("test: GitLab consumer trial"),
@@ -205,20 +204,13 @@ func installGitLabDevelopmentPolicy(t *testing.T, client *gitlabapi.Client, targ
 	useGitLabAdminPolicy(ctx, t, client, project, livetest.GitLabAdminPipelineFile+"@"+policyProject+":"+policy.ID)
 }
 
-// waitGitLabBranch waits for GitLab to take a pushed branch in: it does so
-// after git has returned, and refuses a merge request opened before then,
-// "source_branch does not exist".
-func waitGitLabBranch(t *testing.T, ctx context.Context, client *gitlabapi.Client, project, branch, sha string) {
+// waitGitLabPush waits for GitLab to finish processing a push the harness
+// made before it opens a merge request: one opened earlier is refreshed by
+// the late push and gets a second merge-request pipeline.
+func waitGitLabPush(t *testing.T, ctx context.Context, client *gitlabapi.Client, project, branch, sha string) {
 	t.Helper()
 
-	if err := retry.Run(ctx, nil, 30, 2*time.Second, func() error {
-		current, _, readErr := client.Branches.GetBranch(project, branch, gitlabapi.WithContext(ctx))
-		if readErr != nil || current.Commit == nil || current.Commit.ID != sha {
-			return fmt.Errorf("branch %s is not at %s yet: %w", branch, sha, errs.ErrDependencyUnavailable)
-		}
-
-		return nil
-	}, retry.WithBackoff(retry.Constant)); err != nil {
+	if err := livetest.WaitGitLabPushProcessed(ctx, client, project, branch, sha); err != nil {
 		t.Fatal(err)
 	}
 }

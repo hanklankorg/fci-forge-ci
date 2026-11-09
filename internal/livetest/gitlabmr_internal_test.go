@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"sync/atomic"
 	"testing"
 
@@ -98,5 +99,88 @@ func TestCreateGitLabMergeRequestDoesNotReplayLostResponse(t *testing.T) {
 	})
 	if !errors.Is(err, cause) || transport.calls.Load() != 1 {
 		t.Fatalf("uncertain POST was replayed or cause lost: calls=%d err=%v", transport.calls.Load(), err)
+	}
+}
+
+// GitLab run 6: the branch was readable at once, but GitLab processed the
+// push in a later job, refreshed the merge request opened meanwhile, and
+// gave it a second pipeline. The fake keeps that order: the push event
+// appears only when the push is processed, after events for other refs and
+// for the branch's earlier commit, and a merge request opened before then
+// is the race.
+func TestWaitGitLabPushProcessedPrecedesTheMergeRequest(t *testing.T) {
+	t.Parallel()
+
+	const (
+		branch = "topic"
+		head   = "2222222222222222222222222222222222222222"
+	)
+
+	other := `{"push_data":{"ref_type":"tag","ref":"topic","commit_to":"` + head + `"}},` +
+		`{"push_data":{"ref_type":"branch","ref":"main","commit_to":"` + head + `"}},` +
+		`{"push_data":{"ref_type":"branch","ref":"topic","commit_to":"1111111111111111111111111111111111111111"}}`
+
+	var (
+		mu        sync.Mutex
+		polls     int
+		processed bool
+		raced     bool
+	)
+
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+
+		response.Header().Set("Content-Type", "application/json")
+
+		switch {
+		case request.Method == http.MethodGet && request.URL.Path == "/api/v4/projects/trial/fc-example/events":
+			if action := request.URL.Query().Get("action"); action != "pushed" {
+				t.Errorf("events read with action %q", action)
+			}
+
+			polls++
+
+			switch polls {
+			case 1:
+				_, _ = io.WriteString(response, `[]`)
+			case 2:
+				_, _ = io.WriteString(response, `[`+other+`]`)
+			default:
+				processed = true
+				_, _ = io.WriteString(response, `[{"push_data":{"ref_type":"branch","ref":"topic","commit_to":"`+head+`"}},`+other+`]`)
+			}
+		case request.Method == http.MethodPost && request.URL.Path == "/api/v4/projects/trial/fc-example/merge_requests":
+			raced = !processed
+
+			response.WriteHeader(http.StatusCreated)
+			_, _ = io.WriteString(response, `{"iid":1,"source_branch":"topic","target_branch":"main"}`)
+		default:
+			t.Errorf("unexpected request %s %s", request.Method, request.URL.Path)
+			response.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	client, err := gitlabapi.NewClient("inert", gitlabapi.WithBaseURL(server.URL+"/api/v4/"), gitlabapi.WithHTTPClient(server.Client()))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err = WaitGitLabPushProcessed(t.Context(), client, "trial/fc-example", branch, head); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err = CreateGitLabMergeRequest(t.Context(), client, "trial/fc-example", &gitlabapi.CreateMergeRequestOptions{
+		SourceBranch: new(branch), TargetBranch: new("main"), Title: new("test: processed push"),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	if raced || polls != 3 {
+		t.Fatalf("merge request opened before GitLab processed the push: raced=%v polls=%d", raced, polls)
 	}
 }
