@@ -34,9 +34,11 @@ func TestCampaignSnapshot_RunsTheMultiImageDemosOnForgejo(t *testing.T) {
 }
 
 // On GitLab the snapshot takes the component's job image alone: the Cargo
-// workspace, container-first, and the monorepo, whose two producers build in
-// their families' runtime images, which the campaign prepares from the plan.
-func TestCampaignSnapshot_RunsTheMultiImageDemosOnGitLab(t *testing.T) {
+// workspace, container-first, the monorepo, whose two producers build in
+// their families' runtime images, which the campaign prepares from the plan,
+// and the Go service, container-first, whose lifecycle needs a GitLab
+// release build the demo does not ship.
+func TestCampaignSnapshot_RunsTheDevelopmentCellsOnGitLab(t *testing.T) {
 	t.Parallel()
 
 	dir, plan := planCheckedInLifecycle(t, campaignGitLab, "test/live/campaigns/snapshot-gitlab.cases", "both", "")
@@ -44,6 +46,7 @@ func TestCampaignSnapshot_RunsTheMultiImageDemosOnGitLab(t *testing.T) {
 	want := [][]string{
 		{campaignConsumerRecipe, campaignGitLab, filepath.Join(dir, "demos/hello-cargo-workspace"), TrialSnapshot, "job-archive=/c/rust.tar"},
 		{campaignConsumerRecipe, campaignGitLab, filepath.Join(dir, "demos/hello-monorepo"), TrialSnapshot, "job-archive=/c/java.tar"},
+		{campaignConsumerRecipe, campaignGitLab, filepath.Join(dir, "demos/hello-go-service"), TrialSnapshot, "job-archive=/c/go.tar"},
 	}
 
 	if len(plan.Cases) != len(want) {
@@ -59,7 +62,7 @@ func TestCampaignSnapshot_RunsTheMultiImageDemosOnGitLab(t *testing.T) {
 	root := reporoot.Path(t)
 
 	targets, err := CampaignRuntimeTargets(root, []string{campaignGitLab + "=" + filepath.Join(root, "test/live/campaigns/snapshot-gitlab.cases")}, nil)
-	if err != nil || !slices.Equal(targets, []string{"java", "node", "rust"}) {
+	if err != nil || !slices.Equal(targets, []string{"go", "java", "node", "rust"}) {
 		t.Fatalf("snapshot runtime targets %q, %v; want the job images' and the monorepo's producer families", targets, err)
 	}
 }
@@ -83,6 +86,9 @@ func TestCampaignSnapshot_SelectsOneCell(t *testing.T) {
 		}},
 		"gitlab monorepo": {campaignGitLab, "snapshot-gitlab.cases", "hello-monorepo/snapshot/image-builder=buildah/visibility=public", func(dir string) []string {
 			return []string{campaignConsumerRecipe, campaignGitLab, filepath.Join(dir, "demos/hello-monorepo"), TrialSnapshot, "job-archive=/c/java.tar"}
+		}},
+		"gitlab go service": {campaignGitLab, "snapshot-gitlab.cases", "hello-go-service/snapshot/image-builder=buildah/visibility=public", func(dir string) []string {
+			return []string{campaignConsumerRecipe, campaignGitLab, filepath.Join(dir, "demos/hello-go-service"), TrialSnapshot, "job-archive=/c/go.tar"}
 		}},
 	} {
 		t.Run(name, func(t *testing.T) {

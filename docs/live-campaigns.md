@@ -344,7 +344,9 @@ token; the release secrets are set at the release phase and not before. It
 runs outside the campaign route, inside Forge Lab's hosted session:
 `just test-live-consumer github <checkout> lifecycle org=<org-id>`
 (docs/testing.md, Trying a consumer on GitHub). On GitHub the event is
-admitted for the `hello-maven-service` demo alone.
+admitted for the demos that ship all three fixtures and a service
+snapshot's declaration: `hello-maven-service`, `hello-cargo-container`,
+`hello-go-service` and `hello-npm-service`.
 
 **Development routes.** On Forgejo and GitLab the event is admitted for a
 demo with a development route on the provider, read from the demo's own
@@ -380,7 +382,7 @@ behind it:
 | hello-cargo-container | lifecycle | lifecycle | container-first from `release-images.yml`, no producer |
 | hello-npm-service | lifecycle | lifecycle | artifact-first: `artifacts.yml` is a service snapshot's (one npm producer), with the snapshot-npm-layout merge's layout, and the demo ships its GitLab release build |
 | hello-cargo-workspace | — | — | two runtime images; the lifecycle judges one container (the snapshot event judges both, see [Snapshot](#snapshot)) |
-| hello-go-service | lifecycle | — | container-first from `artifacts.yml`, no producer; its `extract.binary` is the release's, which the snapshot does not run; no GitLab release build, as no example demo ships one |
+| hello-go-service | lifecycle | — | container-first from `artifacts.yml`, no producer; its `extract.binary` is the release's, which the snapshot does not run; no GitLab release build, as no example demo ships one (the snapshot event runs its development phase on GitLab, see [Snapshot](#snapshot)) |
 | hello-go-cli, hello-maven, hello-npm-package | — | — | no container, so no snapshot; hello-maven's library development route publishes a SNAPSHOT package, another shape |
 | hello-gradle, hello-monorepo, hello-android, hello-ios | — | — | no Forgejo flow or no container; the example demos ship no GitLab release build (the snapshot event judges hello-monorepo's two images on GitLab, see [Snapshot](#snapshot)) |
 
@@ -402,14 +404,17 @@ would be a workflow of the demo's, not a setting.
 `test/live/campaigns/snapshot-forgejo.cases` and
 `test/live/campaigns/snapshot-gitlab.cases` run the `snapshot` event: the
 lifecycle's development phase alone, over every image the planner plans from
-the demo's declaration. It is the multi-image demos' route until their full
-lifecycle exists; it releases nothing and does not couple to a release's
-image fan-out:
+the demo's declaration. It is the route of every development cell no
+lifecycle line runs: the multi-image demos' until their full lifecycle
+exists, and `hello-go-service`'s on GitLab, which has no GitLab release
+build. It releases nothing and does not couple to a release's image
+fan-out:
 
 ```text
 consumer hello-cargo-workspace snapshot CI_JOB_IMAGE=@JOB_IMAGE_RUST CI_IMAGE_BUILDER=buildah
 consumer hello-cargo-workspace snapshot job-archive=@FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_RUST
 consumer hello-monorepo snapshot job-archive=@FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_JAVA
+consumer hello-go-service snapshot job-archive=@FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_GO
 ```
 
 Each cell reruns with one command:
@@ -418,6 +423,7 @@ Each cell reruns with one command:
 just campaign-lane <dir> forgejo test/live/campaigns/snapshot-forgejo.cases hello-cargo-workspace/snapshot/image-builder=buildah/visibility=public
 just campaign-lane <dir> gitlab test/live/campaigns/snapshot-gitlab.cases hello-cargo-workspace/snapshot/image-builder=buildah/visibility=public
 just campaign-lane <dir> gitlab test/live/campaigns/snapshot-gitlab.cases hello-monorepo/snapshot/image-builder=buildah/visibility=public
+just campaign-lane <dir> gitlab test/live/campaigns/snapshot-gitlab.cases hello-go-service/snapshot/image-builder=buildah/visibility=public
 ```
 
 The declaration is the lifecycle's, `livetest.ServiceSnapshotSource`, overlaid

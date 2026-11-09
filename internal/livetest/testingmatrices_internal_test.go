@@ -39,7 +39,9 @@ func TestReadMatrixEvidenceRefusesMalformedLines(t *testing.T) {
 // or the admission's reason, the harness's scope listed apart, and a GitLab
 // lifecycle without the demo's release build is not applicable. The Go
 // service extracts its binaries, yet its snapshot is container-first, and
-// the snapshot event admits it on GitLab, where no release build is needed.
+// the snapshot event runs it on GitLab, where no release build is needed.
+// Each one-image service ships its hosted development fixture, so its GitHub
+// development and lifecycle cells have a line.
 // The multi-image demos' snapshot lines judge every planned image; the
 // monorepo has no Forgejo workflow to pin the harness's workflow by.
 func TestRenderTestingMatricesReadsTheShippedTree(t *testing.T) {
@@ -54,19 +56,19 @@ func TestRenderTestingMatricesReadsTheShippedTree(t *testing.T) {
 		"| hello-maven-service (java · artifact-first · one image) |",
 		"| hello-cargo-container (rust · container-first · one image) |",
 		"| hello-npm-service (node · artifact-first · one image) |",
-		"| 📝 lifecycle / 📝 lifecycle / admitted |",
+		"| 📝 lifecycle / 📝 lifecycle / 📝 lifecycle |",
 		"| hello-ios (xcode-ios · no container · no image) | ⬚ / ⬚ / 📝 |",
 		"- hello-monorepo, github: the demo has no root Containerfile",
 		"| hello-go-cli (go · no container · no image) |",
 		"| hello-go-service (go · container-first · one image) |",
-		"| — | 📝 lifecycle / admitted / admitted |",
+		"| — | 📝 lifecycle / 📝 snapshot / 📝 lifecycle |",
 		"| hello-cargo-workspace (rust · container-first · 2 images) |",
 		"| — | 📝 snapshot / 📝 snapshot / ⛔ |",
 		"| ⛔ / 📝 snapshot / ⛔ | — |",
 		"- hello-monorepo, forgejo snapshot: the demo has no .forgejo/workflows/release.yml",
-		"| 📝 / — / ⬚ (admitted, no line) |",
+		"| 📝 / — / 📝 |",
 		"Outside the live harness's scope, the trial's acceptance and not a product rule:\n\n- hello-cargo-workspace, forgejo:",
-		"|  | container-first | 📝 hello-cargo-container | 📝 hello-cargo-container | ⬚ hello-cargo-container (admitted, no line) |",
+		"|  | container-first | 📝 hello-cargo-container | 📝 hello-cargo-container | 📝 hello-cargo-container |",
 		"| architecture | amd64 |",
 	} {
 		if !strings.Contains(page, want) {
