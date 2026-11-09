@@ -4,13 +4,11 @@
 package gitlabbehavior
 
 import (
-	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/diggsweden/forge-ci/internal/testutil/gitlabrender"
 	"github.com/diggsweden/forge-ci/internal/testutil/reporoot"
@@ -112,8 +110,7 @@ func runReleaseAfterScript(t *testing.T, workspace, job string) {
 		t.Fatal("release artifact publication hook is missing")
 	}
 
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-	defer cancel()
+	ctx := commandContext(t)
 
 	command := exec.CommandContext(ctx, componentBash(t), "--noprofile", "--norc", "-c", script)
 	command.Dir = workspace
@@ -164,8 +161,7 @@ func TestReleaseFilesGatherExactlyThePlannedFamilies(t *testing.T) {
 				}
 			}
 
-			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-			defer cancel()
+			ctx := commandContext(t)
 
 			command := exec.CommandContext(ctx, componentBash(t), "--noprofile", "--norc", "-eu", "-c",
 				`source "$1"; rc_engine() { printf 'engine %s\n' "$*"; }; rc_planned_jobs() { printf 'Prepare: version java\nBuild: java\n' >"$1"; }; rc_gather_families`,

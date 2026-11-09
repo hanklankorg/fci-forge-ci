@@ -4,7 +4,6 @@
 package gitlabbehavior
 
 import (
-	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -14,7 +13,6 @@ import (
 	"slices"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/diggsweden/forge-ci/internal/domain/projecttype"
 	"github.com/diggsweden/forge-ci/internal/domain/version"
@@ -50,8 +48,7 @@ func TestReleaseJobRejectsCredentialsOutsideItsRole(t *testing.T) {
 		t.Run(pair[0]+"/"+pair[1], func(t *testing.T) {
 			t.Parallel()
 
-			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-			defer cancel()
+			ctx := commandContext(t)
 
 			script := filepath.Join(reporoot.Path(t), ".gitlab", "bin", "release.sh")
 			command := exec.CommandContext(ctx, componentBash(t), "--noprofile", "--norc", "-c", `source "$1"; rc_engine() { echo engine-called; }; rc_release_context`, "release-guard", script)
@@ -77,8 +74,7 @@ func TestReleaseHandoffNeverSourcesItsDigestAsShell(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-	defer cancel()
+	ctx := commandContext(t)
 
 	script := filepath.Join(reporoot.Path(t), ".gitlab", "bin", "release.sh")
 
@@ -148,8 +144,7 @@ func TestBaseSigningRequiresExplicitPolicyOptIn(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-	defer cancel()
+	ctx := commandContext(t)
 
 	script := filepath.Join(reporoot.Path(t), ".gitlab", "bin", "release.sh")
 	command := exec.CommandContext(ctx, componentBash(t), "--noprofile", "--norc", "-eu", "-c",
@@ -180,8 +175,7 @@ func TestPublicationRegistryBelongsToTheSeparateProject(t *testing.T) {
 		t.Run(tc.image, func(t *testing.T) {
 			t.Parallel()
 
-			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-			defer cancel()
+			ctx := commandContext(t)
 
 			script := filepath.Join(reporoot.Path(t), ".gitlab", "bin", "release.sh")
 			command := exec.CommandContext(ctx, componentBash(t), "--noprofile", "--norc", "-eu", "-c", `source "$1"; rc_publication_scope`, "publication-scope", script)
@@ -249,8 +243,7 @@ func TestReleaseBranchIsNotTakenFromTheEnvironment(t *testing.T) {
 func TestReleaseBranchInputMustBeABranchName(t *testing.T) {
 	t.Parallel()
 
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-	defer cancel()
+	ctx := commandContext(t)
 
 	script := filepath.Join(reporoot.Path(t), ".gitlab", "bin", "release.sh")
 	command := exec.CommandContext(ctx, componentBash(t), "--noprofile", "--norc", "-c",
@@ -288,8 +281,7 @@ func runReleasePrepareIn(t *testing.T, dir, script, input string, extraEnv ...st
 		}
 	}
 
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-	defer cancel()
+	ctx := commandContext(t)
 
 	command := exec.CommandContext(ctx, componentBash(t), "--noprofile", "--norc", "-c",
 		`set -eu; source "$1"; rc_engine() { printf 'engine %s\n' "$*"; local previous='' arg path; for arg in "$@"; do if [ "$previous" = --paths-file ]; then : >"$arg"; for path in ${FAKE_BUMP_PATHS:-}; do printf '%s\n' "$path" >>"$arg"; done; fi; previous=$arg; done; }; git() { printf 'git %s\n' "$*"; }; rc_release_context; rc_request_checkout() { rc_engine validate tag commit --branch "${RC_RELEASE_BRANCH}"; }; rc_prepare_release`,
@@ -449,8 +441,7 @@ func TestReleasePathGuardsStopTheJob(t *testing.T) {
 				setup = ":"
 			}
 
-			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-			defer cancel()
+			ctx := commandContext(t)
 
 			command := exec.CommandContext(ctx, componentBash(t), "--noprofile", "--norc", "-c",
 				`set -euo pipefail; source "$1"; `+ownerCLI+setup+`; `+test.call+`; echo went-on`, "guards", script)
@@ -495,8 +486,7 @@ func TestReleaseJobKeepsTheCredentialsOfItsRole(t *testing.T) {
 		t.Run(pair[0]+"/"+pair[1], func(t *testing.T) {
 			t.Parallel()
 
-			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-			defer cancel()
+			ctx := commandContext(t)
 
 			script := filepath.Join(reporoot.Path(t), ".gitlab", "bin", "release.sh")
 			command := exec.CommandContext(ctx, componentBash(t), "--noprofile", "--norc", "-c",
@@ -529,8 +519,7 @@ func TestReleaseVersionJobDiffsOnlyItsFamilyFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-	defer cancel()
+	ctx := commandContext(t)
 
 	command := exec.CommandContext(ctx, componentBash(t), "--noprofile", "--norc", "-eu", "-c",
 		`source "$1"; rc_request_checkout() { :; }; rc_new_handoff() { mkdir -- "$1"; }
@@ -599,8 +588,7 @@ func TestReleaseNodeVersionJobCarriesTheShrinkwrapFile(t *testing.T) {
 		pattern.WriteString(" frontend/" + file)
 	}
 
-	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
-	defer cancel()
+	ctx := commandContext(t)
 
 	command := exec.CommandContext(ctx, componentBash(t), "--noprofile", "--norc", "-eu", "-c",
 		`source "$1"; rc_request_checkout() { :; }; rc_new_handoff() { mkdir -- "$1"; }

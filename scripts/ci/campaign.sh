@@ -205,9 +205,9 @@ lane() {
   local dir=${1:-} provider=${2:-} cases=${3:-}
   [[ $# -ge 3 ]] || usage
   shift 3
+  # A GitHub cell exits with its status; the lane below is never reached.
   if [[ "$provider" == github ]]; then
     github_cell "$dir" "$cases" "$@"
-    return
   fi
   # The preflight runs in the repository; a relative cases file is the caller's.
   [[ "$cases" == /* ]] || cases=$PWD/$cases

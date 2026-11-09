@@ -16,10 +16,7 @@ on:
         type: string
       images:
         description: >-
-          One `input=reference` line per runtime image the caller's container
-          jobs run, refused unless the reference is `image@sha256:<64 hex>`.
-          `input?=reference` admits an image a job runs only when its plan
-          asks for it: empty is allowed, anything else must be a digest
+          One `input=reference` line per runtime image the caller's container jobs run, refused unless the reference is `image@sha256:<64 hex>`. `input?=reference` admits an image a job runs only when its plan asks for it: empty is allowed, anything else must be a digest
         required: false
         default: ""
         type: string

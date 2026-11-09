@@ -4,11 +4,9 @@
 package gitlabbehavior
 
 import (
-	"context"
 	"os/exec"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/diggsweden/forge-ci/internal/testutil/gitlabrender"
 )
@@ -121,8 +119,7 @@ func runJobUserCheck(t *testing.T, script string, tc jobUserCase, pin ...string)
 
 	replacements := append([]string{"$[[ inputs.job-user ]]", tc.input}, pin...)
 
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-	defer cancel()
+	ctx := commandContext(t)
 
 	command := exec.CommandContext(ctx, componentBash(t), "--noprofile", "--norc", "-c", fakeID+strings.NewReplacer(replacements...).Replace(script))
 	command.Dir = dir

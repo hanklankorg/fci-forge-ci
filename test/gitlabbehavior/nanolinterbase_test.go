@@ -6,14 +6,12 @@ package gitlabbehavior
 
 import (
 	"bytes"
-	"context"
 	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"gopkg.in/yaml.v3"
 
@@ -236,8 +234,7 @@ func runNanolinterScriptWith(t *testing.T, dir, workspace string, inputs map[str
 		t.Fatal("nanolinter component must have one script block")
 	}
 
-	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
-	defer cancel()
+	ctx := commandContext(t)
 
 	// The local forge stands in for the instance, under the name the job
 	// holds CI_SERVER_URL to.

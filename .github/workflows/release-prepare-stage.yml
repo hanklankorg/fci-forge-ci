@@ -212,8 +212,8 @@ jobs:
           [[ "$CONTEXT_SOURCE_SHA" =~ ^[0-9a-f]{40}$ && "$AUTHORIZED_SOURCE_SHA" == "$CONTEXT_SOURCE_SHA" ]]
           [[ "$FULL_RESULT" == success && "$FULL_RUN_ID" == "$CURRENT_RUN_ID" && "$FULL_RUN_ATTEMPT" == "$CURRENT_RUN_ATTEMPT" ]]
           [[ "$FULL_ARTIFACT_ID" =~ ^[1-9][0-9]*$ && "$FULL_ARTIFACT_NAME" == "full-changelog-$CURRENT_RUN_ID-$CURRENT_RUN_ATTEMPT" ]]
-      # Host jobs have no image: the canonical exact-ID CLI is their only CLI.
       - &canonical-context
+        # Host jobs have no image: the canonical exact-ID CLI is their only CLI.
         name: Require original canonical success and approved identity
         shell: /bin/bash --noprofile --norc -peuo pipefail {0}
         env:

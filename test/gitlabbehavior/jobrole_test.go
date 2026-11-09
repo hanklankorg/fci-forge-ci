@@ -4,7 +4,6 @@
 package gitlabbehavior
 
 import (
-	"context"
 	"errors"
 	"os"
 	"os/exec"
@@ -13,7 +12,6 @@ import (
 	"slices"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/diggsweden/forge-ci/internal/testutil/gitlabrender"
 	"github.com/diggsweden/forge-ci/internal/testutil/reporoot"
@@ -148,8 +146,7 @@ func runReleaseJobStart(t *testing.T, start, user, spoof string) (string, string
 	script := strings.Replace(gitlabrender.Script(t, "templates/release-jobs.yml", start,
 		map[string]any{"job-user": "65532:65532", "engine-sha": pin, "engine-reference": pin}), "object_format=sha1\n", probe+"\n", 1)
 
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-	defer cancel()
+	ctx := commandContext(t)
 
 	command := exec.CommandContext(ctx, componentBash(t), "--noprofile", "--norc", "-c", fakeID+script)
 	command.Dir = dir

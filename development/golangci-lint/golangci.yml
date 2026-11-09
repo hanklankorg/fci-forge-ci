@@ -16,7 +16,10 @@
 # than silently skipped.
 version: "2"
 run:
-  timeout: 5m
+  # Local to this project: a cold-cache run of the live-tagged tree at
+  # concurrency 2 takes about six minutes; a timeout reports only part of
+  # the tree, so the budget leaves room for a slow host.
+  timeout: 15m
   # Keep paths stable when this file moves within development/.
   relative-path-mode: gomod
   # Local to this project: include the live conformance tier in static
@@ -29,8 +32,13 @@ output:
       path: stdout
       print-linter-name: true
       print-issued-lines: true
+# Local to this project: report every finding in one run. A per-linter or
+# per-text cap, or one finding per line, hides the rest until the first ones
+# are fixed, so successive runs would report different sets.
 issues:
-  uniq-by-line: true
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
 linters:
   default: all
   disable:

@@ -4,7 +4,6 @@
 package gitlabbehavior
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"maps"
@@ -15,7 +14,6 @@ import (
 	"slices"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/diggsweden/forge-ci/internal/testutil/gitlabrender"
 	"github.com/diggsweden/forge-ci/internal/testutil/reporoot"
@@ -219,8 +217,7 @@ func runPolicyScript(t *testing.T, script string, env []string) (string, error) 
 
 	dir := t.TempDir()
 
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-	defer cancel()
+	ctx := commandContext(t)
 
 	command := exec.CommandContext(ctx, componentBash(t), "--noprofile", "--norc", "-c", script)
 	command.Dir = dir

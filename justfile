@@ -1420,8 +1420,8 @@ campaign-prepare forge_lab dir +lanes:
 #   just campaign-lane ~/campaigns/hosted github hello-maven-service/lifecycle org=<id>
 [arg('dir', help='Absolute campaign directory from just campaign-prepare; on github, where github.results is written')]
 [arg('cases', help='Cases file: consumer <demo> <event> [key=value ...] or scenario <TestName>, one a line; on github <demo>/<event>')]
-[arg('provider', help='forgejo, gitlab or github; scopes the lane and its lock')]
 [arg('select', help='<demo>[/<event>][/<setting>=<value>...] or <TestName> per cell to rerun; on github, test-live-consumer settings')]
+[arg('provider', help='forgejo, gitlab or github; scopes the lane and its lock')]
 [doc('Live; run a campaign lane; network, destructive')]
 [group('campaign')]
 campaign-lane dir provider cases *select:
