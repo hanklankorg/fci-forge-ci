@@ -66,8 +66,14 @@ func (g *lateRequestGit) PathsDiff(context.Context, string, string, []string) (s
 	return "", nil
 }
 
-func (g *lateRequestGit) FileAt(context.Context, string, string) (string, string, bool, error) {
-	return "", "", false, nil
+// FileAt finds a regular CHANGELOG.md at every commit, the one file the
+// prepared release changes, and nothing else.
+func (g *lateRequestGit) FileAt(_ context.Context, _, path string) (string, string, bool, error) {
+	if path != "CHANGELOG.md" {
+		return "", "", false, nil
+	}
+
+	return "", "100644", true, nil
 }
 
 // Compose the actual native policy and source validators with inert Git and

@@ -273,7 +273,7 @@ func verifyChangelogOnly(ctx context.Context, git tagVerifyGit, in VerifyRelease
 			return fmt.Errorf("verify-release-tag: prepared release must change only CHANGELOG.md; changed paths: %q: %w", changed, errs.ErrValidation)
 		}
 
-		return nil
+		return verifyChangelogFile(ctx, git, in, changelogFile)
 	}
 
 	return verifyChangelogAndPlannedBumps(ctx, git, in, changed)
@@ -317,7 +317,14 @@ func verifyChangelogAndPlannedBumps(ctx context.Context, git tagVerifyGit, in Ve
 		switch {
 		case path == changelogFile:
 			changelog = true
+
+			if err := verifyChangelogFile(ctx, git, in, path); err != nil {
+				return err
+			}
 		case pathpkg.Base(path) == changelogFile && slices.ContainsFunc(scopes, func(scope version.BumpScope) bool { return scope.WorkingDir == pathpkg.Dir(path) }):
+			if err := verifyChangelogFile(ctx, git, in, path); err != nil {
+				return err
+			}
 		case version.PlannedBumpScope(scopes, path) >= 0:
 			index := version.PlannedBumpScope(scopes, path)
 			native[index] = append(native[index], path)
@@ -361,6 +368,31 @@ func plannedGradleVersionFile(item pipeline.PlannedArtifact) string {
 	default:
 		return ""
 	}
+}
+
+// verifyChangelogFile admits a changelog the release commit changes only as
+// a regular file at its parent's mode, or a plain one where the release
+// creates it: the name alone admits no link, deletion or executable.
+func verifyChangelogFile(ctx context.Context, git tagVerifyGit, in VerifyReleaseTagInput, path string) error {
+	_, beforeMode, existed, err := git.FileAt(ctx, in.ExpectedParent, path)
+	if err != nil {
+		return fmt.Errorf("verify-release-tag: read %s before the release: %w", path, err)
+	}
+
+	_, afterMode, written, err := git.FileAt(ctx, in.ReleaseSHA, path)
+	if err != nil {
+		return fmt.Errorf("verify-release-tag: read %s in the release: %w", path, err)
+	}
+
+	if !existed {
+		beforeMode = "100644"
+	}
+
+	if !written || afterMode != beforeMode {
+		return fmt.Errorf("verify-release-tag: %s must be a regular file at its parent's mode in the release: %w", path, errs.ErrValidation)
+	}
+
+	return nil
 }
 
 // verifyTextBump requires the release's version file to hold exactly what the

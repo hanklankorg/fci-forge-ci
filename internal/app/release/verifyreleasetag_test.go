@@ -7,7 +7,9 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
+	pathpkg "path"
 	"slices"
 	"strings"
 	"testing"
@@ -53,6 +55,8 @@ type fakeTagGit struct {
 	files map[string]map[string]string
 	// modes are the Git modes of files by commit then path; 100644 if unset.
 	modes map[string]map[string]string
+	// absent are the changelogs a commit does not have.
+	absent map[string]map[string]bool
 }
 
 type tagVerifyCall struct {
@@ -95,12 +99,23 @@ func (f fakeTagGit) PathsDiff(context.Context, string, string, []string) (string
 	return f.diff, nil
 }
 
+// FileAt reads files and modes. A changelog the files leave out is a regular
+// file at every commit it is not absent from, and a symbolic link (mode
+// 120000) is refused as the adapter refuses every entry that is not one
+// regular file.
 func (f fakeTagGit) FileAt(_ context.Context, commit, path string) (string, string, bool, error) {
 	body, exists := f.files[commit][path]
+	if !exists && pathpkg.Base(path) == "CHANGELOG.md" {
+		exists = !f.absent[commit][path]
+	}
 
 	mode := f.modes[commit][path]
 	if mode == "" {
 		mode = "100644"
+	}
+
+	if mode == "120000" {
+		return "", "", false, fmt.Errorf("%s at %s is not one regular file: %w", path, commit, errs.ErrValidation)
 	}
 
 	return body, mode, exists, nil
@@ -673,4 +688,64 @@ func TestVerifyReleaseTag_ChangelogOnlyRedoesTheAndroidAndXcodeTextBumps(t *test
 			}
 		})
 	}
+}
+
+// A changelog the release commit changes is admitted by its name only as a
+// regular file at its parent's mode: a link, an executable or a deleted
+// changelog is refused, with or without a planned bump, and so is a
+// changelog copy that becomes executable.
+func TestVerifyReleaseTag_ChangelogOnlyAdmitsOnlyARegularChangelog(t *testing.T) {
+	t.Parallel()
+
+	parent := strings.Repeat("b", 40)
+	copied := "services/backend/CHANGELOG.md"
+
+	for _, scenario := range []struct {
+		name   string
+		plan   *pipeline.ReleasePrepareStagePlan
+		path   string
+		modes  map[string]map[string]string
+		absent map[string]map[string]bool
+		want   error
+	}{
+		{name: "a regular changelog", path: "CHANGELOG.md"},
+		{name: "an executable changelog", path: "CHANGELOG.md", modes: map[string]map[string]string{sha: {"CHANGELOG.md": "100755"}}, want: errs.ErrValidation},
+		{name: "a linked changelog", path: "CHANGELOG.md", modes: map[string]map[string]string{sha: {"CHANGELOG.md": "120000"}}, want: errs.ErrValidation},
+		{name: "a deleted changelog", path: "CHANGELOG.md", absent: map[string]map[string]bool{sha: {"CHANGELOG.md": true}}, want: errs.ErrValidation},
+		{name: "an executable changelog beside a bump", plan: bumpPlanOf(projecttype.Maven), path: "CHANGELOG.md",
+			modes: map[string]map[string]string{sha: {"CHANGELOG.md": "100755"}}, want: errs.ErrValidation},
+		{name: "a created changelog copy", plan: backendPlan(), path: copied, absent: map[string]map[string]bool{parent: {copied: true}}},
+		{name: "a linked changelog copy", plan: backendPlan(), path: copied, modes: map[string]map[string]string{sha: {copied: "120000"}}, want: errs.ErrValidation},
+		{name: "an executable created changelog copy", plan: backendPlan(), path: copied,
+			absent: map[string]map[string]bool{parent: {copied: true}}, modes: map[string]map[string]string{sha: {copied: "100755"}}, want: errs.ErrValidation},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			t.Parallel()
+
+			changed := []string{"CHANGELOG.md"}
+			if scenario.path != "CHANGELOG.md" {
+				changed = append(changed, scenario.path)
+			}
+
+			git := fakeTagGit{head: sha, tagCommit: sha, parents: []string{parent}, request: parent, changed: changed, modes: scenario.modes, absent: scenario.absent}
+			err := apprelease.VerifyReleaseTag(t.Context(), git, io.Discard, apprelease.VerifyReleaseTagInput{
+				ReleaseSHA: sha, Tag: "v1.2.3", ExpectedParent: parent, ChangelogOnly: true, PreparePlan: scenario.plan,
+			})
+
+			if scenario.want == nil {
+				require.NoError(t, err)
+			} else {
+				require.ErrorIs(t, err, scenario.want)
+			}
+		})
+	}
+}
+
+// backendPlan bumps one Maven project in services/backend.
+func backendPlan() *pipeline.ReleasePrepareStagePlan {
+	return &pipeline.ReleasePrepareStagePlan{Version: pipeline.ReleasePlanVersion, Stage: "prepare", Targets: pipeline.ReleasePrepareTargets{
+		VersionBump: pipeline.TargetPlan[pipeline.PlannedArtifact]{Runs: true, Items: []pipeline.PlannedArtifact{
+			{Name: "backend", ProjectType: projecttype.Maven, WorkingDirectory: "services/backend"},
+		}},
+	}}
 }
