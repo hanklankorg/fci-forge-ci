@@ -3070,6 +3070,9 @@ Plans the release's version bump and builds from the declaration, as
                           family's build job builds, one a line.
    --job-names-output     the names of the generated jobs, one a line, for
                           the jobs that check every planned job ran.
+   --project-type-output  with --family, the project type that family's
+                          version job bumps with its native tool; a family
+                          the plan bumps no project of is refused.
 
    Without --file and without .forge-ci/artifacts.yml the release has no
    planned bump and no family; a file named by --file must exist.
@@ -3090,9 +3093,10 @@ EXAMPLE:
 | `--runtime-image-android` | runtime image of the android family (Gradle Android) | string | `""` | n/a |
 | `--output` | file to write the generated release jobs to | string | `""` | n/a |
 | `--prepare-plan-output` | file to write the prepare-stage plan JSON to | string | `""` | n/a |
-| `--family` | build family whose artifacts --artifacts-output lists: java, node, go, rust or android | string | `""` | n/a |
+| `--family` | family whose artifacts --artifacts-output lists or whose project type --project-type-output names: java, node, go, rust or android | string | `""` | n/a |
 | `--artifacts-output` | file to write --family's artifact names to, one a line | string | `""` | n/a |
 | `--job-names-output` | file to write the generated jobs' names to, one a line | string | `""` | n/a |
+| `--project-type-output` | file to write --family's version project type to | string | `""` | n/a |
 
 ### `forge-ci plan gitlab-snapshot-pipeline`
 

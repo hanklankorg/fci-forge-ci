@@ -513,9 +513,10 @@ func TestReleaseJobKeepsTheCredentialsOfItsRole(t *testing.T) {
 	}
 }
 
-// A family's version job hands on the diff of the version files its own bump
-// names, its file-pattern without the changelog copies, so two families'
-// patches never both carry one file.
+// A family's version job bumps the project type the plan names for its
+// family, and hands on the diff of the version files its own bump names, its
+// file-pattern without the changelog copies, so two families' patches never
+// both carry one file.
 func TestReleaseVersionJobDiffsOnlyItsFamilyFiles(t *testing.T) {
 	t.Parallel()
 
@@ -533,7 +534,8 @@ func TestReleaseVersionJobDiffsOnlyItsFamilyFiles(t *testing.T) {
 
 	command := exec.CommandContext(ctx, componentBash(t), "--noprofile", "--norc", "-eu", "-c",
 		`source "$1"; rc_request_checkout() { :; }; rc_new_handoff() { mkdir -- "$1"; }
-rc_engine() { printf 'engine %s\n' "$*"; case "$*" in *bump-plan*) printf 'FILE_PATTERN=services/backend/CHANGELOG.md :(glob)services/backend/**/pom.xml\n' >"${CI_OUTPUT}" ;; esac; }
+rc_engine() { printf 'engine %s\n' "$*"; case "$*" in *bump-plan*) printf 'FILE_PATTERN=services/backend/CHANGELOG.md :(glob)services/backend/**/pom.xml\n' >"${CI_OUTPUT}" ;;
+  *"--family java --project-type-output ${RC_WORK}/project-type"*) printf 'maven\n' >"${RC_WORK}/project-type" ;; esac; }
 git() { printf 'git %s\n' "$*"; }; rc_bump_version java`,
 		"bump", filepath.Join(reporoot.Path(t), ".gitlab", "bin", "release.sh"))
 	command.Dir = dir
@@ -602,7 +604,8 @@ func TestReleaseNodeVersionJobCarriesTheShrinkwrapFile(t *testing.T) {
 
 	command := exec.CommandContext(ctx, componentBash(t), "--noprofile", "--norc", "-eu", "-c",
 		`source "$1"; rc_request_checkout() { :; }; rc_new_handoff() { mkdir -- "$1"; }
-rc_engine() { case "$*" in *bump-plan*) printf 'FILE_PATTERN=%s\n' "${FAKE_PATTERN# }" >"${CI_OUTPUT}" ;; esac; }; rc_bump_version node`,
+rc_engine() { case "$*" in *bump-plan*) printf 'FILE_PATTERN=%s\n' "${FAKE_PATTERN# }" >"${CI_OUTPUT}" ;;
+  *"--family node --project-type-output ${RC_WORK}/project-type"*) printf 'npm\n' >"${RC_WORK}/project-type" ;; esac; }; rc_bump_version node`,
 		"bump", filepath.Join(reporoot.Path(t), ".gitlab", "bin", "release.sh"))
 	command.Dir = dir
 	command.Env = append(slices.Clone(gitEnv), "CI_PROJECT_DIR="+dir, "RC_WORK="+dir, "RC_ARTIFACTS_CONFIG=", "RELEASE_VERSION=1.2.3", "RELEASE_POLICY=stable", "FAKE_PATTERN="+pattern.String())

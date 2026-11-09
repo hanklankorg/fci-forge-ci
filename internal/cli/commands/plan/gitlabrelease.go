@@ -16,6 +16,7 @@ import (
 	"github.com/diggsweden/forge-ci/internal/cli/deps"
 	"github.com/diggsweden/forge-ci/internal/cliio"
 	"github.com/diggsweden/forge-ci/internal/domain/errs"
+	"github.com/diggsweden/forge-ci/internal/domain/pipeline"
 )
 
 const (
@@ -25,6 +26,7 @@ const (
 	flagPrepareOutput            = "prepare-plan-output"
 	flagArtifactsOutput          = "artifacts-output"
 	flagJobNamesOutput           = "job-names-output"
+	flagProjectTypeOutput        = "project-type-output"
 )
 
 // gitlabReleasePipelineCmd plans the GitLab release child from the
@@ -50,6 +52,9 @@ func gitlabReleasePipelineCmd() *cli.Command {
                           family's build job builds, one a line.
    --job-names-output     the names of the generated jobs, one a line, for
                           the jobs that check every planned job ran.
+   --project-type-output  with --family, the project type that family's
+                          version job bumps with its native tool; a family
+                          the plan bumps no project of is refused.
 
    Without --file and without .forge-ci/artifacts.yml the release has no
    planned bump and no family; a file named by --file must exist.
@@ -67,9 +72,10 @@ EXAMPLE:
 			&cli.StringFlag{Name: flagRuntimeImageAndroid, Usage: "runtime image of the android family (Gradle Android)"},
 			&cli.StringFlag{Name: flagOutput, Usage: "file to write the generated release jobs to"},
 			&cli.StringFlag{Name: flagPrepareOutput, Usage: "file to write the prepare-stage plan JSON to"},
-			&cli.StringFlag{Name: flagFamily, Usage: "build family whose artifacts --artifacts-output lists: java, node, go, rust or android"},
+			&cli.StringFlag{Name: flagFamily, Usage: "family whose artifacts --artifacts-output lists or whose project type --project-type-output names: java, node, go, rust or android"},
 			&cli.StringFlag{Name: flagArtifactsOutput, Usage: "file to write --family's artifact names to, one a line"},
 			&cli.StringFlag{Name: flagJobNamesOutput, Usage: "file to write the generated jobs' names to, one a line"},
+			&cli.StringFlag{Name: flagProjectTypeOutput, Usage: "file to write --family's version project type to"},
 		},
 		Action: planGitLabRelease,
 	}
@@ -77,12 +83,13 @@ EXAMPLE:
 
 // planGitLabRelease writes each output the command names.
 func planGitLabRelease(_ context.Context, cmd *cli.Command) error {
-	if cmd.String(flagOutput) == "" && cmd.String(flagPrepareOutput) == "" && cmd.String(flagArtifactsOutput) == "" && cmd.String(flagJobNamesOutput) == "" {
-		return fmt.Errorf("name at least one of --%s, --%s, --%s and --%s: %w", flagOutput, flagPrepareOutput, flagArtifactsOutput, flagJobNamesOutput, errs.ErrUsage)
+	if cmd.String(flagOutput) == "" && cmd.String(flagPrepareOutput) == "" && cmd.String(flagArtifactsOutput) == "" && cmd.String(flagJobNamesOutput) == "" && cmd.String(flagProjectTypeOutput) == "" {
+		return fmt.Errorf("name at least one of --%s, --%s, --%s, --%s and --%s: %w", flagOutput, flagPrepareOutput, flagArtifactsOutput, flagJobNamesOutput, flagProjectTypeOutput, errs.ErrUsage)
 	}
 
-	if (cmd.String(flagFamily) == "") != (cmd.String(flagArtifactsOutput) == "") {
-		return fmt.Errorf("--%s and --%s go together: %w", flagFamily, flagArtifactsOutput, errs.ErrUsage)
+	familyOutput := cmd.String(flagArtifactsOutput) != "" || cmd.String(flagProjectTypeOutput) != ""
+	if (cmd.String(flagFamily) == "") == familyOutput {
+		return fmt.Errorf("--%s goes with --%s or --%s: %w", flagFamily, flagArtifactsOutput, flagProjectTypeOutput, errs.ErrUsage)
 	}
 
 	file := cmd.String(flagFile)
@@ -101,6 +108,20 @@ func planGitLabRelease(_ context.Context, cmd *cli.Command) error {
 		}
 	}
 
+	if err := writeFamilyOutputs(cmd, plans); err != nil {
+		return err
+	}
+
+	if cmd.String(flagOutput) == "" && cmd.String(flagJobNamesOutput) == "" {
+		return nil
+	}
+
+	return writeReleaseFamilies(cmd, plans)
+}
+
+// writeFamilyOutputs writes what --family's jobs read: the artifacts its
+// build job builds and the project type its version job bumps.
+func writeFamilyOutputs(cmd *cli.Command, plans appconfig.ReleaseStagePlans) error {
 	if path := cmd.String(flagArtifactsOutput); path != "" {
 		names, err := gitlabpipeline.ReleaseFamilyArtifacts(plans.Build, cmd.String(flagFamily))
 		if err != nil {
@@ -112,11 +133,23 @@ func planGitLabRelease(_ context.Context, cmd *cli.Command) error {
 		}
 	}
 
-	if cmd.String(flagOutput) == "" && cmd.String(flagJobNamesOutput) == "" {
-		return nil
+	if path := cmd.String(flagProjectTypeOutput); path != "" {
+		return writeVersionProjectType(path, plans.Prepare, cmd.String(flagFamily))
 	}
 
-	return writeReleaseFamilies(cmd, plans)
+	return nil
+}
+
+// writeVersionProjectType writes the project type the plan's version family
+// bumps with its native tool, so a version job takes it from the plan.
+func writeVersionProjectType(path string, prepare pipeline.ReleasePrepareStagePlan, family string) error {
+	for _, planned := range prepare.VersionFamilies() {
+		if planned.Family == family {
+			return writeLines(path, []string{string(planned.ProjectType)})
+		}
+	}
+
+	return fmt.Errorf("the plan bumps no project of the %s family with its native tool: %w", family, errs.ErrUsage)
 }
 
 // writeReleaseFamilies writes the generated family jobs, which need each

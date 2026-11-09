@@ -93,6 +93,18 @@ func TestGitlabReleasePipelineCmd_WritesTheReleaseJobsFromTheDeclaration(t *test
 	if body, err := os.ReadFile(jobNames); err != nil || string(body) != "Prepare: version java\nPrepare: version node\nBuild: java\nBuild: node\n" {
 		t.Errorf("job names = %q, %v", body, err)
 	}
+
+	// A version job takes its project type from the plan, without the images.
+	for family, kind := range map[string]string{"java": "maven", "node": "npm"} {
+		projectType := filepath.Join(dir, family+"-project-type")
+		if err := plancmd.New().Run(t.Context(), []string{"plan", "gitlab-release-pipeline", "--file", declaration, "--family", family, "--project-type-output", projectType}); err != nil {
+			t.Fatal(err)
+		}
+
+		if body, err := os.ReadFile(projectType); err != nil || string(body) != kind+"\n" {
+			t.Errorf("%s project type = %q, %v; want %s", family, body, err, kind)
+		}
+	}
 }
 
 func TestGitlabReleasePipelineCmd_RefusesWhatItCannotPlan(t *testing.T) {
@@ -108,6 +120,9 @@ func TestGitlabReleasePipelineCmd_RefusesWhatItCannotPlan(t *testing.T) {
 	for name, args := range map[string][]string{
 		"no output":               {"--file", declaration},
 		"family alone":            {"--file", declaration, "--family", "java", "--output", filepath.Join(dir, "a")},
+		"a project type alone":    {"--file", declaration, "--project-type-output", filepath.Join(dir, "d")},
+		"an unplanned family":     {"--file", declaration, "--family", "rust", "--project-type-output", filepath.Join(dir, "e")},
+		"a family with no tool":   {"--file", declaration, "--family", "go", "--project-type-output", filepath.Join(dir, "f")},
 		"a named file is missing": {"--file", filepath.Join(dir, "absent.yml"), "--output", filepath.Join(dir, "b")},
 		"a family without image":  {"--file", declaration, "--output", filepath.Join(dir, "c")},
 	} {

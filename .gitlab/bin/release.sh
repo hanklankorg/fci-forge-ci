@@ -179,29 +179,16 @@ rc_render_changelog() {
   done
 }
 
-# rc_native_project_type is the project type whose native version tool a
-# family's version job runs.
-rc_native_project_type() {
-  case "$1" in
-  java) echo maven ;;
-  node) echo npm ;;
-  rust) echo cargo ;;
-  *)
-    echo "ERROR: the family '$1' has no native version tool." >&2
-    return 1
-    ;;
-  esac
-}
-
 # rc_bump_version runs the native version tool of one family's planned
 # projects at the request, in the family's runtime image, and hands over only
 # the patch of their native version files and its digest. The job holds no
-# credential.
+# credential. The plan names the project type the family's native tool bumps.
 rc_bump_version() {
   local family=$1 kind
-  kind=$(rc_native_project_type "${family}") || return
   rc_request_checkout
-  rc_release_plan --prepare-plan-output "${RC_WORK:?}/prepare-plan.json"
+  rc_release_plan --prepare-plan-output "${RC_WORK:?}/prepare-plan.json" \
+    --family "${family}" --project-type-output "${RC_WORK}/project-type"
+  kind=$(cat -- "${RC_WORK}/project-type")
   # The plan copies the full changelog into each project; take the rendered one.
   rc_require_regular_file "${CI_PROJECT_DIR}/_release-render/CHANGELOG.md"
   cp --remove-destination -- "${CI_PROJECT_DIR}/_release-render/CHANGELOG.md" CHANGELOG.md

@@ -942,7 +942,9 @@ either changelog renderer bumps.
 
 The `Prepare: version <family>` jobs run the native tools in their runtime
 images and hold no credential (`rc_release_context` refuses every release
-secret there). `Prepare: release commit and tag`, which holds the SSH signing
+secret there). Each re-plans and takes the project type its tool bumps from
+the plan (`plan gitlab-release-pipeline --family <family>
+--project-type-output`). `Prepare: release commit and tag`, which holds the SSH signing
 key, runs no build tool: it checks each family's patch against its job's
 digest, joins them, and `forge-ci version bump-plan --patch` admits the
 joined patch only as version substitutions of the plan's project files,
