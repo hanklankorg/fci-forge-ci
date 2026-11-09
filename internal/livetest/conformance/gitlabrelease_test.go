@@ -700,7 +700,7 @@ func requireGitLabPolicyMergeRequest(t *testing.T, client *gitlabapi.Client, pro
 	ctx, cancel := context.WithTimeout(livetest.Context(t), 30*time.Minute)
 	defer cancel()
 
-	waitGitLabBranch(t, ctx, client, project, trialBranch, head)
+	waitGitLabPush(t, ctx, client, project, trialBranch, head)
 
 	mr, err := livetest.CreateGitLabMergeRequest(ctx, client, project, &gitlabapi.CreateMergeRequestOptions{
 		SourceBranch: new(trialBranch), TargetBranch: new("main"), Title: new("test: consumer trial"),
