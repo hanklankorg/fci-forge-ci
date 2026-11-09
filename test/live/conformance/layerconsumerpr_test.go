@@ -222,9 +222,13 @@ func runLayerConsumerPR(t *testing.T, private bool, objectFormat string, pr cons
 
 	run := livetest.WaitForLayerRun(t, target, repo, workflow, "pull_request")
 
+	// A job the failed gate withholds is one no runner took. The status the
+	// forge gives it is its own: it listed the unstarted test job as blocked
+	// in lab run 568 and as skipped in run 572 (2026-11-10), so the empty
+	// want stands for never started and is judged by the task, not the label.
 	wantRun, wantGate, wantDownstream := jobSuccess, jobSuccess, jobSuccess
 	if pr.blocked {
-		wantRun, wantGate, wantDownstream = jobFailure, jobFailure, "skipped"
+		wantRun, wantGate, wantDownstream = jobFailure, jobFailure, ""
 	}
 
 	jobs := scenario.requireStatus(t, run, wantRun)
@@ -241,13 +245,20 @@ func runLayerConsumerPR(t *testing.T, private bool, objectFormat string, pr cons
 	}
 
 	for _, job := range jobs {
-		if want, ok := wantJobs[job.Name]; !ok || job.Status != want {
+		started := job.TaskID == nil || *job.TaskID != 0
+
+		switch want, ok := wantJobs[job.Name]; {
+		case !ok:
+			t.Errorf("job %q (%s) is not one the pull request's workflow names", job.Name, job.Status)
+		case want == "" && started:
+			t.Errorf("a runner took job %q (%s) after the gate failed, want it never started", job.Name, job.Status)
+		case want != "" && job.Status != want:
 			t.Errorf("job %q is %s, want %s", job.Name, job.Status, want)
 		}
 
 		delete(wantJobs, job.Name)
 
-		if job.Status != "skipped" && !slices.Equal(job.RunsOn, []string{scenario.label}) {
+		if started && !slices.Equal(job.RunsOn, []string{scenario.label}) {
 			t.Errorf("job %q ran on %v, want [%s]", job.Name, job.RunsOn, scenario.label)
 		}
 
