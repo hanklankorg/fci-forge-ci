@@ -358,7 +358,9 @@ jobs:
       fail-fast: false
       matrix:
         build: ${{ fromJson(needs.plan.outputs.builds) }}
-    runs-on: ${{ fromJSON(matrix.build.arch == 'arm64' && inputs['build-runs-on-linux-arm64'] || inputs['build-runs-on-linux-amd64']) }}
+    # The runner input of the leg's own arch, never another's: an empty input
+    # or an arch with no input fails the leg.
+    runs-on: ${{ fromJSON((matrix.build.arch == 'arm64' && inputs['build-runs-on-linux-arm64']) || (matrix.build.arch == 'amd64' && inputs['build-runs-on-linux-amd64']) || '') }}
     timeout-minutes: 45
     permissions:
       actions: read

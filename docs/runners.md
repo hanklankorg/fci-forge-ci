@@ -111,9 +111,9 @@ and never falls back to another input.
 | Input | Default | Selects |
 |---|---|---|
 | `runs-on` | `["ubuntu-26.04"]` | ordinary jobs: builds, lint, plans, SBOMs, changelogs, summaries |
-| `build-runs-on-linux-amd64` | `["ubuntu-26.04"]` | the linux/amd64 legs of `publish-container.yml` and `snapshot-images.yml` |
+| `build-runs-on-linux-amd64` | `["ubuntu-26.04"]` | the linux/amd64 legs of `publish-container.yml` and `snapshot-images.yml`; each leg reads the input of its own arch, so a missing or empty one fails the leg instead of falling back |
 | `build-runs-on-linux-arm64` | `["ubuntu-26.04-arm"]` | the linux/arm64 legs of the same image builds |
-| `runs-on-darwin-arm64` | `["macos-26"]` | the Xcode build and Swift lint jobs |
+| `runs-on-darwin-arm64` | `["macos-26"]` | the unsigned Xcode build and the Swift lint jobs |
 
 A reusable workflow declares only the inputs its own jobs or callees use, and
 the orchestrators pass theirs on. An image build runner must permit the user
@@ -128,7 +128,13 @@ key check, publication, evidence and index jobs, `promote-stage.yml`,
 `validate-release-prerequisites.yml`, the `publish-*` package and store
 workflows (`publish-apple-appstore.yml` on `macos-26`), the
 `snapshot-images.yml` publisher, the OpenSSF Scorecard analysis,
-`release-binary.yml` and `build-cli.yml`. So do the trust-root jobs every
+`release-binary.yml`, `build-cli.yml`, and the signing builds: an Android
+application build with `enable-signing` and an Xcode build with
+`enable-code-signing` run as a separate `build-variants-signed` job on
+`ubuntu-26.04` and `macos-26`, while unsigned and library builds take
+`runs-on` and `runs-on-darwin-arm64`. A guard,
+`TestGitHubSigningJobsRunOnALiteralRunner`, refuses a reusable job that
+receives a signing secret or an OIDC token on any other runner. So do the trust-root jobs every
 release starts with: `resolve-forge-ci-bootstrap.yml`, which admits the engine
 commit and the runtime images, and `canonical-cli-bootstrap.yml`, which builds
 the engine every later job runs. Hosted runners are ephemeral VMs that GitHub

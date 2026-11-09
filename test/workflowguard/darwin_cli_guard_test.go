@@ -87,7 +87,7 @@ func TestMacOSLanesBuildTheEngineFromItsApprovedCheckout(t *testing.T) {
 		}
 	}
 
-	require.Equal(t, 4, lanes, "the macOS lanes are lint-swift's two jobs, build-xcode-ios and publish-apple-appstore")
+	require.Equal(t, 5, lanes, "the macOS lanes are lint-swift's two jobs, build-xcode-ios's unsigned and signed jobs, and publish-apple-appstore")
 
 	var action struct {
 		Inputs map[string]struct {

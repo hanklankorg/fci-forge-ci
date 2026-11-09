@@ -12,9 +12,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **BREAKING**: The GitHub reusable workflows take their runners as JSON-array
   inputs: `runs-on` for ordinary jobs, `build-runs-on-linux-amd64` and
   `build-runs-on-linux-arm64` for image builds, and `runs-on-darwin-arm64`
-  for the Xcode build and Swift lint jobs, defaulting to today's hosted
+  for the unsigned Xcode build and Swift lint jobs, defaulting to today's hosted
   labels. The orchestrators pass them on. Signing, promotion and publication
-  jobs stay on GitHub-hosted runners. The `macos-version` workflow input and
+  jobs stay on GitHub-hosted runners, signed Android and Xcode builds
+  included. The `macos-version` workflow input and
   the `xcode-ios` `config.macos-version` key are removed, with no alias:
   replace `macos-version: macos-26` with
   `runs-on-darwin-arm64: '["macos-26"]'`, and drop the key from

@@ -11,8 +11,8 @@
 # How it works:
 # 1. prep: compute image coordinate, tags, and labels once via forge-ci.
 #    Validate namespace early.
-# 2. build-arch (matrix, fail-fast: false): per-platform native runner
-#    (linux/amd64 -> ubuntu-26.04, linux/arm64 -> ubuntu-26.04-arm).
+# 2. build-arch (matrix, fail-fast: false): per-platform native runner, from
+#    build-runs-on-linux-<arch> (default ubuntu-26.04 / ubuntu-26.04-arm).
 #    Each leg builds to a local layout, runs its configured Trivy gate, and
 #    transfers the recorded layout through the run-scoped artifact store.
 #    Within the same job: per-arch scan reports and binary extraction.
@@ -421,6 +421,8 @@ jobs:
       # when promotable. Single-sources the staging-tag convention (no YAML).
       staging-tag: ${{ steps.metadata.outputs.staging-tag }}
       platforms-json: ${{ steps.platforms.outputs.platforms-json }}
+      # Each platform with its arch suffix: build-arch names its runner input by it.
+      matrix-json: ${{ steps.platforms.outputs.matrix-json }}
       # Unix-epoch seconds of the resolved HEAD commit. Propagated to
       # the build job as SOURCE_DATE_EPOCH (reproducible-builds.org
       # convention) so Buildah pins the image-config `created`
@@ -570,9 +572,10 @@ jobs:
   build-arch:
     name: Build${{ inputs.name && format(' ({0})({1})', inputs.name, matrix.platform) || format(' ({0})', matrix.platform) }}
     needs: [resolve-bootstrap, prep]
-    # linux/arm64 -> ubuntu-26.04-arm (native ARM hosted runner). Anything
-    # else falls through to ubuntu-26.04. No QEMU emulation in either path.
-    runs-on: ${{ fromJSON(matrix.platform == 'linux/arm64' && inputs['build-runs-on-linux-arm64'] || inputs['build-runs-on-linux-amd64']) }}
+    # Each leg runs on the runner input of the arch prep emits for it: no
+    # platform falls through to another's runner, and an empty input or an
+    # arch with no input fails the leg. No QEMU emulation.
+    runs-on: ${{ fromJSON((matrix.suffix == 'arm64' && inputs['build-runs-on-linux-arm64']) || (matrix.suffix == 'amd64' && inputs['build-runs-on-linux-amd64']) || '') }}
     timeout-minutes: 45
     defaults:
       run:
@@ -580,7 +583,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        platform: ${{ fromJson(needs.prep.outputs.platforms-json) }}
+        include: ${{ fromJson(needs.prep.outputs.matrix-json) }}
     permissions:
       actions: read
       contents: read

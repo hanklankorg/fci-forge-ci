@@ -34,7 +34,7 @@ func TestSnapshotImageWorkflowKeepsWholeMatrixPublicationBarrier(t *testing.T) {
 	require.NotContains(t, scalarChild(publish, "if"), "always()")
 	require.Equal(t, "false", scalarChild(mappingChild(build, "strategy"), "fail-fast"))
 	require.Equal(t, "false", scalarChild(mappingChild(mappingChild(jobs, "build-artifacts"), "strategy"), "fail-fast"))
-	require.Contains(t, scalarChild(build, "runs-on"), "matrix.build.arch == 'arm64'")
+	require.Contains(t, scalarChild(build, "runs-on"), "(matrix.build.arch == 'arm64' && inputs['build-runs-on-linux-arm64']) || (matrix.build.arch == 'amd64' && inputs['build-runs-on-linux-amd64']) || ''")
 	require.Contains(t, scalarChild(mappingChild(mappingChild(build, "strategy"), "matrix"), "build"), "needs.plan.outputs.builds")
 	require.Contains(t, scalarChild(mappingChild(mappingChild(publish, "strategy"), "matrix"), "image"), "needs.plan.outputs.images")
 	require.Contains(t, scalarChild(collect, "if"), "needs.publish.result == 'success'")
@@ -171,7 +171,7 @@ func TestSnapshotImageNativeLegsShareOneDelivery(t *testing.T) {
 	}
 
 	build := mappingChild(jobs, "build")
-	require.Contains(t, scalarChild(build, "runs-on"), "matrix.build.arch == 'arm64'")
+	require.Contains(t, scalarChild(build, "runs-on"), "(matrix.build.arch == 'arm64' && inputs['build-runs-on-linux-arm64']) || (matrix.build.arch == 'amd64' && inputs['build-runs-on-linux-amd64']) || ''")
 
 	for _, step := range mappingChild(build, "steps").Content {
 		require.NotContains(t, scalarChild(step, "if"), "matrix.build.arch", "no arch-conditional engine step: %s", scalarChild(step, "name"))
