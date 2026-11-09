@@ -6,6 +6,14 @@
 # runtime images from the same prepared release source, one native build per
 # platform the release selects. A release publishes to one repository, so the
 # two images are tag variants there: <release tag>-worker and -keytool.
+# The artifact is the release plan's: the GitLab release bumps its
+# Cargo version from it. Built container-first, it adds no build job.
+artifacts:
+  - name: hello-cargo-workspace
+    project-type: cargo
+    working-directory: .
+    config:
+      build-mode: container-first
 containers:
   - name: hello-worker
     container-file: Containerfile

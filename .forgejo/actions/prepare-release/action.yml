@@ -50,7 +50,7 @@ inputs:
     required: true
   include-paths-file:
     description: >-
-      File naming the project files of a verified version bump, one per line, committed beside CHANGELOG.md (`forge-ci version apply-bump --paths-file`). Empty commits the changelog alone.
+      File naming the project files of a verified version bump, one per line, committed beside CHANGELOG.md (`forge-ci version bump-plan --paths-file`). Empty commits the changelog alone.
     required: false
     default: ''
 outputs:

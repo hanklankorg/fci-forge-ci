@@ -124,10 +124,11 @@ script change as a version replacement and requires refusal without publishing
 release paths or advancing HEAD. These checks are not whole-forge releases.
 
 The existing GitLab consumer-release trial accepts
-`version=X.Y.Z next-version=X.Y.Z version-bump=npm|cargo`. `next-version` must be
-greater than the first explicit version. The same protected repository/policy
+`version=X.Y.Z next-version=X.Y.Z`; the consumer's declaration decides what
+the release bumps. `next-version` must be greater than the first explicit
+version. The same protected repository/policy
 is retained; the second request is signed at the main left by the first release.
-For npm, the oracle checks each signed tag's manifest/lockfile, actual published
+For a root npm package the plan bumps, the oracle checks each signed tag's manifest/lockfile, actual published
 tarball and Build SBOM version in addition to existing bundle/image checks.
 Use the documented consumer-release recipe and prepared image archives; its
 account lock and cleanup remain unchanged. Native sequence acceptance is pending
@@ -1253,7 +1254,7 @@ just lab --account demo --runners gitlab forgejo
 
 # 2. Here: make a demo, the release, then a pull or merge request on the released main.
 just demo forgejo hello-maven version=0.2.0 CI_JOB_IMAGE=<lint image reference>
-just demo gitlab hello-maven version=0.2.0 version-bump=maven job-user=65532:65532 \
+just demo gitlab hello-maven version=0.2.0 job-user=65532:65532 \
   job-archive=/absolute/images/forge-ci-runtime-java.tar build-archive=/absolute/images/forge-ci-runtime-java.tar \
   signer-archive=/absolute/images/signer.tar lint-archive=/absolute/images/lint.tar
 just github run --org <org> --ack-org <org> --token-file <pat> --prefix fc- --fixtures none \
@@ -1815,7 +1816,7 @@ just test-live-consumer gitlab /absolute/clean-consumer release \
 # Maven consumer: put the requested version in the prepared release commit.
 just test-live-consumer gitlab /absolute/maven-consumer release \
   job-archive=/absolute/check-image.tar build-archive=/absolute/build-image.tar \
-  signer-archive=/absolute/signer-image.tar version=0.2.0 version-bump=maven
+  signer-archive=/absolute/signer-image.tar version=0.2.0
 
 # Maven service demo: the lifecycle, merge request to merge to development
 # snapshot to release (TestGitLabLayer_ConsumerLifecycle; docs/live-campaigns.md,
@@ -1823,14 +1824,14 @@ just test-live-consumer gitlab /absolute/maven-consumer release \
 just test-live-consumer gitlab /absolute/hello-maven-service/consumer lifecycle \
   job-archive=/absolute/java-image.tar build-archive=/absolute/java-image.tar \
   signer-archive=/absolute/signer-image.tar lint-archive=/absolute/lint-java.tar \
-  version=0.2.0 version-bump=maven job-user=65532:65532
+  version=0.2.0 job-user=65532:65532
 
 # Cargo container demo: the same lifecycle, container-first; the snapshot
 # builds the runtime image of .forge-ci/release-images.yml, as the release does.
 just test-live-consumer gitlab /absolute/hello-cargo-container/consumer lifecycle \
   job-archive=/absolute/rust-image.tar build-archive=/absolute/rust-image.tar \
   signer-archive=/absolute/signer-image.tar lint-archive=/absolute/lint-rust.tar \
-  version=0.2.0 version-bump=cargo job-user=65532:65532
+  version=0.2.0 job-user=65532:65532
 ```
 
 The image archives are settings, as for `just demo gitlab`: `job-archive=`
@@ -1839,8 +1840,10 @@ The image archives are settings, as for `just demo gitlab`: `job-archive=`
 the lint image when the gate lints.
 
 `version=X.Y.Z` selects the requested stable version (the default is `0.0.1`).
-`version-bump=maven` enables the policy's Maven version bump; without it the
-consumer must already declare the requested version. A build using
+The release bumps what the plan of the consumer's declaration bumps, each
+project with its native tool where it has one (docs/gitlab.md, Version
+bump); a consumer without a declaration must already declare the requested
+version. A build using
 `--expect-version` correctly refuses a stale POM rather than silently packing
 the wrong version. These lowercase settings configure the policy and are not
 build environment variables.

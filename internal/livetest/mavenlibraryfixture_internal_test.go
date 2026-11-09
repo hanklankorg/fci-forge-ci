@@ -156,7 +156,7 @@ func TestMavenLibraryFixtureNativeRecipes(t *testing.T) {
 				t.Fatal("invalid shell continuation in native release inventory")
 			}
 
-			for _, required := range []string{"-sources.jar", "-javadoc.jar", "dist/*.pom", "version-bump: maven", "sign-and-publish-release.yml@"} {
+			for _, required := range []string{"-sources.jar", "-javadoc.jar", "dist/*.pom", "runtime-image-java: " + config.JavaImage, "sign-and-publish-release.yml@"} {
 				if !strings.Contains(text, required) {
 					t.Errorf("release missing %q", required)
 				}

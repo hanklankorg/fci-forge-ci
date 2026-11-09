@@ -85,11 +85,15 @@ if [ "${forge}" = forgejo ]; then
   engine_sha=$(git -C "${engine}" rev-parse HEAD)
   workflow=${workflow//ENGINE_SHA/${engine_sha}}
   if [ "${kind}" = cargo ]; then
-    workflow=${workflow//VERSION_BUMP/cargo}
+    # The release plan bumps the root crate, as Nano's own release does.
+    printf '%s\n' '# SPDX-FileCopyrightText: 2026 Digg - Agency for Digital Government' \
+      '# SPDX-License-Identifier: CC0-1.0' 'artifacts:' '  - name: generic-cli' \
+      '    project-type: cargo' '    working-directory: .' | stage .gitlab/generic-cli-artifacts.yml
+    workflow=${workflow//ARTIFACTS_CONFIG/.gitlab/generic-cli-artifacts.yml}
     workflow=${workflow//BUMP_IMAGE/\$\{\{ vars.CI_JOB_IMAGE \}\}}
     workflow=${workflow//IS_GO/false}
   else
-    workflow=${workflow//VERSION_BUMP/\'\'}
+    workflow=${workflow//ARTIFACTS_CONFIG/\'\'}
     workflow=${workflow//BUMP_IMAGE/\'\'}
     workflow=${workflow//IS_GO/true}
   fi

@@ -6,8 +6,7 @@ package gitlabbehavior
 import (
 	"bytes"
 	"context"
-	appcontainer "github.com/diggsweden/forge-ci/internal/app/container"
-	"github.com/diggsweden/forge-ci/internal/domain/pipeline"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -19,6 +18,9 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	appcontainer "github.com/diggsweden/forge-ci/internal/app/container"
+	gitlabpipeline "github.com/diggsweden/forge-ci/internal/app/gitlabpipeline"
+	"github.com/diggsweden/forge-ci/internal/domain/pipeline"
 	"github.com/diggsweden/forge-ci/internal/testutil/gitlabrender"
 	"github.com/diggsweden/forge-ci/internal/testutil/reporoot"
 )
@@ -79,7 +81,7 @@ func TestReleaseImageStageTakesItsSettingsFromThePolicy(t *testing.T) {
 	}
 
 	build := body["Build: release files"].(map[string]any)
-	if !reflect.DeepEqual(build["script"], []any{"rc_release_checkout", "rc_gather_exports '$[[ inputs.export-files ]]'", "$[[ inputs.build ]]", "rc_build_handoff"}) {
+	if !reflect.DeepEqual(build["script"], []any{"rc_release_checkout", "rc_gather_exports '$[[ inputs.export-files ]]'", "rc_gather_families", "$[[ inputs.build ]]", "rc_build_handoff"}) {
 		t.Fatalf("the consumer build gained image work: %+v", build["script"])
 	}
 
@@ -623,7 +625,17 @@ func releaseJobsBodyFor(t *testing.T, builder string) map[string]any {
 		t.Fatal(err)
 	}
 
+	// The child pipeline as GitLab composes it from both includes, with
+	// every family job "Release: plan" can name.
+	maps.Copy(body, everyReleaseFamily.Jobs())
+
 	return body
+}
+
+// everyReleaseFamily names every family job of the release child.
+var everyReleaseFamily = gitlabpipeline.ReleaseFamilies{
+	Version: []string{"java", "node", "rust"},
+	Build:   []string{"java", "node", "go", "rust", "android"},
 }
 
 // The release's labels input admits key=value lines only, each value a

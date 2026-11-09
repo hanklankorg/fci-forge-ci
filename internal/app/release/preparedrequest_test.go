@@ -177,7 +177,7 @@ func TestPreparedRequestBindingWithNativeGit(t *testing.T) {
 
 			in := apprelease.VerifyReleaseTagInput{ReleaseSHA: preparedSHA, Tag: "v1.2.3", ExpectedParent: requestSHA, ChangelogOnly: true}
 			if strings.HasPrefix(scenario, "cargo-") {
-				in.VersionBump = projecttype.Cargo
+				in.PreparePlan = bumpPlanOf(projecttype.Cargo)
 			}
 
 			var out bytes.Buffer

@@ -71,7 +71,11 @@ func TestComponentsClearTheEntrypointOfConsumerChosenImages(t *testing.T) {
 		{"nanolinter", "nanolinter-image"},
 		{"megalinter", "megalinter-image"},
 		{"release-jobs", "job-image"},
-		{"release-jobs", "build-image"},
+		{"release-jobs", "runtime-image-java"},
+		{"release-jobs", "runtime-image-node"},
+		{"release-jobs", "runtime-image-go"},
+		{"release-jobs", "runtime-image-rust"},
+		{"release-jobs", "runtime-image-android"},
 	} {
 		body := string(reporoot.ReadFile(t, "templates/"+use.file+".yml"))
 		want := "name: $[[ inputs." + use.input + " ]]\n    entrypoint: [\"\"]"

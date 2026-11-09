@@ -336,11 +336,24 @@ func TestNPMStableReleaseWorkflowBumpsInTheTrialImage(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if !strings.Contains(workflow, "      version-bump: npm\n") || !strings.Contains(workflow, "      version-bump-image: "+image+"\n") {
+	if !strings.Contains(workflow, "      runtime-image-node: "+image+"\n") || strings.Count(workflow, "runtime-image-node:") != 1 || strings.Contains(workflow, "      version-bump:") || strings.Contains(workflow, "      version-bump-image:") {
 		t.Fatalf("the stable fixture does not bump package.json in the trial's image:\n%s", workflow)
 	}
 
-	if _, err = npmStableReleaseWorkflow(npmVersionBumpImage.ReplaceAllLiteralString(string(recipe), ""), pin, image); !errors.Is(err, errNPMRecipeStructure) {
-		t.Fatalf("a recipe without a version-bump image was accepted: %v", err)
+	const runtimeInput = "      runtime-image-node: ${{ vars.CI_JOB_IMAGE }}\n"
+	for name, replacement := range map[string]string{
+		"missing":              "",
+		"duplicate":            runtimeInput + runtimeInput,
+		"different value":      runtimeInput + "      runtime-image-node: " + image + "\n",
+		"different whitespace": runtimeInput + "      runtime-image-node:  ${{ vars.CI_JOB_IMAGE }}\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			modified := strings.Replace(string(recipe), runtimeInput, replacement, 1)
+			if _, err := npmStableReleaseWorkflow(modified, pin, image); !errors.Is(err, errNPMRecipeStructure) {
+				t.Fatalf("a recipe with %s Node version-runtime binding was accepted: %v", name, err)
+			}
+		})
 	}
 }

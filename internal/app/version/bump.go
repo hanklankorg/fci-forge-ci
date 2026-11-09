@@ -76,27 +76,15 @@ type bumpTarget struct {
 	file string
 }
 
-func normalizeBumpTarget(in BumpInput) (bumpTarget, error) { //nolint:cyclop // one target-selection switch followed by shared serialization and path checks.
-	if in.Library && in.ProjectType == projecttype.GradleAndroid {
-		in.ProjectType = projecttype.Gradle
-	}
+func normalizeBumpTarget(in BumpInput) (bumpTarget, error) {
+	kind, file, text := version.TextBumpTarget(in.ProjectType, in.Library, in.GradleVersionFile, in.XcconfigFile)
+	in.ProjectType = kind
 
-	file := ""
-
-	switch in.ProjectType {
-	case projecttype.Gradle, projecttype.GradleAndroid:
-		file = in.GradleVersionFile
-		if file == "" {
-			file = "gradle.properties"
-		}
-	case projecttype.XcodeIOS:
-		file = in.XcconfigFile
-		if file == "" {
-			file = "versions.xcconfig"
-		}
-	case projecttype.Cargo:
+	switch {
+	case text:
+	case in.ProjectType == projecttype.Cargo:
 		file = cargoManifestName
-	case projecttype.Go, projecttype.Meta, projecttype.Maven, projecttype.NPM:
+	case in.ProjectType == projecttype.Go, in.ProjectType == projecttype.Meta, in.ProjectType == projecttype.Maven, in.ProjectType == projecttype.NPM:
 	default:
 		return bumpTarget{}, fmt.Errorf("unknown project type: %s: %w", in.ProjectType, errs.ErrUsage)
 	}
@@ -301,19 +289,23 @@ func bumpGradleJVM(root *os.Root, relative, display, ver string, writer io.Write
 		return err
 	}
 
-	out, res := version.UpdateGradleJVMVersion(string(body), ver)
-	if res == version.UpdatePropertyUpdated {
+	bump, err := version.TextBump(projecttype.Gradle, string(body), true, ver)
+	if err != nil {
+		return err
+	}
+
+	if bump.Property == version.UpdatePropertyUpdated {
 		_, _ = fmt.Fprintf(writer, "Updated version to %s\n", ver)
 	} else {
 		_, _ = fmt.Fprintf(writer, "Added version=%s\n", ver)
 	}
 
-	if err := root.WriteFile(relative, []byte(out), 0o644); err != nil {
+	if err := root.WriteFile(relative, []byte(bump.Body), 0o644); err != nil {
 		return fmt.Errorf("write %s: %w", display, err)
 	}
 
 	_, _ = fmt.Fprintf(writer, "%s Gradle JVM version updated\n", clicolor.Check(writer))
-	_, _ = fmt.Fprint(writer, out)
+	_, _ = fmt.Fprint(writer, bump.Body)
 
 	return nil
 }
@@ -324,49 +316,53 @@ func bumpGradleAndroid(root *os.Root, relative, display, ver string, writer io.W
 		return err
 	}
 
-	// Properties interpret backslashes as escapes, including line continuation.
-	out, res := version.UpdateOrAddProperty(string(body), "versionName", strings.ReplaceAll(ver, `\`, `\\`), "=")
-	if res == version.UpdatePropertyUpdated {
+	bump, err := version.TextBump(projecttype.GradleAndroid, string(body), true, ver)
+	if err != nil {
+		return err
+	}
+
+	if bump.Property == version.UpdatePropertyUpdated {
 		_, _ = fmt.Fprintf(writer, "Updated versionName to %s\n", ver)
 	} else {
 		_, _ = fmt.Fprintf(writer, "Added versionName=%s\n", ver)
 	}
 
-	res2 := version.IncrementVersionCode(out)
-	// Setting the requested version again is a retry, not a new Android release.
-	if out == string(body) && !res2.Added {
+	if !bump.Writes {
 		return nil
 	}
 
-	out = res2.Body
-	if res2.Added {
+	if bump.VersionCode.Added {
 		_, _ = fmt.Fprintln(writer, "Added versionCode=1")
 	} else {
-		_, _ = fmt.Fprintf(writer, "Incremented versionCode: %d → %d\n", res2.Old, res2.New)
+		_, _ = fmt.Fprintf(writer, "Incremented versionCode: %d → %d\n", bump.VersionCode.Old, bump.VersionCode.New)
 	}
 
-	if err := root.WriteFile(relative, []byte(out), 0o644); err != nil {
+	if err := root.WriteFile(relative, []byte(bump.Body), 0o644); err != nil {
 		return fmt.Errorf("write %s: %w", display, err)
 	}
 
 	_, _ = fmt.Fprintf(writer, "%s Gradle Android version updated\n", clicolor.Check(writer))
-	_, _ = fmt.Fprint(writer, out)
+	_, _ = fmt.Fprint(writer, bump.Body)
 
 	return nil
 }
 
 func bumpXcodeIOS(root *os.Root, relative, display, ver string, writer io.Writer) error {
 	body, err := readVersionFile(root, relative, display, "Xcode version file", output.Annotator{})
-	if err != nil {
-		if !errors.Is(err, os.ErrNotExist) {
-			return err
-		}
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
 
+	bump, bumpErr := version.TextBump(projecttype.XcodeIOS, string(body), err == nil, ver)
+	if bumpErr != nil {
+		return bumpErr
+	}
+
+	if bump.Created {
 		// Bash creates the file with MARKETING_VERSION when missing.
 		_, _ = fmt.Fprintf(writer, "Creating %s\n", display)
 
-		out := "MARKETING_VERSION = " + ver + "\n"
-		if werr := writeNewPublicVersionFile(root, relative, []byte(out)); werr != nil {
+		if werr := writeNewPublicVersionFile(root, relative, []byte(bump.Body)); werr != nil {
 			return fmt.Errorf("create %s: %w", display, werr)
 		}
 
@@ -375,19 +371,18 @@ func bumpXcodeIOS(root *os.Root, relative, display, ver string, writer io.Writer
 		return nil
 	}
 
-	out, res := version.UpdateXcodeMarketingVersion(string(body), ver)
-	if res == version.UpdatePropertyUpdated {
+	if bump.Property == version.UpdatePropertyUpdated {
 		_, _ = fmt.Fprintf(writer, "Updated MARKETING_VERSION to %s\n", ver)
 	} else {
 		_, _ = fmt.Fprintf(writer, "Added MARKETING_VERSION = %s\n", ver)
 	}
 
-	if err := root.WriteFile(relative, []byte(out), 0o644); err != nil {
+	if err := root.WriteFile(relative, []byte(bump.Body), 0o644); err != nil {
 		return fmt.Errorf("write %s: %w", display, err)
 	}
 
 	_, _ = fmt.Fprintf(writer, "%s Xcode version updated\n", clicolor.Check(writer))
-	_, _ = fmt.Fprint(writer, out)
+	_, _ = fmt.Fprint(writer, bump.Body)
 
 	return nil
 }

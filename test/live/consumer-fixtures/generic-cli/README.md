@@ -43,8 +43,9 @@ Operator: prepare a new clean checkout with the normal four arguments plus
 test-live-consumer forgejo /absolute/prepared-checkout release version=0.8.6
 CI_AUTH_IMAGE=<reviewed-digest-pinned-restricted-job-image>
 CI_JOB_IMAGE=<reviewed-digest-pinned-native-Rust-job-image>`.
-Exact filter: `^TestForgejoLayer_ConsumerTrial$`. Cargo bump is configured by
-the overlay; Go uses no version bump and can request `version=0.0.1`.
+Exact filter: `^TestForgejoLayer_ConsumerTrial$`. For Cargo the overlay stages
+`.gitlab/generic-cli-artifacts.yml`, whose release plan bumps the root crate in
+`CI_JOB_IMAGE`; Go declares no bump and can request `version=0.0.1`.
 The SDK supplies current layer/binary/signer bindings and ephemeral request
 trust; placeholder pins in the recipe are replaced, never operator digests.
 
@@ -137,8 +138,11 @@ stronger runner to an arbitrary merge-request gate. Prepare a new Go snapshot
 to carry the marker; older snapshots do not acquire it implicitly.
 
 Run the existing public GitLab consumer trial with this new checkout,
-the reviewed v3 job/build archives and reviewed signer archive, and settings
-`version=0.8.6 version-bump=cargo`; filter `^TestGitLabRelease_ConsumerTrial$`.
+the reviewed v3 job/build archives and reviewed signer archive, and setting
+`version=0.8.6`; filter `^TestGitLabRelease_ConsumerTrial$`. There is no
+`version-bump` setting: the release plan of the consumer's
+`.forge-ci/artifacts.yml` decides the bump, and this overlay adds none for
+GitLab.
 
 Uses the existing `TestGitLabRelease_ConsumerTrial` and `templates/release*.yml`
 policy. Unit verification alone does not establish live acceptance. Read each
@@ -187,8 +191,9 @@ just test-live-consumer gitlab /absolute/prepared-checkout release \
   signer-archive=/absolute/reviewed-signer.tar version=0.0.1
 ```
 
-For Nano use `version=0.8.6 version-bump=cargo` instead. These are example runtime
-settings, not constants in the adapter. The exact existing filter is
+For Nano use `version=0.8.6` instead; its `.forge-ci/artifacts.yml`, not a
+setting, decides the bump. These are example runtime settings, not constants
+in the adapter. The exact existing filter is
 `^TestGitLabRelease_ConsumerTrial$`, narrowed to `/public` by the visibility setting.
 Use disposable mode (no demo name), the existing guarded GitLab full-release
 profile and a Linux amd64 runner. Native Cargo target is

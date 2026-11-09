@@ -80,6 +80,35 @@ func ReadFileInRoot(root *os.Root, path string) ([]byte, error) {
 	return readRegularFile(file, path)
 }
 
+// ReadFileInRootNoFollow reads path inside root as ReadFileInRoot does, and
+// refuses a path whose last element is a symbolic link, for an input whose
+// meaning is the file the repository holds. The root refuses a link above it
+// that leads out; the leaf is checked against the opened file, since the
+// root follows a leaf link that stays inside it.
+func ReadFileInRootNoFollow(root *os.Root, path string) ([]byte, error) {
+	file, err := openRootReadFile(root, path)
+	if err != nil {
+		return nil, classifyReadError(err)
+	}
+	defer func() { _ = file.Close() }()
+
+	opened, err := file.Stat()
+	if err != nil {
+		return nil, classifyReadError(err)
+	}
+
+	leaf, err := root.Lstat(path)
+	if err != nil {
+		return nil, classifyReadError(err)
+	}
+
+	if leaf.Mode()&fs.ModeSymlink != 0 || !os.SameFile(opened, leaf) {
+		return nil, fmt.Errorf("%q is a symbolic link, not a regular input file: %w", path, errs.ErrMissingInput)
+	}
+
+	return readRegularFile(file, path)
+}
+
 func readRegularFile(file fs.File, path string) ([]byte, error) {
 	info, err := file.Stat()
 	if err != nil {

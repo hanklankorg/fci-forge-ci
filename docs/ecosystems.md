@@ -320,7 +320,7 @@ list the opt-out for each change.
 | Build reproducibility | ✅ | npm ≥ 10 (npm/cli#3536 fix) | Runtime image pins Node 24 LTS; uses npm 10+. `package-lock.json` checked in is required. |
 | Library shape (no build script) | ✅ | `npm pack` produces the publishable tarball directly | Matches scoped npm-package conventions. |
 | App shape (build script writes dist/) | ✅ | Explicit application build before SBOM generation and `npm pack` | Configure the package's file selection to include the desired build output in the tarball. |
-| Version-bump (package.json + package-lock.json) | ✅ | `forge-ci version bump --project-type npm --version 1.2.3` | Updates both files; preserves lockfile coherence. |
+| Version-bump (package.json + package-lock.json or npm-shrinkwrap.json) | ✅ | `forge-ci version bump --project-type npm --version 1.2.3` | Updates the manifest and its lockfile; preserves lockfile coherence. |
 | Release prerequisite checks | shared release checks | `validate-release-prerequisites.yml` | No npm-specific token, lockfile or Node-pin validator. The build uses `npm ci`; registry authentication is configured in the publisher. |
 | Publish: npmjs.com | snapshot only | `publish-snapshot-npm.yml` | Set `registry: https://registry.npmjs.org`, `use-ci-token: false` and the `registry-password` secret. Production `publish-to: npmjs` remains unsupported. |
 | Publish: GitHub Packages | ✅ | `publish-maven-github.yml` (also handles npm scoped to `npm.pkg.github.com`) | Uses auto-provided `GITHUB_TOKEN`. |

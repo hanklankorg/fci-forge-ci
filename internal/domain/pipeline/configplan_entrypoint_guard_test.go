@@ -35,6 +35,7 @@ func TestConfigPlanHasNoStandaloneEntryPoints(t *testing.T) {
 		"ValidateConfigPlan":          "is the validator",
 		"NewReleasePlan":              "validates before building the plan",
 		"NewSnapshotReleasePlan":      "validates before building the plan",
+		"NewPolicyReleaseStagePlans":  "validates before building the stage plans",
 		"ValidateClassifiedFilePlans": "validates before checking file-only eligibility",
 	}
 

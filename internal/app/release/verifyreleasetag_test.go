@@ -7,13 +7,16 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
+	pathpkg "path"
 	"slices"
 	"strings"
 	"testing"
 
 	apprelease "github.com/diggsweden/forge-ci/internal/app/release"
 	"github.com/diggsweden/forge-ci/internal/domain/errs"
+	"github.com/diggsweden/forge-ci/internal/domain/pipeline"
 	"github.com/diggsweden/forge-ci/internal/domain/projecttype"
 	"github.com/diggsweden/forge-ci/internal/runcontext"
 	"github.com/stretchr/testify/require"
@@ -48,6 +51,12 @@ type fakeTagGit struct {
 	changed             []string
 	changeErr           error
 	diff                string
+	// files are the version files by commit then path, as FileAt reads them.
+	files map[string]map[string]string
+	// modes are the Git modes of files by commit then path; 100644 if unset.
+	modes map[string]map[string]string
+	// absent are the changelogs a commit does not have.
+	absent map[string]map[string]bool
 }
 
 type tagVerifyCall struct {
@@ -90,6 +99,28 @@ func (f fakeTagGit) PathsDiff(context.Context, string, string, []string) (string
 	return f.diff, nil
 }
 
+// FileAt reads files and modes. A changelog the files leave out is a regular
+// file at every commit it is not absent from, and a symbolic link (mode
+// 120000) is refused as the adapter refuses every entry that is not one
+// regular file.
+func (f fakeTagGit) FileAt(_ context.Context, commit, path string) (string, string, bool, error) {
+	body, exists := f.files[commit][path]
+	if !exists && pathpkg.Base(path) == "CHANGELOG.md" {
+		exists = !f.absent[commit][path]
+	}
+
+	mode := f.modes[commit][path]
+	if mode == "" {
+		mode = "100644"
+	}
+
+	if mode == "120000" {
+		return "", "", false, fmt.Errorf("%s at %s is not one regular file: %w", path, commit, errs.ErrValidation)
+	}
+
+	return body, mode, exists, nil
+}
+
 // pomBumpDiff is the diff a verified Maven bump to 1.2.3 leaves in a POM.
 const pomBumpDiff = `diff --git a/pom.xml b/pom.xml
 index 1111111..2222222 100644
@@ -102,9 +133,9 @@ index 1111111..2222222 100644
    <packaging>jar</packaging>
 `
 
-// With a version bump the release commit may carry the verified POM change as
-// well as the changelog; anything that is not that substitution, any other
-// file, or a bump without the changelog is still refused.
+// With a planned version bump the release commit may carry the verified POM
+// change as well as the changelog; anything that is not that substitution,
+// any other file, or a bump without the changelog is still refused.
 func TestVerifyReleaseTag_ChangelogOnlyAdmitsTheVerifiedVersionBump(t *testing.T) {
 	t.Parallel()
 
@@ -120,7 +151,9 @@ func TestVerifyReleaseTag_ChangelogOnlyAdmitsTheVerifiedVersionBump(t *testing.T
 		{name: "bump that is no version change", changed: []string{"CHANGELOG.md", "pom.xml"},
 			diff: strings.Replace(pomBumpDiff, "+  <version>1.2.3</version>", "+  <version>1.2.3</version><evil/>", 1), want: errs.ErrValidation},
 		{name: "bump without the changelog", changed: []string{"pom.xml"}, diff: pomBumpDiff, want: errs.ErrValidation},
-		{name: "changelog without the bump", changed: []string{"CHANGELOG.md"}, want: errs.ErrValidation},
+		// The prepare job admits a project already at the release version.
+		{name: "changelog without the bump", changed: []string{"CHANGELOG.md"}},
+		{name: "a module POM", changed: []string{"CHANGELOG.md", "core/pom.xml"}, diff: strings.ReplaceAll(pomBumpDiff, "pom.xml", "core/pom.xml")},
 		{name: "another file too", changed: []string{"CHANGELOG.md", "pom.xml", "src/Main.java"}, diff: pomBumpDiff, want: errs.ErrValidation},
 	} {
 		t.Run(scenario.name, func(t *testing.T) {
@@ -128,7 +161,7 @@ func TestVerifyReleaseTag_ChangelogOnlyAdmitsTheVerifiedVersionBump(t *testing.T
 
 			git := fakeTagGit{head: sha, tagCommit: sha, parents: []string{parent}, request: parent, changed: scenario.changed, diff: scenario.diff}
 			err := apprelease.VerifyReleaseTag(t.Context(), git, io.Discard, apprelease.VerifyReleaseTagInput{
-				ReleaseSHA: sha, Tag: "v1.2.3", ExpectedParent: parent, ChangelogOnly: true, VersionBump: projecttype.Maven,
+				ReleaseSHA: sha, Tag: "v1.2.3", ExpectedParent: parent, ChangelogOnly: true, PreparePlan: bumpPlanOf(projecttype.Maven),
 			})
 
 			if scenario.want == nil {
@@ -526,4 +559,193 @@ func TestVerifyReleaseTag_RequiresTheSingleChildOfTheAuthorisedSource(t *testing
 			}
 		})
 	}
+}
+
+// bumpPlanOf is a prepare-stage plan bumping one project of kind at the root.
+func bumpPlanOf(kind projecttype.Type) *pipeline.ReleasePrepareStagePlan {
+	return &pipeline.ReleasePrepareStagePlan{Version: pipeline.ReleasePlanVersion, Stage: "prepare", Targets: pipeline.ReleasePrepareTargets{
+		VersionBump: pipeline.TargetPlan[pipeline.PlannedArtifact]{Runs: true, Items: []pipeline.PlannedArtifact{{Name: "app", ProjectType: kind, WorkingDirectory: "."}}},
+	}}
+}
+
+// A monorepo's release commit carries each project's changelog copy and its
+// own version files; a file of no planned project, or a project's file
+// outside its directory, is refused.
+func TestVerifyReleaseTag_ChangelogOnlyAdmitsEveryPlannedProject(t *testing.T) {
+	t.Parallel()
+
+	parent := strings.Repeat("b", 40)
+	plan := &pipeline.ReleasePrepareStagePlan{Version: pipeline.ReleasePlanVersion, Stage: "prepare", Targets: pipeline.ReleasePrepareTargets{
+		VersionBump: pipeline.TargetPlan[pipeline.PlannedArtifact]{Runs: true, Items: []pipeline.PlannedArtifact{
+			{Name: "backend", ProjectType: projecttype.Maven, WorkingDirectory: "services/backend"},
+			{Name: "frontend", ProjectType: projecttype.NPM, WorkingDirectory: "packages/frontend"},
+			{Name: "app", ProjectType: projecttype.Gradle, WorkingDirectory: "apps/android"},
+		}},
+	}}
+	backend := strings.ReplaceAll(pomBumpDiff, "pom.xml", "services/backend/pom.xml")
+	// The Gradle version file before the bump, and the release's.
+	properties := func(release string) map[string]map[string]string {
+		return map[string]map[string]string{
+			parent: {"apps/android/gradle.properties": "org.gradle.jvmargs=-Xmx1g\nversion=1.2.2\n"},
+			sha:    {"apps/android/gradle.properties": release},
+		}
+	}
+	bumped := properties("org.gradle.jvmargs=-Xmx1g\nversion=1.2.3\n")
+
+	for _, scenario := range []struct {
+		name    string
+		changed []string
+		files   map[string]map[string]string
+		want    error
+	}{
+		{name: "every project", changed: []string{"CHANGELOG.md", "apps/android/CHANGELOG.md", "apps/android/gradle.properties",
+			"packages/frontend/CHANGELOG.md", "services/backend/CHANGELOG.md", "services/backend/pom.xml"}, files: bumped},
+		{name: "a version file with more than the bump", changed: []string{"CHANGELOG.md", "apps/android/gradle.properties"},
+			files: properties("org.gradle.jvmargs=-Xmx1g\nversion=1.2.3\norg.gradle.java.home=/tmp/evil\n"), want: errs.ErrValidation},
+		{name: "another Gradle file of the project", changed: []string{"CHANGELOG.md", "apps/android/build.gradle.kts"}, want: errs.ErrValidation},
+		{name: "a changelog of no project", changed: []string{"CHANGELOG.md", "docs/CHANGELOG.md"}, want: errs.ErrValidation},
+		{name: "a POM outside the project", changed: []string{"CHANGELOG.md", "pom.xml"}, want: errs.ErrValidation},
+		{name: "a Gradle file outside the project", changed: []string{"CHANGELOG.md", "gradle.properties"}, want: errs.ErrValidation},
+		{name: "a source file", changed: []string{"CHANGELOG.md", "services/backend/src/Main.java"}, want: errs.ErrValidation},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			t.Parallel()
+
+			git := fakeTagGit{head: sha, tagCommit: sha, parents: []string{parent}, request: parent, changed: scenario.changed, diff: backend, files: scenario.files}
+			err := apprelease.VerifyReleaseTag(t.Context(), git, io.Discard, apprelease.VerifyReleaseTagInput{
+				ReleaseSHA: sha, Tag: "v1.2.3", ExpectedParent: parent, ChangelogOnly: true, PreparePlan: plan,
+			})
+
+			if scenario.want == nil {
+				require.NoError(t, err)
+			} else {
+				require.ErrorIs(t, err, scenario.want)
+			}
+		})
+	}
+}
+
+// validate-tag redoes an Android and an Xcode project's text bump on the
+// parent's bytes: the release must hold exactly those bytes at the parent's
+// mode. It knows only the default versions.xcconfig, so a bump written to
+// any other xcconfig is refused.
+func TestVerifyReleaseTag_ChangelogOnlyRedoesTheAndroidAndXcodeTextBumps(t *testing.T) {
+	t.Parallel()
+
+	parent := strings.Repeat("b", 40)
+	plan := &pipeline.ReleasePrepareStagePlan{Version: pipeline.ReleasePlanVersion, Stage: "prepare", Targets: pipeline.ReleasePrepareTargets{
+		VersionBump: pipeline.TargetPlan[pipeline.PlannedArtifact]{Runs: true, Items: []pipeline.PlannedArtifact{
+			{Name: "android", ProjectType: projecttype.GradleAndroid, WorkingDirectory: "apps/android"},
+			{Name: "ios", ProjectType: projecttype.XcodeIOS, WorkingDirectory: "apps/ios"},
+		}},
+	}}
+
+	const (
+		android  = "apps/android/gradle.properties"
+		xcconfig = "apps/ios/versions.xcconfig"
+		custom   = "apps/ios/Config/Release.xcconfig"
+	)
+
+	before := map[string]string{android: "versionName=1.2.2\nversionCode=7\n", xcconfig: "MARKETING_VERSION = 1.2.2\n", custom: "MARKETING_VERSION = 1.2.2\n"}
+	release := func(files map[string]string) map[string]map[string]string {
+		return map[string]map[string]string{parent: before, sha: files}
+	}
+
+	for _, scenario := range []struct {
+		name    string
+		changed []string
+		files   map[string]map[string]string
+		modes   map[string]map[string]string
+		want    error
+	}{
+		{name: "both bumps", changed: []string{"CHANGELOG.md", android, xcconfig},
+			files: release(map[string]string{android: "versionName=1.2.3\nversionCode=8\n", xcconfig: "MARKETING_VERSION = 1.2.3\n"})},
+		{name: "an xcconfig the bump creates", changed: []string{"CHANGELOG.md", xcconfig},
+			files: map[string]map[string]string{parent: {}, sha: {xcconfig: "MARKETING_VERSION = 1.2.3\n"}}},
+		{name: "an Android bump that keeps the version code", changed: []string{"CHANGELOG.md", android},
+			files: release(map[string]string{android: "versionName=1.2.3\nversionCode=7\n"}), want: errs.ErrValidation},
+		{name: "an Xcode bump with more than the version", changed: []string{"CHANGELOG.md", xcconfig},
+			files: release(map[string]string{xcconfig: "MARKETING_VERSION = 1.2.3\nCODE_SIGN_IDENTITY = evil\n"}), want: errs.ErrValidation},
+		{name: "a custom xcconfig", changed: []string{"CHANGELOG.md", custom},
+			files: release(map[string]string{custom: "MARKETING_VERSION = 1.2.3\n"}), want: errs.ErrValidation},
+		{name: "a bumped file made executable", changed: []string{"CHANGELOG.md", xcconfig},
+			files: release(map[string]string{xcconfig: "MARKETING_VERSION = 1.2.3\n"}), modes: map[string]map[string]string{sha: {xcconfig: "100755"}}, want: errs.ErrValidation},
+		{name: "a created file that is executable", changed: []string{"CHANGELOG.md", xcconfig},
+			files: map[string]map[string]string{parent: {}, sha: {xcconfig: "MARKETING_VERSION = 1.2.3\n"}}, modes: map[string]map[string]string{sha: {xcconfig: "100755"}}, want: errs.ErrValidation},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			t.Parallel()
+
+			git := fakeTagGit{head: sha, tagCommit: sha, parents: []string{parent}, request: parent, changed: scenario.changed, files: scenario.files, modes: scenario.modes}
+			err := apprelease.VerifyReleaseTag(t.Context(), git, io.Discard, apprelease.VerifyReleaseTagInput{
+				ReleaseSHA: sha, Tag: "v1.2.3", ExpectedParent: parent, ChangelogOnly: true, PreparePlan: plan,
+			})
+
+			if scenario.want == nil {
+				require.NoError(t, err)
+			} else {
+				require.ErrorIs(t, err, scenario.want)
+			}
+		})
+	}
+}
+
+// A changelog the release commit changes is admitted by its name only as a
+// regular file at its parent's mode: a link, an executable or a deleted
+// changelog is refused, with or without a planned bump, and so is a
+// changelog copy that becomes executable.
+func TestVerifyReleaseTag_ChangelogOnlyAdmitsOnlyARegularChangelog(t *testing.T) {
+	t.Parallel()
+
+	parent := strings.Repeat("b", 40)
+	copied := "services/backend/CHANGELOG.md"
+
+	for _, scenario := range []struct {
+		name   string
+		plan   *pipeline.ReleasePrepareStagePlan
+		path   string
+		modes  map[string]map[string]string
+		absent map[string]map[string]bool
+		want   error
+	}{
+		{name: "a regular changelog", path: "CHANGELOG.md"},
+		{name: "an executable changelog", path: "CHANGELOG.md", modes: map[string]map[string]string{sha: {"CHANGELOG.md": "100755"}}, want: errs.ErrValidation},
+		{name: "a linked changelog", path: "CHANGELOG.md", modes: map[string]map[string]string{sha: {"CHANGELOG.md": "120000"}}, want: errs.ErrValidation},
+		{name: "a deleted changelog", path: "CHANGELOG.md", absent: map[string]map[string]bool{sha: {"CHANGELOG.md": true}}, want: errs.ErrValidation},
+		{name: "an executable changelog beside a bump", plan: bumpPlanOf(projecttype.Maven), path: "CHANGELOG.md",
+			modes: map[string]map[string]string{sha: {"CHANGELOG.md": "100755"}}, want: errs.ErrValidation},
+		{name: "a created changelog copy", plan: backendPlan(), path: copied, absent: map[string]map[string]bool{parent: {copied: true}}},
+		{name: "a linked changelog copy", plan: backendPlan(), path: copied, modes: map[string]map[string]string{sha: {copied: "120000"}}, want: errs.ErrValidation},
+		{name: "an executable created changelog copy", plan: backendPlan(), path: copied,
+			absent: map[string]map[string]bool{parent: {copied: true}}, modes: map[string]map[string]string{sha: {copied: "100755"}}, want: errs.ErrValidation},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			t.Parallel()
+
+			changed := []string{"CHANGELOG.md"}
+			if scenario.path != "CHANGELOG.md" {
+				changed = append(changed, scenario.path)
+			}
+
+			git := fakeTagGit{head: sha, tagCommit: sha, parents: []string{parent}, request: parent, changed: changed, modes: scenario.modes, absent: scenario.absent}
+			err := apprelease.VerifyReleaseTag(t.Context(), git, io.Discard, apprelease.VerifyReleaseTagInput{
+				ReleaseSHA: sha, Tag: "v1.2.3", ExpectedParent: parent, ChangelogOnly: true, PreparePlan: scenario.plan,
+			})
+
+			if scenario.want == nil {
+				require.NoError(t, err)
+			} else {
+				require.ErrorIs(t, err, scenario.want)
+			}
+		})
+	}
+}
+
+// backendPlan bumps one Maven project in services/backend.
+func backendPlan() *pipeline.ReleasePrepareStagePlan {
+	return &pipeline.ReleasePrepareStagePlan{Version: pipeline.ReleasePlanVersion, Stage: "prepare", Targets: pipeline.ReleasePrepareTargets{
+		VersionBump: pipeline.TargetPlan[pipeline.PlannedArtifact]{Runs: true, Items: []pipeline.PlannedArtifact{
+			{Name: "backend", ProjectType: projecttype.Maven, WorkingDirectory: "services/backend"},
+		}},
+	}}
 }

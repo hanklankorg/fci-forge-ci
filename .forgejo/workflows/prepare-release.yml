@@ -11,7 +11,10 @@
 # Reusable prepare stage for a consumer release: guard the release-request
 # tag, fail-fast on enabled pipeline secrets, require the request at the head
 # of the release branch, generate + sign the changelog commit, and create the final release
-# tag once. Callers consume
+# tag once. The release plan of the consumer's artifacts.yml decides the
+# version bump the commit carries: one key-free version job per toolchain
+# family whose projects need their native version tool, each in that
+# family's runtime image. Callers consume
 # outputs.release-tag / outputs.release-sha in their build job and forward
 # them to sign-and-publish-release.yml.
 #
@@ -114,23 +117,28 @@ on:
         type: string
         required: false
         default: main
-      version-bump:
+      artifacts-config:
         description: >-
-          Project type whose project files the signed release commit bumps to the release version: maven, npm, cargo, or empty (the default) for no bump. The bump runs the project's build tool in a separate job that holds no secret; the signing job only verifies and applies the resulting patch. npm/Cargo require consistent existing lockfiles and semantic version-only changes.
+          Path of the artifacts.yml whose release plan decides the version bump: every declared project is bumped to the release version. Empty reads .forge-ci/artifacts.yml; without that file the release commit carries the changelog alone.
         type: string
         required: false
         default: ''
-      version-bump-image:
+      runtime-image-java:
         description: >-
-          Digest-pinned image the version-bump job runs in, <registry>/<repository>[:<tag>]@sha256:<digest>, carrying bash, git, curl, sha256sum and the selected build tool (JDK/Maven, Node/npm or Rust/Cargo). Required with version-bump.
+          Digest-pinned image of the java family, <registry>/<repository>[:<tag>]@sha256:<digest>, such as forge-ci-runtime-java-25, carrying bash, git, curl, sha256sum, a JDK and Maven. The plan's Maven projects are version-bumped in it, in a job that holds no secret. Empty, the default, when the plan has none; a planned family without its image stops the release before any version job.
         type: string
         required: false
         default: ''
-      version-bump-working-directory:
-        description: Repository-relative directory of the root project file the bump starts from.
+      runtime-image-node:
+        description: Digest-pinned image of the node family (npm), as runtime-image-java.
         type: string
         required: false
-        default: '.'
+        default: ''
+      runtime-image-rust:
+        description: Digest-pinned image of the rust family (Cargo), as runtime-image-java.
+        type: string
+        required: false
+        default: ''
     outputs:
       release-tag:
         description: Final stable release tag (vX.Y.Z) derived from the request tag.
@@ -138,6 +146,10 @@ on:
       release-sha:
         description: Final commit SHA the release tag points to after preparation.
         value: ${{ jobs.prepare.outputs.release-sha }}
+      artifacts-config:
+        description: >-
+          The validated artifacts-config this release planned its bump from, empty for the default. Pass it to sign-and-publish-release.yml, whose jobs re-check the release commit against the same declaration; check-l3-isolation requires that flow.
+        value: ${{ jobs.coordinates.outputs.artifacts_config }}
 
 jobs:
   coordinates:
@@ -148,9 +160,10 @@ jobs:
       helpers_repository: ${{ steps.validate.outputs.helpers_repository }}
       signer_image: ${{ steps.validate.outputs.signer_image }}
       release_branch: ${{ steps.branch.outputs.release_branch }}
-      version_bump: ${{ steps.bump.outputs.version_bump }}
-      version_bump_image: ${{ steps.bump.outputs.version_bump_image }}
-      version_bump_working_directory: ${{ steps.bump.outputs.version_bump_working_directory }}
+      artifacts_config: ${{ steps.plan-inputs.outputs.artifacts_config }}
+      runtime_image_java: ${{ steps.plan-inputs.outputs.runtime_image_java }}
+      runtime_image_node: ${{ steps.plan-inputs.outputs.runtime_image_node }}
+      runtime_image_rust: ${{ steps.plan-inputs.outputs.runtime_image_rust }}
     steps:
       - name: Validate trust coordinate
         id: validate
@@ -219,42 +232,121 @@ jobs:
           fi
           printf 'release_branch=%s\n' "${RELEASE_BRANCH_INPUT}" >>"${FORGEJO_OUTPUT}"
 
-      - name: Validate version bump
-        id: bump
+      # The plan job chooses which of these images run; each one it uses is
+      # a job's container, so each is a complete digest-pinned reference.
+      - name: Validate version plan inputs
+        id: plan-inputs
         env:
-          VERSION_BUMP_INPUT: ${{ inputs['version-bump'] }}
-          VERSION_BUMP_IMAGE_INPUT: ${{ inputs['version-bump-image'] }}
-          VERSION_BUMP_WORKING_DIRECTORY_INPUT: ${{ inputs['version-bump-working-directory'] }}
+          ARTIFACTS_CONFIG_INPUT: ${{ inputs['artifacts-config'] }}
+          RUNTIME_IMAGE_JAVA_INPUT: ${{ inputs['runtime-image-java'] }}
+          RUNTIME_IMAGE_NODE_INPUT: ${{ inputs['runtime-image-node'] }}
+          RUNTIME_IMAGE_RUST_INPUT: ${{ inputs['runtime-image-rust'] }}
         run: |
           set -euo pipefail
-          case "${VERSION_BUMP_INPUT}" in
-            '')
-              if [ -n "${VERSION_BUMP_IMAGE_INPUT}" ]; then
-                echo "ERROR: version-bump-image is set but version-bump is empty" >&2
-                exit 1
-              fi
-              ;;
-            maven | npm | cargo)
-              if [[ ! "${VERSION_BUMP_IMAGE_INPUT}" =~ ^[a-z0-9]+([.-][a-z0-9]+)*(:[0-9]+)?/([a-z0-9]+(([._]|__|-+)[a-z0-9]+)*/)*[a-z0-9]+(([._]|__|-+)[a-z0-9]+)*(:[A-Za-z0-9_][A-Za-z0-9._-]{0,127})?@sha256:[0-9a-f]{64}$ ]]; then
-                echo "ERROR: version-bump-image must be a complete OCI repository coordinate pinned by sha256 digest: <registry>/<repository>[:<tag>]@sha256:<64 hex>" >&2
-                exit 1
-              fi
-              ;;
-            *)
-              echo "ERROR: version-bump must be maven, npm, cargo or empty: ${VERSION_BUMP_INPUT}" >&2
-              exit 1
-              ;;
-          esac
-          directory=${VERSION_BUMP_WORKING_DIRECTORY_INPUT}
-          if [[ -z "${directory}" || "${directory}" == /* || "/${directory}/" == *'/../'* || ! "${directory}" =~ ^[A-Za-z0-9_./-]+$ ]]; then
-            echo "ERROR: version-bump-working-directory must be a repository-relative path: ${directory}" >&2
+          export LC_ALL=C
+          config=${ARTIFACTS_CONFIG_INPUT}
+          if [ -n "${config}" ] && [[ ! "${config}" =~ ^[A-Za-z0-9_.][A-Za-z0-9_./-]*$ || "/${config}/" == *'/../'* ]]; then
+            echo "ERROR: artifacts-config must be a repository-relative path: ${config}" >&2
             exit 1
           fi
+          for family in java node rust; do
+            name="RUNTIME_IMAGE_${family^^}_INPUT"
+            image=${!name}
+            if [ -n "${image}" ] && [[ ! "${image}" =~ ^[a-z0-9]+([.-][a-z0-9]+)*(:[0-9]+)?/([a-z0-9]+(([._]|__|-+)[a-z0-9]+)*/)*[a-z0-9]+(([._]|__|-+)[a-z0-9]+)*(:[A-Za-z0-9_][A-Za-z0-9._-]{0,127})?@sha256:[0-9a-f]{64}$ ]]; then
+              echo "ERROR: runtime-image-${family} must be a complete OCI repository coordinate pinned by sha256 digest: <registry>/<repository>[:<tag>]@sha256:<64 hex>" >&2
+              exit 1
+            fi
+          done
           {
-            printf 'version_bump=%s\n' "${VERSION_BUMP_INPUT}"
-            printf 'version_bump_image=%s\n' "${VERSION_BUMP_IMAGE_INPUT}"
-            printf 'version_bump_working_directory=%s\n' "${directory}"
+            printf 'artifacts_config=%s\n' "${config}"
+            # An image is written only when given: the version job's container
+            # is an empty string, the runner default, for a family without one.
+            if [ -n "${RUNTIME_IMAGE_JAVA_INPUT}" ]; then printf 'runtime_image_java=%s\n' "${RUNTIME_IMAGE_JAVA_INPUT}"; fi
+            if [ -n "${RUNTIME_IMAGE_NODE_INPUT}" ]; then printf 'runtime_image_node=%s\n' "${RUNTIME_IMAGE_NODE_INPUT}"; fi
+            if [ -n "${RUNTIME_IMAGE_RUST_INPUT}" ]; then printf 'runtime_image_rust=%s\n' "${RUNTIME_IMAGE_RUST_INPUT}"; fi
           } >>"${FORGEJO_OUTPUT}"
+
+  # The release plan of the declaration at the request: which toolchain
+  # families' native version tools the bump runs. The engine reads
+  # artifacts.yml as data; no consumer code runs here and no secret is named.
+  plan:
+    name: "Prepare: version plan"
+    needs: coordinates
+    runs-on: ${{ fromJSON(inputs['runner-label']) }}
+    timeout-minutes: 5
+    outputs:
+      versions: ${{ steps.plan.outputs.versions }}
+    steps:
+      - name: Checkout layer helpers at the caller's pin
+        env:
+          EXPECTED_HELPERS_SHA: ${{ inputs['forge-ci-sha'] }}
+          FORGE_CI_REPOSITORY_URL: ${{ needs.coordinates.outputs.helpers_repository }}
+        run: |
+          set -euo pipefail
+          if [[ ! "${EXPECTED_HELPERS_SHA}" =~ ^([0123456789abcdef]{40}|[0123456789abcdef]{64})$ ]]; then
+            echo "ERROR: forge-ci-sha must be a 40- or 64-character lowercase commit hex digest" >&2
+            exit 1
+          fi
+          helpers_dir=.forge-ci-helpers
+          git init --quiet "${helpers_dir}"
+          git -C "${helpers_dir}" remote add origin "${FORGE_CI_REPOSITORY_URL:?}"
+          # Direct unadvertised SHA fetches can be refused.
+          # Retry advertised branches/tags without assuming a default branch.
+          helpers_fetch_log=$(mktemp)
+          if ! GIT_TERMINAL_PROMPT=0 git -C "${helpers_dir}" -c protocol.version=2 fetch --quiet --no-tags --depth=1 --no-recurse-submodules origin "${EXPECTED_HELPERS_SHA}" 2>"${helpers_fetch_log}"; then
+            if ! GIT_TERMINAL_PROMPT=0 git -C "${helpers_dir}" -c protocol.version=2 fetch --quiet --no-recurse-submodules origin '+refs/heads/*:refs/remotes/origin/*' '+refs/tags/*:refs/tags/*' 2>>"${helpers_fetch_log}"; then
+              echo "ERROR: cannot fetch layer helpers ${EXPECTED_HELPERS_SHA} from $(git -C "${helpers_dir}" remote get-url origin)" >&2
+              cat -- "${helpers_fetch_log}" >&2
+              rm -f -- "${helpers_fetch_log}"
+              exit 1
+            fi
+          fi
+          rm -f -- "${helpers_fetch_log}"
+          git -C "${helpers_dir}" checkout --quiet --detach "${EXPECTED_HELPERS_SHA}"
+          actual_sha=$(git -C "${helpers_dir}" rev-parse HEAD)
+          if [ "${actual_sha}" != "${EXPECTED_HELPERS_SHA}" ]; then
+            echo "ERROR: helper checkout resolved to unexpected commit ${actual_sha}" >&2
+            exit 1
+          fi
+
+      - name: Fetch engine binary
+        env:
+          FORGE_CI_REPOSITORY_URL: ${{ needs.coordinates.outputs.helpers_repository }}
+        run: |
+          set -euo pipefail
+          # shellcheck source=/dev/null
+          source ./.forge-ci-helpers/.engine/bin/lib-forge-ci.sh
+          fetch_forge_ci
+
+      - name: Checkout consumer repository at release request tag
+        env:
+          CHECKOUT_REF: ${{ forgejo.sha }}
+        run: |
+          set -euo pipefail
+          # shellcheck source=/dev/null
+          source ./.forge-ci-helpers/.engine/bin/lib-forge-ci.sh
+          run_forge_ci platform checkout
+
+      # One matrix row a planned family, [] for none. A planned family the
+      # caller gave no runtime image stops the release here.
+      - name: Plan the version jobs
+        id: plan
+        env:
+          ARTIFACTS_CONFIG: ${{ needs.coordinates.outputs.artifacts_config }}
+          RUNTIME_IMAGE_JAVA: ${{ needs.coordinates.outputs.runtime_image_java }}
+          RUNTIME_IMAGE_NODE: ${{ needs.coordinates.outputs.runtime_image_node }}
+          RUNTIME_IMAGE_RUST: ${{ needs.coordinates.outputs.runtime_image_rust }}
+        run: |
+          set -euo pipefail
+          work=$(mktemp -d "${RUNNER_TEMP:?}/release-version-plan.XXXXXX")
+          file=()
+          if [ -n "${ARTIFACTS_CONFIG:-}" ]; then file=(--file "${ARTIFACTS_CONFIG}"); fi
+          # shellcheck source=/dev/null
+          source ./.forge-ci-helpers/.engine/bin/lib-forge-ci.sh
+          run_forge_ci plan release-versions "${file[@]}" --matrix-output "${work}/versions.json" \
+            --runtime-image-java "${RUNTIME_IMAGE_JAVA:-}" --runtime-image-node "${RUNTIME_IMAGE_NODE:-}" \
+            --runtime-image-rust "${RUNTIME_IMAGE_RUST:-}"
+          printf 'versions=%s\n' "$(cat -- "${work}/versions.json")" >>"${FORGEJO_OUTPUT}"
 
   render:
     name: "Prepare: changelog"
@@ -451,29 +543,44 @@ jobs:
             --name release-changelog --dir "${handoff}" \
             --retention-days 1 --if-no-files error
 
-  # The version bump runs the project's build tool, and with it the project's
-  # plugins, so it gets a job of its own that references no secret at all. Only
-  # the patch and its digest leave it; the signing job proves the patch is a
-  # version substitution before applying it, and runs no build tool itself.
+  # A family's version bump runs its native tool, and with it the project's
+  # plugins, so each family gets a job of its own, in the family's runtime
+  # image, that references no secret at all. Only the patch of the family's
+  # version files and its digest leave it; the signing job proves the joined
+  # patch is a version substitution of planned project files before applying
+  # it, and runs no build tool itself.
   #
   # The job itself always runs and its steps are the ones conditioned on a
-  # bump being asked for: Forgejo decides on the server, before any runner
+  # planned family: Forgejo decides on the server, before any runner
   # evaluates a condition, that the dependant of a skipped job is skipped too
-  # (Nanolinter fixture, lab runs 65 and 67, 2026-10-16), so a skipped version
-  # job would skip the signing job with it. Without a bump the image below is
-  # empty and the runner takes the label's default image for the empty job.
-  version-bump:
-    name: "Prepare: version"
-    needs: coordinates
+  # (Nanolinter fixture, lab runs 65 and 67, 2026-10-16), and an empty matrix
+  # blocks its dependants (forgejo/forgejo#12191). So a plan without a family
+  # runs one empty row in the label's default image.
+  version:
+    name: "Prepare: version ${{ matrix.version.family || 'none' }}"
+    needs: [coordinates, plan, render]
     runs-on: ${{ fromJSON(inputs['runner-label']) }}
     timeout-minutes: 20
-    container:
-      image: ${{ needs.coordinates.outputs.version_bump_image }}
+    # Select a validated coordinate by key, never a logical expression's value.
+    # format keeps an empty container, the runner default, for the empty row.
+    container: ${{ format('{0}', needs.coordinates.outputs[fromJSON('{"java":"runtime_image_java","node":"runtime_image_node","rust":"runtime_image_rust"}')[matrix.version.family]]) }}
+    strategy:
+      fail-fast: false
+      matrix:
+        version: ${{ fromJSON(needs.plan.outputs.versions != '[]' && needs.plan.outputs.versions || '[{}]') }}
+    # One output a family: Forgejo merges the rows' outputs, each row setting
+    # its own family's.
     outputs:
-      patch-digest: ${{ steps.patch.outputs.digest }}
+      patch_digest_java: ${{ steps.patch.outputs.patch_digest_java }}
+      patch_digest_node: ${{ steps.patch.outputs.patch_digest_node }}
+      patch_digest_rust: ${{ steps.patch.outputs.patch_digest_rust }}
     steps:
+      - name: No version job planned
+        if: ${{ !matrix.version.family }}
+        run: echo 'The release plan bumps no project with a native version tool.'
+
       - name: Checkout layer helpers at the caller's pin
-        if: ${{ needs.coordinates.outputs.version_bump != '' }}
+        if: ${{ matrix.version.family != '' }}
         env:
           EXPECTED_HELPERS_SHA: ${{ inputs['forge-ci-sha'] }}
           FORGE_CI_REPOSITORY_URL: ${{ needs.coordinates.outputs.helpers_repository }}
@@ -506,7 +613,7 @@ jobs:
           fi
 
       - name: Fetch engine binary
-        if: ${{ needs.coordinates.outputs.version_bump != '' }}
+        if: ${{ matrix.version.family != '' }}
         env:
           FORGE_CI_REPOSITORY_URL: ${{ needs.coordinates.outputs.helpers_repository }}
         run: |
@@ -516,7 +623,7 @@ jobs:
           fetch_forge_ci
 
       - name: Checkout consumer repository at release request tag
-        if: ${{ needs.coordinates.outputs.version_bump != '' }}
+        if: ${{ matrix.version.family != '' }}
         env:
           CHECKOUT_REF: ${{ forgejo.sha }}
         run: |
@@ -528,7 +635,7 @@ jobs:
       # guard-release-tag's own check, run inline: a container job here runs
       # only the verified helper checkout's engine, never an action.
       - name: Reject non-stable release request
-        if: ${{ needs.coordinates.outputs.version_bump != '' }}
+        if: ${{ matrix.version.family != '' }}
         id: guard
         env:
           RELEASE_REQUEST: ${{ forgejo.ref_name }}
@@ -539,53 +646,94 @@ jobs:
           FORGE_CI_PROVIDER=forgejo run_forge_ci validate tag release-guard \
             --tag "${RELEASE_REQUEST:?}"
 
-      # The same engine verb, and so the same `mvn versions:set`, that GitHub's
-      # and GitLab's release preparation run.
-      - name: Bump project version
-        if: ${{ needs.coordinates.outputs.version_bump != '' }}
-        env:
-          PROJECT_TYPE: ${{ needs.coordinates.outputs.version_bump }}
-          RELEASE_TAG: ${{ steps.guard.outputs.release-tag }}
-          WORKING_DIRECTORY: ${{ needs.coordinates.outputs.version_bump_working_directory }}
+      # The plan copies the full changelog into each project; the bump reads
+      # the rendered one. Only the regular file crosses.
+      - name: Download the rendered changelog
+        if: ${{ matrix.version.family != '' }}
         run: |
           set -euo pipefail
+          handoff=$(mktemp -d "${RUNNER_TEMP:?}/release-changelog.XXXXXX")
           # shellcheck source=/dev/null
           source ./.forge-ci-helpers/.engine/bin/lib-forge-ci.sh
-          run_forge_ci version bump --project-type "${PROJECT_TYPE:?}" \
-            --version "${RELEASE_TAG#v}" --working-dir "${WORKING_DIRECTORY:?}" \
-            --maven-cli-opts '--batch-mode --no-transfer-progress --errors --fail-at-end -Dstyle.color=always'
+          run_forge_ci artifact download --name release-changelog --dir "${handoff}"
+          if [ ! -f "${handoff}/CHANGELOG.md" ] || [ -L "${handoff}/CHANGELOG.md" ]; then
+            echo "ERROR: changelog artifact must contain a regular CHANGELOG.md" >&2
+            exit 1
+          fi
+          cp --remove-destination -- "${handoff}/CHANGELOG.md" CHANGELOG.md
+          rm -rf -- "${handoff}"
 
-      # Literal paths and plain text whatever the project's Git configuration
-      # says: no external diff, no textconv, no renames, fixed prefixes.
-      - name: Upload the version-bump patch
-        if: ${{ needs.coordinates.outputs.version_bump != '' }}
-        id: patch
+      # The same engine verb, and so the same `mvn versions:set`, `npm version`
+      # or Cargo bump, that GitHub's and GitLab's release preparation run, for
+      # this family's planned projects alone. The engine reports the file
+      # pattern of their version files as the step's file-pattern.
+      - name: Bump the family's project versions
+        if: ${{ matrix.version.family != '' }}
+        id: bump
+        env:
+          ARTIFACTS_CONFIG: ${{ needs.coordinates.outputs.artifacts_config }}
+          PROJECT_TYPE: ${{ matrix.version['project-type'] }}
+          RELEASE_TAG: ${{ steps.guard.outputs.release-tag }}
         run: |
           set -euo pipefail
+          work=$(mktemp -d "${RUNNER_TEMP:?}/release-version-plan.XXXXXX")
+          file=()
+          if [ -n "${ARTIFACTS_CONFIG:-}" ]; then file=(--file "${ARTIFACTS_CONFIG}"); fi
+          # shellcheck source=/dev/null
+          source ./.forge-ci-helpers/.engine/bin/lib-forge-ci.sh
+          run_forge_ci plan release-versions "${file[@]}" --prepare-plan-output "${work}/prepare-plan.json"
+          run_forge_ci version bump-plan --plan-json "$(cat -- "${work}/prepare-plan.json")" \
+            --version "${RELEASE_TAG#v}" --release-policy "${RELEASE_POLICY:-stable}" --project-type "${PROJECT_TYPE:?}" \
+            --maven-cli-opts '--batch-mode --no-transfer-progress --errors --fail-at-end -Dstyle.color=always'
+
+      # This family's version files alone, as literal paths and plain text
+      # whatever the project's Git configuration says: no external diff, no
+      # textconv, no renames, fixed prefixes. The changelog copies are the
+      # signing job's to write, and no other file the bump touched leaves.
+      # A family whose projects already declare the version hands on an
+      # empty patch.
+      - name: Upload the version patch
+        if: ${{ matrix.version.family != '' }}
+        id: patch
+        env:
+          FAMILY: ${{ matrix.version.family }}
+          FILE_PATTERN: ${{ steps.bump.outputs.file-pattern }}
+        run: |
+          set -euo pipefail
+          case "${FAMILY}" in
+            java | node | rust) ;;
+            *) echo "ERROR: the version job has no family it knows: ${FAMILY}" >&2; exit 1 ;;
+          esac
+          pathspecs=()
+          read -r -a pathspecs <<<"${FILE_PATTERN}"
+          native=()
+          for pathspec in "${pathspecs[@]}"; do
+            case "${pathspec##*/}" in CHANGELOG.md) ;; *) native+=("${pathspec}") ;; esac
+          done
           handoff=$(mktemp -d "${RUNNER_TEMP:?}/release-version-bump.XXXXXX")
-          git -c core.quotePath=true diff --binary --no-ext-diff --no-textconv --no-color --no-renames \
-            --src-prefix=a/ --dst-prefix=b/ >"${handoff}/version-bump.patch"
-          if [ ! -s "${handoff}/version-bump.patch" ]; then
-            echo "ERROR: the version bump changed no tracked file" >&2
-            exit 1
+          if [ "${#native[@]}" -eq 0 ]; then
+            : >"${handoff}/version-bump.patch"
+          else
+            git -c core.quotePath=true diff --binary --no-ext-diff --no-textconv --no-color --no-renames \
+              --src-prefix=a/ --dst-prefix=b/ -- "${native[@]}" >"${handoff}/version-bump.patch"
           fi
           digest=$(sha256sum -- "${handoff}/version-bump.patch")
           digest=${digest%% *}
           # shellcheck source=/dev/null
           source ./.forge-ci-helpers/.engine/bin/lib-forge-ci.sh
           run_forge_ci artifact upload \
-            --name release-version-bump --dir "${handoff}" \
+            --name "release-version-${FAMILY}" --dir "${handoff}" \
             --retention-days 1 --if-no-files error
-          printf 'digest=%s\n' "${digest}" >>"${FORGEJO_OUTPUT}"
+          printf 'patch_digest_%s=%s\n' "${FAMILY}" "${digest}" >>"${FORGEJO_OUTPUT}"
 
   # A renderer config can run commands (git-cliff replace_command). A later
   # key-free step in the same job cannot undo its processes or filesystem edits.
   # This fresh job receives only two data files and never runs the renderer.
   prepare:
     name: "Prepare: release commit and tag"
-    # No condition: every job above runs whether or not a bump is asked for,
-    # so the default rule, all of them successful, is the whole requirement.
-    needs: [coordinates, render, version-bump]
+    # No condition: every job above runs whether or not the plan bumps, so
+    # the default rule, all of them successful, is the whole requirement.
+    needs: [coordinates, render, version]
     runs-on: ${{ fromJSON(inputs['runner-label']) }}
     timeout-minutes: 10
     outputs:
@@ -680,34 +828,63 @@ jobs:
           done
           rm -rf -- "${handoff}"
 
-      # Text checks only: the patch matches the digest its job reported, it
-      # touches only the project files of the type, and every changed line moves
-      # the project's current version to the release version. No build tool runs
-      # in this job.
+      # Text checks only, no build tool: the release is planned again from
+      # this checkout, each planned family's patch must match the digest its
+      # job reported, and the engine admits the joined patch only as version
+      # substitutions of the plan's project files, applies it, and writes the
+      # changelog copies and the text-bumped version files itself. It names
+      # the paths it wrote, and the release commit carries those alone.
       - name: Verify and apply the version bump
         id: bump
-        if: ${{ needs.coordinates.outputs.version_bump != '' }}
         env:
-          PATCH_DIGEST: ${{ needs.version-bump.outputs.patch-digest }}
-          PROJECT_TYPE: ${{ needs.coordinates.outputs.version_bump }}
+          ARTIFACTS_CONFIG: ${{ needs.coordinates.outputs.artifacts_config }}
+          PATCH_DIGEST_JAVA: ${{ needs.version.outputs.patch_digest_java }}
+          PATCH_DIGEST_NODE: ${{ needs.version.outputs.patch_digest_node }}
+          PATCH_DIGEST_RUST: ${{ needs.version.outputs.patch_digest_rust }}
           RELEASE_TAG: ${{ steps.guard.outputs.release-tag }}
-          WORKING_DIRECTORY: ${{ needs.coordinates.outputs.version_bump_working_directory }}
         run: |
           set -euo pipefail
-          handoff=$(mktemp -d "${RUNNER_TEMP:?}/release-version-bump.XXXXXX")
+          work=$(mktemp -d "${RUNNER_TEMP:?}/release-version-bump.XXXXXX")
           paths_file=$(mktemp "${RUNNER_TEMP:?}/release-version-bump-paths.XXXXXX")
+          file=()
+          if [ -n "${ARTIFACTS_CONFIG:-}" ]; then file=(--file "${ARTIFACTS_CONFIG}"); fi
           # shellcheck source=/dev/null
           source ./.forge-ci-helpers/.engine/bin/lib-forge-ci.sh
-          run_forge_ci artifact download --name release-version-bump --dir "${handoff}"
-          if [ ! -f "${handoff}/version-bump.patch" ] || [ -L "${handoff}/version-bump.patch" ]; then
-            echo "ERROR: version-bump artifact must contain a regular version-bump.patch" >&2
-            exit 1
+          run_forge_ci plan release-versions "${file[@]}" \
+            --prepare-plan-output "${work}/prepare-plan.json" --families-output "${work}/families"
+          patch="${work}/version-bump.patch"
+          : >"${patch}"
+          while IFS= read -r family; do
+            case "${family}" in
+              java) digest=${PATCH_DIGEST_JAVA:-} ;;
+              node) digest=${PATCH_DIGEST_NODE:-} ;;
+              rust) digest=${PATCH_DIGEST_RUST:-} ;;
+              *) echo "ERROR: the plan names a version family this job does not know: ${family}" >&2; exit 1 ;;
+            esac
+            if [[ ! "${digest}" =~ ^[0-9a-f]{64}$ ]]; then
+              echo "ERROR: the plan bumps the ${family} family, but \"Prepare: version ${family}\" reported no patch digest." >&2
+              exit 1
+            fi
+            handoff="${work}/${family}"
+            run_forge_ci artifact download --name "release-version-${family}" --dir "${handoff}"
+            if [ ! -f "${handoff}/version-bump.patch" ] || [ -L "${handoff}/version-bump.patch" ]; then
+              echo "ERROR: the ${family} version artifact must contain a regular version-bump.patch" >&2
+              exit 1
+            fi
+            actual=$(sha256sum -- "${handoff}/version-bump.patch")
+            if [ "${actual%% *}" != "${digest}" ]; then
+              echo "ERROR: the ${family} version patch differs from its job's digest." >&2
+              exit 1
+            fi
+            cat -- "${handoff}/version-bump.patch" >>"${patch}"
+          done <"${work}/families"
+          joined=$(sha256sum -- "${patch}")
+          run_forge_ci version bump-plan --plan-json "$(cat -- "${work}/prepare-plan.json")" \
+            --version "${RELEASE_TAG#v}" --release-policy "${RELEASE_POLICY:-stable}" \
+            --patch "${patch}" --patch-sha256 "${joined%% *}" --paths-file "${paths_file}"
+          if [ -s "${paths_file}" ]; then
+            printf 'paths-file=%s\n' "${paths_file}" >>"${FORGEJO_OUTPUT}"
           fi
-          run_forge_ci version apply-bump --release-policy "${RELEASE_POLICY:-stable}" --project-type "${PROJECT_TYPE:?}" \
-            --version "${RELEASE_TAG:?}" --working-dir "${WORKING_DIRECTORY:?}" \
-            --patch "${handoff}/version-bump.patch" --sha256 "${PATCH_DIGEST:?}" \
-            --paths-file "${paths_file}"
-          printf 'paths-file=%s\n' "${paths_file}" >>"${FORGEJO_OUTPUT}"
 
       - name: Sign changelog commit and create final tag
         id: prepare-release

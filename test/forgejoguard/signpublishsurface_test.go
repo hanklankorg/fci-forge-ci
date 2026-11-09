@@ -41,6 +41,7 @@ func signPublishInputs() map[string]inputContract {
 		"cosign-public-key":        {required: true},
 		"cosign-public-key-sha256": {required: true},
 		"forge-ci-repository":      {value: ""},
+		"artifacts-config":         {value: ""},
 		"artifact-name":            {value: "build-dist"},
 		"artifact-path":            {value: "dist/"},
 		"release-images-path":      {value: ""},

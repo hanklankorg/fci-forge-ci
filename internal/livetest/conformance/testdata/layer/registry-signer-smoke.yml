@@ -283,6 +283,7 @@ jobs:
       cosign-public-key-sha256: RENDER_COSIGN_PUBLIC_KEY_SHA256
       release-tag: ${{ needs.prepare.outputs.release-tag }}
       release-sha: ${{ needs.prepare.outputs.release-sha }}
+      artifacts-config: ${{ needs.prepare.outputs.artifacts-config }}
       release-request-sha: ${{ forgejo.sha }}
       dist-digest: ${{ needs.build.outputs.dist-digest }}
       artifact-name: build-dist

@@ -4,9 +4,11 @@
 # Pin the exact commit of an authenticated forge-ci release. Serve that commit
 # and its checksum-bound engine package on your Forgejo instance before use.
 #
-# Minimal isolated release flow for a Cargo project released as binaries
-# (no containers): the Go CLI release (examples/go-cli/forgejo/) with
-# build-cargo in place of build-go.
+# Minimal isolated release flow for this example's Cargo workspace, the
+# worker and api-service crates artifacts.yml declares, released as binaries
+# (no containers): the Go CLI release (examples/go-cli/forgejo/) with one
+# build-cargo step a crate in place of build-go. Copy artifacts.yml to
+# .forge-ci/artifacts.yml: the release plan bumps the crates it declares.
 # Copy to your repo as .forgejo/workflows/release.yml, then replace the
 # placeholders. Every one is a literal in the file, so `git grep` finds them:
 #
@@ -30,10 +32,16 @@
 #                                 containers/signer/Containerfile
 #   PIN_COSIGN_PUBLIC_KEY_SHA256  output of `sha256sum cosign.pub` for your
 #                                 organization's Cosign public key
+#   PIN_RUST_IMAGE_DIGEST         sha256 digest of the Rust image the
+#                                 version bump runs in (bash, git, curl,
+#                                 sha256sum, Cargo); keep the tag beside it
+#                                 so Renovate can update the pin, the digest
+#                                 decides the pull
 #
 # Then:
 #
-#   1. Fill in each FIXME: the bot identity and the name of your binary.
+#   1. Fill in each FIXME: the bot identity. Name your own crates in the
+#      build steps and in artifacts.yml.
 #   2. Configure the variables CI_RUNNER_LABEL,
 #      RELEASE_GIT_HOST_KEY_FINGERPRINT and COSIGN_PUBLIC_KEY (RELEASE_GIT_URL
 #      only where SSH runs on another host or port than the web), and the
@@ -48,8 +56,9 @@
 #
 #   prepare (forge-ci)  ->  build (yours)  ->  sign-and-publish (forge-ci)
 #
-# The build job is a Cargo build with forge-ci's build-cargo action, which
-# leaves the same dist/ layout as build-go; any other build works as long as
+# The build job is a Cargo build with forge-ci's build-cargo action, once a
+# crate, gathered into the same dist/ layout as build-go; any other build
+# works as long as
 # it ends with the same hand-off. Something of your own that must pass before a release (a
 # token check with verify-forgejo-token, a full test run) is a job of yours
 # that prepare `needs:`; the prepare job itself is the reusable workflow.
@@ -96,6 +105,10 @@ jobs:
       # file. The reusable workflow fails closed on any other boolean spelling.
       verify-release-request-signature: 'false'
       release-request-allowed-signers: .forgejo/release-allowed-signers
+      # The signed release commit carries the crates' release version. The
+      # plan's bump runs Cargo in its own key-free job, in this image, which
+      # needs bash, git, curl and sha256sum beside Cargo.
+      runtime-image-rust: docker.io/library/rust:1@sha256:PIN_RUST_IMAGE_DIGEST
       # This binary-only starter has no distro packages or container ledger.
       sign-distro-packages: 'false'
       publish-container-images: 'false'
@@ -125,9 +138,6 @@ jobs:
     needs: prepare
     runs-on: ${{ fromJSON(vars.CI_RUNNER_LABEL) }}
     timeout-minutes: 30
-    env:
-      # FIXME: the name of your binary. It also names the Build SBOM.
-      ARTIFACT_NAME: FIXME-app
     outputs:
       dist-digest: ${{ steps.dist.outputs.digest }}
     steps:
@@ -162,19 +172,32 @@ jobs:
           # Release isolation: no cache in token-bearing release jobs.
           cache: 'false'
 
-      # Tests, Build SBOM (bom.json beside Cargo.toml) and one binary per
-      # platform, as dist/<os>-<arch>/<name>-<os>-<arch>. The version and the commit are the
-      # prepared release's: the runner's own ref and commit are the request's.
-      - name: Build
+      # Once a crate, as artifacts.yml declares them: tests, Build SBOM
+      # (bom.json beside the crate's Cargo.toml) and one binary per platform,
+      # as <crate>/dist/<os>-<arch>/<name>-<os>-<arch>. The version and the
+      # commit are the prepared release's: the runner's own ref and commit are
+      # the request's.
+      - name: Build worker
         uses: https://FORGE_HOST/OWNER/forge-ci/.forgejo/actions/build-cargo@PIN_FORGE_CI_SHA
         with:
           version: ${{ needs.prepare.outputs.release-tag }}
           commit: ${{ needs.prepare.outputs.release-sha }}
-          artifact-name: ${{ env.ARTIFACT_NAME }}
+          working-directory: worker
+          artifact-name: worker
           # Add linux/arm64 once the job has its Rust target and linker.
           platforms: linux/amd64
 
-      # The hand-off the signer takes: the public files, exactly one checksums
+      - name: Build api-service
+        uses: https://FORGE_HOST/OWNER/forge-ci/.forgejo/actions/build-cargo@PIN_FORGE_CI_SHA
+        with:
+          version: ${{ needs.prepare.outputs.release-tag }}
+          commit: ${{ needs.prepare.outputs.release-sha }}
+          working-directory: api-service
+          artifact-name: api-service
+          platforms: linux/amd64
+
+      # Both crates' binaries and SBOMs go into one dist/. The hand-off the
+      # signer takes: the public files, exactly one checksums
       # file covering them, release-notes.md for the release body, and
       # dist/release-files.json, the manifest that declares the public files.
       # `release files declare` writes the checksums file and the manifest
@@ -192,7 +215,11 @@ jobs:
           RELEASE_SHA: ${{ needs.prepare.outputs.release-sha }}
         run: |
           set -euo pipefail
-          cp -- bom.json "dist/${ARTIFACT_NAME}.cdx.json"
+          mkdir -p dist
+          for crate in worker api-service; do
+            cp -R -- "${crate}/dist/." dist/
+            cp -- "${crate}/bom.json" "dist/${crate}.cdx.json"
+          done
           forge-ci release notes \
             --source-file release-notes.md \
             --target-file dist/release-notes.md \
@@ -200,7 +227,7 @@ jobs:
             --release-commit "${RELEASE_SHA}"
           forge-ci release files declare \
             --asset 'dist/*/*' \
-            --sbom "dist/${ARTIFACT_NAME}.cdx.json"
+            --sbom 'dist/*.cdx.json'
 
       - name: Upload dist/ with hand-off digest
         id: dist
@@ -223,6 +250,7 @@ jobs:
       runner-label: ${{ vars.CI_RUNNER_LABEL }}
       release-tag: ${{ needs.prepare.outputs.release-tag }}
       release-sha: ${{ needs.prepare.outputs.release-sha }}
+      artifacts-config: ${{ needs.prepare.outputs.artifacts-config }}
       # The commit the request tag pushed, from the event context. The signer
       # binds the release commit to it, so do not route this through a job
       # output: a value that travels with the release is not evidence about it.

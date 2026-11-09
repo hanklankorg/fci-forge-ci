@@ -9,7 +9,6 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"strings"
 	"testing"
 
 	urfavecli "github.com/urfave/cli/v3"
@@ -173,13 +172,12 @@ func TestGitLabReleaseDemosDeclareTheirImagesOnce(t *testing.T) {
 			continue
 		}
 
-		forgejo, err := os.ReadFile(filepath.Join(consumer, ".forgejo", "workflows", "release.yml"))
-		if !images || err != nil {
+		forgejo := filepath.Join(consumer, ".forgejo", "workflows", "release.yml")
+		if _, err := os.Stat(forgejo); !images || err != nil {
 			continue
 		}
 
-		named := strings.Contains(string(forgejo), "artifacts-config:")
-		if config == "" && named || config != "" && !strings.Contains(string(forgejo), "artifacts-config: "+config) {
+		if forgejoArtifactsConfig(t, forgejo, "release-images.yml") != config {
 			t.Errorf("%s: the GitLab release reads %q (empty is the default), its Forgejo release another declaration",
 				entry.Name(), config)
 		}

@@ -24,7 +24,7 @@ import (
 )
 
 func TestPreparedBumpPlanUsesOnlyVerifiedPatchesAndEngineTextWriters(t *testing.T) {
-	for _, failure := range []string{"", "digest", "unplanned", "linked-changelog", "directory-changelog"} {
+	for _, failure := range []string{"", "digest", "unplanned", "duplicate", "linked-changelog", "directory-changelog"} {
 		t.Run("case-"+failure, func(t *testing.T) {
 			root := t.TempDir()
 			t.Chdir(root)
@@ -57,6 +57,10 @@ func TestPreparedBumpPlanUsesOnlyVerifiedPatchesAndEngineTextWriters(t *testing.
 			if failure == "unplanned" {
 				patch = strings.ReplaceAll(patch, "two/pom.xml", "outside/pom.xml")
 			}
+			// Two version jobs' patches joined, both changing one file.
+			if failure == "duplicate" {
+				patch += strings.ReplaceAll(completePatch, "pom.xml", "one/pom.xml")
+			}
 
 			writeFile(t, root, "native.patch", patch)
 			sum := sha256.Sum256([]byte(patch))
@@ -69,7 +73,8 @@ func TestPreparedBumpPlanUsesOnlyVerifiedPatchesAndEngineTextWriters(t *testing.
 			body, err := json.Marshal(plan)
 			require.NoError(t, err)
 
-			in := appversion.BumpPlanInput{PlanJSON: string(body), Version: "0.2.0", ChangelogFile: "full.md", PatchPath: "native.patch", PatchSHA256: hex.EncodeToString(sum[:])}
+			in := appversion.BumpPlanInput{PlanJSON: string(body), Version: "0.2.0", ChangelogFile: "full.md", PatchPath: "native.patch", PatchSHA256: hex.EncodeToString(sum[:]),
+				PathsFile: filepath.Join(root, "bump-paths")}
 			if failure == "digest" {
 				in.PatchSHA256 = strings.Repeat("0", 64)
 			}
@@ -92,7 +97,11 @@ func TestPreparedBumpPlanUsesOnlyVerifiedPatchesAndEngineTextWriters(t *testing.
 
 				require.Error(t, err)
 
-				if failure == "linked-changelog" || failure == "directory-changelog" {
+				if failure == "duplicate" {
+					require.ErrorContains(t, err, "one/pom.xml twice")
+				}
+
+				if failure == "linked-changelog" || failure == "directory-changelog" || failure == "duplicate" {
 					require.ErrorIs(t, err, errs.ErrValidation)
 				}
 
@@ -110,6 +119,12 @@ func TestPreparedBumpPlanUsesOnlyVerifiedPatchesAndEngineTextWriters(t *testing.
 				require.NoError(t, readErr)
 				require.Contains(t, string(contents), "0.2.0")
 			}
+
+			// Exactly what the bump wrote, for the release commit: no stray
+			// file of the checkout, such as the commit message.
+			paths, err := os.ReadFile(filepath.Join(root, "bump-paths"))
+			require.NoError(t, err)
+			require.Equal(t, "one/pom.xml\ntwo/pom.xml\none/CHANGELOG.md\ntwo/CHANGELOG.md\ngradle/CHANGELOG.md\ngradle/gradle.properties\n", string(paths))
 		})
 	}
 }

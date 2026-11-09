@@ -302,7 +302,10 @@ func checkConsumerReleaseBuild(t *testing.T, kit consumerKit) {
 				t.Errorf("%s: the build is stamped with commit %q, not the prepared release commit", path, got)
 			}
 
-			order = append(order, "build")
+			// One build step a project, all before the declaration.
+			if len(order) == 0 || order[len(order)-1] != "build" {
+				order = append(order, "build")
+			}
 		case strings.Contains(run, "release files declare"):
 			order = append(order, "declare")
 		case strings.Contains(uses, "/.forgejo/actions/upload-dist@"):

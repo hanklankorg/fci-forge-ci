@@ -101,15 +101,24 @@ jobs:
       - name: Checkout repository
         uses: https://FORGE_HOST/OWNER/forge-ci/.forgejo/actions/checkout-consumer@PIN_FORGE_CI_SHA
 
-      # `cargo test --locked` and a build for the runner's platform, by the
-      # action the release build uses. The image must already carry the
-      # toolchain rust-toolchain.toml pins. No Build SBOM: nothing is
-      # published from here.
-      - name: Build and test
+      # `cargo test --locked` and a build for the runner's platform of each
+      # crate the release builds, by the action the release build uses. The
+      # image must already carry the toolchain rust-toolchain.toml pins. No
+      # Build SBOM: nothing is published from here.
+      - name: Build and test worker
         uses: https://FORGE_HOST/OWNER/forge-ci/.forgejo/actions/build-cargo@PIN_FORGE_CI_SHA
         with:
           version: 0.0.0-pr
           commit: ${{ forgejo.sha }}
+          working-directory: worker
+          enable-build-sbom: 'false'
+
+      - name: Build and test api-service
+        uses: https://FORGE_HOST/OWNER/forge-ci/.forgejo/actions/build-cargo@PIN_FORGE_CI_SHA
+        with:
+          version: 0.0.0-pr
+          commit: ${{ forgejo.sha }}
+          working-directory: api-service
           enable-build-sbom: 'false'
 
   # ===========================================================================

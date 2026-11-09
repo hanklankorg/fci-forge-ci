@@ -53,7 +53,6 @@ var requiredInputFixtures = map[string]any{
 	"base-images":                      false,
 	"transparency-log":                 "none",
 	"release-branch":                   "",
-	"version-bump":                     "",
 	"changelog-creator":                "git-cliff",
 	"megalinter-image":                 "registry.invalid/team/megalinter@sha256:" + strings.Repeat("8", 64),
 	"nanolinter-image":                 "registry.invalid/team/nanolinter@sha256:" + strings.Repeat("7", 64),

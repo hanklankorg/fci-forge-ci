@@ -101,7 +101,7 @@ func TestReleaseWithImagesRendersAValidConfiguration(t *testing.T) {
 				inputs := map[string]any{
 					"release-images": true, "image-builder": builder, "builder-job-image": builderImage,
 					"artifacts-config": config, "release-platforms": "linux/amd64",
-					"job-user": "65532:65532", "version-bump": "npm", "export-files": exports, "export": []any{},
+					"job-user": "65532:65532", "runtime-image-node": builderImage, "export-files": exports, "export": []any{},
 				}
 				if exports {
 					inputs["export"] = export

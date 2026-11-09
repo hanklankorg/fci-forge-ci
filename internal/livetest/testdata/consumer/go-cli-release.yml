@@ -349,6 +349,7 @@ jobs:
       runner-label: ${{ vars.CI_RUNNER_LABEL }}
       release-tag: ${{ needs.prepare.outputs.release-tag }}
       release-sha: ${{ needs.prepare.outputs.release-sha }}
+      artifacts-config: ${{ needs.prepare.outputs.artifacts-config }}
       # The commit the request tag pushed, from the event context: the signer
       # binds the release commit to it, so it is not routed through a job
       # output.

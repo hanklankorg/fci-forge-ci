@@ -24,11 +24,16 @@ payload field or tag name supplies Q. The fixed request tag name comes from the
 native release-request prefix and the validated final version. Raw object equality
 also refuses replacing a request annotation while keeping its peeled commit Q.
 
-For the initial file-only root Go profile, add `--changelog-only`; this permits
-only `CHANGELOG.md` to differ. For root Cargo, also pass `--version-bump cargo`;
-the existing version-substitution validator checks root Cargo version files and
-the changelog, not arbitrary source/config changes. Cargo files below subdirectories
-are refused in this bounded profile. Existing Maven/npm bump handling is unchanged.
+For the file-only profile, add `--changelog-only`; this permits only
+`CHANGELOG.md` to differ. With `--prepare-plan-file`, the release's
+prepare-stage plan, it also admits that plan's version bump: each planned
+project's changelog and its native version files, checked as a version
+substitution to the tag's version, and a Gradle or Xcode project's version
+file holding exactly the bytes the engine's text bump writes over the
+parent's, at the parent's file mode (a plain file when the bump creates
+it). Only the default `versions.xcconfig` is admitted for Xcode, since
+the plan does not carry another. Nothing outside the planned projects'
+files may change.
 
 The check returns failure before emitting success; it has no private-key,
 signer or publication capability. Callers must run it before those capabilities,
@@ -90,7 +95,7 @@ identity; it is not an optional parentage bypass for prepared children. This
 mode requires Q and rejects prepared-change profiles. Ordinary prepared and
 recovery routes retain the single-child rule. An exact-P publication retry
 reuses the signed payload and reruns these checks without requiring a new P or
-an absent final tag. Existing `--changelog-only`/`--version-bump` profiles remain
+an absent final tag. Existing `--changelog-only`/`--prepare-plan-file` profiles remain
 unchanged for callers selecting them; the general native multi-artifact prepare
 plan is not silently restricted to the root Go/Cargo file-only profile.
 

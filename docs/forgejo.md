@@ -306,7 +306,7 @@ the caller passes them by name. Never use `secrets: inherit`.
 
 | Workflow | Does | Secrets |
 |---|---|---|
-| `prepare-release.yml` | Checks that every secret the release will need is configured, before any checkout; guards the request tag; requires the request at the head of the release branch; renders the changelog; with `version-bump`, bumps the project files in a key-free job and verifies that bump; makes the signed release commit and the final tag once. Outputs `release-tag` and `release-sha`. | `RELEASE_SSH_SIGNING_KEY`; presence only of the others; none in the version-bump job |
+| `prepare-release.yml` | Checks that every secret the release will need is configured, before any checkout; guards the request tag; requires the request at the head of the release branch; renders the changelog; bumps the version files of the projects `artifacts.yml` plans in one key-free job a toolchain family and verifies that bump; makes the signed release commit and the final tag once. Outputs `release-tag`, `release-sha` and the `artifacts-config` it planned from. | `RELEASE_SSH_SIGNING_KEY`; presence only of the others; none in the version-plan and version jobs |
 | `sign-and-publish-release.yml` | Four separately privileged jobs after a secret-free preflight: `sign` (checksums, SBOMs, provenance, images, distro packages), `promote` (final image tags), `publish` (the Forgejo release), `cleanup` (candidate tags). | Cosign, GPG, `RELEASE_TOKEN`, `RELEASE_REGISTRY_TOKEN`, each only in the job that needs it |
 | `sign-container-images.yml` | Signs and attests a base-image ledger in one engine call. | Cosign, `RELEASE_REGISTRY_TOKEN` |
 | `verify-base-container-images.yml` | Verifies existing base images against the trusted key; optional explicit registry authentication supports private bases. Only missing images (or anonymous access refusal) are cache misses. | optional `RELEASE_REGISTRY_TOKEN`, `registry-user` for external registries |
@@ -325,6 +325,8 @@ description. The inputs they share:
 | `skip-signer-image-check` | no, in prepare | `'false'` by default. Set explicitly to `'true'` for a private signer image whose anonymous availability cannot be checked. |
 | `cosign-public-key`, `cosign-public-key-sha256` | yes, in the four signer workflows | Your organization's Cosign public key, and its SHA-256 as `sha256sum cosign.pub` prints it. |
 | `release-branch` | no, in prepare | The branch the release lands on, `main` by default. See [The request is the head of the release branch](#the-request-is-the-head-of-the-release-branch). |
+| `artifacts-config` | no, in prepare; from prepare in sign/publish | The `artifacts.yml` whose release plan decides the version bump, `.forge-ci/artifacts.yml` by default. Give it to `prepare-release.yml`; pass `sign-and-publish-release.yml` the prepare job's `artifacts-config` output, as `release-tag` and `release-sha`, which `check-l3-isolation` requires. See [The prepare job](#the-prepare-job). |
+| `runtime-image-java`, `-node`, `-rust` | no, in prepare | Digest-pinned images the plan's version job of each family runs in; a planned family without one is refused at `Prepare: version plan`. |
 | `release-policy` | no, in prepare and sign/publish | `stable` (default) or `stable-prerelease`; pass the same value to both workflows. See [release policy](workflows.md#stable-and-prerelease-policy). |
 | `transparency-log` | no, in the four signer workflows | `none` (the default) or `public`: whether signatures are also written to the public Sigstore transparency log. One value for every workflow of an organization; see [The transparency log](#the-transparency-log). |
 | `release-asset-retention` | no, in `sign-and-publish-release.yml` | How many of the newest releases keep every file; older ones keep their checksums and signatures. Empty, the default, deletes nothing. See [Old releases' files](#old-releases-files). |
@@ -342,7 +344,7 @@ alone. Each `action.yml` documents its own inputs and outputs.
 | Action | Does |
 |---|---|
 | `setup-forge-ci` | Downloads the layer's binary, verifies it against the recorded checksum and puts it on the job `PATH`. The first step of a consumer job that calls `forge-ci` itself. |
-| `check-l3-isolation` | The pull-request gate over the consumer's release workflow: no signing secret in the build job, enumerated signer secrets, the digest hand-off, one commit across every reference, and the signer image, the key digest and the transparency-log setting written out as literals. |
+| `check-l3-isolation` | The pull-request gate over the consumer's release workflow: no signing secret in the build job, enumerated signer secrets, a prepare job that calls `prepare-release.yml`, its `release-tag`, `release-sha` and `artifacts-config` passed to the signer as bare `needs` expressions, the digest hand-off, one commit across every reference, and the signer image, the key digest and the transparency-log setting written out as literals. |
 | `checkout-consumer` | Checks the consumer out without Node and without persisted credentials. |
 | `setup-toolchain` | Installs the consumer's pinned tools with mise, verified and cache-aware. |
 | `lint-nanolinter` | The pull-request lint gate: the repository's nanolinter plan with a mandated floor. |
@@ -517,7 +519,7 @@ organization provides:
 | Pull-request lint and build | `CI_JOB_IMAGE` | nanolinter with its check tools, and your toolchain. Nothing is installed. |
 | Release build | The runner's job image, with `setup-toolchain` | Go and the tools of the consumer's mise config, installed and verified. |
 | `prepare-release.yml` | The runner's job image | Bash, Git, curl and `sha256sum`. |
-| `prepare-release.yml`, version-bump job | `version-bump-image`, digest-pinned | Bash, Git, curl, `sha256sum` and the build tool: a JDK and Maven for `maven`, Node and npm for `npm`, Rust and Cargo for `cargo`. |
+| `prepare-release.yml`, `Prepare: version <family>` jobs | `runtime-image-java`, `-node`, `-rust`, digest-pinned | Bash, Git, curl, `sha256sum` and the family's version tool: a JDK and Maven, Node and npm, or Cargo. |
 | Signing, promotion, publication | The signer image | The organization's, built from `containers/signer/Containerfile`. |
 
 Every job that runs the CLI downloads the layer's own build of it, by the
@@ -790,6 +792,8 @@ for them; every `pullrequest.yml` in the examples, such as
   choice on each forge.
 - **`check-l3-isolation`**: the release-isolation gate over the consumer's
   workflows: no signing secret in the build job, enumerated signer secrets,
+  a prepare job that calls `prepare-release.yml`, its release identity and
+  declaration passed to the signer as bare `needs` expressions,
   the digest hand-off, one commit across every reference, and the signer
   image, key digest, transparency-log setting and every `enforce-*` setting
   written out as literals.
@@ -891,10 +895,11 @@ request tag and its commit the request commit, so `build-go` and
 `release-tag` and `release-sha`. A pull request passes `build-maven` no
 `version`, and builds the version its POM declares.
 
-**A Maven release commit carries its version.** `prepare-release.yml` with
-`version-bump: maven` and a digest-pinned `version-bump-image` bumps the POMs
-in the signed release commit, as GitHub's and GitLab's release preparation
-do, so the tagged source declares the version the jar carries.
+**A Maven release commit carries its version.** `prepare-release.yml` bumps
+the POMs of the Maven projects `artifacts.yml` declares, in the
+`runtime-image-java` the caller pins by digest, in the signed release
+commit, as GitHub's and GitLab's release preparation do, so the tagged source
+declares the version the jar carries.
 `build-maven`, given the release's `version`, refuses a POM that declares
 another. [The prepare job](#the-prepare-job) says how the bump is kept out
 of the job that holds the signing key.
@@ -1385,38 +1390,43 @@ configure image-pull access on the trusted runner. The digest-pinned coordinate
 and the signer's own toolchain/key checks remain mandatory. A misspelled skip
 value fails instead of silently bypassing the check.
 
-**A version bump never runs where the key is.** A bump of project files runs
-the project's build tool, and with it the project's plugins or scripts:
-`mvn versions:set` for `version-bump: maven`, `npm version` for `npm`, and a
-`Cargo.toml` edit with `cargo update --workspace` for `cargo`. So it runs in a
-`version-bump` job of its own, in the `version-bump-image` the caller pins by
-digest, and that job references no secret at all, not even a presence check.
-It runs the engine's `version bump`, the same verb GitHub's and GitLab's
-release preparation run, and hands over only `git diff` of the result,
-uploaded as an artifact, with the patch's sha256 as a job output.
+**A version bump never runs where the key is.** The release plan of the
+consumer's `artifacts.yml` (the `artifacts-config` input,
+`.forge-ci/artifacts.yml` by default) decides the bump, as on GitLab; there
+is no `version-bump` input. A release without a declaration, or whose
+projects have no version file (Go), carries the changelog alone.
 
-The `prepare` job runs no build tool. `forge-ci version apply-bump` checks the
-patch as text before Git applies it: it matches the reported digest, touches
-only the type's project files (`pom.xml`; `package.json`, `package-lock.json`
-and `npm-shrinkwrap.json`; `Cargo.toml` and `Cargo.lock`), creates, deletes,
-renames or re-modes nothing, and every changed line is the root project's
-current version replaced by the release version and nothing else. After
-applying it, the root project file must declare the release version. One
-limit: a line naming another artifact at exactly the project's old version,
-such as a sibling module or a dependency released in step, also passes,
-because `versions:set` legitimately moves reactor modules the same way. The
-files it changed are committed beside `CHANGELOG.md` in the signed release
-commit; any other file the bump job touched never reaches it.
+A bump of project files runs the project's own tools, and with them its
+plugins: `mvn versions:set`, `npm version`, Cargo. So the `Prepare: version
+plan` job, which runs no consumer code, reads the declaration with `forge-ci
+plan release-versions` and names one `Prepare: version <family>` job for
+each toolchain family whose projects need a native tool: `java` for Maven,
+`node` for npm, `rust` for Cargo. Each runs in the family's
+`runtime-image-<family>`, pinned by digest; a planned family without its
+image stops at the plan job. A version job references no secret at all, not
+even a presence check. It runs `forge-ci version bump-plan --project-type`
+for its family's projects and hands over only the `git diff` of the files the
+engine names, uploaded as the `release-version-<family>` artifact, with the
+patch's sha256 as the job output `patch_digest_<family>`.
+
+The `prepare` job runs no build tool. It plans again from its own checkout,
+downloads exactly the planned families' patches, refuses a missing digest, a
+patch that is not a regular file or one that differs from its job's digest,
+and joins them. `forge-ci version bump-plan --patch` then admits the joined
+patch only as version substitutions of the plan's project files, each
+changed line the version or the reproducible-build timestamp, before it
+applies it, writes the Gradle and Xcode version files as text and the
+changelog copies, and names those paths with `--paths-file`. The signed
+release commit carries them beside `CHANGELOG.md`; any other file a version
+job touched never reaches it.
 
 This is stricter than GitHub's `version-bump.yml`, which runs the bump in the
-job that later signs and pushes the release commit. A POM whose version is a
-property, such as `${revision}`, is refused: the substitution can only be
-checked against a literal version. Leave `version-bump` empty and the release
-commit carries the changelog alone, as before; the `version-bump` job still
-runs, with every step skipped, in the label's default image. It cannot be
-skipped as a job: Forgejo decides on the server, before any condition of the
-dependant is read, that the dependant of a skipped job is skipped too, which
-would take the signing job with it.
+job that later signs and pushes the release commit. Without a planned family
+the version matrix has one row whose every step is skipped, in the label's
+default image. It cannot be an empty matrix or a skipped job: Forgejo blocks
+the dependants of an empty matrix, and decides on the server, before any
+condition of the dependant is read, that the dependant of a skipped job is
+skipped too, which would take the signing job with it.
 
 ### The request is the head of the release branch
 
@@ -1455,7 +1465,8 @@ commit.
 A consumer that tested the request before preparation can enforce its
 changelog-only policy with `release validate-tag --expected-parent <request
 commit> --changelog-only`, alongside `--release-sha` and `--tag`. It requires
-one child commit changing exactly `CHANGELOG.md` and the local
+one child commit changing exactly `CHANGELOG.md`, a regular file at its
+parent's mode, and the local
 `release-request/<tag>` still naming the tested request. A failed Git read,
 an extra changed path, or a moved request is a refusal.
 
@@ -1576,7 +1587,26 @@ reviewed as one set.
 - **The request is bound.** Each privileged job re-validates the release tag
   and, through `release-request-sha` from the caller's event context, its
   lineage: the release commit must be the single child of the commit the
-  request authorized.
+  request authorized. It also re-checks what that commit changes, with
+  `release validate-tag --changelog-only --prepare-plan-file` and the plan of
+  the declaration the release planned from: `CHANGELOG.md` and exactly the
+  planned version bump, nothing else. A changelog, the root one or a
+  project's copy, is admitted only as a regular file at its parent's mode,
+  never a link; a text version file only with the bytes and the mode the
+  engine's bump writes; and a commit that edits the declaration itself is
+  refused, since the declaration is no version file. A declaration reached
+  through a symbolic link, the file or a directory above it, plans nothing:
+  it must be a file of the repository.
+- **The declaration is the prepare job's.** `prepare-release.yml` outputs
+  the validated `artifacts-config` it planned the bump from, and the signer
+  takes it as `${{ needs.prepare.outputs.artifacts-config }}`, the way it
+  takes `release-tag` and `release-sha`; `check-l3-isolation` refuses a
+  release workflow that passes the signer anything else: a value that
+  falls back to or wraps another, a longer output name, a second key
+  spelled in another case, or a prepare job that does not call
+  `prepare-release.yml`. The signer
+  re-plans from the release commit, whose declaration the check above
+  admits unchanged from the request prepare planned.
 - **The hand-off is unsigned.** After the signer has verified the `dist/`
   digest, its first look at the files is `release files validate --unsigned`,
   which refuses a signature, a bundle or a provenance statement that arrived

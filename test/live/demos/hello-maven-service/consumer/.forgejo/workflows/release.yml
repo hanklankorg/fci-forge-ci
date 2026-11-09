@@ -26,8 +26,8 @@ jobs:
       release-git-host-key-fingerprint: ${{ vars.RELEASE_GIT_HOST_KEY_FINGERPRINT }}
       verify-release-request-signature: 'true'
       release-request-allowed-signers: .forgejo/release-allowed-signers
-      version-bump: maven
-      version-bump-image: docker.io/library/maven@sha256:96f175708f766ea049ab6c794a85335d238894c75f8eb364bddd98086a5b7cfd
+      # The plan of artifacts.yml bumps the Maven project in this image.
+      runtime-image-java: docker.io/library/maven@sha256:96f175708f766ea049ab6c794a85335d238894c75f8eb364bddd98086a5b7cfd
       sign-distro-packages: 'false'
       publish-container-images: 'true'
     secrets:
@@ -139,6 +139,7 @@ jobs:
       runner-label: ${{ vars.CI_RUNNER_LABEL }}
       release-tag: ${{ needs.prepare.outputs.release-tag }}
       release-sha: ${{ needs.prepare.outputs.release-sha }}
+      artifacts-config: ${{ needs.prepare.outputs.artifacts-config }}
       release-request-sha: ${{ forgejo.sha }}
       dist-digest: ${{ needs.handoff.outputs['dist_digest'] }}
       artifact-name: build-dist

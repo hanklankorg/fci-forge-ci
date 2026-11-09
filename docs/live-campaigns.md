@@ -229,9 +229,9 @@ consumer hello-maven-service lifecycle CI_JOB_IMAGE=@JOB_IMAGE_JAVA CI_IMAGE_BUI
 consumer hello-maven-service lifecycle CI_JOB_IMAGE=@JOB_IMAGE_JAVA CI_IMAGE_BUILDER=kaniko CI_IMAGE_BUILDER_JOB_IMAGE=@KANIKO_JOB_IMAGE RELEASE_PLATFORMS=linux/amd64
 consumer hello-cargo-container lifecycle CI_JOB_IMAGE=@JOB_IMAGE_RUST CI_IMAGE_BUILDER=buildah RELEASE_PLATFORMS=linux/amd64
 consumer hello-npm-service lifecycle CI_JOB_IMAGE=@JOB_IMAGE_JAVASCRIPT_TYPESCRIPT CI_IMAGE_BUILDER=buildah RELEASE_PLATFORMS=linux/amd64
-consumer hello-maven-service lifecycle job-archive=@FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_JAVA build-archive=@FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_JAVA signer-archive=@FORGE_CI_LIVE_SIGNER_IMAGE_ARCHIVE lint-archive=@LINT_IMAGE_ARCHIVE_JAVA version=0.2.0 version-bump=maven job-user=65532:65532
-consumer hello-cargo-container lifecycle job-archive=@FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_RUST build-archive=@FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_RUST signer-archive=@FORGE_CI_LIVE_SIGNER_IMAGE_ARCHIVE lint-archive=@LINT_IMAGE_ARCHIVE_RUST version=0.2.0 version-bump=cargo job-user=65532:65532
-consumer hello-npm-service lifecycle job-archive=@FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_NODE build-archive=@FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_NODE signer-archive=@FORGE_CI_LIVE_SIGNER_IMAGE_ARCHIVE lint-archive=@LINT_IMAGE_ARCHIVE_JAVASCRIPT_TYPESCRIPT version=0.2.0 version-bump=npm job-user=65532:65532
+consumer hello-maven-service lifecycle job-archive=@FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_JAVA build-archive=@FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_JAVA signer-archive=@FORGE_CI_LIVE_SIGNER_IMAGE_ARCHIVE lint-archive=@LINT_IMAGE_ARCHIVE_JAVA version=0.2.0 job-user=65532:65532
+consumer hello-cargo-container lifecycle job-archive=@FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_RUST build-archive=@FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_RUST signer-archive=@FORGE_CI_LIVE_SIGNER_IMAGE_ARCHIVE lint-archive=@LINT_IMAGE_ARCHIVE_RUST version=0.2.0 job-user=65532:65532
+consumer hello-npm-service lifecycle job-archive=@FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_NODE build-archive=@FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_NODE signer-archive=@FORGE_CI_LIVE_SIGNER_IMAGE_ARCHIVE lint-archive=@LINT_IMAGE_ARCHIVE_JAVASCRIPT_TYPESCRIPT version=0.2.0 job-user=65532:65532
 ```
 
 Neither file declares a visibility, a builder or an administrator setting.

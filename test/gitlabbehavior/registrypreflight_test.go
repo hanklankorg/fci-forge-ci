@@ -112,8 +112,10 @@ printf 'engine %s\n' "$*"
 					}
 
 					command := exec.CommandContext(t.Context(), componentBash(t), "--noprofile", "--norc", "-eu", "-c",
-						`source "$1"; rc_engine() { printf '%s\n' "$@"; }; rc_release_summary "$2" '[]'`, "summary", filepath.Join(reporoot.Path(t), ".gitlab/bin/release.sh"), strconv.FormatBool(images))
-					command.Env = []string{"PATH=/usr/bin:/bin", "RC_BASE_IMAGES=" + strconv.FormatBool(bases), "RELEASE_TAG=v1.2.3", "RC_RELEASE_BRANCH=main"}
+						`source "$1"; rc_engine() { printf '%s\n' "$@"; }; rc_checkout() { :; }; rc_planned_jobs() { : >"$1"; }; rc_release_summary "$2" '[]'`,
+						"summary", filepath.Join(reporoot.Path(t), ".gitlab/bin/release.sh"), strconv.FormatBool(images))
+					command.Env = []string{"PATH=/usr/bin:/bin", "RC_BASE_IMAGES=" + strconv.FormatBool(bases), "RELEASE_TAG=v1.2.3", "RC_RELEASE_BRANCH=main",
+						"RELEASE_REQUEST_SHA=" + strings.Repeat("a", 40), "RC_WORK=" + t.TempDir()}
 
 					out, err := command.CombinedOutput()
 					if err != nil || strings.Contains(string(out), "Check: registry access=success") != needed ||

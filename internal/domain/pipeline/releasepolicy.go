@@ -70,7 +70,7 @@ func resolveReleasePolicy(in releasePolicyInputs) (ReleasePolicy, error) {
 		SignArtifacts:            in.ReleaseSignArtifacts,
 		CreateRelease:            in.ReleasePublisher == "github-cli",
 		RequireAllowlistedSigner: in.AnyRequireAuthorization || in.ReleaseRequireAllowlistedSigner,
-		RunVersionBump:           !in.ChangelogSkipVersionBump && in.ChangelogCreator == changelogCreatorGitCliff,
+		RunVersionBump:           VersionBumpRuns(in.ChangelogCreator == changelogCreatorGitCliff, in.ChangelogSkipVersionBump),
 		MakeLatest:               parsed.Prerelease == "",
 		Prerelease:               parsed.Prerelease != "",
 		CreateDraftRelease:       in.ReleaseDraft,

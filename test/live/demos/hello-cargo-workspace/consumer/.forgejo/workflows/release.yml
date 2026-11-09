@@ -31,6 +31,9 @@ jobs:
       release-git-host-key-fingerprint: ${{ vars.RELEASE_GIT_HOST_KEY_FINGERPRINT }}
       verify-release-request-signature: 'true'
       release-request-allowed-signers: .forgejo/release-allowed-signers
+      # The plan of artifacts.yml bumps Cargo.toml and Cargo.lock in the job
+      # image, which carries Rust and Cargo.
+      runtime-image-rust: ${{ vars.CI_JOB_IMAGE }}
       sign-distro-packages: 'false'
       publish-container-images: 'true'
     secrets:
@@ -246,6 +249,7 @@ jobs:
       runner-label: ${{ vars.CI_RUNNER_LABEL }}
       release-tag: ${{ needs.prepare.outputs.release-tag }}
       release-sha: ${{ needs.prepare.outputs.release-sha }}
+      artifacts-config: ${{ needs.prepare.outputs.artifacts-config }}
       release-request-sha: ${{ forgejo.sha }}
       dist-digest: ${{ needs.handoff.outputs['dist_digest'] }}
       artifact-name: build-dist

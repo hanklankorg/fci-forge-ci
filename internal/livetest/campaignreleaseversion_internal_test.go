@@ -10,16 +10,13 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"testing"
 
 	"github.com/diggsweden/forge-ci/internal/domain/sbom"
 	"github.com/diggsweden/forge-ci/internal/testutil/reporoot"
+	"gopkg.in/yaml.v3"
 )
-
-// workflowVersionBump is a Forgejo release workflow's version-bump: input.
-var workflowVersionBump = regexp.MustCompile(`(?m)^[ \t]+version-bump:[ \t]*\S`)
 
 // A release case must not request a version its demo neither declares nor
 // bumps to: the release refuses a commit that does not carry the version it
@@ -105,7 +102,18 @@ func releaseCaseVersion(t *testing.T, provider, consumer string, words []string)
 			t.Fatal(err)
 		}
 
-		return cmp.Or(parsed.Version, defaults.Version), parsed.VersionBump != ""
+		// The GitLab release bumps what the plan of its declaration bumps.
+		_, artifactsConfig, err := GitLabReleaseImages(consumer)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		bumps, err := PlannedVersionBumps(consumer, artifactsConfig)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		return cmp.Or(parsed.Version, defaults.Version), len(bumps) != 0
 	}
 
 	parsed, err := ParseTrialSettings(TrialRelease, settings)
@@ -113,12 +121,45 @@ func releaseCaseVersion(t *testing.T, provider, consumer string, words []string)
 		t.Fatal(err)
 	}
 
-	workflow, err := os.ReadFile(filepath.Join(consumer, ".forgejo", "workflows", parsed.Workflow))
+	// The Forgejo release bumps what the plan of the declaration its
+	// prepare-release.yml call names bumps.
+	bumps, err := PlannedVersionBumps(consumer, forgejoArtifactsConfig(t, filepath.Join(consumer, ".forgejo", "workflows", parsed.Workflow), "prepare-release.yml"))
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	return parsed.Version, workflowVersionBump.Match(workflow)
+	return parsed.Version, len(bumps) != 0
+}
+
+// forgejoArtifactsConfig is the artifacts-config input a Forgejo release
+// workflow passes the layer's called workflow, "" for the default.
+func forgejoArtifactsConfig(t *testing.T, path, called string) string {
+	t.Helper()
+
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var workflow struct {
+		Jobs map[string]struct {
+			Uses string            `yaml:"uses"`
+			With map[string]string `yaml:"with"`
+		} `yaml:"jobs"`
+	}
+	if err := yaml.Unmarshal(body, &workflow); err != nil {
+		t.Fatalf("%s: %v", path, err)
+	}
+
+	for _, job := range workflow.Jobs {
+		if strings.Contains(job.Uses, "/.forgejo/workflows/"+called+"@") {
+			return job.With["artifacts-config"]
+		}
+	}
+
+	t.Fatalf("%s calls no %s", path, called)
+
+	return ""
 }
 
 // declaredDemoVersion returns the version the demo's package.json, Cargo.toml

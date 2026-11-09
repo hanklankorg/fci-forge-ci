@@ -70,11 +70,12 @@ func TestGitLabConsumerBuildVariablesStayLiteralAndLocal(t *testing.T) {
 	}
 }
 
-// version-bump and job-user are the trial's own settings, written into the policy; every
-// other word stays a consumer variable for the build.
-func TestParseGitLabReleaseSettings_SeparatesTheBumpFromVariables(t *testing.T) {
-	got, err := ParseGitLabReleaseSettings("version-bump=maven\nversion=0.2.0\njob-user=65532:65532\nRELEASE_PLATFORMS=linux/amd64")
-	if err != nil || got.VersionBump != "maven" || got.Version != "0.2.0" || got.JobUser != "65532:65532" ||
+// version and job-user are the trial's own settings, written into the request
+// and the policy; every other word stays a consumer variable for the build.
+// The declaration decides the bump, so version-bump is no setting.
+func TestParseGitLabReleaseSettings_SeparatesItsSettingsFromVariables(t *testing.T) {
+	got, err := ParseGitLabReleaseSettings("version=0.2.0\njob-user=65532:65532\nRELEASE_PLATFORMS=linux/amd64")
+	if err != nil || got.Version != "0.2.0" || got.JobUser != "65532:65532" ||
 		got.Variables["RELEASE_PLATFORMS"] != "linux/amd64" || len(got.Variables) != 1 {
 		t.Fatalf("ParseGitLabReleaseSettings() = %+v, %v", got, err)
 	}
@@ -84,7 +85,7 @@ func TestParseGitLabReleaseSettings_SeparatesTheBumpFromVariables(t *testing.T) 
 	}
 
 	for _, input := range []string{
-		"version-bump=gradle", "version-bump=maven\nversion-bump=maven", "version-bump=",
+		"version-bump=maven",
 		"version=vv0.2.0", "version=0.2", "version=1.0.0\nversion=1.0.1",
 		"job-user=", "job-user=nonroot", "job-user=65532\njob-user=65532", "job-user=65532:",
 		"job-user=065532", "job-user=65532:065532", "job-user=00",
@@ -102,12 +103,12 @@ func TestParseGitLabReleaseSettings_SeparatesTheBumpFromVariables(t *testing.T) 
 func TestParseGitLabLifecycleSettings_TakesAReleaseSettingsButASecondCase(t *testing.T) {
 	t.Parallel()
 
-	got, err := ParseGitLabLifecycleSettings("version-bump=maven\nversion=0.2.0\njob-user=65532:65532\nRELEASE_PLATFORMS=linux/amd64")
-	if err != nil || got.VersionBump != "maven" || got.Version != "0.2.0" || got.JobUser != "65532:65532" || got.Variables["RELEASE_PLATFORMS"] != "linux/amd64" {
+	got, err := ParseGitLabLifecycleSettings("version=0.2.0\njob-user=65532:65532\nRELEASE_PLATFORMS=linux/amd64")
+	if err != nil || got.Version != "0.2.0" || got.JobUser != "65532:65532" || got.Variables["RELEASE_PLATFORMS"] != "linux/amd64" {
 		t.Fatalf("ParseGitLabLifecycleSettings() = %+v, %v", got, err)
 	}
 
-	for _, input := range []string{"scenario=TestGitLabRelease_ConsumerTrial", "version-bump=maven\nversion=0.2.0\nnext-version=0.3.0"} {
+	for _, input := range []string{"scenario=TestGitLabRelease_ConsumerTrial", "version=0.2.0\nnext-version=0.3.0"} {
 		if _, err := ParseGitLabLifecycleSettings(input); !errors.Is(err, errs.ErrValidation) {
 			t.Errorf("ParseGitLabLifecycleSettings(%q) = %v, want a validation error", input, err)
 		}

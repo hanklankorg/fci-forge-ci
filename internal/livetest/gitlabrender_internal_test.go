@@ -96,7 +96,9 @@ func TestGitLabDemosStructurallyRenderForBothBuildersAndEvents(t *testing.T) {
 
 					inputs := map[string]any{
 						"image-builder": builder, "builder-job-image": "registry.invalid/" + builder + "@sha256:" + strings.Repeat("d", 64),
-						"job-image": images.Job, "build-image": images.Job, "job-user": "65532:65532",
+						"job-image": images.Job, "job-user": "65532:65532",
+						"runtime-image-java": images.Job, "runtime-image-node": images.Job, "runtime-image-go": images.Job,
+						"runtime-image-rust": images.Job, "runtime-image-android": images.Job,
 						"checks": []any{"bash .gitlab/check-release.sh"}, "build": []any{"bash " + GitLabConsumerBuildScript},
 						"release-images": releaseImages, "artifacts-config": declaration, "release-platforms": "linux/amd64",
 						"export-files": len(exports) != 0, "export": exportInputs,

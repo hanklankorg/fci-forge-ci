@@ -24,8 +24,21 @@ spec:
     job-user:
       regex: '^$|^(0|[1-9][0-9]*)(:(0|[1-9][0-9]*))?$'
       default: ''
-    build-image:
-      regex: '^[^[:space:]]+@sha256:[0-9a-f]{64}$'
+    runtime-image-java:
+      regex: '^$|^[^[:space:]]+@sha256:[0-9a-f]{64}$'
+      default: ''
+    runtime-image-node:
+      regex: '^$|^[^[:space:]]+@sha256:[0-9a-f]{64}$'
+      default: ''
+    runtime-image-go:
+      regex: '^$|^[^[:space:]]+@sha256:[0-9a-f]{64}$'
+      default: ''
+    runtime-image-rust:
+      regex: '^$|^[^[:space:]]+@sha256:[0-9a-f]{64}$'
+      default: ''
+    runtime-image-android:
+      regex: '^$|^[^[:space:]]+@sha256:[0-9a-f]{64}$'
+      default: ''
     signer-image:
       regex: '^[^[:space:]]+@sha256:[0-9a-f]{64}$'
     publication-project:
@@ -59,11 +72,11 @@ spec:
       description: Runner tags for consumer checks only, after restricted signed-request authorization.
     build:
       type: array
-      description: Consumer build commands producing dist/release-files.json and release-notes.md.
+      description: Consumer build commands, run in each family build job and then in the release files job, which writes dist/release-files.json and release-notes.md.
     build-runner-tags:
       type: array
       default: []
-      description: Runner tags of the build job, and with buildah of the amd64 image job; empty leaves them untagged.
+      description: Runner tags of the build jobs, and with buildah of the amd64 image job; empty leaves them untagged.
     release-images:
       type: boolean
       default: false
@@ -112,8 +125,6 @@ spec:
       options: [none, public]
     release-branch:
       regex: '^$|^[A-Za-z0-9_][A-Za-z0-9_./-]*$'
-    version-bump:
-      options: ['', maven, npm, cargo]
     enforce-lint:
       type: boolean
     enforce-vulnerabilities:
@@ -173,8 +184,8 @@ stages: [check, prepare, build, images, sign, publish]
     # image's home; every other job gets a private one.
     want_user='$[[ inputs.job-user ]]' work_parent=/tmp own_home=false
     case "${rc_job_role:?}" in
-      request | checks | changelog | version) own_home=true ;;
-      build) want_user= own_home=true ;;
+      request | checks | changelog | release-files) own_home=true ;;
+      build | version) want_user= own_home=true ;;
       export)
         want_user= own_home=true
         if [ '$[[ inputs.image-builder ]]' = kaniko ]; then work_parent=${CI_PROJECT_DIR:?}; fi
@@ -231,7 +242,7 @@ stages: [check, prepare, build, images, sign, publish]
       RC_RELEASE_ASSET_RETENTION='$[[ inputs.release-asset-retention ]]' \
       RC_BASE_IMAGES='$[[ inputs.base-images ]]' \
       RC_RELEASE_BRANCH_INPUT='$[[ inputs.release-branch ]]' \
-      RC_VERSION_BUMP='$[[ inputs.version-bump ]]' \
+      RC_ARTIFACTS_CONFIG='$[[ inputs.artifacts-config ]]' \
       RC_ADMIN_LINT='$[[ inputs.enforce-lint ]]' \
       RC_ADMIN_VULNERABILITIES='$[[ inputs.enforce-vulnerabilities ]]' \
       RC_ADMIN_APPLICATION_TESTS='$[[ inputs.enforce-application-tests ]]' \
@@ -299,7 +310,7 @@ stages: [check, prepare, build, images, sign, publish]
     # The checks and build commands run the gates; their forge-ci applies
     # the administrator's settings as its flags, never from the environment.
     case "${rc_job_role}" in
-      checks | build)
+      checks | build | release-files)
         forge_ci_admin_path "${RC_WORK}/admin-bin" "${RC_ADMIN_LINT}" "${RC_ADMIN_VULNERABILITIES}" \
           "${RC_ADMIN_APPLICATION_TESTS}" "${RC_ADMIN_REPRODUCIBLE_BUILDS}"
         forge-ci policy show
@@ -396,22 +407,55 @@ stages: [check, prepare, build, images, sign, publish]
   artifacts:
     expire_in: 1 day
     paths: [_release-render/]
-# The project's build tool rewrites its version files here, in the job image
-# and without any credential; the release commit's job runs no build tool and
-# takes only the patch, after proving it is a version substitution.
-"Prepare: version":
+# The plan's version jobs, one per toolchain family whose projects it bumps
+# with their native tool, named by "Release: plan" from these hidden jobs.
+# The tool rewrites the family's version files in its runtime image without
+# any credential; the release commit's job runs no build tool and takes only
+# the patches, after proving each a version substitution of a planned file.
+.forge-ci-release-version:
   extends: .forge-ci-release
   stage: prepare
   before_script: [readonly rc_job_role=version, *forge-ci-release-start]
-  after_script: [rc_handoff=_release-bump, *forge-ci-release-handoff]
-  needs: ["Check: consumer checks"]
-  rules:
-    - if: '"$[[ inputs.version-bump ]]" != ""'
+  variables:
+    RC_JOB_USER: ''
+  needs:
+    - job: "Check: consumer checks"
+      artifacts: false
+    - job: "Prepare: changelog"
+      artifacts: true
+.forge-ci-release-version-java:
+  extends: .forge-ci-release-version
+  image:
+    name: $[[ inputs.runtime-image-java ]]
+    entrypoint: [""]
+  after_script: [rc_handoff=_release-bump-java, *forge-ci-release-handoff]
   script:
-    - rc_bump_version
+    - rc_bump_version java
   artifacts:
     expire_in: 1 day
-    paths: [_release-bump/]
+    paths: [_release-bump-java/]
+.forge-ci-release-version-node:
+  extends: .forge-ci-release-version
+  image:
+    name: $[[ inputs.runtime-image-node ]]
+    entrypoint: [""]
+  after_script: [rc_handoff=_release-bump-node, *forge-ci-release-handoff]
+  script:
+    - rc_bump_version node
+  artifacts:
+    expire_in: 1 day
+    paths: [_release-bump-node/]
+.forge-ci-release-version-rust:
+  extends: .forge-ci-release-version
+  image:
+    name: $[[ inputs.runtime-image-rust ]]
+    entrypoint: [""]
+  after_script: [rc_handoff=_release-bump-rust, *forge-ci-release-handoff]
+  script:
+    - rc_bump_version rust
+  artifacts:
+    expire_in: 1 day
+    paths: [_release-bump-rust/]
 "Prepare: release commit and tag":
   extends: .forge-ci-release
   stage: prepare
@@ -423,22 +467,106 @@ stages: [check, prepare, build, images, sign, publish]
   needs:
     - job: "Prepare: changelog"
       artifacts: true
-    - job: "Prepare: version"
+    - job: "Prepare: version java"
+      artifacts: true
+      optional: true
+    - job: "Prepare: version node"
+      artifacts: true
+      optional: true
+    - job: "Prepare: version rust"
       artifacts: true
       optional: true
   script:
     - rc_prepare_release
-"Build: release files":
+# The plan's build jobs, one per toolchain family it builds, named by
+# "Release: plan" from these hidden jobs: the build commands in the family's
+# runtime image on the release commit, with FORGE_CI_BUILD_FAMILY and
+# FORGE_CI_ARTIFACTS naming what to build. They hand on dist/ and
+# image-context/ without a manifest.
+.forge-ci-release-build-family:
   extends: .forge-ci-release
   stage: build
   before_script: [readonly rc_job_role=build, *forge-ci-release-start]
-  after_script: [rc_handoff=_release-build, *forge-ci-release-handoff]
   tags: $[[ inputs.build-runner-tags ]]
-  image:
-    name: $[[ inputs.build-image ]]
-    entrypoint: [""]
   variables:
     RC_JOB_USER: ''
+  needs:
+    - job: "Prepare: release commit and tag"
+      artifacts: false
+.forge-ci-release-build-java:
+  extends: .forge-ci-release-build-family
+  image:
+    name: $[[ inputs.runtime-image-java ]]
+    entrypoint: [""]
+  after_script: [rc_handoff=_release-build-java, *forge-ci-release-handoff]
+  script:
+    - rc_family_checkout java
+    - $[[ inputs.build ]]
+    - rc_family_handoff java
+  artifacts:
+    expire_in: 1 day
+    paths: [_release-build-java/]
+.forge-ci-release-build-node:
+  extends: .forge-ci-release-build-family
+  image:
+    name: $[[ inputs.runtime-image-node ]]
+    entrypoint: [""]
+  after_script: [rc_handoff=_release-build-node, *forge-ci-release-handoff]
+  script:
+    - rc_family_checkout node
+    - $[[ inputs.build ]]
+    - rc_family_handoff node
+  artifacts:
+    expire_in: 1 day
+    paths: [_release-build-node/]
+.forge-ci-release-build-go:
+  extends: .forge-ci-release-build-family
+  image:
+    name: $[[ inputs.runtime-image-go ]]
+    entrypoint: [""]
+  after_script: [rc_handoff=_release-build-go, *forge-ci-release-handoff]
+  script:
+    - rc_family_checkout go
+    - $[[ inputs.build ]]
+    - rc_family_handoff go
+  artifacts:
+    expire_in: 1 day
+    paths: [_release-build-go/]
+.forge-ci-release-build-rust:
+  extends: .forge-ci-release-build-family
+  image:
+    name: $[[ inputs.runtime-image-rust ]]
+    entrypoint: [""]
+  after_script: [rc_handoff=_release-build-rust, *forge-ci-release-handoff]
+  script:
+    - rc_family_checkout rust
+    - $[[ inputs.build ]]
+    - rc_family_handoff rust
+  artifacts:
+    expire_in: 1 day
+    paths: [_release-build-rust/]
+.forge-ci-release-build-android:
+  extends: .forge-ci-release-build-family
+  image:
+    name: $[[ inputs.runtime-image-android ]]
+    entrypoint: [""]
+  after_script: [rc_handoff=_release-build-android, *forge-ci-release-handoff]
+  script:
+    - rc_family_checkout android
+    - $[[ inputs.build ]]
+    - rc_family_handoff android
+  artifacts:
+    expire_in: 1 day
+    paths: [_release-build-android/]
+# The release files: every family's and export job's files laid together,
+# then the build commands once more, in job-image as job-user with no
+# family, to write the release notes and declare the files.
+"Build: release files":
+  extends: .forge-ci-release
+  stage: build
+  before_script: [readonly rc_job_role=release-files, *forge-ci-release-start]
+  after_script: [rc_handoff=_release-build, *forge-ci-release-handoff]
+  tags: $[[ inputs.build-runner-tags ]]
   needs:
     - job: "Prepare: release commit and tag"
       artifacts: false
@@ -448,9 +576,25 @@ stages: [check, prepare, build, images, sign, publish]
     - job: "Build: export arm64"
       artifacts: true
       optional: true
+    - job: "Build: java"
+      artifacts: true
+      optional: true
+    - job: "Build: node"
+      artifacts: true
+      optional: true
+    - job: "Build: go"
+      artifacts: true
+      optional: true
+    - job: "Build: rust"
+      artifacts: true
+      optional: true
+    - job: "Build: android"
+      artifacts: true
+      optional: true
   script:
     - rc_release_checkout
     - rc_gather_exports '$[[ inputs.export-files ]]'
+    - rc_gather_families
     - $[[ inputs.build ]]
     - rc_build_handoff
   artifacts:
@@ -682,8 +826,9 @@ stages: [check, prepare, build, images, sign, publish]
     - rc_cleanup_release
 # The release overview, as a "Summary" section of this job's log. It needs the
 # last job of the chain, so it runs only after a successful release; GitLab's
-# pipeline view shows which job failed in an unsuccessful one. It holds no
-# release secret.
+# pipeline view shows which job failed in an unsuccessful one. It plans the
+# request again to list the family jobs that ran, and downloads nothing. It
+# holds no release secret.
 "Summary: release":
   extends: .forge-ci-release
   stage: .post

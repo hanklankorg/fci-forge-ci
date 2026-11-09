@@ -198,15 +198,15 @@ func TestCampaignLifecycle_RunsTheServiceDemosOnGitLab(t *testing.T) {
 			want := [][]string{{
 				campaignConsumerRecipe, campaignGitLab, filepath.Join(dir, "demos/hello-maven-service"), TrialLifecycle,
 				"job-archive=/c/java.tar", "build-archive=/c/java.tar", "signer-archive=/c/signer.tar", "lint-archive=/c/lint-java.tar",
-				"version=0.2.0", "version-bump=maven", "job-user=65532:65532",
+				"version=0.2.0", "job-user=65532:65532",
 			}, {
 				campaignConsumerRecipe, campaignGitLab, filepath.Join(dir, "demos/hello-cargo-container"), TrialLifecycle,
 				"job-archive=/c/rust.tar", "build-archive=/c/rust.tar", "signer-archive=/c/signer.tar", "lint-archive=/c/lint-rust.tar",
-				"version=0.2.0", "version-bump=cargo", "job-user=65532:65532",
+				"version=0.2.0", "job-user=65532:65532",
 			}, {
 				campaignConsumerRecipe, campaignGitLab, filepath.Join(dir, "demos/hello-npm-service"), TrialLifecycle,
 				"job-archive=/c/node.tar", "build-archive=/c/node.tar", "signer-archive=/c/signer.tar", "lint-archive=/c/lint-js.tar",
-				"version=0.2.0", "version-bump=npm", "job-user=65532:65532",
+				"version=0.2.0", "job-user=65532:65532",
 			}}
 
 			if len(plan.Cases) != len(want) {
@@ -238,7 +238,7 @@ func TestCampaignLifecycle_SelectsOneCell(t *testing.T) {
 			return []string{
 				campaignConsumerRecipe, campaignGitLab, filepath.Join(dir, "demos/hello-maven-service"), TrialLifecycle,
 				"job-archive=/c/java.tar", "build-archive=/c/java.tar", "signer-archive=/c/signer.tar", "lint-archive=/c/lint-java.tar",
-				"version=0.2.0", "version-bump=maven", "job-user=65532:65532",
+				"version=0.2.0", "job-user=65532:65532",
 			}
 		}},
 		"forgejo cargo container-first, buildah, public": {campaignForgejo, "lifecycle-forgejo.cases", "hello-cargo-container/lifecycle/image-builder=buildah/visibility=public", visibilityPublic, func(dir string) []string {
@@ -337,7 +337,7 @@ func TestCampaignLane_NamesTheInheritedSelectorASelectionConflictsWith(t *testin
 }
 
 // npmLifecycleLine is the shipped GitLab lifecycle line of the npm service.
-const npmLifecycleLine = "consumer hello-npm-service lifecycle job-archive=@FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_NODE build-archive=@FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_NODE signer-archive=@FORGE_CI_LIVE_SIGNER_IMAGE_ARCHIVE lint-archive=@LINT_IMAGE_ARCHIVE_JAVASCRIPT_TYPESCRIPT version=0.2.0 version-bump=npm job-user=65532:65532"
+const npmLifecycleLine = "consumer hello-npm-service lifecycle job-archive=@FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_NODE build-archive=@FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_NODE signer-archive=@FORGE_CI_LIVE_SIGNER_IMAGE_ARCHIVE lint-archive=@LINT_IMAGE_ARCHIVE_JAVASCRIPT_TYPESCRIPT version=0.2.0 job-user=65532:65532"
 
 // A GitLab lifecycle ends in a release, so a demo without the GitLab release
 // build is refused at plan time, as its release would be.
@@ -375,7 +375,7 @@ func TestCampaignLifecycle_RefusesWhatItCannotRun(t *testing.T) {
 		"gitlab without the lint archive": {campaignGitLab, "consumer hello-maven-service lifecycle job-archive=/a.tar build-archive=/b.tar signer-archive=/s.tar", "nanolinter flavor's archive"},
 		"gitlab without the signer":       {campaignGitLab, "consumer hello-maven-service lifecycle job-archive=/a.tar build-archive=/b.tar lint-archive=/l.tar", "signer-archive="},
 		"gitlab second case":              {campaignGitLab, "consumer hello-maven-service lifecycle" + gitlabArchives + " scenario=TestGitLabRelease_ConsumerTrial", "no scenario="},
-		"gitlab second release":           {campaignGitLab, "consumer hello-maven-service lifecycle" + gitlabArchives + " version=0.2.0 version-bump=maven next-version=0.3.0", "no scenario= or next-version="},
+		"gitlab second release":           {campaignGitLab, "consumer hello-maven-service lifecycle" + gitlabArchives + " version=0.2.0 next-version=0.3.0", "no scenario= or next-version="},
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()

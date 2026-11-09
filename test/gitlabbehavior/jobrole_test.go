@@ -29,9 +29,16 @@ var releaseJobRoles = map[string]string{
 	"Check: release request":          "request",
 	"Check: consumer checks":          "checks",
 	"Prepare: changelog":              "changelog",
-	"Prepare: version":                "version",
+	"Prepare: version java":           "version",
+	"Prepare: version node":           "version",
+	"Prepare: version rust":           "version",
 	"Prepare: release commit and tag": "prepare",
-	"Build: release files":            "build",
+	"Build: java":                     "build",
+	"Build: node":                     "build",
+	"Build: go":                       "build",
+	"Build: rust":                     "build",
+	"Build: android":                  "build",
+	"Build: release files":            "release-files",
 	"Build: export amd64":             "export",
 	"Build: export arm64":             "export",
 	"Images: plan":                    "images-plan",
@@ -90,7 +97,7 @@ func TestReleaseJobsOpenWithTheirLiteralRole(t *testing.T) {
 func TestReleaseJobStartFollowsItsRoleNotItsName(t *testing.T) {
 	t.Parallel()
 
-	ownHome := []string{"request", "checks", "changelog", "version", "build", "export"}
+	ownHome := []string{"request", "checks", "changelog", "release-files", "version", "build", "export"}
 
 	for _, builder := range []string{"buildah", "kaniko"} {
 		body := releaseJobsBodyFor(t, builder)

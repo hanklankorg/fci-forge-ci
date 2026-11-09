@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -277,15 +278,40 @@ func loadConfig(in EmitConfigPlanInput, annot output.Annotator) (*config.Config,
 	return cfg, nil
 }
 
+// readArtifactsFile reads the declaration. The plan it decides must be the
+// file the repository holds, so a relative path, which is what every release
+// workflow passes, is read inside the working directory: a symbolic link
+// above it that leads out, or a declaration that is itself a link, is
+// refused. An absolute path is a file the operator named outright, read at
+// its own directory with the same refusal of a link.
 func readArtifactsFile(in EmitConfigPlanInput) ([]byte, error) {
 	if in.FS == nil {
-		return cliio.ReadFile(in.Path)
+		if in.Path == cliio.StdSentinel {
+			return cliio.ReadFile(in.Path)
+		}
+
+		dir, name := ".", in.Path
+		if filepath.IsAbs(in.Path) {
+			dir, name = filepath.Split(in.Path)
+		}
+
+		root, err := os.OpenRoot(dir)
+		if err != nil {
+			return nil, err
+		}
+		defer func() { _ = root.Close() }()
+
+		return cliio.ReadFileInRootNoFollow(root, name)
 	}
 	// An in-memory fs.FS doesn't carry stdin semantics; only honour
 	// the "-" sentinel when reading from the real filesystem above.
 	path := filepath.ToSlash(filepath.Clean(in.Path))
 	path = strings.TrimPrefix(path, "./")
 	path = strings.TrimPrefix(path, "/")
+
+	if info, err := fs.Lstat(in.FS, path); err == nil && info.Mode()&fs.ModeSymlink != 0 {
+		return nil, fmt.Errorf("%q is a symbolic link, not a regular input file: %w", in.Path, errs.ErrMissingInput)
+	}
 
 	return fs.ReadFile(in.FS, path)
 }
@@ -344,4 +370,39 @@ func joinProjectTypes(types []projecttype.Type) string {
 	}
 
 	return strings.Join(parts, ", ")
+}
+
+// ReleaseStagePlans are the prepare and build stage plans of a release whose
+// policy decides signing and publication, from its declaration alone.
+type ReleaseStagePlans struct {
+	Prepare pipeline.ReleasePrepareStagePlan
+	Build   pipeline.ReleaseBuildStagePlan
+}
+
+// LoadReleaseStagePlans plans the version bump and the builds of the
+// declaration at in.Path, as `plan release` does for the same declaration.
+// Without the file, and with absentIsEmpty, the release has neither: a
+// repository without a declaration builds with its build commands alone.
+func LoadReleaseStagePlans(in EmitConfigPlanInput, annot output.Annotator, absentIsEmpty bool) (ReleaseStagePlans, error) {
+	if _, err := readArtifactsFile(in); errors.Is(err, fs.ErrNotExist) {
+		if !absentIsEmpty {
+			return ReleaseStagePlans{}, fmt.Errorf("%s does not exist: %w", in.Path, errs.ErrMissingInput)
+		}
+
+		prepare, build := pipeline.UndeclaredReleaseStagePlans()
+
+		return ReleaseStagePlans{Prepare: prepare, Build: build}, nil
+	}
+
+	plan, err := loadConfigPlan(in, annot)
+	if err != nil {
+		return ReleaseStagePlans{}, err
+	}
+
+	prepare, build, err := pipeline.NewPolicyReleaseStagePlans(plan)
+	if err != nil {
+		return ReleaseStagePlans{}, err
+	}
+
+	return ReleaseStagePlans{Prepare: prepare, Build: build}, nil
 }

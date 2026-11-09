@@ -3050,6 +3050,55 @@ EXAMPLE:
 | `--version` | release version forwarded to each publish component | string | `""` | `$VERSION` |
 | `--output` | destination path for the child pipeline (default: stdout) | string | `""` | `$OUTPUT_FILE` |
 
+### `forge-ci plan gitlab-release-pipeline`
+
+plan the GitLab release child pipeline's version and build jobs from artifacts.yml
+
+```
+Plans the release's version bump and builds from the declaration, as
+   'plan release' does, and writes what the GitLab release jobs read:
+
+   --output               the generated part of the release child pipeline:
+                          one "Prepare: version <family>" job per toolchain
+                          family whose projects the plan bumps with their
+                          native tool, one "Build: <family>" job per family it
+                          builds. Each extends its hidden job in
+                          templates/release-jobs.yml and carries nothing else.
+                          A planned family needs its --runtime-image-<family>.
+   --prepare-plan-output  the prepare-stage plan JSON, for 'version bump-plan'
+                          and 'release validate-tag --prepare-plan-file'.
+   --artifacts-output     with --family, the names of the artifacts that
+                          family's build job builds, one a line.
+   --job-names-output     the names of the generated jobs, one a line, for
+                          the jobs that check every planned job ran.
+   --project-type-output  with --family, the project type that family's
+                          version job bumps with its native tool; a family
+                          the plan bumps no project of is refused.
+
+   Without --file and without .forge-ci/artifacts.yml the release has no
+   planned bump and no family; a file named by --file must exist.
+
+EXAMPLE:
+   forge-ci plan gitlab-release-pipeline \
+     --runtime-image-java "registry.example.com/team/forge-ci-runtime-java-25@sha256:<digest>" \
+     --output release-families.yml
+```
+
+| Flag | Description | Type | Default | Env vars |
+|------|-------------|------|---------|----------|
+| `--file` | artifacts.yml of the release (default: .forge-ci/artifacts.yml, which may be absent) | string | `""` | n/a |
+| `--runtime-image-java` | runtime image of the java family (Maven, Gradle) | string | `""` | n/a |
+| `--runtime-image-node` | runtime image of the node family (npm) | string | `""` | n/a |
+| `--runtime-image-go` | runtime image of the go family | string | `""` | n/a |
+| `--runtime-image-rust` | runtime image of the rust family (Cargo) | string | `""` | n/a |
+| `--runtime-image-android` | runtime image of the android family (Gradle Android) | string | `""` | n/a |
+| `--output` | file to write the generated release jobs to | string | `""` | n/a |
+| `--prepare-plan-output` | file to write the prepare-stage plan JSON to | string | `""` | n/a |
+| `--family` | family whose artifacts --artifacts-output lists or whose project type --project-type-output names: java, node, go, rust or android | string | `""` | n/a |
+| `--artifacts-output` | file to write --family's artifact names to, one a line | string | `""` | n/a |
+| `--job-names-output` | file to write the generated jobs' names to, one a line | string | `""` | n/a |
+| `--project-type-output` | file to write --family's version project type to | string | `""` | n/a |
+
 ### `forge-ci plan gitlab-snapshot-pipeline`
 
 render a native GitLab snapshot child pipeline from its frozen image plan
@@ -3143,6 +3192,44 @@ admit native export jobs or print whether an architecture is selected
 | `--commands-file` | JSON export commands, data only | string | `"-"` | n/a |
 | `--image-plan` | optional release image plan file | string | `""` | n/a |
 | `--selected-arch` | print true/false for this native architecture instead of admitting export jobs | string | `""` | n/a |
+
+### `forge-ci plan release-versions`
+
+plan a release's version bump and its per-family version jobs from artifacts.yml
+
+```
+Plans the release's version bump from the declaration, as
+   'plan gitlab-release-pipeline' does, and writes what the release's version
+   jobs read:
+
+   --matrix-output        the version jobs as one-line JSON for strategy.matrix:
+                          one {"family", "project-type"} row per toolchain
+                          family whose projects the plan bumps with their
+                          native tool, [] for none. A planned family needs
+                          its --runtime-image-<family>.
+   --families-output      the same families' names, one a line, for the job
+                          that joins their patches.
+   --prepare-plan-output  the prepare-stage plan JSON, for 'version bump-plan'
+                          and 'release validate-tag --prepare-plan-file'.
+
+   Without --file and without .forge-ci/artifacts.yml the release has no
+   planned bump; a file named by --file must exist.
+
+EXAMPLE:
+   forge-ci plan release-versions \
+     --runtime-image-java "registry.example.com/team/forge-ci-runtime-java-25@sha256:<digest>" \
+     --matrix-output versions.json
+```
+
+| Flag | Description | Type | Default | Env vars |
+|------|-------------|------|---------|----------|
+| `--file` | artifacts.yml of the release (default: .forge-ci/artifacts.yml, which may be absent) | string | `""` | n/a |
+| `--runtime-image-java` | runtime image of the java family, whose Maven projects it bumps | string | `""` | n/a |
+| `--runtime-image-node` | runtime image of the node family, whose npm projects it bumps | string | `""` | n/a |
+| `--runtime-image-rust` | runtime image of the rust family, whose Cargo projects it bumps | string | `""` | n/a |
+| `--matrix-output` | file to write the version jobs' matrix JSON to | string | `""` | n/a |
+| `--families-output` | file to write the planned version families to, one a line | string | `""` | n/a |
+| `--prepare-plan-output` | file to write the prepare-stage plan JSON to | string | `""` | n/a |
 
 ### `forge-ci plan snapshot-release`
 
@@ -4540,7 +4627,7 @@ EXAMPLE:
 | `--expected-parent` | require the single child of this authorised source SHA and freshly bind the exact remote release-request/<tag> object and peeled commit; signed-request authorization remains separate | string | `""` | `$RELEASE_REQUEST_SHA` |
 | `--changelog-only` | require exactly a CHANGELOG.md change from --expected-parent, and bind release-request/<tag> to that tested commit | bool | `false` | n/a |
 | `--request-is-release` | explicit no-bump route: require release-sha to equal expected-parent, retaining remote request binding; incompatible with prepared-change profiles | bool | `false` | `$RELEASE_REQUEST_IS_RELEASE` |
-| `--version-bump` | with --changelog-only, also admit this project type's version bump (maven/npm/cargo), checked as a version substitution to the tag's version | string | `""` | n/a |
+| `--prepare-plan-file` | with --changelog-only, also admit the version bump of this prepare-stage plan JSON file: each planned project's changelog copy and version files, native ones checked as a version substitution to the tag's version | string | `""` | n/a |
 | `--token-file` | Read token for a private repository. Read from a file ("-" for stdin); trailing CR/LF is trimmed. Explicit input overrides environment credentials; empty content supplies no token. Omit for environment selection, with runner-issued tokens scoped to their server. | string | `""` | n/a |
 
 ## `forge-ci report`
@@ -5635,8 +5722,10 @@ access to signing secrets (those belong only to the separately-trusted signing
 job), and every actions/checkout step must set persist-credentials: false.
 
 When --sign-job is set, additional Forgejo release-signing invariants are
-checked: prepare release identity outputs, signer secret enumeration, dist-digest
-handoff wiring, prepare-secret-before-checkout ordering, and cache-free
+checked: the prepare job calls the layer's prepare-release.yml, the signer takes
+release-tag, release-sha, artifacts-config and dist-digest each as the bare
+${{ needs.<job>.outputs.<name> }} expression under its exact key, signer secret
+enumeration, prepare-secret-before-checkout ordering, and cache-free
 setup-toolchain use. --single-pin-subject additionally enforces that every
 matching cross-repo reference in the workflow directory uses one commit pin.
 --single-pin-input names the input through which the subject's reusable
@@ -5665,7 +5754,7 @@ EXAMPLE:
 | `--workflow` | path to the workflow file to check (required) | string | `""` | n/a |
 | `--build-job` | the artifact-producing job that must not see signing secrets | string | `"build"` | n/a |
 | `--sign-job` | cross-repo signing workflow call-site job; enables Forgejo release-signing channel checks | string | `""` | n/a |
-| `--prepare-job` | job that emits release-tag/release-sha and may check signing-secret presence before checkout | string | `""` | n/a |
+| `--prepare-job` | job that calls prepare-release.yml for release-tag, release-sha and artifacts-config, required when --sign-job is set | string | `""` | n/a |
 | `--dist-digest-output` | build job output carrying the dist-digest passed to the signer | string | `""` | n/a |
 | `--single-pin-subject` | subject whose @<sha> refs must agree across the workflow directory (for example, example/provider-workflows) | string | `""` | n/a |
 | `--single-pin-input` | input of the subject's reusable workflows that repeats their commit pin (for example, forge-ci-sha); needs --single-pin-subject | string | `""` | n/a |
@@ -5956,11 +6045,13 @@ apply every artifact mutation in a prepare-stage plan to one working tree
 | `--plan-json` | typed release prepare-stage plan JSON (required) | string | `""` | `$PREPARE_STAGE_PLAN_JSON` |
 | `--patch` | native version changes produced by a separate key-free job; never run native tools in this mode | string | `""` | n/a |
 | `--patch-sha256` | expected sha256 reported by the key-free patch job | string | `""` | n/a |
+| `--paths-file` | with --patch, file the paths the bump wrote besides CHANGELOG.md are written to, one per line, for commit-changelog-release --include-paths-file | string | `""` | n/a |
 | `--release-policy` | accepted release versions: stable or stable-prerelease | string | `"stable"` | `$RELEASE_POLICY` |
 | `--version` | release version without a leading v (required) | string | `""` | `$VERSION` |
 | `--changelog-file` | full changelog copied into each planned artifact directory | string | `"CHANGELOG.md"` | `$CHANGELOG_FILE` |
 | `--xcode-version-file` | xcconfig file holding MARKETING_VERSION | string | `""` | `$XCODE_VERSION_FILE` |
 | `--maven-cli-opts` | extra args forwarded to mvn | string | `""` | `$MAVEN_CLI_OPTS` |
+| `--project-type` | run the native tools of this project type alone (maven, npm or cargo), for a key-free job with one toolchain; repeatable, and not with --patch | string | `""` | n/a |
 
 ### `forge-ci version commit-changelog-release`
 

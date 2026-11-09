@@ -68,8 +68,10 @@ jobs:
       release-git-host-key-fingerprint: ${{ vars.RELEASE_GIT_HOST_KEY_FINGERPRINT }}
       verify-release-request-signature: 'true'
       release-request-allowed-signers: .forgejo/release-allowed-signers
-      version-bump: VERSION_BUMP
-      version-bump-image: BUMP_IMAGE
+      # The overlay's declaration decides the bump: for cargo the root
+      # crate, in the job image, which carries Cargo. Go declares none.
+      artifacts-config: ARTIFACTS_CONFIG
+      runtime-image-rust: BUMP_IMAGE
       sign-distro-packages: 'false'
       publish-container-images: 'false'
     secrets:
@@ -100,13 +102,14 @@ jobs:
           git fetch --no-tags origin "refs/tags/${REQUEST}:refs/tags/${REQUEST}" "refs/tags/${RELEASE_TAG}:refs/tags/${RELEASE_TAG}"
           test "$(git rev-parse "refs/tags/${REQUEST}^{commit}")" = "$EXPECTED"
           git -c gpg.ssh.allowedSignersFile=.forgejo/release-allowed-signers verify-tag "$REQUEST"
-          args=()
-          case "$(cat .gitlab/generic-cli-kind)" in
-            cargo) args+=(--version-bump cargo) ;;
-            go) ;;
-            *) exit 1 ;;
-          esac
-          forge-ci release validate-tag --tag "$RELEASE_TAG" --release-sha "$RELEASE_SHA" --expected-parent "$EXPECTED" --changelog-only "${args[@]}"
+          # The prepare plan of the declaration prepare read: validate-tag
+          # admits exactly its bump beside the changelog.
+          config=ARTIFACTS_CONFIG
+          file=()
+          if [ -n "$config" ]; then file=(--file "$config"); fi
+          plan=$(mktemp "${RUNNER_TEMP:?}/prepare-plan.XXXXXX")
+          forge-ci plan release-versions "${file[@]}" --prepare-plan-output "$plan"
+          forge-ci release validate-tag --tag "$RELEASE_TAG" --release-sha "$RELEASE_SHA" --expected-parent "$EXPECTED" --changelog-only --prepare-plan-file "$plan"
       - if: IS_GO
         uses: https://forge.example/examplescope/forge-ci/.forgejo/actions/setup-buildah@ENGINE_SHA
         with:
@@ -131,6 +134,8 @@ jobs:
       runner-label: ${{ vars.CI_RUNNER_LABEL }}
       release-tag: ${{ needs.prepare.outputs.release-tag }}
       release-sha: ${{ needs.prepare.outputs.release-sha }}
+      # The declaration prepare read: every signer job admits exactly its bump.
+      artifacts-config: ${{ needs.prepare.outputs.artifacts-config }}
       release-request-sha: ${{ forgejo.sha }}
       dist-digest: ${{ needs.build.outputs.dist-digest }}
       artifact-name: build-dist
