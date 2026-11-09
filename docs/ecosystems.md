@@ -456,7 +456,7 @@ list the opt-out for each change.
 | Canonical tool | Xcode + xcodebuild |
 | Status | Production |
 | Tracked since | v0.90.0 |
-| Runner requirement | macOS (`macos-26` by default; override via `macos-version` config field) |
+| Runner requirement | macOS arm64 (`macos-26` by default; the GitHub `runs-on-darwin-arm64` input chooses the build and lint runner) |
 
 #### Capabilities
 

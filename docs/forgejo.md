@@ -433,6 +433,8 @@ GitHub's configurable SLSA attestor `runs-on` string input uses the same JSON-ar
 encoding. Fixed GitHub hosted-runner labels and macOS-version inputs stay plain
 labels. GitLab uses its native `runner-tags` array input and `tags` YAML list;
 do not copy Actions expressions or JSON encoding into those GitLab inputs.
+[Runner roles across the forges](runners.md#runner-roles-across-the-forges)
+lists each role's input on all three.
 
 ### Variables the layer sets
 

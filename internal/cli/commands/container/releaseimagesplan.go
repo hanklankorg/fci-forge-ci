@@ -15,6 +15,7 @@ import (
 	appconfig "github.com/diggsweden/forge-ci/internal/app/config"
 	appcontainer "github.com/diggsweden/forge-ci/internal/app/container"
 	"github.com/diggsweden/forge-ci/internal/cli/cienv"
+	"github.com/diggsweden/forge-ci/internal/cli/commonflags"
 	"github.com/diggsweden/forge-ci/internal/cli/deps"
 	"github.com/diggsweden/forge-ci/internal/cli/regflags"
 	"github.com/diggsweden/forge-ci/internal/domain/errs"
@@ -69,6 +70,9 @@ build and publish on a forge whose jobs take no multiline outputs, and only
 registry-user is emitted. --runner-archs then names the architectures a native
 build job exists for; a container building another is refused here.
 
+The layer passes its runner inputs with --runner-input; a build of a platform
+whose image build runner input has no value is refused here.
+
 EXAMPLE:
    forge-ci container release-images plan --image-repository ghcr.io/owner/app --registry-username owner --release-tag v1.2.3`,
 		// A --label value may hold commas (a license expression, a text).
@@ -86,6 +90,7 @@ EXAMPLE:
 			&cli.StringSliceFlag{Name: flagLabel, Usage: "key=value label every image carries after the standard ones, such as org.opencontainers.image.licenses=MIT (repeatable); a standard provenance label is refused"},
 			&cli.StringFlag{Name: flagOutput, Usage: "write the builds/images plan to this file instead of the builds, images and image-names outputs"},
 			&cli.StringFlag{Name: flagRunnerArchs, Usage: "with --output: comma-separated architectures that have a native build job; empty admits every one"},
+			commonflags.RunnerInput(),
 			regflags.UsernameFor("user the registry token logs in as, written to the registry-user output; empty is the --repository owner on the forge's own registry and refused on another one"),
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
@@ -110,10 +115,16 @@ EXAMPLE:
 					return err
 				}
 
+				runnerInputs, err := commonflags.RunnerInputs(cmd, dep.Platform)
+				if err != nil {
+					return err
+				}
+
 				input := appconfig.EmitReleaseImagesPlanInput{
 					Config:            appconfig.EmitConfigPlanInput{Path: cmp.Or(file, defaultArtifactsFile)},
 					DefaultWhenAbsent: !named,
 					ResolvedPlan:      resolved,
+					Runners:           runnerInputs,
 					Images: pipeline.ReleaseImagesInput{
 						ImageRepository:  imageRepository,
 						Repository:       cmd.String(flagRepository),
@@ -123,20 +134,7 @@ EXAMPLE:
 					},
 				}
 
-				var plan pipeline.ReleaseImagesPlan
-				if output := cmd.String(flagOutput); output != "" {
-					plan, err = appconfig.ResolveReleaseImagesPlan(input, deps.Annotator(cmd))
-					if err == nil {
-						err = writeReleaseImagesPlanFile(output, plan, cmd.String(flagRunnerArchs))
-					}
-				} else {
-					if cmd.String(flagRunnerArchs) != "" {
-						return fmt.Errorf("--runner-archs needs --output: %w", errs.ErrUsage)
-					}
-
-					plan, err = appconfig.EmitReleaseImagesPlan(ctx, dep.OutputSink, deps.Annotator(cmd), input)
-				}
-
+				plan, err := runReleaseImagesPlan(ctx, cmd, dep, input)
 				if err != nil {
 					return err
 				}
@@ -149,6 +147,25 @@ EXAMPLE:
 			})
 		},
 	}
+}
+
+// runReleaseImagesPlan writes the plan to --output, or emits it as outputs.
+func runReleaseImagesPlan(ctx context.Context, cmd *cli.Command, dep *deps.Deps, input appconfig.EmitReleaseImagesPlanInput) (pipeline.ReleaseImagesPlan, error) {
+	output := cmd.String(flagOutput)
+	if output == "" {
+		if cmd.String(flagRunnerArchs) != "" {
+			return pipeline.ReleaseImagesPlan{}, fmt.Errorf("--runner-archs needs --output: %w", errs.ErrUsage)
+		}
+
+		return appconfig.EmitReleaseImagesPlan(ctx, dep.OutputSink, deps.Annotator(cmd), input)
+	}
+
+	plan, err := appconfig.ResolveReleaseImagesPlan(input, deps.Annotator(cmd))
+	if err != nil {
+		return pipeline.ReleaseImagesPlan{}, err
+	}
+
+	return plan, writeReleaseImagesPlanFile(output, plan, cmd.String(flagRunnerArchs))
 }
 
 // releasePlanRegistryUser is the user the publishing job logs in as, decided

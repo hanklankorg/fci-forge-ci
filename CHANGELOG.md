@@ -9,6 +9,59 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- GitLab release-image plans now receive every declared runner input from
+  readonly policy bindings, both before release preparation and at the image
+  planning job. Missing native build runners are refused by shared admission,
+  not an inferred architecture list. There are no new component input names
+  or contract/SDK requirements; policies must name each selected platform's
+  build runner. Export/base admission remains on its separate interface.
+- GitHub release and snapshot plans now receive all declared runner inputs
+  after workflow defaults, and refuse image/Xcode platforms without their
+  own runner before emitting plan outputs. `plan snapshot-release` accepts
+  the same repeatable `--runner-input name=value` interface as `plan release`.
+  Direct CLI callers should pass their layer's inputs; omission stays
+  compatible until the GitLab and Forgejo admission migration is complete.
+- **BREAKING**: The GitHub reusable workflows take their runners as JSON-array
+  inputs: `runs-on` for ordinary jobs, `build-runs-on-linux-amd64` and
+  `build-runs-on-linux-arm64` for image builds, and `runs-on-darwin-arm64`
+  for the unsigned Xcode build and Swift lint jobs, defaulting to today's hosted
+  labels. The orchestrators pass them on. Signing, promotion and publication
+  jobs stay on GitHub-hosted runners, signed Android and Xcode builds
+  included. The `macos-version` workflow input and
+  the `xcode-ios` `config.macos-version` key are removed, with no alias:
+  replace `macos-version: macos-26` with
+  `runs-on-darwin-arm64: '["macos-26"]'`, and drop the key from
+  `artifacts.yml`, which now refuses it. App Store publication runs on
+  `macos-26`. See docs/runners.md, GitHub runners.
+- GitLab components take their runner tags as inputs: `runner-tags` on
+  `check`, `nanolinter`, `megalinter`, `build-*`, `publish-maven-central`,
+  `publish-forge-packages` and `release`, and `signer-runner-tags` on
+  `release` for the jobs in `signer-image`. Each defaults to `[]`, untagged,
+  as before. docs/runners.md gains one table of the runner roles and their
+  input on each forge.
+- **BREAKING**: GitLab runner inputs follow one pattern,
+  `[role-]runner-tags[-<os>-<arch>]`, with no aliases for the old names.
+  `release` and `snapshot-images` rename `build-runner-tags` to
+  `build-runner-tags-linux-amd64` and `build-runner-tags-arm64` to
+  `build-runner-tags-linux-arm64`; `publish-apple-appstore` renames
+  `runner-tags` to `runner-tags-darwin-arm64`. An include that passes an old
+  name fails, because GitLab refuses an undeclared input; rename it in the
+  policy project. `release` drops `checks-runner-tags`: the consumer checks
+  and all family/release-files build commands, amd64 image and export jobs
+  run on `build-runner-tags-linux-amd64`, whichever the image builder,
+  kaniko included. Version and ordinary jobs stay on `runner-tags`.
+  Each job takes its own role's input; none falls back to
+  another's.
+- **BREAKING**: `build-runner-tags-linux-amd64` and
+  `build-runner-tags-linux-arm64` of `release` and `snapshot-images` have no
+  default. Every policy names them: the amd64 tags of a real runner, such as
+  `[privileged]` or a GitLab.com `saas-linux-*` tag, and the arm64 runner's or
+  `[]` for none. The release refuses empty amd64 tags at its first job, and a
+  snapshot refuses an amd64 or arm64 build without tags. An untagged build
+  could land on a runner of any platform.
+- **BREAKING**: GitLab release jobs refuse a `signer-runner-tags` that names a
+  `$variable`: GitLab expands a variable in a tag, which would let a project
+  choose the runner that sees the release credentials.
 - Add credential-free root-only plan and canonical-payload admission against
   independently approved exact plan bytes and explicit producer source facts.
   Verify retained producer SBOM pins without regeneration; content revisions

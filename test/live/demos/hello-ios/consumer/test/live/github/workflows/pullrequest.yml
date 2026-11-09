@@ -71,7 +71,7 @@ jobs:
     with:
       forge-ci-binary-ref: v0.90.0
       xcode-version: "26.6"
-      macos-version: macos-26
+      runs-on-darwin-arm64: '["macos-26"]'
       project: HelloTrial.xcodeproj
       scheme: HelloTrial
       use-xcodegen: true

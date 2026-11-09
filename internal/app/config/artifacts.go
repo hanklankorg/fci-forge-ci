@@ -24,6 +24,7 @@ import (
 	"github.com/diggsweden/forge-ci/internal/domain/pipeline"
 	"github.com/diggsweden/forge-ci/internal/domain/projecttype"
 	"github.com/diggsweden/forge-ci/internal/domain/repository"
+	"github.com/diggsweden/forge-ci/internal/domain/runners"
 	domainsummary "github.com/diggsweden/forge-ci/internal/domain/summary"
 )
 
@@ -108,6 +109,9 @@ type EmitReleaseImagesPlanInput struct {
 	// ResolvedPlan is optional consumer-owned policy, in the same output shape
 	// as the declarative planner. It is admitted before emitting any outputs.
 	ResolvedPlan string
+	// Runners is the runner inputs the forge layer passed; a build of a
+	// platform whose input has no value is refused. Nil is not checked.
+	Runners *runners.Inputs
 }
 
 // EmitReleaseImagesPlan writes the release-images build and publication
@@ -145,7 +149,16 @@ func ResolveReleaseImagesPlan(in EmitReleaseImagesPlanInput, annot output.Annota
 }
 
 func resolveReleaseImagesPlan(in EmitReleaseImagesPlanInput, annot output.Annotator) (pipeline.ReleaseImagesPlan, error) {
-	return planReleaseImages(in, annot)
+	plan, err := planReleaseImages(in, annot)
+	if err != nil {
+		return pipeline.ReleaseImagesPlan{}, err
+	}
+
+	if err := in.Runners.Admit(plan.RunnerNeeds()); err != nil {
+		return pipeline.ReleaseImagesPlan{}, err
+	}
+
+	return plan, nil
 }
 
 func planReleaseImages(in EmitReleaseImagesPlanInput, annot output.Annotator) (pipeline.ReleaseImagesPlan, error) {

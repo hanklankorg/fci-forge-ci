@@ -35,6 +35,16 @@ on:
       build-stage-plan-json:
         required: true
         type: string
+      runs-on:
+        description: "JSON array of runner labels for the ordinary jobs, read with fromJSON. Signing, promotion and publication jobs stay on GitHub-hosted runners."
+        required: false
+        default: '["ubuntu-26.04"]'
+        type: string
+      runs-on-darwin-arm64:
+        description: "JSON array of runner labels for the macOS arm64 jobs, read with fromJSON."
+        required: false
+        default: '["macos-26"]'
+        type: string
       forge-ci-binary-ref:
         required: true
         type: string
@@ -124,7 +134,7 @@ jobs:
         runtime-image=${{ inputs['runtime-image'] }}
   validate-test-selections:
     needs: [resolve-bootstrap]
-    runs-on: ubuntu-26.04
+    runs-on: ${{ fromJSON(inputs['runs-on']) }}
     container:
       image: ${{ inputs['runtime-image'] }}
     permissions:
@@ -158,6 +168,7 @@ jobs:
     # build-maven uses only auto-provided GITHUB_TOKEN.
     uses: ./.github/workflows/build-maven.yml
     with:
+      runs-on: ${{ inputs['runs-on'] }}
       enforce-application-tests: ${{ inputs['enforce-application-tests'] }}
       forge-ci-binary-ref: ${{ inputs['forge-ci-binary-ref'] }}
       working-directory: ${{ matrix.artifact.working_directory }}
@@ -183,6 +194,7 @@ jobs:
     # build-npm uses only auto-provided GITHUB_TOKEN.
     uses: ./.github/workflows/build-npm.yml
     with:
+      runs-on: ${{ inputs['runs-on'] }}
       enforce-application-tests: ${{ inputs['enforce-application-tests'] }}
       forge-ci-binary-ref: ${{ inputs['forge-ci-binary-ref'] }}
       working-directory: ${{ matrix.artifact.working_directory }}
@@ -208,6 +220,7 @@ jobs:
     # build-gradle-app uses only auto-provided GITHUB_TOKEN.
     uses: ./.github/workflows/build-gradle-app.yml
     with:
+      runs-on: ${{ inputs['runs-on'] }}
       enforce-application-tests: ${{ inputs['enforce-application-tests'] }}
       forge-ci-binary-ref: ${{ inputs['forge-ci-binary-ref'] }}
       working-directory: ${{ matrix.artifact.working_directory }}
@@ -233,6 +246,7 @@ jobs:
     # build-go uses only auto-provided GITHUB_TOKEN.
     uses: ./.github/workflows/build-go.yml
     with:
+      runs-on: ${{ inputs['runs-on'] }}
       test-selection-json: ${{ needs.validate-test-selections.outputs.go-test-selections-json != '{}' && toJson(fromJson(needs.validate-test-selections.outputs.go-test-selections-json)[matrix.artifact.name]) || '' }}
       enforce-application-tests: ${{ inputs['enforce-application-tests'] }}
       forge-ci-binary-ref: ${{ inputs['forge-ci-binary-ref'] }}
@@ -263,6 +277,7 @@ jobs:
     # build-cargo uses only auto-provided GITHUB_TOKEN.
     uses: ./.github/workflows/build-cargo.yml
     with:
+      runs-on: ${{ inputs['runs-on'] }}
       test-selection-json: ${{ needs.validate-test-selections.outputs.cargo-test-selections-json != '{}' && toJson(fromJson(needs.validate-test-selections.outputs.cargo-test-selections-json)[matrix.artifact.name]) || '' }}
       enforce-application-tests: ${{ inputs['enforce-application-tests'] }}
       forge-ci-binary-ref: ${{ inputs['forge-ci-binary-ref'] }}
@@ -295,6 +310,7 @@ jobs:
       SECRETS_PROPERTIES_BASE64: ${{ secrets.SECRETS_PROPERTIES_BASE64 }}
     uses: ./.github/workflows/build-gradle-android.yml
     with:
+      runs-on: ${{ inputs['runs-on'] }}
       enforce-application-tests: ${{ inputs['enforce-application-tests'] }}
       forge-ci-binary-ref: ${{ inputs['forge-ci-binary-ref'] }}
       library: ${{ matrix.artifact.build_type == 'library' }}
@@ -335,6 +351,7 @@ jobs:
       XCCONFIG_BASE64: ${{ secrets.XCCONFIG_BASE64 }}
     uses: ./.github/workflows/build-xcode-ios.yml
     with:
+      runs-on-darwin-arm64: ${{ inputs['runs-on-darwin-arm64'] }}
       xcode-version: ${{ matrix.artifact.xcode_ios.xcode_version }}
       scheme: ${{ matrix.artifact.xcode_ios.scheme }}
       workspace: ${{ matrix.artifact.xcode_ios.workspace }}
@@ -349,7 +366,6 @@ jobs:
       include-tag: false
       build-number: ${{ matrix.artifact.xcode_ios.build_number }}
       working-directory: ${{ matrix.artifact.working_directory }}
-      macos-version: ${{ matrix.artifact.xcode_ios.macos_version || 'macos-26' }}
       forge-ci-binary-ref: ${{ inputs['forge-ci-binary-ref'] }}
   # Container-first cargo and container-first Go produce nothing at the
   # build-stage level. Their manifest-derived Build SBOMs and actual
@@ -360,7 +376,7 @@ jobs:
     name: Summary
     needs: [resolve-bootstrap, validate-test-selections, maven, npm, gradle, go, cargo, gradle-android, xcode-ios]
     if: always() && needs.resolve-bootstrap.result == 'success' && needs.validate-test-selections.result == 'success'
-    runs-on: ubuntu-26.04
+    runs-on: ${{ fromJSON(inputs['runs-on']) }}
     container:
       image: ${{ inputs['runtime-image'] }}
     permissions:

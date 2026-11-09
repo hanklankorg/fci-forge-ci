@@ -20,6 +20,8 @@ import (
 	"github.com/diggsweden/forge-ci/internal/domain/output"
 	"github.com/diggsweden/forge-ci/internal/domain/pipeline"
 	"github.com/diggsweden/forge-ci/internal/domain/projecttype"
+	"github.com/diggsweden/forge-ci/internal/domain/provider"
+	"github.com/diggsweden/forge-ci/internal/domain/runners"
 	"github.com/diggsweden/forge-ci/internal/testutil/fakeoutputsink"
 	"github.com/diggsweden/forge-ci/internal/testutil/testfs"
 )
@@ -830,4 +832,34 @@ func TestEmitConfigPlan_ParseFailureClassifiesInvalidConfigOnce(t *testing.T) {
 	if got := strings.Count(err.Error(), errs.ErrInvalidConfig.Error()); got != 1 {
 		t.Errorf("err = %v: sentinel text appears %d times, want 1", err, got)
 	}
+}
+
+// An image build of a platform whose build runner input has no value is
+// refused before any output is written; no other platform's runner stands in.
+func TestEmitReleaseImagesPlan_RefusesABuildWithoutARunner(t *testing.T) {
+	t.Parallel()
+
+	plan := func(t *testing.T, pairs ...string) (*fakeoutputsink.Sink, error) {
+		t.Helper()
+
+		inputs, err := runners.ParseInputs(provider.ForgeForgejo, pairs)
+		require.NoError(t, err)
+
+		sink := fakeoutputsink.New(t)
+		_, err = appconfig.EmitReleaseImagesPlan(t.Context(), sink, output.Annotator{}, appconfig.EmitReleaseImagesPlanInput{
+			Config:  appconfig.EmitConfigPlanInput{Path: writeYAML(t, "containers:\n  - name: app\n    platforms: linux/amd64,linux/arm64\n")},
+			Images:  pipeline.ReleaseImagesInput{ImageRepository: "ghcr.io/acme/app", Repository: "acme/app", ReleaseTag: "v1.2.3"},
+			Runners: inputs,
+		})
+
+		return sink, err
+	}
+
+	sink, err := plan(t, `build-runs-on-linux-amd64=["pool"]`)
+	require.ErrorIs(t, err, errs.ErrUsage)
+	require.ErrorContains(t, err, "forgejo runner input build-runs-on-linux-arm64 has no value")
+	require.Empty(t, sink.Keys())
+
+	_, err = plan(t, `build-runs-on-linux-amd64=["pool"]`, `build-runs-on-linux-arm64=["arm64"]`)
+	require.NoError(t, err)
 }

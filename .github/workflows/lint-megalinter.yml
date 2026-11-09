@@ -30,6 +30,11 @@ on:
         description: "Required trusted MegaLinter image reference pinned by @sha256:<64 lowercase hex>"
         required: true
         type: string
+      runs-on:
+        description: "JSON array of runner labels for the ordinary jobs, read with fromJSON. Signing, promotion and publication jobs stay on GitHub-hosted runners."
+        required: false
+        default: '["ubuntu-26.04"]'
+        type: string
       forge-ci-binary-ref:
         description: "Full approved engine commit the canonical CLI of this run was built from; the lint job receives exactly that build for its checkout, policy and SARIF commands"
         required: true
@@ -74,7 +79,7 @@ jobs:
   megalinter-lint:
     needs: [resolve-bootstrap]
     name: MegaLinter
-    runs-on: ubuntu-26.04
+    runs-on: ${{ fromJSON(inputs['runs-on']) }}
     timeout-minutes: 30
     permissions:
       contents: read

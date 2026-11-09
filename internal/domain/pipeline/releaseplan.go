@@ -14,6 +14,7 @@ import (
 	"github.com/diggsweden/forge-ci/internal/domain/errs"
 	"github.com/diggsweden/forge-ci/internal/domain/projecttype"
 	domainrelease "github.com/diggsweden/forge-ci/internal/domain/release"
+	"github.com/diggsweden/forge-ci/internal/domain/runners"
 	"github.com/diggsweden/forge-ci/internal/listval"
 	"github.com/diggsweden/forge-ci/internal/pathsafe"
 )
@@ -43,6 +44,10 @@ type ReleasePlanInput struct {
 	// ReleasePlatforms is RELEASE_PLATFORMS, the subset of each container's
 	// declared platforms this run builds. Empty plans every declared platform.
 	ReleasePlatforms string
+	// Runners is the runner inputs the forge layer passed. The plan is
+	// refused when a platform it builds, or its Xcode jobs, has none; nil, a
+	// layer that passes none, is not checked.
+	Runners *runners.Inputs
 }
 
 // ReleasePlan is the top-level typed contract for production release setup.
@@ -263,6 +268,10 @@ func NewReleasePlan(in ReleasePlanInput) (ReleasePlan, error) {
 	}
 
 	in.ConfigPlan = narrowed
+
+	if err := in.Runners.Admit(releaseRunnerNeeds(narrowed)); err != nil {
+		return ReleasePlan{}, err
+	}
 
 	if err := domainrelease.ValidateTransparencyConsent(in.RepositoryVisibility, in.ConfigPlan.Sign.Transparency, in.ConfigPlan.Sign.TransparencyExplicit, in.ReleaseSignArtifacts); err != nil {
 		return ReleasePlan{}, err

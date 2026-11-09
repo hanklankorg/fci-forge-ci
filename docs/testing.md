@@ -395,8 +395,8 @@ each one needs and what it leaves behind.
 ```bash
 # In Forge Lab: providers, fixtures, runners and the forgeci contract.
 just lab --account forgeci --fixtures --runners gitlab forgejo
-# Here: the contract and CA check alone, in seconds, before anything heavier.
-just test-live-preflight full
+# Here: the run's preflight, every admission it makes and no lab writes.
+just test-live-preflight
 # A consumer's own workflow against this checkout, both visibilities.
 just test-live-consumer forgejo /absolute/consumer pull-request CI_JOB_IMAGE=<digest reference>
 # A kept demo: make one, see what exists, delete one when done with.
@@ -476,7 +476,8 @@ The launcher drains the redacted log before releasing its lock and returns
 130 for interruption. When supervising the launcher directly with systemd,
 allow at least `TimeoutStopSec=180` so it does not kill this cleanup early.
 When using Forge Lab's full-release wrapper, run `just test-live-preflight`
-first: the wrapper swaps the privileged runner in before the launcher's own
+with the run's arguments first (see
+[the live preflight](live-campaigns.md#preflight-a-run)): the wrapper swaps the privileged runner in before the launcher's own
 preflight runs, so a stale contract refused inside it costs two runner swaps
 instead of seconds. The wrapper's child shutdown grace must
 cover the suite's two-minute cleanup. Use the current three-minute default
@@ -779,9 +780,11 @@ acknowledgement and mint the contract again. A build that fails there is a
 failure: the fixture's first job, `Check that a job can build an image`, is
 the layer's `setup-buildah` alone, so the failure names the runner and not the
 release. Forge Lab's k3s road publishes no such runner, so they skip there.
-The GitLab image scenarios take the same runner through the release policy's
-`build-runner-tags`, or build with kaniko on the ordinary runner under
-`FORGE_CI_LIVE_GITLAB_IMAGE_BUILDER=kaniko`; see
+The GitLab image scenarios use the exact per-platform build inputs with
+either builder: `build-runner-tags-linux-amd64` for amd64 and the corresponding
+arm64 input when that native platform is covered. Kaniko may use a pool
+without Buildah's user namespaces, but still names that pool's tags through
+the build input. Select it with `FORGE_CI_LIVE_GITLAB_IMAGE_BUILDER=kaniko`; see
 [Image builds with kaniko](#image-builds-with-kaniko).
 
 #### Focused resolved-image-plan smoke
@@ -1947,9 +1950,11 @@ FORGE_CI_LIVE_KANIKO_JOB_IMAGE_ARCHIVE=/absolute/images/kaniko-job.tar \
 ```
 
 The release policy then takes `image-builder: kaniko`, the pushed kaniko job
-image as `builder-job-image`, and no `build-runner-tags`. The lab's runners
-are of one architecture, so a release on an arm64 lab, whose image job needs
-tagged runners, is not covered. A development scenario that builds images
+image as `builder-job-image`, and the selected pool's tags in the exact
+per-platform build input, just as with Buildah. Kaniko does not require a
+Buildah-capable pool, but does not omit the build selector. The lab's runners
+are of one architecture; native arm64 release-image acceptance remains not
+covered. A development scenario that builds images
 runs its job in its consumer image archive, which must then be a kaniko job
 image, untagged, with `CI_IMAGE_BUILDER` and `CI_IMAGE_BUILDER_JOB_IMAGE`
 added to that job alone. The base-image fixture builds its base in the

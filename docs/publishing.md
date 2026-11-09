@@ -768,7 +768,6 @@ artifacts:
       configuration: Release
       enable-code-signing: true   # Enables IPA export and App Store Connect upload
       export-options-var: EXPORT_OPTIONS_BASE64
-      macos-version: macos-26
       # App Store Connect upload options
       submit-for-review: false  # Summary intent only; submit review manually in App Store Connect
       skip-validation: false    # Validate IPA before upload (recommended)

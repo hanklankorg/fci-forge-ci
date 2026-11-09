@@ -48,16 +48,20 @@ func TestReleaseImageStageTakesItsSettingsFromThePolicy(t *testing.T) {
 			t.Fatalf("%s release-images must be an opt-in boolean: %+v", path, images)
 		}
 
-		arm64 := inputs["build-runner-tags-arm64"].(map[string]any)
-		if arm64["type"] != "array" || !reflect.DeepEqual(arm64["default"], []any{}) {
-			t.Fatalf("%s build-runner-tags-arm64 must default to no arm64 runner: %+v", path, arm64)
+		// Bound to a platform, the build inputs have no default: the policy
+		// names its runners, [] stating it has no arm64 one.
+		for _, name := range []string{"build-runner-tags-linux-amd64", "build-runner-tags-linux-arm64"} {
+			input := inputs[name].(map[string]any)
+			if _, defaulted := input["default"]; input["type"] != "array" || defaulted {
+				t.Fatalf("%s %s must be a required array: %+v", path, name, input)
+			}
 		}
 	}
 
 	root := releaseDocumentBody(t, "templates/release.yml")
 	forwarded := root["release"].(map[string]any)["trigger"].(map[string]any)["include"].([]any)[0].(map[string]any)["inputs"].(map[string]any)
 
-	for _, name := range []string{"job-user", "release-images", "artifacts-config", "release-platforms", "image-builder", "builder-job-image", "build-runner-tags-arm64"} {
+	for _, name := range []string{"job-user", "release-images", "artifacts-config", "release-platforms", "image-builder", "builder-job-image", "build-runner-tags-linux-arm64"} {
 		if forwarded[name] != "$[[ inputs."+name+" ]]" {
 			t.Fatalf("root component does not forward %s", name)
 		}
@@ -91,7 +95,7 @@ func TestReleaseImageStageTakesItsSettingsFromThePolicy(t *testing.T) {
 
 	for arch, rule := range map[string]string{
 		"amd64": `"true" == "true"`,
-		"arm64": `'true' == 'true' && '$[[ inputs.build-runner-tags-arm64 ]]' != '[]'`,
+		"arm64": `'true' == 'true' && '$[[ inputs.build-runner-tags-linux-arm64 ]]' != '[]'`,
 	} {
 		job := gitlabrender.ResolveExtends(t, withExports, withExports["Build: export "+arch].(map[string]any))
 
@@ -154,7 +158,7 @@ func TestReleaseImageStageTakesItsSettingsFromThePolicy(t *testing.T) {
 	}
 
 	arm64Rule := body["Images: build arm64"].(map[string]any)["rules"].([]any)[0].(map[string]any)["if"]
-	if arm64Rule != `'$[[ inputs.release-images ]]' == 'true' && '$[[ inputs.build-runner-tags-arm64 ]]' != '[]'` {
+	if arm64Rule != `'$[[ inputs.release-images ]]' == 'true' && '$[[ inputs.build-runner-tags-linux-arm64 ]]' != '[]'` {
 		t.Fatalf("the arm64 image job is not bound to its runner tags: %v", arm64Rule)
 	}
 
@@ -233,11 +237,11 @@ func TestReleaseImageBuilderAdmitsOnlyTheKanikoJobImage(t *testing.T) {
 // that would stop after Prepare pushed the release commit and tag.
 // exportsCheck hands the export commands to the request check as data on
 // stdin; it runs none of them.
-const exportsCheck = "rc_check_exports '$[[ inputs.export-files ]]' '$[[ inputs.builder-job-image ]]' '$[[ inputs.release-platforms ]]' '$[[ inputs.build-runner-tags-arm64 ]]' <<'RC_EXPORT_COMMANDS'\n" +
+const exportsCheck = "rc_check_exports '$[[ inputs.export-files ]]' '$[[ inputs.builder-job-image ]]' '$[[ inputs.release-platforms ]]' '$[[ inputs.build-runner-tags-linux-arm64 ]]' <<'RC_EXPORT_COMMANDS'\n" +
 	"$[[ inputs.export ]]\nRC_EXPORT_COMMANDS\n"
 
 const releaseImagesCheck = "rc_check_release_images '$[[ inputs.release-images ]]' '$[[ inputs.image-builder ]]' " +
-	"'$[[ inputs.builder-job-image ]]' '$[[ inputs.artifacts-config ]]' '$[[ inputs.release-platforms ]]' '$[[ inputs.build-runner-tags-arm64 ]]'"
+	"'$[[ inputs.builder-job-image ]]' '$[[ inputs.artifacts-config ]]' '$[[ inputs.release-platforms ]]'"
 
 // The release request check, which runs before Prepare pushes anything,
 // refuses an image stage that would stop later: either builder without the
@@ -272,9 +276,10 @@ func TestReleaseRequestCheckRefusesAnImageStageThatWouldStop(t *testing.T) {
 
 			work := t.TempDir()
 			env := append([]string{"RC_WORK=" + work, "RELEASE_TAG=v1.2.3", "RC_REGISTRY=registry.invalid", "RC_REGISTRY_IMAGE=registry.invalid/team/app",
-				"RC_SERVER_URL=https://gitlab.invalid", "CI_PROJECT_PATH=team/app", "RC_IMAGE_LABELS=" + tc.labels}, tc.env...)
+				"RC_SERVER_URL=https://gitlab.invalid", "CI_PROJECT_PATH=team/app", "RC_IMAGE_LABELS=" + tc.labels,
+				"RC_RUNNER_TAGS=[]", "RC_SIGNER_RUNNER_TAGS=[]", `RC_BUILD_RUNNER_TAGS_LINUX_AMD64=["amd64"]`, "RC_BUILD_RUNNER_TAGS_LINUX_ARM64=[]"}, tc.env...)
 
-			output, err := runReleaseFunction(t, work, "rc_check_release_images "+tc.args+" .forge-ci/artifacts.yml '' '[]'", env...)
+			output, err := runReleaseFunction(t, work, "rc_check_release_images "+tc.args+" .forge-ci/artifacts.yml ''", env...)
 			if (err == nil) != (tc.wantError == "") || !strings.Contains(output, tc.wantError) {
 				t.Fatalf("err = %v:\n%s", err, output)
 			}
@@ -286,7 +291,7 @@ func TestReleaseRequestCheckRefusesAnImageStageThatWouldStop(t *testing.T) {
 
 			plan := "engine: container release-images plan --file .forge-ci/artifacts.yml --image-plan-json  --release-tag v1.2.3 --release-platforms  " + labelArgs +
 				"--image-repository registry.invalid/team/app --server-url https://gitlab.invalid --repository team/app " +
-				"--registry-username gitlab-ci-token --runner-archs amd64 --output " + work + "/release-images-plan.json"
+				`--registry-username gitlab-ci-token --runner-input runner-tags=[] --runner-input signer-runner-tags=[] --runner-input build-runner-tags-linux-amd64=["amd64"] --runner-input build-runner-tags-linux-arm64=[] --output ` + work + "/release-images-plan.json"
 			if strings.Contains(output, plan) != tc.planned {
 				t.Fatalf("planned=%t, want %t:\n%s", strings.Contains(output, plan), tc.planned, output)
 			}

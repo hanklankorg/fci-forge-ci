@@ -278,3 +278,52 @@ func TestCheckLiveInputs_GuardsWithoutTouchingAProvider(t *testing.T) {
 		}
 	})
 }
+
+// TestCheckLiveInputs_JudgesOnlyTheCredentialsTheRunUses holds the one
+// credential-age rule to the endpoints the run drives: a stale one it uses
+// refuses the run with the step that leaves other sessions' contracts
+// alone, and one it does not use is neither refused nor reported.
+func TestCheckLiveInputs_JudgesOnlyTheCredentialsTheRunUses(t *testing.T) {
+	// At this time the fixture's Forgejo credential, which has no expiry, is
+	// stale; its GitLab one expires later and is fresh.
+	stale := fixtureNow().Add(48 * time.Hour)
+
+	t.Run("a stale endpoint the run does not use is silent", func(t *testing.T) {
+		arrangePreflight(t, composeFixtureBody(t))
+		t.Setenv(liveProviderEnv, string(provider.ForgeGitLab))
+
+		summary, err := CheckLiveInputs(stale)
+		if err != nil {
+			t.Fatalf("a GitLab run refused over the Forgejo credential: %v", err)
+		}
+
+		if summary.Selected != 1 || strings.Contains(summary.Explanation, "STALE") ||
+			strings.Contains(summary.Explanation, "forgejo (forgejo)") || strings.Contains(summary.Explanation, "gitea") {
+			t.Fatalf("the explanation names an endpoint the run does not use:\n%s", summary.Explanation)
+		}
+	})
+
+	for _, scope := range []string{string(provider.ForgeForgejo), "all"} {
+		t.Run("a stale endpoint the run uses refuses it, scope "+scope, func(t *testing.T) {
+			arrangePreflight(t, composeFixtureBody(t))
+			t.Setenv(liveProviderEnv, scope)
+
+			_, err := CheckLiveInputs(stale)
+			if err == nil || !strings.Contains(err.Error(), "forgejo destructive guard") || !strings.Contains(err.Error(), "older than 24h0m0s") {
+				t.Fatalf("stale Forgejo credential = %v", err)
+			}
+
+			// The step is a contract of the operator's own; emitting the
+			// shared one in place would revoke other sessions' tokens.
+			for _, want := range []string{"revokes their tokens", "LAB_TARGETS_FILE=/absolute/path/own.json just targets --account forgeci"} {
+				if !strings.Contains(err.Error(), want) {
+					t.Fatalf("the refusal lacks %q: %v", want, err)
+				}
+			}
+
+			if all := strings.Contains(err.Error(), "selects the other forge with "+liveProviderEnv); all != (scope == "all") {
+				t.Fatalf("the provider hint is %t for scope %s: %v", all, scope, err)
+			}
+		})
+	}
+}

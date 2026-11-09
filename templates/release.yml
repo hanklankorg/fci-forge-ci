@@ -80,19 +80,24 @@ spec:
       regex: '^[^''[:space:]]+@[^''[:space:]]+$'
     checks:
       type: array
-    checks-runner-tags:
-      description: Runner tags for consumer checks after restricted signed-request authorization. Empty leaves checks untagged. Select stronger capacity only for trusted checks requiring it.
+    runner-tags:
+      description: >-
+        Runner tags of the ordinary release jobs: request authorization, preparation, version jobs, image planning and the summary. Consumer build commands use build-runner-tags-linux-amd64 and signer jobs use signer-runner-tags. Empty, the default, leaves ordinary jobs untagged. Name literal tags only, never a $VARIABLE, which a project variable could set.
+      type: array
+      default: []
+    signer-runner-tags:
+      description: >-
+        Runner tags of the jobs that run in signer-image and hold the signing and publication credentials: the access checks, signing, promotion and publication. Set them in this policy, as literals, never from a $VARIABLE: they decide which runner sees the release credentials. Empty, the default, leaves them untagged.
       type: array
       default: []
     build:
       description: >-
         Consumer build commands. They run once in each "Build: <family>" job, in that family's runtime image, with FORGE_CI_BUILD_FAMILY naming the family and FORGE_CI_ARTIFACTS its planned artifacts, space-separated, and leave files in dist/ and image-context/. They run once more in "Build: release files", in job-image, with both empty, over every family's and export job's files: that run writes the release notes and declares the release files.
       type: array
-    build-runner-tags:
+    build-runner-tags-linux-amd64:
       description: >-
-        Runner tags for the build jobs and, with buildah, the amd64 image job, for example [privileged] where only a tagged runner lets an image build enter user namespaces. Request authorization and signing stay on untagged runners. Empty, the default, leaves them untagged.
+        Runner tags of the consumer checks, family builds, release files and amd64 image and export jobs, whichever the image builder, for example [privileged] where only a tagged runner lets Buildah enter user namespaces, or a GitLab.com saas-linux-* tag. Required, and never empty: an untagged job could land on any runner. Request authorization and version preparation stay on runner-tags and signing on signer-runner-tags.
       type: array
-      default: []
     release-images:
       description: >-
         Build the containers artifacts-config declares in the release's image jobs, scan them, stage them in this project's registry and hand them to signing. The build leaves files the Containerfiles copy that are not in the repository in image-context/. Without artifacts.yml the root Containerfile is the image.
@@ -113,17 +118,16 @@ spec:
       default: ''
     image-builder:
       description: >-
-        Image builder of the image jobs, which run in builder-job-image: buildah, the default, on the build-runner-tags runner, or kaniko on an ordinary runner, for runners that deny the user namespaces Buildah needs.
+        Image builder of the image jobs, which run in builder-job-image: buildah, the default, or kaniko, for runners that deny the user namespaces Buildah needs; either runs on the build runner inputs.
       options: [buildah, kaniko]
       default: buildah
     builder-job-image:
       description: The digest-pinned job image of the image builder, containers/buildah-job or, admitted, containers/kaniko-job. Required with release-images.
       regex: '^$|^[^[:space:]]+@sha256:[0-9a-f]{64}$'
       default: ''
-    build-runner-tags-arm64:
-      description: Runner tags of a native arm64 runner for the arm64 image builds. Empty, the default, builds no arm64 image; a container that declares linux/arm64 then needs release-platforms narrowed.
+    build-runner-tags-linux-arm64:
+      description: Runner tags of a native arm64 runner for the arm64 image and export jobs. Required; [] states there is none and builds no arm64 image, and a container that declares linux/arm64 then needs release-platforms narrowed.
       type: array
-      default: []
     export-files:
       description: >-
         Run the export commands before the build job: once per selected architecture (release-platforms; empty is linux/amd64, and a container that declares linux/arm64 then needs release-platforms named), natively on that architecture's runner, in builder-job-image with image-builder, on the release commit and with no credential of the job. Each job's dist/ is laid into the build job's dist/ before the build commands run. Requires builder-job-image.
@@ -195,6 +199,7 @@ spec:
 # child only through the trigger's own include below.
 "Release: plan":
   stage: .pre
+  tags: $[[ inputs.runner-tags ]]
   interruptible: false
   inherit:
     variables: false
@@ -342,16 +347,17 @@ release:
           bot-name: $[[ inputs.bot-name ]]
           bot-email: $[[ inputs.bot-email ]]
           checks: $[[ inputs.checks ]]
-          checks-runner-tags: $[[ inputs.checks-runner-tags ]]
+          runner-tags: $[[ inputs.runner-tags ]]
+          signer-runner-tags: $[[ inputs.signer-runner-tags ]]
           build: $[[ inputs.build ]]
-          build-runner-tags: $[[ inputs.build-runner-tags ]]
+          build-runner-tags-linux-amd64: $[[ inputs.build-runner-tags-linux-amd64 ]]
           release-images: $[[ inputs.release-images ]]
           artifacts-config: $[[ inputs.artifacts-config ]]
           release-platforms: $[[ inputs.release-platforms ]]
           labels: $[[ inputs.labels ]]
           image-builder: $[[ inputs.image-builder ]]
           builder-job-image: $[[ inputs.builder-job-image ]]
-          build-runner-tags-arm64: $[[ inputs.build-runner-tags-arm64 ]]
+          build-runner-tags-linux-arm64: $[[ inputs.build-runner-tags-linux-arm64 ]]
           export-files: $[[ inputs.export-files ]]
           export: $[[ inputs.export ]]
           changelog-creator: $[[ inputs.changelog-creator ]]

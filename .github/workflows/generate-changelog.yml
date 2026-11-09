@@ -62,6 +62,11 @@ on:
         description: "forge-ci runtime image., pinned by digest (image@sha256:<64 hex>); the resolver refuses anything else before the job container starts."
         required: true
         type: string
+      runs-on:
+        description: "JSON array of runner labels for the ordinary jobs, read with fromJSON. Signing, promotion and publication jobs stay on GitHub-hosted runners."
+        required: false
+        default: '["ubuntu-26.04"]'
+        type: string
       forge-ci-binary-ref:
         description: "Full engine commit (40 hex) the workflow ref names; a tag or branch is refused"
         required: true
@@ -89,7 +94,7 @@ jobs:
   generate-changelog:
     needs: [resolve-bootstrap]
     name: Generate
-    runs-on: ubuntu-26.04
+    runs-on: ${{ fromJSON(inputs['runs-on']) }}
     timeout-minutes: 15
     outputs:
       binding-run-id: ${{ github.run_id }}

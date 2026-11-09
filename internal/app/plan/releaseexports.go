@@ -65,15 +65,15 @@ func CheckReleaseExports(in ReleaseExportsInput) error {
 
 	var tags []string
 	if err := json.Unmarshal([]byte(in.ARM64Tags), &tags); err != nil {
-		return fmt.Errorf("build-runner-tags-arm64 must be a JSON string array: %w", errs.ErrUsage)
+		return fmt.Errorf("build-runner-tags-linux-arm64 must be a JSON string array: %w", errs.ErrUsage)
 	}
 
 	if tags == nil {
-		return fmt.Errorf("build-runner-tags-arm64 must be an array, not null: %w", errs.ErrUsage)
+		return fmt.Errorf("build-runner-tags-linux-arm64 must be an array, not null: %w", errs.ErrUsage)
 	}
 
 	if slices.Contains(platforms, "linux/arm64") && len(tags) == 0 {
-		return fmt.Errorf("linux/arm64 requires build-runner-tags-arm64: %w", errs.ErrUsage)
+		return fmt.Errorf("linux/arm64 requires build-runner-tags-linux-arm64: %w", errs.ErrUsage)
 	}
 
 	if len(in.ImagePlan) != 0 {

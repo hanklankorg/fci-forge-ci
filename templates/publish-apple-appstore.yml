@@ -12,7 +12,7 @@
 # parse the result → write the summary. The binary does find-ipa /
 # prepare-credentials / parse-upload-result; altool does the validate + upload.
 #
-# RUNNER: requires a macOS runner with Xcode (altool). Set --runner-tags to your
+# RUNNER: requires a macOS runner with Xcode (altool). Set runner-tags-darwin-arm64 to your
 # macOS runner's tags (e.g. saas-macos-medium-m1 on GitLab SaaS) and --macos-image
 # to the desired image. The runner must already provide the reviewed forge-ci
 # binary; selecting an Xcode image does not install it.
@@ -32,7 +32,7 @@
 #     - component: $CI_SERVER_FQDN/diggsweden/forge-ci/publish-apple-appstore@0.90.0
 #       inputs:
 #         platform: ios
-#         runner-tags: [saas-macos-medium-m1]
+#         runner-tags-darwin-arm64: [saas-macos-medium-m1]
 spec:
   inputs:
     stage:
@@ -49,7 +49,7 @@ spec:
       type: boolean
       default: false
       description: Skip the altool --validate-app step before upload.
-    runner-tags:
+    runner-tags-darwin-arm64:
       type: array
       default: ["saas-macos-medium-m1"]
       description: Tags selecting the macOS runner (must have Xcode/altool).
@@ -59,7 +59,7 @@ spec:
 ---
 "$[[ inputs.job-name ]]":
   stage: $[[ inputs.stage ]]
-  tags: $[[ inputs.runner-tags ]]
+  tags: $[[ inputs.runner-tags-darwin-arm64 ]]
   image: $[[ inputs.macos-image ]]
   variables:
     PLATFORM: "$[[ inputs.platform ]]"

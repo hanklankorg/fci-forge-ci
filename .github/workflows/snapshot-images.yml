@@ -75,6 +75,21 @@ on:
       registry-user:
         default: ""
         type: string
+      runs-on:
+        description: "JSON array of runner labels for the ordinary jobs, read with fromJSON. Signing, promotion and publication jobs stay on GitHub-hosted runners."
+        required: false
+        default: '["ubuntu-26.04"]'
+        type: string
+      build-runs-on-linux-amd64:
+        description: "JSON array of runner labels for the linux/amd64 image builds, read with fromJSON. The runner must permit the user namespaces Buildah needs."
+        required: false
+        default: '["ubuntu-26.04"]'
+        type: string
+      build-runs-on-linux-arm64:
+        description: "JSON array of runner labels for the linux/arm64 image builds, read with fromJSON. The runner must permit the user namespaces Buildah needs."
+        required: false
+        default: '["ubuntu-26.04-arm"]'
+        type: string
       forge-ci-binary-ref:
         description: "Full approved engine commit the canonical CLI was built from; the host build legs receive exactly that build"
         required: true
@@ -127,7 +142,7 @@ jobs:
         runtime-image-java?=${{ inputs['runtime-image-java'] }}
   plan:
     needs: [resolve-bootstrap]
-    runs-on: ubuntu-26.04
+    runs-on: ${{ fromJSON(inputs['runs-on']) }}
     timeout-minutes: 20
     # The admitted base image: forge-ci baked in, so the plan installs nothing.
     container:
@@ -240,7 +255,7 @@ jobs:
       fail-fast: false
       matrix:
         artifact: ${{ fromJson(needs.plan.outputs.artifacts) }}
-    runs-on: ubuntu-26.04
+    runs-on: ${{ fromJSON(inputs['runs-on']) }}
     timeout-minutes: 45
     container:
       image: >-
@@ -285,7 +300,7 @@ jobs:
   prepare-context:
     needs: [plan, build-artifacts]
     if: ${{ !cancelled() && needs.plan.result == 'success' && (needs.build-artifacts.result == 'success' || needs.build-artifacts.result == 'skipped') }}
-    runs-on: ubuntu-26.04
+    runs-on: ${{ fromJSON(inputs['runs-on']) }}
     timeout-minutes: 20
     container:
       image: ${{ inputs['runtime-image'] }}
@@ -343,7 +358,9 @@ jobs:
       fail-fast: false
       matrix:
         build: ${{ fromJson(needs.plan.outputs.builds) }}
-    runs-on: ${{ matrix.build.arch == 'arm64' && 'ubuntu-26.04-arm' || 'ubuntu-26.04' }}
+    # The runner input of the leg's own arch, never another's: an empty input
+    # or an arch with no input fails the leg.
+    runs-on: ${{ fromJSON((matrix.build.arch == 'arm64' && inputs['build-runs-on-linux-arm64']) || (matrix.build.arch == 'amd64' && inputs['build-runs-on-linux-amd64']) || '') }}
     timeout-minutes: 45
     permissions:
       actions: read
@@ -528,7 +545,7 @@ jobs:
   collect:
     needs: [plan, prepare-context, build, publish]
     if: ${{ !cancelled() && needs.plan.result == 'success' && needs.prepare-context.result == 'success' && ((needs.build.result == 'success' && needs.publish.result == 'success') || (needs.plan.outputs.images == '[]' && needs.build.result == 'skipped' && needs.publish.result == 'skipped')) }}
-    runs-on: ubuntu-26.04
+    runs-on: ${{ fromJSON(inputs['runs-on']) }}
     container:
       image: ${{ inputs['runtime-image'] }}
     permissions:

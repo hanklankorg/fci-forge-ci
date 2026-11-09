@@ -8,7 +8,6 @@ artifacts:
     publish-to: []
     config:
       xcode-version: "26.6"
-      macos-version: macos-26
       project: HelloTrial.xcodeproj
       scheme: HelloTrial
       configuration: Release

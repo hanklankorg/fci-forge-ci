@@ -205,12 +205,12 @@ images and pins, a validating regex. The inputs that are not obvious:
 | | `request-allowed-signers` | OpenSSH allowed-signers text for the people who may sign a request tag. |
 | | `bot-name`, `bot-email` | The release bot identity; no default. |
 | | `checks`, `build` | Consumer commands: checks on the request commit, and the build that writes `dist/release-files.json` and `release-notes.md`. |
-| | `build-runner-tags` | Runner tags for the build job and, with Buildah, the amd64 image job, for example `[privileged]`. Empty, the default, leaves them untagged. |
+| | `build-runner-tags-linux-amd64` | Required, never empty: runner tags of the consumer checks, family builds, release files and amd64 image and export jobs, whichever the image builder. Name a runner's own tags, such as `[privileged]` for a self-managed runner that permits user namespaces, or a `saas-linux-*` tag on GitLab.com. An untagged job could land on a runner of any platform, so there is no default. |
 | | `release-images`, `artifacts-config`, `release-platforms`, `labels` | `true` builds the `containers:` of `artifacts-config` (default `.forge-ci/artifacts.yml`; without it the root `Containerfile`) in the release's image jobs, narrowed to `release-platforms`, with `labels` beside the standard ones. Default `false`: no image jobs. See [Release images](#release-images). |
 | | `image-builder`, `builder-job-image` | The image jobs' builder, `buildah` (default) or `kaniko`, and the digest-pinned job image they run in: the Buildah job image or the kaniko job image. |
-| | `build-runner-tags-arm64` | Tags of a native arm64 runner. The arm64 image and export jobs exist only when they are set. |
+| | `build-runner-tags-linux-arm64` | Required: tags of a native arm64 runner for the arm64 image and export jobs, such as `[saas-linux-medium-arm64]` on GitLab.com, or `[]` to state there is none; the arm64 jobs exist only when it is set. |
 | | `export-files`, `export` | `true` runs the `export` commands once per selected architecture, natively, in `builder-job-image` with `image-builder`, before the build job, and lays their `dist/` into its own. See [Files exported from a Containerfile](#files-exported-from-a-containerfile). |
-| | `checks-runner-tags` | Runner tags for consumer checks after restricted signed-request authorization. Empty, the default, leaves checks untagged. Authorization and signing stay untagged. |
+| | `runner-tags`, `signer-runner-tags` | Runner tags of ordinary jobs, including request authorization, preparation and generated version jobs, and of the signer jobs, the ones in `signer-image` that hold the release credentials. Consumer build commands use the build input above. Empty, the default, leaves ordinary and signer jobs untagged. Write both as literals in this policy, never as a `$VARIABLE`: GitLab expands a variable in a tag, so a project could then choose the runner that sees the credentials. See [Runner roles across the forges](runners.md#runner-roles-across-the-forges). |
 | | `changelog-creator`, `changelog-config`, `commit-body-config` | `git-cliff` (default) or `git-chglog`, and the consumer's configuration files, by default `.forge-ci/gitcliff/keepachangelog.toml` and `.forge-ci/gitcliff/minimal.toml`, copies of this repository's [`templates/gitcliff/`](../templates/gitcliff/) that `forge-ci init` writes. git-cliff renders offline, without remote metadata, and reads stable `vX.Y.Z` tags only, overriding any `tag_pattern` in the configuration. A SHA-256 repository needs `git-chglog`, since git-cliff cannot read one. |
 | | `release-policy` | `stable` (default) or `stable-prerelease`, selected in the trusted external policy. GitLab has no native prerelease flag; see [release policy](workflows.md#stable-and-prerelease-policy). |
 | | `release-branch` | The branch a release lands on; empty, the default, takes the project's default branch. The request must be its head. |
@@ -221,8 +221,9 @@ images and pins, a validating regex. The inputs that are not obvious:
 | | `enforce-lint`, `enforce-vulnerabilities`, `enforce-application-tests`, `enforce-reproducible-builds` | The administrator's [check enforcement](admin-policy.md) for the checks and build jobs and the image scans; default `false`. |
 | `nanolinter` | `forge-ci-repository`, `server-url`, `nanolinter-image`, `required-lints`, `enable-gitlab-sast` | The project serving the component and its engine package (required), the flavour image (required, pinned by digest, as the examples show), the mandated floor (default `secrets,sast`), and the SAST report. `enforce-lint` and `enforce-vulnerabilities`, default `false`, are the administrator's [check enforcement](admin-policy.md). |
 | `megalinter` | `forge-ci-repository`, `server-url`, `megalinter-image`, `enable-gitlab-sast` | Required digest-pinned image; the rest as for `nanolinter`. |
+| `check`, `nanolinter`, `megalinter`, `build-*`, `publish-*` | `runner-tags` | Runner tags of the component's job; empty, the default, leaves it untagged. `publish-apple-appstore` takes `runner-tags-darwin-arm64` instead, which defaults to a hosted macOS runner's. |
 | `build-*` | `working-directory`, `version`, `skip-tests`, `enable-build-sbom`, `runtime-image` | Common to every build component; `runtime-image` is required and pinned by `@sha256:`; `build-go` and `build-cargo` add `platforms` and `artifact-name`, `build-go` also `main-package` (relative to `working-directory`), `build-maven` `build-type` and `profile`, `build-gradle-android` the module, flavour and signing inputs. `enforce-application-tests`, default `false`, is the administrator's [check enforcement](admin-policy.md); the job's `runtime-image` must carry an engine from this release or later. |
-| `publish-*` | `project-type`, `working-directory`, `runtime-image` | `runtime-image` as for `build-*`. `publish-maven-central` adds `profile` and `settings-path`; `publish-apple-appstore` takes none of these, only `platform`, `skip-validation`, `runner-tags` and `macos-image`. |
+| `publish-*` | `project-type`, `working-directory`, `runtime-image` | `runtime-image` as for `build-*`. `publish-maven-central` adds `profile` and `settings-path`; `publish-apple-appstore` takes none of these, only `platform`, `skip-validation`, `runner-tags-darwin-arm64` and `macos-image`. |
 
 The standalone `publish-maven-central` component also accepts `release-policy`.
 It binds the selected input before authorization; a project environment variable
@@ -383,14 +384,16 @@ root, whichever the builder. For Buildah, the default, it is the image of
 built and pinned by digest like the signer image; it carries Buildah and its
 helpers, and the job installs nothing. Buildah needs user namespaces. Where
 only some runners allow them, tag those runners and name the tags in
-`build-runner-tags`: the build jobs and the amd64 image job move there, and the
-signing jobs stay on the untagged runners.
+`build-runner-tags-linux-amd64`: the consumer checks, family builds, release
+files and amd64 image and export jobs run there. Ordinary and version jobs
+stay on `runner-tags`, and signing jobs on `signer-runner-tags`, untagged by
+default.
 
 Where no runner allows them, set `image-builder: kaniko` and
 `builder-job-image` to the kaniko job image of
 [containers/kaniko-job/Containerfile](../containers/kaniko-job/Containerfile),
-pinned by digest. The image build jobs then run in it, as root, on untagged
-runners. Before a Containerfile is
+pinned by digest. The image build jobs then run in it, as root, on the same
+build runner inputs. Before a Containerfile is
 built, the job admits the image as the snapshot builds do: its title must be
 `forge-ci kaniko job image` and its `org.opencontainers.image.source` label
 the engine project, `${CI_SERVER_URL}/<forge-ci-repository>`, read with the
@@ -401,14 +404,15 @@ and the checkout in the workspace, and its temporary files in the job image's
 [Building on the pool with kaniko](runners.md#building-on-the-pool-with-kaniko)
 for what kaniko does not do.
 
-Integration checks that execute Buildah need user namespaces too. Set
-`checks-runner-tags` in the trusted release policy for those checks. The
-restricted `Check: release request` must succeed before the selected runner
-starts `Check: consumer checks`; that job freshly checks out the immutable
+Integration checks that execute Buildah need user namespaces too. They run
+on `build-runner-tags-linux-amd64`, while request authorization stays on
+`runner-tags`. Consumer build commands, including ones that execute Buildah,
+run on `build-runner-tags-linux-amd64`. `Check: release
+request` must succeed before `Check: consumer checks` starts; that job freshly checks out the immutable
 request commit and repeats signature and branch-head validation before running
 `checks`. Both jobs refuse release credentials. Changelog and version
-preparation wait for successful consumer checks. This selector does not route
-merge-request checks or change the ordinary runner default.
+preparation wait for successful consumer checks. These inputs do not route
+merge-request checks.
 The components clear the entrypoint of `job-image` and the runtime images,
 here and in `check`, and of the lint images in `nanolinter` and `megalinter`, so an
 image that starts a tool of its own still runs the job's shell on a Docker
@@ -724,6 +728,8 @@ include:
       bot-email: FIXME
       checks:
         - bash .gitlab/check-release.sh
+      build-runner-tags-linux-amd64: [saas-linux-small-amd64]
+      build-runner-tags-linux-arm64: []
       build:
         - bash .gitlab/build-release.sh
 ```
@@ -740,12 +746,12 @@ the build and signing, as the Forgejo
    `Check: release request` makes the same plan at the request commit first,
    so a stage that would stop later stops the release before `Prepare`
    pushes the release commit and tag: a container that builds linux/arm64
-   without `build-runner-tags-arm64` (narrow `release-platforms` or name the
+   without `build-runner-tags-linux-arm64` (narrow `release-platforms` or name the
    runner), an empty `builder-job-image`, whichever the builder, or a
    `publication-project` that is not a separate project. An empty
    `builder-job-image` GitLab already refuses as it creates the pipeline,
    since the image jobs then name no image.
-2. `Images: build amd64` and, with `build-runner-tags-arm64`, `Images: build
+2. `Images: build amd64` and, with `build-runner-tags-linux-arm64`, `Images: build
    arm64` build every planned image of their architecture natively to OCI
    layouts in `builder-job-image`, with no registry write. The engine passes
    the build no credential of the job, but this is the trust `Build: release files` gives
@@ -819,16 +825,16 @@ architecture, never emulated. With `export-files: true`:
 
 1. `Check: release request` refuses an export the jobs would not carry out:
    an empty `builder-job-image`, or a `release-platforms` that names
-   linux/arm64 without `build-runner-tags-arm64`. Export commands without
+   linux/arm64 without `build-runner-tags-linux-arm64`. Export commands without
    `export-files` would have no effect and are refused too.
-2. `Build: export amd64` and, with `build-runner-tags-arm64`, `Build: export
+2. `Build: export amd64` and, with `build-runner-tags-linux-arm64`, `Build: export
    arm64` run the `export` commands on the release commit in
    `builder-job-image` with `image-builder`, as the image jobs do, for each
    architecture `release-platforms` selects; empty selects linux/amd64, the
    platform a container declares when it names none. A container that
    declares linux/arm64 then needs `release-platforms` named, or the request
    check refuses, so the images and the exports build the same
-   architectures; `build-runner-tags-arm64` serves arm64 and never selects
+   architectures; `build-runner-tags-linux-arm64` serves arm64 and never selects
    it. `EXPORT_PLATFORM` and `EXPORT_ARCH` name the
    job's architecture, and the job holds no credential of its own once the
    builder is admitted. The commands write `dist/`, regular files and
@@ -1048,13 +1054,13 @@ The child runs these jobs, in five stages that read the same on every forge
 | Job | Image | Does |
 |---|---|---|
 | `Check: signing access`, `Check: publishing access`, `Check: registry access` | signer | The toolchain check, the Cosign key against the trusted public key, and the release and registry tokens, before anything else. Registry access is scheduled only when the protected `release-images` or `base-images` input is true; archive/export-only releases need no publication-registry token. |
-| `Check: release request` | job | On the restricted runner, validates the signed request and that it is the head of the release branch; executes no consumer commands. |
-| `Check: consumer checks` | job | After authorization, freshly checks out and revalidates the immutable request, then runs `checks` on `checks-runner-tags` (untagged by default). |
+| `Check: release request` | job | On `runner-tags`, validates the signed request and that it is the head of the release branch; executes no consumer commands. |
+| `Check: consumer checks` | job | After authorization, freshly checks out and revalidates the immutable request, then runs `checks` on `build-runner-tags-linux-amd64`. |
 | `Prepare: changelog` | job | Renders the changelog and commit message. Consumer configuration runs only here and in the version jobs. |
 | `Prepare: version <family>` | runtime | One per family the plan bumps with a native tool; sets the release version in the family's project files and hands over the patch; holds no credential. See [Plan-driven release jobs](#plan-driven-release-jobs). |
 | `Prepare: release commit and tag` | job | Verifies the version patches, applies the plan's bump, commits it with the changelog and pushes the signed release commit and final tag with `RELEASE_SSH_SIGNING_KEY`. |
-| `Build: <family>` | runtime | One per family the plan builds; checks out the final tag and runs `build` for the family's artifacts; hands `dist/` and `image-context/` on. |
-| `Build: release files` | job | Checks out the final tag, lays the family and export files together and runs `build` to declare them; hands `dist/` on with its digest. |
+| `Build: <family>` | runtime | One per family the plan builds; checks out the final tag and runs `build` for the family's artifacts on `build-runner-tags-linux-amd64`; hands `dist/` and `image-context/` on. |
+| `Build: release files` | job | On `build-runner-tags-linux-amd64`, checks out the final tag, lays the family and export files together and runs `build` to declare them; hands `dist/` on with its digest. |
 | `Sign: files and images` | signer | Imports images into the publication project, signs files, packages, provenance and images. |
 | `Publish: images` | signer | Moves final image tags, with a journal. |
 | `Publish: release` | signer | Creates the GitLab release with notes and assets. |
@@ -1473,7 +1479,7 @@ branch is resolved once; the policy pipeline's ref is not the source identity.
 
 The component generates a child pipeline with native amd64/arm64 builds,
 publication after all builds and exact receipt collection. Set
-`build-runner-tags` and `build-runner-tags-arm64` for the corresponding native
+`build-runner-tags-linux-amd64` and `build-runner-tags-linux-arm64` for the corresponding native
 runners; arm64 builds require arm64 tags. `runner-tags` selects control-plane
 runners. Buildah is the default; kaniko requires the admitted digest-pinned
 `builder-job-image`, also used as `build-image`. Build execution receives no

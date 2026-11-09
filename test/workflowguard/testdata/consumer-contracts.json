@@ -58,6 +58,16 @@
         "type": "string",
         "default": "secrets,sast"
       },
+      "runs-on": {
+        "required": false,
+        "type": "string",
+        "default": "[\"ubuntu-26.04\"]"
+      },
+      "runs-on-darwin-arm64": {
+        "required": false,
+        "type": "string",
+        "default": "[\"macos-26\"]"
+      },
       "runtime-image": {
         "required": true,
         "type": "string"
@@ -89,6 +99,16 @@
       "branch": {
         "required": true,
         "type": "string"
+      },
+      "build-runs-on-linux-amd64": {
+        "required": false,
+        "type": "string",
+        "default": "[\"ubuntu-26.04\"]"
+      },
+      "build-runs-on-linux-arm64": {
+        "required": false,
+        "type": "string",
+        "default": "[\"ubuntu-26.04-arm\"]"
       },
       "canonical-builder-image": {
         "required": true,
@@ -247,6 +267,16 @@
         "type": "boolean",
         "default": true
       },
+      "runs-on": {
+        "required": false,
+        "type": "string",
+        "default": "[\"ubuntu-26.04\"]"
+      },
+      "runs-on-darwin-arm64": {
+        "required": false,
+        "type": "string",
+        "default": "[\"macos-26\"]"
+      },
       "runtime-image": {
         "required": true,
         "type": "string"
@@ -325,6 +355,16 @@
         "required": true,
         "type": "string"
       },
+      "build-runs-on-linux-amd64": {
+        "required": false,
+        "type": "string",
+        "default": "[\"ubuntu-26.04\"]"
+      },
+      "build-runs-on-linux-arm64": {
+        "required": false,
+        "type": "string",
+        "default": "[\"ubuntu-26.04-arm\"]"
+      },
       "canonical-builder-image": {
         "required": true,
         "type": "string"
@@ -397,6 +437,16 @@
         "required": false,
         "type": "string",
         "default": "ghcr.io"
+      },
+      "runs-on": {
+        "required": false,
+        "type": "string",
+        "default": "[\"ubuntu-26.04\"]"
+      },
+      "runs-on-darwin-arm64": {
+        "required": false,
+        "type": "string",
+        "default": "[\"macos-26\"]"
       },
       "runtime-image": {
         "required": true,

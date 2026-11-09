@@ -38,6 +38,11 @@ on:
         description: "Administrator-pinned forge-ci base runtime image@sha256 digest the SARIF upload job runs in (forge-ci baked in)"
         required: true
         type: string
+      runs-on:
+        description: "JSON array of runner labels for the ordinary jobs, read with fromJSON. Signing, promotion and publication jobs stay on GitHub-hosted runners."
+        required: false
+        default: '["ubuntu-26.04"]'
+        type: string
       forge-ci-binary-ref:
         description: "Full engine commit (40 hex) the workflow ref names; a tag or branch is refused"
         required: true
@@ -103,7 +108,7 @@ jobs:
     name: Upload SARIF to Code Scanning
     needs: [resolve-bootstrap, analysis]
     if: always() && needs.analysis.result != 'cancelled' && needs.resolve-bootstrap.result == 'success'
-    runs-on: ubuntu-26.04
+    runs-on: ${{ fromJSON(inputs['runs-on']) }}
     timeout-minutes: 5
     container:
       image: ${{ inputs['runtime-image'] }}

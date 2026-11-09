@@ -86,7 +86,13 @@ EXAMPLE:
    CONFIG_PLAN_JSON="$config_plan" forge-ci --runner local --json plan release \
      --tag v1.2.3 --branch main --repository-visibility public
 
-Composition does not execute a release or establish signing/publication readiness.`,
+Composition does not execute a release or establish signing/publication readiness.
+
+The layer passes its runner inputs with --runner-input. The plan is then
+refused when a platform its containers build, or its Xcode jobs, has no
+runner: the input of that role and platform has no value.`,
+		// A --runner-input value is a JSON array, whose commas separate nothing.
+		DisableSliceFlagSeparator: true,
 		Flags: []cli.Flag{
 			&cli.StringFlag{Name: "repository-visibility", Sources: cli.EnvVars("REPOSITORY_VISIBILITY"), Usage: "public, private, internal or unknown; unknown requires explicit public-transparency consent"},
 			&cli.StringFlag{Name: configPlanJSONFlag, Sources: cli.EnvVars("CONFIG_PLAN_JSON"), Usage: "typed config-plan JSON (output of 'config parse-artifacts')"},
@@ -102,10 +108,16 @@ Composition does not execute a release or establish signing/publication readines
 			&cli.StringFlag{Name: "changelog-creator", Sources: cli.EnvVars("CHANGELOG_CREATOR"), Usage: "changelog renderer: git-cliff, the only one the GitHub release runs, or empty for no changelog"},
 			&cli.BoolFlag{Name: "changelog-skip-version-bump", Sources: cli.EnvVars("CHANGELOG_SKIP_VERSION_BUMP"), Usage: "skip the version-bump commit (caller already committed)"},
 			&cli.StringFlag{Name: "release-platforms", Sources: cli.EnvVars("RELEASE_PLATFORMS"), Usage: "comma-separated subset of each container's platforms this run builds; empty plans every declared platform"},
+			commonflags.RunnerInput(),
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			return deps.FromCmd(ctx, cmd, func(d *deps.Deps) error {
-				_, err := appplan.Release(ctx, d.OutputSink, d.SummarySink, appplan.ReleaseInput{
+				runnerInputs, err := commonflags.RunnerInputs(cmd, d.Platform)
+				if err != nil {
+					return err
+				}
+
+				_, err = appplan.Release(ctx, d.OutputSink, d.SummarySink, appplan.ReleaseInput{
 					RepositoryVisibility:            cmd.String("repository-visibility"),
 					ConfigPlanJSON:                  cmd.String(configPlanJSONFlag),
 					Branch:                          cmd.String("branch"),
@@ -120,6 +132,7 @@ Composition does not execute a release or establish signing/publication readines
 					ChangelogCreator:                cmd.String("changelog-creator"),
 					ChangelogSkipVersionBump:        cmd.Bool("changelog-skip-version-bump"),
 					ReleasePlatforms:                cmd.String("release-platforms"),
+					Runners:                         runnerInputs,
 				})
 
 				return err
@@ -140,7 +153,11 @@ EXAMPLE:
    config_output="$(forge-ci --runner local --json config parse-artifacts --file .forge-ci/artifacts.yml)" &&
    config_plan="$(printf '%s\n' "$config_output" | jq -er '."config-plan-json"')" &&
    CONFIG_PLAN_JSON="$config_plan" forge-ci --runner local --json plan snapshot-release \
-     --project-type go --branch main`,
+     --project-type go --branch main
+
+Pass --runner-input name=value for each runner input of the calling layer.
+The plan refuses a planned image or Xcode platform without its own runner.`,
+		DisableSliceFlagSeparator: true,
 		Flags: []cli.Flag{
 			&cli.StringFlag{Name: configPlanJSONFlag, Sources: cli.EnvVars("CONFIG_PLAN_JSON"), Usage: "typed config-plan JSON (output of 'config parse-artifacts')"},
 			&cli.StringFlag{Name: "project-type", Sources: cli.EnvVars("PROJECT_TYPE"), Usage: "primary ecosystem of the project (maven/npm/go/cargo/…)"},
@@ -152,7 +169,7 @@ EXAMPLE:
 			&cli.StringFlag{Name: "java-version", Sources: cli.EnvVars("JAVA_VERSION"), Usage: "JDK version installed by the publish job (Maven/Gradle paths)"},
 			&cli.StringFlag{Name: "node-version", Sources: cli.EnvVars("NODE_VERSION"), Usage: "Node.js version installed by the publish job (npm path)"},
 			&cli.StringFlag{Name: "rust-toolchain", Value: "stable", Sources: cli.EnvVars("RUST_TOOLCHAIN"), Usage: "Rust toolchain installed by the publish job (cargo path)"},
-			&cli.StringFlag{Name: "registry", Sources: cli.EnvVars("REGISTRY"), Usage: "registry forwarded to the snapshot plan context (snapshot flow builds no containers)"},
+			&cli.StringFlag{Name: "registry", Sources: cli.EnvVars("REGISTRY"), Usage: "registry forwarded to the snapshot plan context"},
 			&cli.StringFlag{Name: "forge-ci-binary-ref", Sources: cli.EnvVars("FORGE_CI_BINARY_REF"), Usage: "git ref of the forge-ci binary used in the plan"},
 			&cli.StringFlag{Name: "npm-registry", Sources: cli.EnvVars("NPM_REGISTRY"), Usage: "npm registry URL the dev tarball is published to"},
 			&cli.StringFlag{Name: "scope", Sources: cli.EnvVars("SCOPE", "PACKAGE_SCOPE"), Usage: "npm package scope (e.g. @examplescope) routed to the registry"},
@@ -160,10 +177,17 @@ EXAMPLE:
 			&cli.BoolFlag{Name: "publish-npm", Value: true, Sources: cli.EnvVars("PUBLISH_NPM"), Usage: "include the npm dev-publish step in the plan"},
 			&cli.BoolFlag{Name: "publish-maven-snapshots", Sources: cli.EnvVars("PUBLISH_MAVEN_SNAPSHOTS"), Usage: "opt into Maven-format snapshot publication for Maven, Gradle JVM and Android libraries"},
 			&cli.BoolFlag{Name: "use-ci-token", Value: true, Sources: cli.EnvVars("USE_CI_TOKEN"), Usage: "use the CI platform token in place of an explicit registry password"},
+			commonflags.RunnerInput(),
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			return deps.FromCmd(ctx, cmd, func(d *deps.Deps) error {
-				_, err := appplan.SnapshotRelease(ctx, d.OutputSink, appplan.SnapshotReleaseInput{
+				runnerInputs, err := commonflags.RunnerInputs(cmd, d.Platform)
+				if err != nil {
+					return err
+				}
+
+				_, err = appplan.SnapshotRelease(ctx, d.OutputSink, appplan.SnapshotReleaseInput{
+					Runners:               runnerInputs,
 					ConfigPlanJSON:        cmd.String(configPlanJSONFlag),
 					ProjectType:           cmd.String("project-type"),
 					Branch:                cmd.String("branch"),

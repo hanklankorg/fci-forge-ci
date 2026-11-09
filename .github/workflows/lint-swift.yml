@@ -61,10 +61,15 @@ on:
         required: false
         default: "*.swift"
         type: string
-      macos-version:
-        description: "macOS runner version (macos-13, macos-14, macos-15, macos-26)"
+      runs-on:
+        description: "JSON array of runner labels for the ordinary jobs, read with fromJSON. Signing, promotion and publication jobs stay on GitHub-hosted runners."
         required: false
-        default: "macos-26"
+        default: '["ubuntu-26.04"]'
+        type: string
+      runs-on-darwin-arm64:
+        description: "JSON array of runner labels for the macOS arm64 jobs, read with fromJSON."
+        required: false
+        default: '["macos-26"]'
         type: string
       forge-ci-binary-ref:
         description: "Full approved engine commit; the macOS jobs build forge-ci from the engine checkout at it (canonical delivery serves Linux only)"
@@ -89,7 +94,7 @@ jobs:
     needs: [resolve-bootstrap]
     name: Swift Format Lint
     if: ${{ inputs['enable-swiftformat'] }}
-    runs-on: ${{ inputs.macos-version }}
+    runs-on: ${{ fromJSON(inputs['runs-on-darwin-arm64']) }}
     timeout-minutes: 20
     permissions:
       contents: read
@@ -132,7 +137,7 @@ jobs:
     needs: [resolve-bootstrap]
     name: SwiftLint
     if: ${{ inputs['enable-swiftlint'] }}
-    runs-on: ${{ inputs.macos-version }}
+    runs-on: ${{ fromJSON(inputs['runs-on-darwin-arm64']) }}
     timeout-minutes: 20
     permissions:
       contents: read
@@ -167,7 +172,7 @@ jobs:
         run: forge-ci lint swift swiftlint --enforce-lint="$ADMIN_LINT"
   summary:
     name: Lint Summary
-    runs-on: ubuntu-26.04
+    runs-on: ${{ fromJSON(inputs['runs-on']) }}
     needs: [resolve-bootstrap, swift-format-lint, swiftlint]
     if: always() && needs.resolve-bootstrap.result == 'success'
     container:
