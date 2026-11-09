@@ -18,6 +18,7 @@ import (
 
 func TestSnapshotRunnerAdmissionUsesDeclaredPlatforms(t *testing.T) {
 	t.Parallel()
+
 	for _, tc := range []struct {
 		name  string
 		cfg   config.Config
@@ -32,10 +33,13 @@ func TestSnapshotRunnerAdmissionUsesDeclaredPlatforms(t *testing.T) {
 		}, "runs-on-darwin-arm64"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
 			require.NoError(t, config.Derive(&tc.cfg))
 			in := pipeline.SnapshotReleasePlanInput{ConfigPlan: pipeline.NewConfigPlan(&tc.cfg), Branch: "main", SBOMs: "none"}
 			legacy, err := pipeline.NewSnapshotReleasePlan(in)
 			require.NoError(t, err, "omission stays compatible until every layer migrates")
+
 			for _, missing := range []string{"", "[]"} {
 				in.Runners, err = runners.ParseInputs(provider.ForgeGitHub, []string{`runs-on=["ordinary"]`, tc.input + "=" + missing})
 				require.NoError(t, err)
@@ -44,6 +48,7 @@ func TestSnapshotRunnerAdmissionUsesDeclaredPlatforms(t *testing.T) {
 				require.ErrorContains(t, err, tc.input)
 				require.Equal(t, pipeline.SnapshotReleasePlan{}, refused)
 			}
+
 			in.Runners, err = runners.ParseInputs(provider.ForgeGitHub, []string{tc.input + `=["isolated", "native"]`})
 			require.NoError(t, err)
 			admitted, err := pipeline.NewSnapshotReleasePlan(in)

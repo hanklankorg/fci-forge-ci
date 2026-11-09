@@ -23,6 +23,7 @@ func TestRunnerRolesAreCoherentAcrossForges(t *testing.T) {
 	t.Parallel()
 
 	doc := string(reporoot.ReadFile(t, "docs/runners.md"))
+
 	for dir, forge := range map[string]provider.ForgeAPI{
 		"templates": provider.ForgeGitLab, ".github/workflows": provider.ForgeGitHub,
 	} {
@@ -30,14 +31,17 @@ func TestRunnerRolesAreCoherentAcrossForges(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+
 		for _, path := range workflowInputFiles(t, dir) {
 			for _, name := range declaredInputs(t, path) {
 				if !isRunnerInput(name) {
 					continue
 				}
+
 				if !slices.Contains(known, name) {
 					t.Errorf("%s: runner input %s is not owned by runners.Names(%s)", path, name, forge)
 				}
+
 				if !strings.Contains(doc, "`"+name+"`") {
 					t.Errorf("docs/runners.md does not name %s's %s", path, name)
 				}
@@ -63,19 +67,24 @@ func TestForgejoRunnerMigrationBoundary(t *testing.T) {
 		"sign-and-publish-release.yml":      {"runner-label"},
 		"sign-container-images.yml":         {"runner-label"},
 	}
+
 	for _, path := range workflowInputFiles(t, ".forgejo/workflows") {
 		var got []string
+
 		for _, name := range declaredInputs(t, path) {
 			if isRunnerInput(name) {
 				got = append(got, name)
 			}
 		}
+
 		name := filepath.Base(path)
 		if !slices.Equal(got, expected[name]) {
 			t.Errorf("%s: runner inputs = %v, migration boundary = %v", path, got, expected[name])
 		}
+
 		delete(expected, name)
 	}
+
 	if len(expected) != 0 {
 		t.Errorf("Forgejo runner workflows disappeared: %v", expected)
 	}
@@ -87,16 +96,20 @@ func isRunnerInput(name string) bool {
 
 func workflowInputFiles(t *testing.T, dir string) []string {
 	t.Helper()
+
 	entries, err := os.ReadDir(filepath.Join(reporoot.Path(t), dir))
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	var paths []string
+
 	for _, entry := range entries {
 		if filepath.Ext(entry.Name()) == ".yml" {
 			paths = append(paths, dir+"/"+entry.Name())
 		}
 	}
+
 	return paths
 }
 
