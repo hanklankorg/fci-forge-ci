@@ -31,6 +31,11 @@ func TestSnapshotEventDoesNotProbeSingleImageReadiness(t *testing.T) {
 			RecipeDirectory: recipe, JobImage: serviceTestJobImage,
 			Branch: "development", ReadinessURL: "http://127.0.0.1:8080/health", Images: snapshot,
 		}
+		if snapshot {
+			config.ReadinessURL = ""
+			// No service fixture is read or executed for the snapshot event.
+			config.Fixture = filepath.Join(t.TempDir(), "does-not-exist.sh")
+		}
 
 		fixture, err := serviceDevelopmentFixture(t.Context(), source, config)
 		if err != nil {
@@ -451,9 +456,10 @@ func stageTestDemo(t *testing.T, demo string) (string, string, Consumer, layerGi
 
 // The snapshot event takes the Cargo workspace's two images, which the
 // lifecycle's one-service scope refuses: the planner plans both, each native
-// amd64 under its own tag suffix in the one repository, and with no one
-// service to probe the harness writes the snapshot job alone.
-func TestServiceDevelopmentSnapshotsEveryPlannedImage(t *testing.T) {
+// amd64 under its own tag suffix in the one repository. The harness writes
+// the snapshot job alone because this is the snapshot event's scope, not a
+// service inference from the image count.
+func TestSnapshotEventSnapshotsEveryPlannedImage(t *testing.T) {
 	recipe, _, source, _ := stageTestDemo(t, "hello-cargo-workspace")
 
 	declaration, err := ServiceSnapshotSource(recipe)

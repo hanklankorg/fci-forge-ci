@@ -445,10 +445,12 @@ serves under its receipt's tag, with no tag but the planned images' and
 their `-amd64` architecture tags. This snapshot-only event probes no
 readiness, even for a single image: the image count does not declare a
 runnable service. The lifecycle event retains its service readiness check.
+Snapshot-only events need neither a readiness URL nor a service fixture;
+the Forgejo fixture does not read the operator's service fixture for this event.
 The branches stay where the trial pushed them, and the repository
 holds no tag and no release.
 
-On Forgejo (`TestForgejoLayer_ServiceSnapshot`) the consumer's main and a
+On Forgejo (`TestForgejoLayer_Snapshot`) the consumer's main and a
 change on `development` are pushed with Actions off; the harness's
 `development.yml` is the only workflow planned, and the only run: it is
 dispatched on `main` and snapshots `development`. The receipts are the
@@ -460,7 +462,7 @@ the layer, so a demo without one has no Forgejo route: `hello-monorepo`,
 whose example ships no Forgejo workflows, is refused on Forgejo, and adding
 them is the example's work.
 
-On GitLab (`TestGitLabLayer_ServiceSnapshot`) one pinned policy includes the
+On GitLab (`TestGitLabLayer_Snapshot`) one pinned policy includes the
 `snapshot-images` component alone, admitted only for the pipeline the
 harness requests on `main` through the API; the pushes of `main` and
 `development` match no rule. The frozen plan is the parent's `Snapshot:
@@ -471,8 +473,12 @@ the runtime image of its toolchain family,
 `FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_<FAMILY>`, which `campaign-prepare`
 prepares from the plan (none for the container-first Cargo workspace,
 `java` and `node` for the monorepo), and the images with the lane's
-builder. The development registry credential is a protected variable scoped
-to the publisher's environment, on a protected `main`. No release build,
+builder. `job-archive=` is required even without producers and is not the
+builder archive: Buildah requires `FORGE_CI_LIVE_BUILDAH_JOB_IMAGE_ARCHIVE`,
+kaniko requires `FORGE_CI_LIVE_KANIKO_JOB_IMAGE_ARCHIVE`. Campaign admission
+and the standalone trial refuse a missing selected-builder archive before
+creating mutable resources. The development registry credential is a protected
+variable scoped to the publisher's environment, on a protected `main`. No release build,
 signer or lint archive is asked for.
 
 The generated [Testing matrices](testing-matrices.md) show these lines in the

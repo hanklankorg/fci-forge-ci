@@ -147,3 +147,55 @@ func TestCampaignSnapshot_RefusesAGitLabProducerWithoutItsImage(t *testing.T) {
 		t.Fatalf("a snapshot without its producer's image: plan=%+v err=%v", plan, err)
 	}
 }
+
+// Admission must use the effective lane builder, not the presence of some
+// other builder's archive. No provider resources are needed to discover a
+// missing archive, including for a container-first snapshot with no producers.
+func TestCampaignSnapshot_RequiresTheSelectedBuilderArchive(t *testing.T) {
+	t.Parallel()
+
+	for _, builder := range []string{"", ImageBuilderBuildah, ImageBuilderKaniko} {
+		t.Run("builder="+builder, func(t *testing.T) {
+			t.Parallel()
+
+			run, err := CampaignRunSettings(campaignGitLab, func(key string) string {
+				if key == GitLabImageBuilderEnv {
+					return builder
+				}
+
+				return ""
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			selected, _ := imageBuilderValue(builder)
+			archiveEnv := GitLabSnapshotBuilderArchiveEnv(selected)
+
+			for _, present := range []bool{false, true} {
+				env := lifecycleCampaignEnv
+
+				if !present {
+					archive := "/c/buildah.tar"
+					if selected == ImageBuilderKaniko {
+						archive = "/c/kaniko.tar"
+					}
+
+					env = strings.ReplaceAll(env, archiveEnv+"="+archive+"\n", "")
+				}
+
+				dir, cases := newCampaign(t, env, "consumer hello-cargo-workspace snapshot job-archive=/c/rust.tar\n")
+				writeLifecycleDemo(t, dir, "hello-cargo-workspace")
+
+				plan, err := PlanCampaignLane(reporoot.Path(t), dir, campaignGitLab, cases, campaignHead, run)
+				if present {
+					if err != nil || len(plan.Cases) != 1 {
+						t.Fatalf("prepared %s snapshot: plan=%+v err=%v", selected, plan, err)
+					}
+				} else if !errors.Is(err, errs.ErrValidation) || len(plan.Cases) != 0 || !strings.Contains(err.Error(), archiveEnv) {
+					t.Fatalf("missing %s: plan=%+v err=%v", archiveEnv, plan, err)
+				}
+			}
+		})
+	}
+}

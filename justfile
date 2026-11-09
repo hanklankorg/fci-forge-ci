@@ -1043,12 +1043,13 @@ test-live-consumer forge repo event *settings:
     export FORGE_CI_LIVE_CONSUMER_SETTINGS
     case "$forge:$event" in
     forgejo:lifecycle | forgejo:snapshot)
-        # The development phase is the demo's service snapshot, with the demo's
-        # readiness probe and no runtime fixture; a snapshot of several images
-        # has no one service and probes none.
-        export FORGE_CI_LIVE_SERVICE_READINESS_URL=http://127.0.0.1:8080/health FORGE_CI_LIVE_SERVICE_FIXTURE=''
-        scenario=TestForgejoLayer_ConsumerLifecycle
-        [[ $event != snapshot ]] || scenario=TestForgejoLayer_ServiceSnapshot
+        # Only lifecycle probes the demo's service; snapshot judges publication
+        # regardless of image count and needs no readiness configuration.
+        scenario=TestForgejoLayer_Snapshot
+        if [[ $event == lifecycle ]]; then
+            export FORGE_CI_LIVE_SERVICE_READINESS_URL=http://127.0.0.1:8080/health FORGE_CI_LIVE_SERVICE_FIXTURE=''
+            scenario=TestForgejoLayer_ConsumerLifecycle
+        fi
         exec bash scripts/ci/run-live-tests.sh focused "^${scenario}$"
         ;;
     forgejo:*)
@@ -1070,7 +1071,7 @@ test-live-consumer forge repo event *settings:
             printf 'a GitLab snapshot takes job-archive=<path> alone\n' >&2
             exit 2
         fi
-        exec bash scripts/ci/run-live-tests.sh focused '^TestGitLabLayer_ServiceSnapshot$'
+        exec bash scripts/ci/run-live-tests.sh focused '^TestGitLabLayer_Snapshot$'
         ;;
     gitlab:release | gitlab:lifecycle)
         for name in job build signer; do

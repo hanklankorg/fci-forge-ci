@@ -80,11 +80,11 @@ const (
 // for the repository its source label names, and the campaign prepares one,
 // labelled for that repository (ConsumerTrialLayerURL), so every event of a
 // consumer trial runs its workflows from it, a snapshot's too.
-// ServiceSnapshotScenario names a snapshot's consumer copy, on either forge.
+// SnapshotScenario names a snapshot's consumer copy, on either forge.
 const (
-	ConsumerTrial           = "consumer-trial"
-	ConsumerLifecycle       = "consumer-lifecycle"
-	ServiceSnapshotScenario = "service-snapshot"
+	ConsumerTrial     = "consumer-trial"
+	ConsumerLifecycle = "consumer-lifecycle"
+	SnapshotScenario  = "snapshot"
 )
 
 // LayerScenario is the scenario name of the scratch repository a scenario

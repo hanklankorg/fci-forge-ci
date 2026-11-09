@@ -34,6 +34,16 @@ const ForgejoImageBuilderEnv = "FORGE_CI_LIVE_FORGEJO_IMAGE_BUILDER"
 // and labels with the layer it runs from when the run selects kaniko.
 const KanikoJobImageArchiveEnv = "FORGE_CI_LIVE_KANIKO_JOB_IMAGE_ARCHIVE"
 
+// GitLabSnapshotBuilderArchiveEnv names the saved job image required by the
+// snapshot's selected builder. The caller must validate the builder selection.
+func GitLabSnapshotBuilderArchiveEnv(builder string) string {
+	if builder == ImageBuilderKaniko {
+		return KanikoJobImageArchiveEnv
+	}
+
+	return "FORGE_CI_LIVE_BUILDAH_JOB_IMAGE_ARCHIVE"
+}
+
 // The image builders a scenario can select.
 const (
 	ImageBuilderBuildah = "buildah"

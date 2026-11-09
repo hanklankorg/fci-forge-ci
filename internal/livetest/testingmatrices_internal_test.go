@@ -249,7 +249,7 @@ func TestSeedTestingEvidenceReadsSnapshotRunsAsDevelopment(t *testing.T) {
 	t.Parallel()
 
 	live := t.TempDir()
-	for provider, scenario := range map[string]string{campaignForgejo: "TestForgejoLayer_ServiceSnapshot", campaignGitLab: "TestGitLabLayer_ServiceSnapshot"} {
+	for provider, scenario := range map[string]string{campaignForgejo: "TestForgejoLayer_Snapshot", campaignGitLab: "TestGitLabLayer_Snapshot"} {
 		writeFile(t, filepath.Join(live, provider, "verdict.json"), `{"verdict":"passed","run":{"provider":"`+provider+`","started_at":"2026-11-09T10:00:00Z",`+
 			`"scenario":"^`+scenario+`$","inputs":{"forge_ci_live_consumer":"/c/demos/hello-cargo-workspace/consumer","forge_ci_live_consumer_event":"snapshot"}}}`)
 	}

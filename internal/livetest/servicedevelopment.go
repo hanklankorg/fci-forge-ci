@@ -48,7 +48,8 @@ var (
 // selected source on the container runner, never on the controller or in the
 // source checkout. Images selects the snapshot event's scope, every image
 // the planner plans from the declaration, in place of the lifecycle's one
-// service; only the lifecycle checks readiness.
+// service; only the lifecycle checks readiness and reads Fixture. ReadinessURL
+// and Fixture are ignored for snapshot-only events.
 type ServiceDevelopmentConfig struct {
 	RecipeDirectory, Declaration, JobImage, Branch, ReadinessURL, Fixture string
 	Images                                                                bool
@@ -95,9 +96,12 @@ func serviceDevelopmentFixture(ctx context.Context, source Consumer, config Serv
 		return source, err
 	}
 
-	fixture, err := readServiceFixture(config.Fixture)
-	if err != nil {
-		return source, err
+	var fixture string
+	if !config.Images {
+		fixture, err = readServiceFixture(config.Fixture)
+		if err != nil {
+			return source, err
+		}
 	}
 
 	body, err := os.ReadFile(filepath.Join(config.RecipeDirectory, ".forgejo/workflows/release.yml"))
@@ -161,10 +165,15 @@ func ServiceSnapshotJobImageVariables(ctx context.Context, tb TB, consumer Consu
 }
 
 // validateInfrastructure checks the recipe directory, the job image and the
-// readiness endpoint before any Git work.
+// lifecycle's readiness endpoint before any Git work. A snapshot needs no
+// endpoint because it judges publication, not a runnable service.
 func (c ServiceDevelopmentConfig) validateInfrastructure() error {
 	if !filepath.IsAbs(c.RecipeDirectory) || !container.ValidDigestReference(c.JobImage) {
 		return errServiceRecipeOrImage
+	}
+
+	if c.Images {
+		return nil
 	}
 
 	endpoint, err := url.Parse(c.ReadinessURL)
