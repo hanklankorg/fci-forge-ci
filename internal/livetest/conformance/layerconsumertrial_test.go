@@ -7,7 +7,6 @@
 package conformance_test
 
 import (
-	"fmt"
 	"maps"
 	"os"
 	"path/filepath"
@@ -15,7 +14,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/diggsweden/forge-ci/internal/domain/errs"
 	"github.com/diggsweden/forge-ci/internal/domain/provider"
 	"github.com/diggsweden/forge-ci/internal/livetest"
 )
@@ -646,53 +644,17 @@ func requireSignedRelease(t *testing.T, target livetest.Target, repo string, key
 		t.Fatal("retain release inventory: ", err)
 	}
 
-	retained := map[string]bool{}
-	read := func(name string) []byte {
-		body := livetest.Download(t, target, assets[name], maxReleaseFile)
-		if err := evidence.Retain(name, body); err != nil {
-			t.Fatal("retain release payload: ", err)
-		}
-
-		retained[name] = true
-
-		return body
-	}
-
-	verified, err := livetest.VerifyReleaseBundles(slices.Collect(maps.Keys(assets)), func(subject, bundle string) error {
-		if assets[subject] == "" {
-			return fmt.Errorf("the release offers %s and not the file it signs: %w", bundle, errs.ErrValidation)
-		}
-
-		blob := read(subject)
-
-		return livetest.VerifyBlob(t, target, keys.cosignPublicPath, blob, read(bundle))
+	verified, err := livetest.VerifyReleaseReadback(evidence, names, func(name string) ([]byte, error) {
+		return livetest.Download(t, target, assets[name], maxReleaseFile), nil
+	}, func(blob, bundle []byte) error {
+		return livetest.VerifyBlob(t, target, keys.cosignPublicPath, blob, bundle)
 	})
 	if err != nil {
 		t.Error(err)
 	}
 
-	if evidence.Enabled() {
-		for _, name := range names {
-			if !retained[name] {
-				read(name)
-			}
-		}
-	}
-
 	if len(verified) == 0 {
 		t.Errorf("the release of %s offers no Cosign bundle that verifies, among %d files", tag, len(assets))
-	}
-
-	// A valid signature on checksums alone does not authenticate the bytes a
-	// consumer downloads. Check the published inventory, not local build output.
-	for name := range verified {
-		if name == "checksums.txt" || strings.HasSuffix(name, "_checksums.txt") {
-			if err := livetest.VerifyReleaseChecksums(read(name), names, func(subject string) ([]byte, error) {
-				return read(subject), nil
-			}); err != nil {
-				t.Error(err)
-			}
-		}
 	}
 
 	// The size is what one release adds to the owner's storage quota; the

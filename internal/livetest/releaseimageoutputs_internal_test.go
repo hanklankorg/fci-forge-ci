@@ -20,6 +20,7 @@ import (
 	"github.com/diggsweden/forge-ci/internal/domain/imageledger"
 	"github.com/diggsweden/forge-ci/internal/domain/output"
 	"github.com/diggsweden/forge-ci/internal/domain/pipeline"
+	"github.com/diggsweden/forge-ci/internal/domain/provenance"
 )
 
 func releaseOutputFixture(t *testing.T) (ReleaseImageOutputs, []imageledger.Entry) {
@@ -59,6 +60,7 @@ type releaseOutputEvidence struct {
 	expected                             ReleaseImageOutputs
 	errSignature, errSBOM, errProvenance error
 	requests                             []string
+	attestations                         []container.AttestationVerifyRequest
 }
 
 func (f *releaseOutputEvidence) VerifyImage(_ context.Context, in container.ImageVerifyRequest, _ io.Writer) error {
@@ -84,6 +86,11 @@ func (f *releaseOutputEvidence) VerifyImage(_ context.Context, in container.Imag
 }
 
 func (f *releaseOutputEvidence) VerifyAttestation(_ context.Context, in container.AttestationVerifyRequest, _ io.Writer) error {
+	f.attestations = append(f.attestations, in)
+	if len(f.requests) == 0 || in.ImageRef != f.requests[len(f.requests)-1] {
+		return errors.New("SBOM request changed the authenticated image digest")
+	}
+
 	if in.PredicateType != container.PredicateTypeCycloneDX || in.KeyRef != f.expected.PublicKey {
 		return errors.New("wrong SBOM request")
 	}
@@ -92,6 +99,11 @@ func (f *releaseOutputEvidence) VerifyAttestation(_ context.Context, in containe
 }
 
 func (f *releaseOutputEvidence) VerifyAttestationOutput(_ context.Context, in container.AttestationVerifyRequest, out, _ io.Writer) error {
+	f.attestations = append(f.attestations, in)
+	if len(f.requests) == 0 || in.ImageRef != f.requests[len(f.requests)-1] {
+		return errors.New("provenance request changed the authenticated image digest")
+	}
+
 	if in.PredicateType != container.PredicateTypeSLSAProvenance1 || in.KeyRef != f.expected.PublicKey {
 		return errors.New("wrong provenance request")
 	}
@@ -99,8 +111,11 @@ func (f *releaseOutputEvidence) VerifyAttestationOutput(_ context.Context, in co
 	statement := map[string]any{
 		"predicateType": "https://slsa.dev/provenance/v1",
 		"predicate": map[string]any{"buildDefinition": map[string]any{
-			"externalParameters":   map[string]any{"workflow": map[string]string{"ref": f.expected.Tag, "repository": f.expected.Source, "path": f.expected.Workflow}},
-			"resolvedDependencies": []any{map[string]any{"digest": map[string]string{"gitCommit": f.expected.Commit}}},
+			"externalParameters": map[string]any{"workflow": map[string]string{"ref": f.expected.Tag, "repository": f.expected.Source, "path": f.expected.Workflow}},
+			"resolvedDependencies": []any{map[string]any{
+				"uri":    provenance.SourceDependency(f.expected.Source, f.expected.Tag, f.expected.Commit).URI,
+				"digest": map[string]string{"gitCommit": f.expected.Commit},
+			}},
 		}},
 	}
 
@@ -174,13 +189,19 @@ func TestReleaseImageOutputsReadback(t *testing.T) {
 
 			err := VerifyReleaseImageOutputs(t.Context(), in, resolve, verifier, io.Discard)
 			if name == "matching" {
-				if err != nil || reads != 2 || len(verifier.requests) != 2 {
+				if err != nil || reads != 2 || len(verifier.requests) != 2 || len(verifier.attestations) != 4 {
 					t.Fatalf("readback incomplete: reads=%d evidence=%v err=%v", reads, verifier.requests, err)
 				}
 
 				for index, ref := range verifier.requests {
 					if ref != in.Repository+"@"+entries[index].Digest {
 						t.Fatalf("evidence did not use exact top-level receipt digest: %s", ref)
+					}
+				}
+
+				for index, request := range verifier.attestations {
+					if request.ImageRef != entries[index/2].Ref {
+						t.Fatalf("attestation did not use exact authenticated image digest: %+v", request)
 					}
 				}
 			} else if err == nil {

@@ -6,11 +6,55 @@ package livetest
 import (
 	"bytes"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"path"
+	"strings"
 
 	"github.com/diggsweden/forge-ci/internal/domain/provenance"
 )
+
+// VerifyReleaseReadback composes bundle authentication and published checksum
+// verification with the release evidence owner. Bounded provider reads and
+// native signature verification are supplied by the caller.
+func VerifyReleaseReadback(evidence *ReleaseEvidence, names []string, download func(string) ([]byte, error), verify func([]byte, []byte) error) (map[string]bool, error) {
+	read, err := evidence.CaptureReadback(download)
+	if err != nil {
+		return nil, err
+	}
+
+	authenticatedChecksums := map[string][]byte{}
+	verified, bundleErr := VerifyReleaseBundles(names, func(subject, bundle string) error {
+		body, err := read(subject)
+		if err != nil {
+			return err
+		}
+
+		signature, err := read(bundle)
+		if err != nil {
+			return err
+		}
+
+		if err := verify(body, signature); err != nil {
+			return err
+		}
+
+		if subject == "checksums.txt" || strings.HasSuffix(subject, "_checksums.txt") {
+			authenticatedChecksums[subject] = body
+		}
+
+		return nil
+	})
+	failures := []error{bundleErr}
+
+	// These are the very bytes handed to signature verification, not another
+	// read of even the same asset name or retained file after authentication.
+	for _, body := range authenticatedChecksums {
+		failures = append(failures, VerifyReleaseChecksums(body, names, read))
+	}
+
+	return verified, errors.Join(failures...)
+}
 
 // VerifyReleaseChecksums binds a verified checksum document to the actual
 // published payloads. Signature verification is caller-owned; this must only be

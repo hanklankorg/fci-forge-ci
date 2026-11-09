@@ -4,6 +4,7 @@
 package livetest
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -131,10 +132,32 @@ func (e *ReleaseEvidence) Enabled() bool { return e.root != "" }
 // CaptureReadback saves the bounded public inventory before independent
 // validation can fail. Verification reuses these exact bytes without another
 // provider fetch. A complete capture is observation evidence, not acceptance.
-// With retention disabled, preserve the caller's ordinary on-demand reader.
+// With retention disabled, capture on demand and reuse the first bytes, too:
+// authenticity cannot depend on whether observation evidence is retained.
 func (e *ReleaseEvidence) CaptureReadback(download func(string) ([]byte, error)) (func(string) ([]byte, error), error) {
 	if !e.Enabled() {
-		return download, nil
+		captured := map[string][]byte{}
+		remaining := e.remaining
+
+		return func(name string) ([]byte, error) {
+			if body, ok := captured[name]; ok {
+				return bytes.Clone(body), nil
+			}
+
+			body, err := download(name)
+			if err != nil {
+				return nil, err
+			}
+
+			if int64(len(body)) > 512<<20 || int64(len(body)) > remaining {
+				return nil, fmt.Errorf("release readback exceeds byte budget: %w", errReleaseEvidence)
+			}
+
+			captured[name] = bytes.Clone(body)
+			remaining -= int64(len(body))
+
+			return bytes.Clone(captured[name]), nil
+		}, nil
 	}
 
 	for _, asset := range e.receipt.Assets {

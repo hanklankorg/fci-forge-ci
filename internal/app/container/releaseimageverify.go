@@ -372,7 +372,7 @@ func releaseImageProvenanceStatementMatches(statement map[string]any, expected r
 		return false
 	}
 
-	if !releaseImageHasGitCommitDependency(build, expected.Commit) {
+	if !releaseImageHasSourceDependency(build, expected) {
 		return false
 	}
 
@@ -406,10 +406,13 @@ func releaseImageBaseMatches(params, build map[string]any, expected releaseImage
 	return releaseImageHasBaseDependency(build, expected.BaseRef, expected.BaseInputID)
 }
 
-func releaseImageHasGitCommitDependency(build map[string]any, commit string) bool {
+func releaseImageHasSourceDependency(build map[string]any, expected releaseImageProvenanceExpectation) bool {
+	// The producer exports the same ref in workflow.ref and SourceDependency.
+	// Do not accept an independently rewritten short/full ref or URL alias.
+	source := domainprovenance.SourceDependency(expected.Source, expected.Tag, expected.Commit)
 	for _, dep := range releaseImageDependencies(build) {
 		digest, ok := domainprovenance.NestedMap(dep, "digest")
-		if ok && domainprovenance.StatementString(digest, "gitCommit") == commit {
+		if ok && domainprovenance.StatementString(dep, "uri") == source.URI && domainprovenance.StatementString(digest, source.DigestType) == source.Digest {
 			return true
 		}
 	}

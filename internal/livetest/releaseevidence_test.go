@@ -232,6 +232,49 @@ func TestReleaseEvidenceCaptureReadback(t *testing.T) {
 	}
 }
 
+func TestReleaseEvidenceCaptureOnceWithoutRetention(t *testing.T) {
+	t.Setenv("FORGE_CI_LIVE_SNAPSHOT_EVIDENCE_DIR", "")
+	t.Setenv("FORGE_CI_LIVE_SNAPSHOT_EVIDENCE", "")
+
+	evidence, err := NewReleaseEvidence(Target{}, "repo", "v1", "request", []string{"a", "b"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	evidence.remaining = 2
+	shared := []byte("a")
+	calls := 0
+
+	read, err := evidence.CaptureReadback(func(name string) ([]byte, error) {
+		calls++
+
+		if name == "b" {
+			return []byte("bb"), nil
+		}
+
+		return shared, nil
+	})
+	if err != nil || calls != 0 {
+		t.Fatalf("disabled readback fetched eagerly: %v, calls=%d", err, calls)
+	}
+
+	first, err := read("a")
+	if err != nil || string(first) != "a" {
+		t.Fatalf("first captured read: %q, %v", first, err)
+	}
+
+	shared[0], first[0] = 'x', 'y'
+
+	second, err := read("a")
+	if err != nil || string(second) != "a" || calls != 1 {
+		t.Fatalf("captured bytes changed or were fetched again: %q, %v, calls=%d", second, err, calls)
+	}
+
+	if _, err := read("b"); !errors.Is(err, errReleaseEvidence) {
+		t.Fatalf("disabled capture ignored aggregate byte budget: %v", err)
+	}
+}
+
 func TestReleaseEvidenceRejectsNamesLimitsAndSecrets(t *testing.T) {
 	t.Setenv("FORGE_CI_LIVE_SNAPSHOT_EVIDENCE_DIR", t.TempDir())
 

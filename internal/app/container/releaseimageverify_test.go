@@ -17,6 +17,7 @@ import (
 	"github.com/diggsweden/forge-ci/internal/adapters/cosign"
 	appcontainer "github.com/diggsweden/forge-ci/internal/app/container"
 	"github.com/diggsweden/forge-ci/internal/domain/errs"
+	"github.com/diggsweden/forge-ci/internal/domain/provenance"
 )
 
 // Named so the propagation assertions below can use errors.Is rather than
@@ -400,7 +401,7 @@ func releaseImagePayloadWith(t *testing.T, fields releaseImageFields, mutate fun
 		},
 	}
 
-	deps := []any{map[string]any{"digest": map[string]any{"gitCommit": fields.commit}}}
+	deps := []any{map[string]any{"uri": provenance.SourceDependency(fields.source, fields.tag, fields.commit).URI, "digest": map[string]any{"gitCommit": fields.commit}}}
 	if fields.baseRef != "" {
 		external["base"] = map[string]any{"ref": fields.baseRef, "input_id": fields.baseInputID}
 		deps = append(deps, map[string]any{
@@ -434,6 +435,57 @@ func releaseImagePayloadWith(t *testing.T, fields releaseImageFields, mutate fun
 	}
 
 	return body
+}
+
+func TestVerifyExistingReleaseImage_SourceDependencyBinding(t *testing.T) {
+	t.Parallel()
+
+	for _, ref := range []string{"v1.2.3", "refs/tags/v1.2.3"} {
+		for _, defect := range []string{"", "missing URI", "foreign URI", "other ref", "ref alias", "unrelated matching commit"} {
+			t.Run(ref+"/"+defect, func(t *testing.T) {
+				t.Parallel()
+
+				input := releaseImageVerifyInput()
+				input.ExpectedTag = ref
+				input.ExpectedCommit = strings.Repeat("a", 40)
+				fields := releaseImageFields{tag: ref, commit: input.ExpectedCommit, source: input.ExpectedSource, workflow: input.ExpectedWorkflow}
+				payload := releaseImagePayloadWith(t, fields, func(s map[string]any) {
+					build := s["predicate"].(map[string]any)["buildDefinition"].(map[string]any)
+					deps := build["resolvedDependencies"].([]any)
+					dep := deps[0].(map[string]any)
+
+					switch defect {
+					case "missing URI":
+						delete(dep, "uri")
+					case "foreign URI":
+						dep["uri"] = "git+https://foreign.example/other/repo@" + ref
+					case "other ref":
+						dep["uri"] = provenance.SourceDependency(fields.source, "other", fields.commit).URI
+					case "ref alias":
+						alias := strings.TrimPrefix(ref, "refs/tags/")
+						if alias == ref {
+							alias = "refs/tags/" + ref
+						}
+
+						dep["uri"] = provenance.SourceDependency(fields.source, alias, fields.commit).URI
+					case "unrelated matching commit":
+						dep["digest"] = map[string]any{"gitCommit": "wrong-source-commit"}
+
+						build["resolvedDependencies"] = append(deps, map[string]any{"uri": "git+https://foreign.example/other/repo@" + ref, "digest": map[string]any{"gitCommit": fields.commit}})
+					}
+				})
+
+				result, err := appcontainer.VerifyExistingReleaseImage(t.Context(), &fakeReleaseImageVerifier{payload: payload}, nil, io.Discard, input)
+				if defect == "" {
+					if err != nil || result.Status != appcontainer.ReleaseImageStatusVerified {
+						t.Fatalf("legitimate producer binding refused: %v", err)
+					}
+				} else if !errors.Is(err, errs.ErrValidation) {
+					t.Fatalf("accepted source dependency substitution: %v", err)
+				}
+			})
+		}
+	}
 }
 
 // TestVerifyExistingReleaseImage_RedactsUnsafeVerifierOutput makes the
