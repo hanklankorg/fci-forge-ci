@@ -39,7 +39,8 @@ const lifecycleCampaignEnv = "CAMPAIGN_COMMIT=" + campaignHead + "\nJOB_IMAGE_JA
 	"\nJOB_IMAGE_JAVASCRIPT_TYPESCRIPT=" + lifecycleNodeJobImage + "\nJOB_IMAGE_GO=" + lifecycleGoJobImage +
 	"\nKANIKO_JOB_IMAGE=" + lifecycleKanikoJobImage + "\n" +
 	"FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_JAVA=/c/java.tar\nFORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_RUST=/c/rust.tar\nFORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_NODE=/c/node.tar\nFORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_GO=/c/go.tar\n" +
-	"FORGE_CI_LIVE_SIGNER_IMAGE_ARCHIVE=/c/signer.tar\nLINT_IMAGE_ARCHIVE_JAVA=/c/lint-java.tar\nLINT_IMAGE_ARCHIVE_RUST=/c/lint-rust.tar\nLINT_IMAGE_ARCHIVE_JAVASCRIPT_TYPESCRIPT=/c/lint-js.tar\n"
+	"FORGE_CI_LIVE_SIGNER_IMAGE_ARCHIVE=/c/signer.tar\nLINT_IMAGE_ARCHIVE_JAVA=/c/lint-java.tar\nLINT_IMAGE_ARCHIVE_RUST=/c/lint-rust.tar\nLINT_IMAGE_ARCHIVE_JAVASCRIPT_TYPESCRIPT=/c/lint-js.tar\n" +
+	"FORGE_CI_LIVE_BUILDAH_JOB_IMAGE_ARCHIVE=/c/buildah.tar\nFORGE_CI_LIVE_KANIKO_JOB_IMAGE_ARCHIVE=/c/kaniko.tar\n"
 
 // lifecycleDemos are the demos a lifecycle's admission reads in these tests,
 // laid out as the shipped demos are (writeLifecycleDemo): the Maven service,

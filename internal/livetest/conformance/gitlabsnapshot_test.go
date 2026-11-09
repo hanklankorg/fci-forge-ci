@@ -28,7 +28,7 @@ const gitlabSnapshotPolicyFile = "snapshot.yml"
 // not the effect of a change the harness makes.
 const gitlabRequestedMainRule = `$CI_PIPELINE_SOURCE == "api" && $CI_COMMIT_REF_NAME == "main"`
 
-// A service snapshot on GitLab: the lifecycle's development phase alone, in
+// A snapshot on GitLab: the lifecycle's development phase alone, in
 // one GitLab project under one pinned policy that includes the
 // snapshot-images component and nothing else, over every image the planner
 // plans from the consumer's declaration (docs/live-campaigns.md, Snapshot).
@@ -41,7 +41,7 @@ const gitlabRequestedMainRule = `$CI_PIPELINE_SOURCE == "api" && $CI_COMMIT_REF_
 // branches unmoved and nothing released. The component probes no readiness,
 // so none is claimed. The development registry credential is a protected
 // variable scoped to the publisher's environment, on a protected main.
-func TestGitLabLayer_ServiceSnapshot(t *testing.T) {
+func TestGitLabLayer_Snapshot(t *testing.T) {
 	livetest.RegisterLiveScenario(t)
 
 	root := os.Getenv(consumerCheckoutEnv)
@@ -55,12 +55,12 @@ func TestGitLabLayer_ServiceSnapshot(t *testing.T) {
 
 	for _, visibility := range livetest.ConsumerVisibilities(t) {
 		t.Run(visibility.Name, func(t *testing.T) {
-			runGitLabServiceSnapshot(t, root, visibility.Private)
+			runGitLabSnapshot(t, root, visibility.Private)
 		})
 	}
 }
 
-func runGitLabServiceSnapshot(t *testing.T, root string, private bool) {
+func runGitLabSnapshot(t *testing.T, root string, private bool) {
 	t.Helper()
 
 	if event := os.Getenv(consumerEventEnv); event != livetest.TrialSnapshot {
@@ -81,19 +81,19 @@ func runGitLabServiceSnapshot(t *testing.T, root string, private bool) {
 		livetest.NotCoveredf(t, "a GitLab snapshot requires the reviewed job image archive of job-archive=")
 	}
 
+	archiveEnv := livetest.GitLabSnapshotBuilderArchiveEnv(livetest.SelectedImageBuilder(t, provider.ForgeGitLab))
+
+	builderArchive := os.Getenv(archiveEnv)
+	if builderArchive == "" {
+		livetest.NotCoveredf(t, "GitLab snapshot images require %s, a saved builder job image", archiveEnv)
+	}
+
 	if !livetest.Requires(t, provider.ForgeGitLab, livetest.NeedsInRunner) {
 		livetest.NotCoveredf(t, "a snapshot needs a GitLab runner")
 	}
 
 	target := livetest.Accept(t, provider.ForgeGitLab)
 	builder := livetest.ChooseImageBuilder(t, target)
-
-	builderArchive := os.Getenv(livetest.KanikoJobImageArchiveEnv)
-	if builder.Builder == livetest.ImageBuilderBuildah {
-		if builderArchive = os.Getenv("FORGE_CI_LIVE_BUILDAH_JOB_IMAGE_ARCHIVE"); builderArchive == "" {
-			livetest.NotCoveredf(t, "Buildah snapshot images require FORGE_CI_LIVE_BUILDAH_JOB_IMAGE_ARCHIVE, a saved Buildah job image")
-		}
-	}
 
 	layer := livetest.PushLayer(t, target, gitlabReleaseRepo(t, target, "snapshot-engine", livetest.ReadLayerAnonymously))
 	consumer := livetest.OpenConsumer(t, target, root).WithDraftLayer(t, layer).WithSnapshotImagesDeclaration(t, source)
@@ -126,7 +126,7 @@ func runGitLabServiceSnapshot(t *testing.T, root string, private bool) {
 
 	policyRepo := gitlabReleaseRepo(t, target, "snapshot-policy", "")
 	policyProject := livetest.RepoSlug(target, policyRepo)
-	repo := livetest.NewBareScratchRepo(t, target, livetest.ServiceSnapshotScenario, consumer.ObjectFormat, private)
+	repo := livetest.NewBareScratchRepo(t, target, livetest.SnapshotScenario, consumer.ObjectFormat, private)
 	project := livetest.RepoSlug(target, repo)
 
 	client, err := gitlabapi.NewClient(target.Token, gitlabapi.WithBaseURL(target.BaseURL()+"/api/v4/"),

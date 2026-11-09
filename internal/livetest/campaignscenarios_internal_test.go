@@ -113,7 +113,7 @@ func TestCampaignScenarioInputsRefuseBeforeAnyCaseCanExecute(t *testing.T) {
 		t.Fatal("GitLab-only interruption accepted on another provider")
 	}
 
-	if _, err := campaignCaseArgs(filepath.Dir(dir), "gitlab", nil, []string{"scenario"}); !errors.Is(err, errs.ErrValidation) {
+	if _, err := campaignCaseArgs(filepath.Dir(dir), "gitlab", nil, []string{"scenario"}, ""); !errors.Is(err, errs.ErrValidation) {
 		t.Fatal("incomplete scenario accepted")
 	}
 }

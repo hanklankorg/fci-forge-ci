@@ -8,8 +8,9 @@
 # trial judges the frozen plan and every planned image's receipt, the plan
 # the snapshot planner makes of the declaration the demo's release builds
 # its images from, overlaid native linux/amd64 and unsigned; a case names no
-# image. A plan of several images has no one service, so no readiness is
-# probed. Nothing is released. A demo the snapshot cannot plan, or without
+# image. The snapshot event probes no readiness, even for one image: image
+# count does not declare a runnable service. Nothing is released. A demo the
+# snapshot cannot plan, or without
 # the Forgejo release workflow the harness's workflow is pinned by, is
 # refused before anything is created (docs/live-campaigns.md, Snapshot).
 # hello-monorepo ships no Forgejo workflows, so it has no line here.

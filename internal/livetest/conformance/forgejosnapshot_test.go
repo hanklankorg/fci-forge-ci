@@ -15,7 +15,7 @@ import (
 	"github.com/diggsweden/forge-ci/internal/livetest"
 )
 
-// A service snapshot on Forgejo: the lifecycle's development phase alone,
+// A snapshot on Forgejo: the lifecycle's development phase alone,
 // over every image the planner plans from the consumer's declaration
 // (docs/live-campaigns.md, Snapshot). The consumer's main and a change on
 // branch development are pushed with Actions off; the harness's service
@@ -26,7 +26,7 @@ import (
 // that run, its two branches unmoved and nothing released; a snapshot
 // probes no readiness. The consumer's own workflows are
 // pinned to the layer and never run.
-func TestForgejoLayer_ServiceSnapshot(t *testing.T) {
+func TestForgejoLayer_Snapshot(t *testing.T) {
 	livetest.RegisterLiveScenario(t)
 
 	root := os.Getenv(consumerCheckoutEnv)
@@ -40,12 +40,12 @@ func TestForgejoLayer_ServiceSnapshot(t *testing.T) {
 
 	for _, visibility := range livetest.ConsumerVisibilities(t) {
 		t.Run(visibility.Name, func(t *testing.T) {
-			runForgejoServiceSnapshot(t, root, visibility.Private)
+			runForgejoSnapshot(t, root, visibility.Private)
 		})
 	}
 }
 
-func runForgejoServiceSnapshot(t *testing.T, root string, private bool) {
+func runForgejoSnapshot(t *testing.T, root string, private bool) {
 	t.Helper()
 
 	settings, err := livetest.ParseTrialSettings(os.Getenv(consumerEventEnv), consumerSettingsWords())
@@ -71,7 +71,10 @@ func runForgejoServiceSnapshot(t *testing.T, root string, private bool) {
 		t.Fatal("the snapshot requires native linux/amd64")
 	}
 
-	containerLabel := livetest.ContainerRunnerLabel(t, target, "the snapshot builds on, and a service's readiness runs the published image with Podman on, the container runner")
+	containerLabel := livetest.RunnerLabel(t, target)
+	if builder == livetest.ImageBuilderBuildah {
+		containerLabel = livetest.ContainerRunnerLabel(t, target, "the snapshot builds images with Buildah")
+	}
 
 	declaration, err := livetest.ServiceSnapshotSource(root)
 	if err != nil {
@@ -80,10 +83,10 @@ func runForgejoServiceSnapshot(t *testing.T, root string, private bool) {
 
 	config := livetest.ServiceDevelopmentConfig{
 		RecipeDirectory: root, Declaration: declaration, JobImage: settings.Variables["CI_JOB_IMAGE"], Branch: lifecycleBranch,
-		ReadinessURL: os.Getenv("FORGE_CI_LIVE_SERVICE_READINESS_URL"), Fixture: os.Getenv("FORGE_CI_LIVE_SERVICE_FIXTURE"), Images: true,
+		Images: true,
 	}
 
-	const name = livetest.ServiceSnapshotScenario
+	const name = livetest.SnapshotScenario
 
 	facts := livetest.ConsumerFacts{Inputs: map[string]string{}, Secrets: map[string]string{}}
 	useLabRegistry(t, target, livetest.ScratchRepo(name), nil, &facts)

@@ -255,7 +255,7 @@ func evidenceKey(run LiveRunHeader) string {
 		"^TestGitLabLayer_ConsumerTrial$": TrialPullRequest, "^TestGitLabRelease_ConsumerTrial$": TrialRelease,
 		"^TestGitLabLayer_ConsumerLifecycle$": TrialLifecycle, "^TestForgejoLayer_ConsumerLifecycle$": TrialLifecycle,
 		// A snapshot is the development route alone, the matrices' snapshot flow.
-		"^TestGitLabLayer_ServiceSnapshot$": matrixDevelopment, "^TestForgejoLayer_ServiceSnapshot$": matrixDevelopment,
+		"^TestGitLabLayer_Snapshot$": matrixDevelopment, "^TestForgejoLayer_Snapshot$": matrixDevelopment,
 	}[run.Scenario]; known {
 		flow = scenario
 	}

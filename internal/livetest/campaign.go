@@ -199,7 +199,7 @@ func PlanCampaignLane(root, dir, provider, casesPath, head string, run CampaignR
 	caseFacts := make([]map[string]string, 0, len(file.cases))
 
 	for _, line := range file.cases {
-		args, caseErr := campaignCaseArgs(dir, provider, env, line.words)
+		args, caseErr := campaignCaseArgs(dir, provider, env, line.words, run.Settings["image-builder"])
 		if caseErr != nil {
 			return CampaignPlan{}, fmt.Errorf("%s:%d: %s: %w", casesPath, line.number, line.text, caseErr)
 		}
@@ -401,7 +401,7 @@ func campaignLaneEnvironment(provider string, env map[string]string, run Campaig
 }
 
 // campaignCaseArgs maps one case's words to the recipe that runs it.
-func campaignCaseArgs(dir, provider string, env map[string]string, words []string) ([]string, error) {
+func campaignCaseArgs(dir, provider string, env map[string]string, words []string, builder string) ([]string, error) {
 	switch words[0] {
 	case settingScenario:
 		return campaignScenarioRecipe(provider, env, words)
@@ -436,7 +436,7 @@ func campaignCaseArgs(dir, provider string, env map[string]string, words []strin
 		return nil, err
 	}
 
-	if err := campaignAdmitConsumer(filepath.Join(dir, "demos", words[1]), provider, words[2], words[3:], settings, env); err != nil {
+	if err := campaignAdmitConsumer(filepath.Join(dir, "demos", words[1]), provider, words[2], words[3:], settings, env, builder); err != nil {
 		return nil, err
 	}
 
@@ -453,7 +453,7 @@ func campaignEventList(events []string) string {
 // campaignAdmitConsumer refuses a consumer case the lane could not run: a
 // lifecycle or a snapshot of a demo without a development route, or a GitLab
 // consumer without what its gate, release, lifecycle or snapshot need.
-func campaignAdmitConsumer(checkout, provider, event string, words, settings []string, env map[string]string) error {
+func campaignAdmitConsumer(checkout, provider, event string, words, settings []string, env map[string]string, builder string) error {
 	switch event {
 	case TrialLifecycle:
 		if err := campaignAdmitLifecycle(provider, checkout); err != nil {
@@ -465,7 +465,7 @@ func campaignAdmitConsumer(checkout, provider, event string, words, settings []s
 		}
 
 		if provider == campaignGitLab {
-			return campaignAdmitGitLabSnapshot(checkout, settings, env)
+			return campaignAdmitGitLabSnapshot(checkout, settings, env, builder)
 		}
 
 		return nil
@@ -526,10 +526,19 @@ func campaignAdmitGitLabConsumer(checkout, event string, words, settings []strin
 // snapshot takes: no settings, since it runs neither the demo's gate nor a
 // release, and in campaign.env the runtime image archive of each toolchain
 // family the planner plans a producer of, GitLabJobImageArchiveEnv<FAMILY>,
-// which that producer builds in.
-func campaignAdmitGitLabSnapshot(checkout string, settings []string, env map[string]string) error {
+// which that producer builds in, and the selected builder's job image archive.
+func campaignAdmitGitLabSnapshot(checkout string, settings []string, env map[string]string, builder string) error {
 	if len(settings) != 0 {
 		return fmt.Errorf("a GitLab %s takes job-archive= alone: %w", TrialSnapshot, errs.ErrValidation)
+	}
+
+	selected, valid := imageBuilderValue(builder)
+	if !valid {
+		return fmt.Errorf("%s must be buildah or kaniko: %w", GitLabImageBuilderEnv, errs.ErrValidation)
+	}
+
+	if name := GitLabSnapshotBuilderArchiveEnv(selected); env[name] == "" {
+		return fmt.Errorf("the snapshot selects %s and campaign.env has no %s; prepare the campaign with this cases file: %w", selected, name, errs.ErrValidation)
 	}
 
 	families, err := campaignSnapshotFamilies(checkout)

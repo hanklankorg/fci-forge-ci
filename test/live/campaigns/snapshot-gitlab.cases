@@ -13,14 +13,17 @@
 # readiness. Nothing is released and the demo's gate does not run, so no
 # release build, signer or lint archive is asked for
 # (docs/live-campaigns.md, Snapshot). job-archive= is the component's job
-# image; each producer the plan names builds in the runtime image of its
+# image, not the builder's image, and is required even for a container-first
+# declaration. Each producer the plan names builds in the runtime image of its
 # toolchain, FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_<FAMILY>, which the campaign
 # prepares from the plan: none for the container-first Cargo workspace and
 # Go service, java and node for the monorepo's backend and frontend. The
 # builder is the lane's, FORGE_CI_LIVE_GITLAB_IMAGE_BUILDER: unset or
 # buildah, the Buildah job image on the contract's runner that permits user
-# namespaces; kaniko, the kaniko job image of
-# FORGE_CI_LIVE_KANIKO_JOB_IMAGE_ARCHIVE. The visibility is the run's:
+# namespaces (FORGE_CI_LIVE_BUILDAH_JOB_IMAGE_ARCHIVE); kaniko, the job image of
+# FORGE_CI_LIVE_KANIKO_JOB_IMAGE_ARCHIVE. Both builders require their archive
+# at admission, before any mutable resource is created. The visibility is the
+# run's:
 # FORGE_CI_LIVE_CONSUMER_VISIBILITY unset or both runs each line public and
 # private. Prepare with gitlab=<this file>. amd64 runners only for now. A
 # selector reruns one line:
