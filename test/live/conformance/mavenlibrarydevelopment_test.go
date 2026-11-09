@@ -17,6 +17,19 @@ import (
 )
 
 func TestForgejoMavenLibraryConsumer_Development(t *testing.T) {
+	mavenLibraryDevelopment(t, "maven-library-development", false)
+}
+
+// TestForgejoMavenReactorConsumer_Development is the same development
+// witness for an opted-in reactor: every module and the parent POM are
+// published, and the fresh consumer declares only the module no sibling
+// depends on, so its sibling and the parent POM resolve from the registry.
+func TestForgejoMavenReactorConsumer_Development(t *testing.T) {
+	mavenLibraryDevelopment(t, "maven-reactor-development", true)
+}
+
+func mavenLibraryDevelopment(t *testing.T, scratch string, reactor bool) {
+	t.Helper()
 	livetest.RegisterLiveScenario(t)
 
 	root := os.Getenv(consumerCheckoutEnv)
@@ -40,15 +53,23 @@ func TestForgejoMavenLibraryConsumer_Development(t *testing.T) {
 
 	source := livetest.OpenConsumer(t, target, root)
 	admitted := source.Commit
-	consumer, model := livetest.NewMavenLibraryDevelopmentFixture(t, source, livetest.MavenLibraryFixtureConfig{RecipeDirectory: recipe, JavaImage: os.Getenv("FORGE_CI_LIVE_MAVEN_LIBRARY_IMAGE"), Profile: os.Getenv("FORGE_CI_LIVE_MAVEN_LIBRARY_PROFILE")}, os.Getenv("FORGE_CI_LIVE_MAVEN_LIBRARY_ORACLE"))
-	layer, repo := newConsumerRepos(t, target, consumer, "maven-library-development", false)
+	consumer, model := livetest.NewMavenLibraryDevelopmentFixture(t, source, livetest.MavenLibraryFixtureConfig{RecipeDirectory: recipe, JavaImage: os.Getenv("FORGE_CI_LIVE_MAVEN_LIBRARY_IMAGE"), Profile: os.Getenv("FORGE_CI_LIVE_MAVEN_LIBRARY_PROFILE"), Reactor: reactor}, os.Getenv("FORGE_CI_LIVE_MAVEN_LIBRARY_ORACLE"))
+	layer, repo := newConsumerRepos(t, target, consumer, scratch, false)
 
-	name := livetest.MavenPackageName(target, model.Group, model.Artifact)
-	if slices.Contains(livetest.PublishedPackageVersions(t, target, repo, "maven", name), model.Version) {
-		t.Fatal("snapshot coordinate already exists in disposable owner; refusing collision")
+	// Refuse every coordinate before owning the cleanup of any of them, so a
+	// collision never deletes a snapshot this run did not publish.
+	for _, publication := range model.Publications() {
+		name := livetest.MavenPackageName(target, publication.Group, publication.Artifact)
+		if slices.Contains(livetest.PublishedPackageVersions(t, target, repo, "maven", name), publication.Version) {
+			t.Fatalf("snapshot coordinate %s already exists in disposable owner; refusing collision", name)
+		}
 	}
 
-	t.Cleanup(func() { livetest.DeletePublishedPackage(t, target, repo, "maven", name, model.Version) })
+	for _, publication := range model.Publications() {
+		name := livetest.MavenPackageName(target, publication.Group, publication.Artifact)
+
+		t.Cleanup(func() { livetest.DeletePublishedPackage(t, target, repo, "maven", name, publication.Version) })
+	}
 
 	plan, err := layer.PlanConsumer(consumer.Workflows(t), livetest.ConsumerFacts{Inputs: map[string]string{"forge-ci-repository": layer.Repository}})
 	if err != nil {
@@ -97,41 +118,55 @@ func TestForgejoMavenLibraryConsumer_Development(t *testing.T) {
 		t.Fatal("runner did not confirm fresh-registry oracle for exact dev SHA")
 	}
 
-	base := strings.ReplaceAll(model.Group, ".", "/") + "/" + model.Artifact + "/" + model.Version + "/"
+	for _, publication := range model.Publications() {
+		base := strings.ReplaceAll(publication.Group, ".", "/") + "/" + publication.Artifact + "/" + publication.Version + "/"
 
-	var metadata struct {
-		Versions []struct {
-			Extension  string `xml:"extension"`
-			Classifier string `xml:"classifier"`
-			Value      string `xml:"value"`
-		} `xml:"versioning>snapshotVersions>snapshotVersion"`
-	}
-	if err := xml.Unmarshal(livetest.MavenRegistryFile(t, target, repo, base+"maven-metadata.xml"), &metadata); err != nil {
-		t.Fatal(err)
-	}
+		var metadata struct {
+			Versions []struct {
+				Extension  string `xml:"extension"`
+				Classifier string `xml:"classifier"`
+				Value      string `xml:"value"`
+			} `xml:"versioning>snapshotVersions>snapshotVersion"`
+		}
+		if err := xml.Unmarshal(livetest.MavenRegistryFile(t, target, repo, base+"maven-metadata.xml"), &metadata); err != nil {
+			t.Fatal(err)
+		}
 
-	for _, want := range [][2]string{{"pom", ""}, {"jar", ""}, {"jar", "sources"}, {"jar", "javadoc"}} {
-		found := false
+		wants := [][2]string{{"pom", ""}, {"jar", ""}, {"jar", "sources"}, {"jar", "javadoc"}}
+		if publication.Packaging == "pom" {
+			// The parent publishes its POM and nothing else.
+			wants = wants[:1]
 
-		for _, entry := range metadata.Versions {
-			if entry.Extension == want[0] && entry.Classifier == want[1] && !strings.Contains(entry.Value, "SNAPSHOT") {
-				suffix := ""
-				if entry.Classifier != "" {
-					suffix = "-" + entry.Classifier
+			for _, entry := range metadata.Versions {
+				if entry.Extension != "pom" || entry.Classifier != "" {
+					t.Fatalf("parent %s published %s %q beside its POM", publication.Artifact, entry.Extension, entry.Classifier)
 				}
-
-				if len(livetest.MavenRegistryFile(t, target, repo, base+model.Artifact+"-"+entry.Value+suffix+"."+entry.Extension)) == 0 {
-					t.Fatal("empty timestamped snapshot")
-				}
-
-				found = true
 			}
 		}
 
-		if !found {
-			t.Fatalf("missing timestamped snapshot metadata for %v", want)
+		for _, want := range wants {
+			found := false
+
+			for _, entry := range metadata.Versions {
+				if entry.Extension == want[0] && entry.Classifier == want[1] && !strings.Contains(entry.Value, "SNAPSHOT") {
+					suffix := ""
+					if entry.Classifier != "" {
+						suffix = "-" + entry.Classifier
+					}
+
+					if len(livetest.MavenRegistryFile(t, target, repo, base+publication.Artifact+"-"+entry.Value+suffix+"."+entry.Extension)) == 0 {
+						t.Fatal("empty timestamped snapshot")
+					}
+
+					found = true
+				}
+			}
+
+			if !found {
+				t.Fatalf("missing timestamped snapshot metadata for %s %v", publication.Artifact, want)
+			}
 		}
 	}
 
-	t.Logf("admitted source %s; exact development source %s; engine %s; native build, scratch snapshot registry, fresh Maven classifiers and runner oracle passed", admitted, head, layer.Commit)
+	t.Logf("admitted source %s; exact development source %s; engine %s; native build, scratch snapshot registry of %d publication(s), fresh Maven classifiers and runner oracle passed", admitted, head, layer.Commit, len(model.Publications()))
 }

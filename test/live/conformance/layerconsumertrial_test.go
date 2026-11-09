@@ -7,8 +7,10 @@
 package conformance_test
 
 import (
+	"cmp"
 	"maps"
 	"os"
+	"path"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -327,15 +329,64 @@ func requestRelease(t *testing.T, scenario layerScenario, requester livetest.Req
 	requireRunSuccess(t, run)
 
 	released := requireReleaseGit(t, target, repo, keys, request, requestTag, finalTag)
+	requireReleaseCommitScope(t, target, repo, request, released, settings)
 	requireSignedRelease(t, target, repo, keys, finalTag, request)
 
 	if settings.ReleaseImagesConfig != "" {
-		requireLocalReleaseImageOutputs(t, target, repo, run.ID, released, keys, settings)
+		plan := requireLocalReleaseImageOutputs(t, target, repo, run.ID, released, keys, settings)
+		requireImagesCarryReleasedFiles(t, target, repo, run.ID, released, finalTag, plan)
 	}
 
 	requireExternalImages(t, external, keys, settings)
 
 	return run, released
+}
+
+// requireReleaseCommitScope reads from a mirror what the release commit
+// changed since its request and holds it to the release plan of the consumer's
+// own declaration: the changelog, which gains the released version, and the
+// version files of the projects the plan bumps.
+func requireReleaseCommitScope(t *testing.T, target livetest.Target, repo, request, released string, settings livetest.TrialSettings) {
+	t.Helper()
+
+	planned, err := livetest.ForgejoPlannedVersionBumps(os.Getenv(consumerCheckoutEnv), settings.Workflow)
+	if err != nil {
+		t.Fatalf("release commit scope: %v", err)
+	}
+
+	bumps := make([]releaseBump, 0, len(planned))
+	for _, item := range planned {
+		bumps = append(bumps, releaseBump{projectType: item.ProjectType, dir: path.Clean(cmp.Or(item.WorkingDirectory, "."))})
+	}
+
+	mirror := livetest.MirrorRepo(t, target, repo)
+
+	changed, err := mirror.Git(t, "diff-tree", "--no-commit-id", "--name-only", "-r", request, released)
+	if err != nil {
+		t.Fatalf("release commit scope: %v", err)
+	}
+
+	requested := func(file string) bool {
+		_, err := mirror.Git(t, "cat-file", "-e", request+":"+file)
+
+		return err == nil
+	}
+
+	for _, finding := range releaseCommitScopeFindings(strings.Fields(changed), bumps, requested) {
+		t.Error(finding)
+	}
+
+	// A first release may have no changelog to start from.
+	before, _ := mirror.Git(t, "show", request+":"+releaseChangelog)
+
+	after, err := mirror.Git(t, "show", released+":"+releaseChangelog)
+	if err != nil {
+		t.Fatalf("release commit scope: %v", err)
+	}
+
+	for _, finding := range releaseChangelogFindings(before, after, settings.Version) {
+		t.Error(finding)
+	}
 }
 
 // trialVariables adds the layer's and the caller's variables to the trial's

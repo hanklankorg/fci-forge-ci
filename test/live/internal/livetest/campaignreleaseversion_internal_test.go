@@ -15,7 +15,6 @@ import (
 
 	"github.com/diggsweden/forge-ci/internal/domain/sbom"
 	"github.com/diggsweden/forge-ci/internal/testutil/reporoot"
-	"gopkg.in/yaml.v3"
 )
 
 // A release case must not request a version its demo neither declares nor
@@ -136,30 +135,12 @@ func releaseCaseVersion(t *testing.T, provider, consumer string, words []string)
 func forgejoArtifactsConfig(t *testing.T, path, called string) string {
 	t.Helper()
 
-	body, err := os.ReadFile(path)
+	artifactsConfig, err := forgejoCalledArtifactsConfig(path, called)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	var workflow struct {
-		Jobs map[string]struct {
-			Uses string            `yaml:"uses"`
-			With map[string]string `yaml:"with"`
-		} `yaml:"jobs"`
-	}
-	if err := yaml.Unmarshal(body, &workflow); err != nil {
-		t.Fatalf("%s: %v", path, err)
-	}
-
-	for _, job := range workflow.Jobs {
-		if strings.Contains(job.Uses, "/.forgejo/workflows/"+called+"@") {
-			return job.With["artifacts-config"]
-		}
-	}
-
-	t.Fatalf("%s calls no %s", path, called)
-
-	return ""
+	return artifactsConfig
 }
 
 // declaredDemoVersion returns the version the demo's package.json, Cargo.toml

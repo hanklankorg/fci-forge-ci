@@ -154,6 +154,10 @@ type TrialSettings struct {
 	// ReleaseImagesConfig opts into local-registry output readback. The
 	// declaration is read from the verified prepared commit, not the host tree.
 	ReleaseImagesConfig string
+	// SnapshotDeclaration is the declaration a snapshot trial is taken from
+	// in place of ServiceSnapshotSource's: a variant of the consumer's own,
+	// for a policy its release declaration does not have.
+	SnapshotDeclaration string
 }
 
 var (
@@ -173,6 +177,7 @@ const (
 	settingImage               = "image"
 	settingInterrupt           = "interrupt-after"
 	settingReleaseImagesConfig = "release-images-config"
+	settingSnapshotDeclaration = "snapshot-declaration"
 
 	trialPullRequestWorkflow = "pullrequest.yml"
 	trialReleaseWorkflow     = "release.yml"
@@ -186,7 +191,8 @@ const (
 // A lifecycle's three workflows are fixed, so it takes no workflow=; it
 // requests one release, so it takes version= and image= but no next-version=
 // or interrupt-after=. A snapshot's one workflow is the harness's and it
-// releases nothing, so it takes none of these.
+// releases nothing, so it takes none of these; it alone takes
+// snapshot-declaration=, the declaration it is taken from.
 //
 // No word carries a secret. A caller can ask for the lab account's token, by
 // naming the repository secret that receives it, and for a token from one of
@@ -211,6 +217,7 @@ func ParseTrialSettings(event string, words []string) (TrialSettings, error) {
 			return TrialSettings{}, fmt.Errorf("setting %q is none of %s=<file>.yml (not lifecycle or snapshot), %s=<X.Y.Z> (release or lifecycle), %s=<X.Y.Z> (second release), %s=<SECRET_NAME>, "+
 				settingSecretFile+"=<SECRET_NAME>:<absolute file>, "+
 				settingReleaseImagesConfig+"=<relative declaration> (release only), "+
+				settingSnapshotDeclaration+"=<relative declaration> (snapshot only), "+
 				"%s=<registry>/<repository>[:<tag>] (release or lifecycle), %s=<job name> (release only) or <VARIABLE_NAME>=<value>, "+
 				"each name once, where a value starting with @ is %s or %s: %w",
 				word, settingWorkflow, settingVersion, settingNextVersion, settingToken, settingImage, settingInterrupt, trialLayerCommit, trialRequestCommit, errs.ErrValidation)
@@ -295,14 +302,8 @@ func (settings *TrialSettings) requestsRelease() bool {
 // set takes one setting and reports whether it is one.
 func (settings *TrialSettings) set(key, value string) bool {
 	switch key {
-	case settingReleaseImagesConfig:
-		if settings.Event != TrialRelease || settings.ReleaseImagesConfig != "" || !pathsafe.Relative(value) {
-			return false
-		}
-
-		settings.ReleaseImagesConfig = value
-
-		return true
+	case settingReleaseImagesConfig, settingSnapshotDeclaration:
+		return settings.setDeclaration(key, value)
 	case settingWorkflow:
 		settings.Workflow = value
 
@@ -320,6 +321,24 @@ func (settings *TrialSettings) set(key, value string) bool {
 	}
 
 	return settings.setVariable(key, value)
+}
+
+// setDeclaration takes a declaration's path inside the consumer, once, for
+// the one event that reads it: a release its images' declaration to read
+// back, a snapshot the declaration it is taken from.
+func (settings *TrialSettings) setDeclaration(key, value string) bool {
+	event, declaration := TrialRelease, &settings.ReleaseImagesConfig
+	if key == settingSnapshotDeclaration {
+		event, declaration = TrialSnapshot, &settings.SnapshotDeclaration
+	}
+
+	if settings.Event != event || *declaration != "" || !pathsafe.Relative(value) {
+		return false
+	}
+
+	*declaration = value
+
+	return true
 }
 
 // setFileSecret keeps path/name admission and credential-source exclusivity

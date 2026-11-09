@@ -30,6 +30,10 @@ type MavenLibraryFixtureConfig struct {
 	// JavaImage must be an operator-supplied Maven/JDK 21 image pinned by digest.
 	JavaImage string
 	Profile   string
+	// Reactor admits a pom aggregator of jar modules. Only the development
+	// fixture reads it; without it, and in the stable fixture always, an
+	// aggregator is refused as before.
+	Reactor bool
 }
 
 // NewMavenApplicationConsumerFixture binds the existing Maven app recipe to a
@@ -229,7 +233,7 @@ func mavenLibraryArtifact(ctx context.Context, source Consumer) (string, error) 
 		return "", err
 	}
 
-	if !regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]*$`).MatchString(model.Artifact) || (model.Packaging != "" && model.Packaging != "jar") || len(model.Modules) != 0 {
+	if !regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]*$`).MatchString(model.Artifact) || (model.Packaging != "" && model.Packaging != mavenPackagingJar) || len(model.Modules) != 0 {
 		return "", errSingleModuleJarLibrary
 	}
 

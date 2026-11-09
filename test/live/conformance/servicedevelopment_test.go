@@ -8,7 +8,9 @@ package conformance_test
 import (
 	"context"
 	"fmt"
+	"maps"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/diggsweden/forge-ci/internal/domain/snapshotimage"
@@ -23,8 +25,11 @@ const developmentWorkflow = "development.yml"
 // left: the frozen snapshot plan bound to the selected source head and
 // branch, the receipts of every planned amd64 image as the snapshot
 // workflow's collect job exports them, the registry's digest and tag of each
-// with no stable alias, and, for the lifecycle event alone, the readiness
-// evidence binding its published digest to that source. It returns the receipts, in plan order, and the
+// with no stable alias, each image's retained evidence with an SBOM exactly
+// where the declaration's policy plans one
+// (livetest.SnapshotEvidenceFindings), and, for the lifecycle event alone,
+// the readiness evidence binding its published digest to that source. It
+// returns the receipts, in plan order, and the
 // count of the producers the plan built, none for a container-first
 // service.
 func requireServiceDevelopment(t *testing.T, target livetest.Target, repo string, run livetest.WorkflowRun, consumer livetest.Consumer, config livetest.ServiceDevelopmentConfig, head, image string) ([]snapshotimage.Receipt, int) {
@@ -35,9 +40,12 @@ func requireServiceDevelopment(t *testing.T, target livetest.Target, repo string
 	}
 
 	artifacts := map[string]map[string][]byte{}
+	// The publish job's retained evidence of each image, by image name.
+	evidenced := map[string]map[string][]byte{}
 
 	for _, artifact := range livetest.RunArtifacts(t, target, repo, run.ID) {
-		if !slices.Contains([]string{"service-evidence-" + head, snapshotArtifact, snapshotArtifact + "-plan"}, artifact.Name) {
+		imageName, imageEvidence := strings.CutPrefix(artifact.Name, snapshotArtifact+"-evidence-")
+		if !imageEvidence && !slices.Contains([]string{"service-evidence-" + head, snapshotArtifact, snapshotArtifact + "-plan"}, artifact.Name) {
 			continue
 		}
 
@@ -52,11 +60,29 @@ func requireServiceDevelopment(t *testing.T, target livetest.Target, repo string
 			t.Fatal(err)
 		}
 
+		if imageEvidence {
+			evidenced[imageName] = tree
+
+			continue
+		}
+
 		artifacts[artifact.Name] = tree
 	}
 
 	receipts, expected := requireSnapshotImages(livetest.Context(t), t, target, repo, consumer, config.Branch, head, image,
 		artifacts[snapshotArtifact+"-plan"]["snapshot-plan.json"], artifacts[snapshotArtifact]["container-images.json"])
+
+	// The declaration's SBOM policy, as the expected plan carries it, decides
+	// which image retains an SBOM and which must not.
+	if findings := livetest.SnapshotEvidenceFindings(expected, receipts, evidenced); len(findings) != 0 {
+		t.Fatalf("the snapshot's retained evidence does not keep the declaration's SBOM policy:\n%s", strings.Join(findings, "\n"))
+	}
+
+	// What was held, for the run's log: a forbidden SBOM is judged absent
+	// above, not merely unlisted here.
+	for _, planned := range expected.Images {
+		t.Logf("snapshot evidence of image %s: the declaration plans its SBOM %t, and the run retained %v", planned.Name, planned.SBOM, slices.Sorted(maps.Keys(evidenced[planned.Name])))
+	}
 
 	evidence, probed := artifacts["service-evidence-"+head]
 	if probed == config.Images {

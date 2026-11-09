@@ -55,9 +55,11 @@ All notable changes to this acceptance fixture will be documented in this file.
 // transparency log waived as the layer's default requires; and the published
 // release's bundles verify against the same key.
 //
-// The request is signed here and nowhere else in the tier: the tag is made
-// with an SSH key and pushed with git, the consumer's allowed-signers file
-// names that key, and the fixture asks prepare-release.yml to verify it.
+// The request is signed, and this is the one scenario that releases a signed
+// request: the tag is made with an SSH key and pushed with git, the consumer's
+// allowed-signers file names that key, and the fixture asks
+// prepare-release.yml to verify it. The untrusted-request scenario is its
+// refusal: the same kind of request, and a file that does not cover it.
 //
 // Rootless Buildah needs user namespaces, which the contract's ordinary
 // runner may deny, so the image jobs run on the runner the contract names

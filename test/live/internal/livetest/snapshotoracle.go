@@ -6,7 +6,10 @@ package livetest
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"maps"
 	"reflect"
+	"slices"
 	"strings"
 
 	"github.com/google/go-containerregistry/pkg/authn"
@@ -14,6 +17,7 @@ import (
 	v1 "github.com/google/go-containerregistry/pkg/v1"
 	"github.com/google/go-containerregistry/pkg/v1/remote"
 
+	appcontainer "github.com/diggsweden/forge-ci/internal/app/container"
 	"github.com/diggsweden/forge-ci/internal/domain/snapshotimage"
 )
 
@@ -186,4 +190,110 @@ func (registry SnapshotRegistry) requireReceipt(ctx context.Context, tb TB, run 
 			tb.Fatalf("published image %s (%s) does not match the selected platform, source and branch", receipt.Name, platform)
 		}
 	}
+}
+
+// SnapshotEvidenceFindings judges the evidence a snapshot run retained, the
+// tree of each image's evidence artifact by image name, against the expected
+// plan and the receipts: what the plan's SBOM policy requires must be there,
+// and what it forbids must not. A planned image retains one artifact, whose
+// publication record (<image>-dist/<image>.json) names its receipt's tag,
+// digest and reference; that record is what binds the directory's documents
+// to the published image, the product writing no image identity of its own
+// into them. Each planned platform holds its Trivy report, scanned whatever
+// the policy, and sbom.cyclonedx.json exactly when the plan generates one, a
+// CycloneDX document as the product's own inventory step admits it. Any other
+// file is a finding, so an SBOM under another name or platform is not
+// overlooked, as is an artifact of an image the plan does not have. It
+// returns the findings, none for a run that kept its policy.
+func SnapshotEvidenceFindings(plan snapshotimage.Plan, receipts []snapshotimage.Receipt, evidence map[string]map[string][]byte) []string {
+	var findings []string
+
+	planned := map[string]bool{}
+
+	for _, image := range plan.Images {
+		planned[image.Name] = true
+
+		tree, retained := evidence[image.Name]
+		if !retained {
+			findings = append(findings, fmt.Sprintf("image %s retained no evidence artifact", image.Name))
+
+			continue
+		}
+
+		record := image.Name + "-dist/" + image.Name + ".json"
+		admitted := map[string]bool{record: true}
+
+		var published appcontainer.SignerImageMetadata
+
+		receipt := slices.IndexFunc(receipts, func(receipt snapshotimage.Receipt) bool { return receipt.Name == image.Name })
+		if err := json.Unmarshal(tree[record], &published); err != nil || receipt < 0 ||
+			published != (appcontainer.SignerImageMetadata{Tag: receipts[receipt].Tag, Digest: receipts[receipt].Digest, Ref: receipts[receipt].Ref}) {
+			findings = append(findings, fmt.Sprintf("the evidence of image %s is not bound to its receipt: %s records %+v", image.Name, record, published))
+		}
+
+		for _, platform := range image.Platforms {
+			directory := image.Name + "/" + strings.ReplaceAll(platform, "/", "-") + "/"
+
+			// A clean scan derives no SARIF or GitLab report.
+			for _, document := range []string{"trivy.json", "trivy.sarif", "gitlab.json", "sbom.cyclonedx.json"} {
+				admitted[directory+document] = true
+			}
+
+			for _, finding := range snapshotPlatformEvidenceFindings(image.SBOM, tree, directory) {
+				findings = append(findings, fmt.Sprintf("image %s (%s) %s", image.Name, platform, finding))
+			}
+		}
+
+		for _, path := range slices.Sorted(maps.Keys(tree)) {
+			if !admitted[path] {
+				findings = append(findings, fmt.Sprintf("image %s retained unplanned evidence %s", image.Name, path))
+			}
+		}
+	}
+
+	for _, name := range slices.Sorted(maps.Keys(evidence)) {
+		if !planned[name] {
+			findings = append(findings, "evidence artifact of unplanned image "+name)
+		}
+	}
+
+	return findings
+}
+
+// snapshotPlatformEvidenceFindings judges one platform's directory of an
+// image's evidence: its Trivy report, and its SBOM as the plan has it.
+func snapshotPlatformEvidenceFindings(sbom bool, tree map[string][]byte, directory string) []string {
+	var findings []string
+
+	var scan struct {
+		SchemaVersion int `json:"SchemaVersion"`
+	}
+	if err := json.Unmarshal(tree[directory+"trivy.json"], &scan); err != nil || scan.SchemaVersion < 1 {
+		findings = append(findings, "retained no Trivy report")
+	}
+
+	body, generated := tree[directory+"sbom.cyclonedx.json"]
+	if !sbom || !generated {
+		if sbom {
+			findings = append(findings, "retained no SBOM, which its plan requires")
+		}
+
+		if generated {
+			findings = append(findings, "retained an SBOM its plan forbids")
+		}
+
+		return findings
+	}
+
+	// What the product's own inventory step admits before it installs one.
+	var document struct {
+		Format      string `json:"bomFormat"`
+		SpecVersion string `json:"specVersion"`
+		Version     int    `json:"version"`
+	}
+	if err := json.Unmarshal(body, &document); err != nil || document.Format != "CycloneDX" || document.SpecVersion == "" || document.Version < 1 {
+		findings = append(findings, "retained an SBOM that is not a CycloneDX document")
+	}
+
+	return findings
 }

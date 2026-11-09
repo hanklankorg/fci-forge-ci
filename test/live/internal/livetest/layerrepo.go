@@ -9,6 +9,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/url"
 	"slices"
@@ -309,6 +310,17 @@ func OwnerPackages(tb TB, target Target) []OwnerPackage {
 	ctx, cancel := context.WithTimeout(Context(tb), timeoutAPI)
 	defer cancel()
 
+	packages, err := ownerPackages(ctx, target)
+	if err != nil {
+		tb.Fatalf("livetest: %v", err)
+	}
+
+	return packages
+}
+
+// ownerPackages is OwnerPackages under the caller's context, for a cleanup
+// that outlives the test's.
+func ownerPackages(ctx context.Context, target Target) ([]OwnerPackage, error) {
 	var packages []OwnerPackage
 
 	for page := 1; ; page++ {
@@ -325,7 +337,7 @@ func OwnerPackages(tb TB, target Target) []OwnerPackage {
 		endpoint := target.BaseURL() + "/api/v1/packages/" + url.PathEscape(target.Owner) +
 			"?limit=" + strconv.Itoa(listLimit) + "&page=" + strconv.Itoa(page)
 		if _, err := decode(ctx, target, http.MethodGet, endpoint, nil, &rows, http.StatusOK); err != nil {
-			tb.Fatalf("livetest: list the packages of %s: %v", target.Owner, err)
+			return nil, fmt.Errorf("list the packages of %s: %w", target.Owner, err)
 		}
 
 		for _, row := range rows {
@@ -344,5 +356,5 @@ func OwnerPackages(tb TB, target Target) []OwnerPackage {
 
 	slices.SortFunc(packages, func(a, b OwnerPackage) int { return cmp.Compare(a.ID, b.ID) })
 
-	return packages
+	return packages, nil
 }

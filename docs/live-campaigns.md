@@ -563,6 +563,19 @@ the layer, so a demo without one has no Forgejo route: `hello-monorepo`,
 whose example ships no Forgejo workflows, is refused on Forgejo, and adding
 them is the example's work.
 
+A Forgejo snapshot also takes `snapshot-declaration=<repository-relative
+declaration>`, a variant of the consumer's own declaration staged in place of
+`ServiceSnapshotSource`'s, for a policy the release declaration does not have.
+`hello-maven-service` ships one, `.forge-ci/artifacts-build-sbom.yml`: the
+artifact-first producer keeps its Build SBOM and the image gets none, so the
+run's retained evidence must hold the image's scan and no
+`sbom.cyclonedx.json` (`livetest.SnapshotEvidenceFindings`). No cases file has
+a line for it; run it standalone from an exported checkout:
+
+```bash
+just test-live-consumer forgejo <exported hello-maven-service> snapshot CI_JOB_IMAGE=<nanolinter java image, digest reference> CI_IMAGE_BUILDER=buildah snapshot-declaration=.forge-ci/artifacts-build-sbom.yml
+```
+
 On GitLab (`TestGitLabLayer_Snapshot`) one pinned policy includes the
 `snapshot-images` component alone, admitted only for the pipeline the
 harness requests on `main` through the API; the pushes of `main` and
@@ -645,6 +658,18 @@ an independently authenticated pre-signing build digest. The internal ledger
 alone cannot prove that last property. Releases without this explicit readback
 setting retain their existing, narrower oracle; workflow success must not be
 reported as independent image verification.
+
+The same readback compares an image with the release file it was built from,
+where there is one. For each planned linux/amd64 build it reads the planned
+Containerfile from the prepared commit; a `COPY` from the build context's
+`dist/`, without `--from`, names a release file and its path in the image.
+The release must serve that file, an artifact of the run must hold the same
+bytes at the copied path, and the published image's file must have them too.
+A hand-off `COPY` that names no one file and absolute path is a failure. An
+image whose Containerfile builds for itself copies none and is not compared,
+which the log states; other architectures are not read.
+`test/live/campaigns/release-variants-forgejo.cases` runs it for the Go
+service; no shipped Cargo demo builds its image from a released file.
 
 ### Explicit-input GitLab regressions
 

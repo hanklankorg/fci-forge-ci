@@ -106,6 +106,46 @@ This exercises local GitLab/Forgejo registry transport and lifecycle attachment,
 not GitHub Packages, a separate consumer's reproducibility, fresh-cache Maven
 resolution, or private anonymous denial. Those require their own acceptance.
 
+`TestInRunner_ForgePackages_GradleLibraryReachesAFreshConsumer` is the Gradle
+producer the exported-publication scenario does not have, on Forgejo only. A
+[two-build fixture](../test/live/fixtures/libraries/gradle-jvm/README.md) is
+exported with `build gradle export-publications` through its own wrapper and
+uploaded with `publish forge-packages deploy --project-type gradle`. In the
+same job a second Gradle build, with no token and an empty dependency cache,
+resolves the coordinate from the registry, runs the library's code and compares
+the JAR and module metadata it resolved with the exported files. The host then
+compares the registry's POM, module metadata, JAR and sources JAR with a
+checksum receipt frozen before the upload, and requires the module metadata to
+offer that JAR by size and SHA-256. The wrapper downloads its pinned Gradle
+distribution from the internet inside the job. Android libraries are not
+covered. Run it with:
+
+```sh
+just test-live '^TestInRunner_ForgePackages_GradleLibraryReachesAFreshConsumer$'
+```
+
+### Go module downstream evidence
+
+A Go library is published by its release tag; the product has no Go package
+publisher. `TestForgejoLayer_GoModuleReleaseReachesAFreshConsumer` runs the
+minimal signed binary release in a repository of its own, with a `go.mod` that
+declares the repository's own path and a package to import, and holds it to the
+same assertions as `TestForgejoLayer_MinimalBinaryRelease`. A second repository
+then runs a downstream module's job with `GOPROXY=direct`, no checksum database,
+no credential and an empty module cache. The job requires Go to resolve the
+final tag at the release commit, which the host has found the signed tag
+pointing at, and to run the library's code. It needs the signer image, like the
+release it reuses:
+
+```sh
+export FORGE_CI_LIVE_SIGNER_IMAGE="$(just test-live-image signer /path/to/forge-lab)"
+just test-live '^TestForgejoLayer_GoModuleReleaseReachesAFreshConsumer$'
+```
+
+The scenario is public and SHA-1 only, and skips on a forge reached on a port:
+a Go module path cannot name one. It says nothing about a private module, which
+needs the consumer's own Git credentials, or about a module proxy.
+
 ### Isolated npm/Cargo release-version evidence
 
 The existing key-free bump-job/text-and-digest handoff also supports `npm` and
@@ -777,11 +817,15 @@ forge's registry, recorded in the image ledger, signed by
 verifies. The host verifies both images with `cosign verify` against the
 scenario's own key.
 
-Its release request is the one signed request of the tier: an annotated tag
-signed with a throwaway SSH key and pushed with git, a
+Its release request is the one signed request of the tier that is released:
+an annotated tag signed with a throwaway SSH key and pushed with git, a
 `.forgejo/release-allowed-signers` in the consumer that names the key, and
 `verify-release-request-signature: 'true'` in the fixture. The minimal
 release keeps the default, an unsigned tag created through the forge's API.
+`TestForgejoLayer_PrepareReleaseRefusesAnUntrustedRequest` signs its request
+the same way and commits a file that names another key, or no file: the run
+must fail in the job that signs, before the bot's key is loaded, and leave no
+release commit, final tag or release.
 
 Rootless Buildah needs user namespaces, which the runner under the
 contract's `runner.label` may deny. The scenarios that build an image with it,
@@ -2085,7 +2129,7 @@ The full matrix covers GitLab and Forgejo on both supported roads:
 | `RUN-1..5` | Forgejo resolves as Forgejo and not GitHub on a real runner; runtime self-report; annotation dialect; step summaries; output-file writes |
 | `CHK-1` | `platform checkout` |
 | `UX-1..4` | printed links resolve; `--dry-run` mutates nothing while the same verb does mutate when real; identical `--json` shape; identical exit code per failure class |
-| `LAYER-1..5` | the Forgejo delivery layer on a real runner, Forgejo only: an artifact handed between two jobs that set the layer's binary up from a pinned commit; `prepare-release.yml` stopping on a missing secret before it fetches or pushes anything; a consumer pull request built, tested and passed through `check-l3-isolation` with nothing published; a release request taken to a signed, published release whose commit, tag, checksums, provenance and Cosign bundles are verified from the host; an image built in a job, pushed, recorded in the ledger and signed, and the same image signed and verified as a base, both verified from the host with `cosign verify` |
+| `LAYER-1..6` | the Forgejo delivery layer on a real runner, Forgejo only: an artifact handed between two jobs that set the layer's binary up from a pinned commit; `prepare-release.yml` stopping on a missing secret before it fetches or pushes anything; a consumer pull request built, tested and passed through `check-l3-isolation` with nothing published; a release request taken to a signed, published release whose commit, tag, checksums, provenance and Cosign bundles are verified from the host; an image built in a job, pushed, recorded in the ledger and signed, and the same image signed and verified as a base, both verified from the host with `cosign verify`; a signed release request whose signer the consumer's allowed-signers file does not cover, refused before the bot's key is loaded with nothing committed, tagged or released |
 
 For release acceptance, retain the exact source/binary identities, target
 generation, selected scenarios, result and cleanup outcome. Evidence from one

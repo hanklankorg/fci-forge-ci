@@ -45,9 +45,42 @@ or a new stable release. The supplied MAC0 oracle tests the real public API's
 correct-key round trip and wrong-key rejection. Other libraries supply their own
 regular Java oracle file; generic fixture code carries no library identity.
 
+## Reactor (native acceptance OPEN)
+
+`TestForgejoMavenReactorConsumer_Development` runs the same three jobs for a
+reactor. It is a separate selector: the single-library selector above still
+refuses an aggregator. The fixture and its inputs are described in the
+[reactor fixture](../../fixtures/development/maven-reactor/README.md).
+
+The reactor must be a SNAPSHOT `pom` aggregator whose direct modules are
+literal JAR modules naming it as parent at its version. Exactly one module
+has no dependent sibling and depends on a sibling itself; that module is the
+coordinate the fresh consumer declares. Any other shape is refused before the
+private index changes.
+
+1. The build job hands over each module's original POM, and each JAR module's
+   main, sources and Javadoc JARs, as `<module>/pom.xml` and
+   `<module>/target/`.
+2. One `publish forge-packages deploy --project-type maven --from-build
+   --snapshot` publishes every module from that handoff: the parent as a POM
+   only, each JAR module with its three JARs.
+3. The fresh consumer declares only the consumed module, so its sibling and
+   the parent POM resolve from the registry. Every publication is then read
+   back by coordinate and compared with the producer's bytes, and the oracle
+   runs the application against the resolved library.
+
+The controller refuses a pre-existing snapshot of any module, deletes every
+module's snapshot afterwards, and requires timestamped metadata and nonempty
+registry files for each: POM, main, sources and Javadoc for a JAR module, and
+for the parent a POM and no other entry.
+
+No native run of this selector exists. Its offline tests cover the POM
+contract, the rendered workflow and the handoff layout the publisher reads;
+they execute no Maven.
+
 ## Native checkpoint — 2026-10-30
 
-Public Forgejo run **315** passed for original `cose-lib` source
+Public Forgejo run **315** passed for an external Maven library's original source
 `25a3e92ceec72b869e2d04e4cbdebd9660ad8b7a`, with exact development source
 `dd54777419f58c059595045ef070b830ea1228d6`. Native build, snapshot publication,
 fresh Maven classifier resolution, original four-file byte identity and the

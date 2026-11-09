@@ -12,8 +12,11 @@
 - `fixtures/consumers`: consumer recipe projects.
 - `fixtures/adapters/generic-cli`: actual-source adapters and their offline tests.
 - `fixtures/oracles/maven-library`: downstream Java publication oracle.
+- `fixtures/oracles/maven-reactor`: downstream oracle of the reactor fixture.
 - `fixtures/services`: disposable service setup, installed-package oracle and inputs.
 - `fixtures/development/rust-development`: four-role development receipt fixture.
+- `fixtures/development/maven-reactor`: parent POM, library and application reactor.
+- `fixtures/libraries/gradle-jvm`: Gradle library producer and its fresh downstream consumer build.
 - `campaigns`: campaign declarations and the hand-maintained evidence overlay.
 
 Ordinary `go test ./...` runs untagged support and fixture tests; the `live` tag

@@ -76,9 +76,13 @@ func runForgejoSnapshot(t *testing.T, root string, private bool) {
 		containerLabel = livetest.ContainerRunnerLabel(t, target, "the snapshot builds images with Buildah")
 	}
 
-	declaration, err := livetest.ServiceSnapshotSource(root)
-	if err != nil {
-		t.Fatal(err)
+	// The declaration the consumer's release builds its images from, unless
+	// the trial names a variant of it (snapshot-declaration=).
+	declaration := settings.SnapshotDeclaration
+	if declaration == "" {
+		if declaration, err = livetest.ServiceSnapshotSource(root); err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	config := livetest.ServiceDevelopmentConfig{

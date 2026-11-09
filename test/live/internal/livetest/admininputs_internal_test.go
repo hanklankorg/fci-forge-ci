@@ -5,7 +5,10 @@ package livetest
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -156,6 +159,79 @@ func TestForgejoAdminWrapperBindsOnlyInputsDeclaredByItsPinnedEngine(t *testing.
 
 	if strings.Contains(text, "enforce-") {
 		t.Fatal("rendering changed the source wrapper")
+	}
+}
+
+// The minimal release owner reads enforce-application-tests from the same
+// run inputs its fixture is rendered with. The build-go step is the one call
+// of that fixture that declares the input, so it alone receives the literal:
+// neither release workflow takes a test setting, and the publisher is held
+// back by the build's result, not by a setting of its own.
+func TestMinimalReleaseFixtureBindsApplicationTestsOnItsBuildAlone(t *testing.T) {
+	t.Parallel()
+
+	root := reporoot.Path(t)
+	commit := mustLayerGit(t, githubStageGit(), root, "rev-parse", "HEAD")
+
+	fixture, err := os.ReadFile(filepath.Join(root, "test/live/conformance/testdata/layer/minimal-binary-release.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, enforced := range []bool{false, true} {
+		admin, err := newWorkflowAdmin(t.Context(), root, commit, func(key string) string {
+			if key == adminInputEnvironment(enforcement.ApplicationTests) {
+				return strconv.FormatBool(enforced)
+			}
+
+			return ""
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		layer := sampleLayer()
+		layer.admin, layer.Commit = admin, commit
+
+		rendered, err := layer.Render(string(fixture), layerFixtureFacts()...)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		var document yaml.Node
+		if err := yaml.Unmarshal([]byte(rendered), &document); err != nil {
+			t.Fatal(err)
+		}
+
+		jobs := gitlabMappingValue(document.Content[0], "jobs")
+		setting := enforcement.Setting(enforcement.ApplicationTests)
+
+		for _, call := range []string{"prepare", "sign-and-publish"} {
+			if gitlabMappingValue(gitlabMappingValue(gitlabMappingValue(jobs, call), "with"), setting) != nil {
+				t.Fatalf("%s received %s, which its workflow does not declare", call, setting)
+			}
+		}
+
+		bound := 0
+
+		for _, step := range gitlabMappingValue(gitlabMappingValue(jobs, "build"), "steps").Content {
+			inputs := gitlabMappingValue(step, "with")
+			if gitlabMappingValue(inputs, setting) == nil {
+				continue
+			}
+
+			if use := gitlabMappingValue(step, "uses"); use == nil || use.Value != layer.actionBase()+".forgejo/actions/build-go@"+commit {
+				t.Fatalf("%s reached a step that is not the layer's Go build: %+v", setting, use)
+			}
+
+			assertAdminBooleans(t, inputs, map[string]bool{setting: enforced})
+
+			bound++
+		}
+
+		if bound != 1 {
+			t.Fatalf("%s=%t reached %d build steps, want the one Go build", setting, enforced, bound)
+		}
 	}
 }
 

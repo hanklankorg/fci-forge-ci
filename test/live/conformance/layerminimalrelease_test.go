@@ -12,7 +12,6 @@ import (
 	"compress/gzip"
 	"crypto/rand"
 	"crypto/sha256"
-	_ "embed"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -30,9 +29,6 @@ import (
 	"github.com/diggsweden/forge-ci/internal/domain/provider"
 	"github.com/diggsweden/forge-ci/test/live/internal/livetest"
 )
-
-//go:embed testdata/layer/minimal-binary-release.yml
-var layerMinimalReleaseFixture string
 
 // The consumer that is released: one command, and a changelog with an entry
 // to release.
@@ -71,6 +67,16 @@ All notable changes to this acceptance fixture will be documented in this file.
 	releaseNotes      = "release-notes.md"
 	bundleSuffix      = ".bundle"
 
+	releaseBuildJob = "Build minimal binary release"
+
+	// layerDeclarationFile is where the release reads a consumer's
+	// declaration from by default.
+	layerDeclarationFile = ".forge-ci/artifacts.yml"
+
+	// releaseCanaryTest is where an adverse case puts the pull-request
+	// owner's test source: beside the command, in the package the build tests.
+	releaseCanaryTest = "cmd/layer-release-canary/main_test.go"
+
 	maxReleaseFile = 64 << 20
 )
 
@@ -105,24 +111,62 @@ func releaseAssets() []string {
 // key, with the transparency log waived as the layer's default requires; the
 // archive holds the binary; no job log holds a key or a passphrase; and the
 // owner's packages are as they were.
+//
+// The two adverse cases add only a Go test beside the command, the sources the
+// pull-request owner uses. The fixture's build is the layer's build-go, which
+// runs the tests and takes enforce-application-tests from Layer.Render. A real
+// assertion failure under report-only policy must leave the whole release as
+// the clean case has it. Under enforcing policy, and for a compiler error
+// under either, the build fails and no signer or publisher job runs: the
+// repository gains no release, the run no dist hand-off, and the account no
+// package. prepare-release.yml has ended by then, so the release commit and
+// the signed final tag exist in every case; what a blocked build withholds is
+// everything a reader of the release could download.
+//
+// The meta case is the clean one with a declaration of one meta project,
+// .forge-ci/artifacts.yml: a release the engine builds, bumps and scans
+// nothing for. The release is the clean case's in every file and job, which
+// shows the engine added none of its own; the release commit changes the
+// changelog alone; and the release commit job's log shows the bump read the
+// meta project, so the declaration was planned from and not passed over.
 func TestForgejoLayer_MinimalBinaryRelease(t *testing.T) {
 	livetest.RegisterLiveScenario(t)
 
 	for _, visibility := range livetest.ConsumerVisibilities(t) {
 		t.Run(visibility.Name, func(t *testing.T) {
 			format := pairedObjectFormat(visibility)
-			t.Run(format, func(t *testing.T) { runLayerMinimalRelease(t, visibility.Private, format) })
+			t.Run(format, func(t *testing.T) {
+				t.Run("clean", func(t *testing.T) { runLayerMinimalRelease(t, visibility.Private, format, "", "") })
+				t.Run("meta", func(t *testing.T) { runLayerMinimalRelease(t, visibility.Private, format, "", layerMetaDeclaration) })
+
+				for _, adverse := range consumerPRAdverseTests {
+					t.Run(adverse.name, func(t *testing.T) { runLayerMinimalRelease(t, visibility.Private, format, adverse.source, "") })
+				}
+			})
 		})
 	}
 }
 
-func runLayerMinimalRelease(t *testing.T, private bool, objectFormat string) {
+func runLayerMinimalRelease(t *testing.T, private bool, objectFormat, adverseTest, declaration string) {
 	t.Helper()
 
-	const (
-		workflow = "layer-minimal-release"
-		name     = "layer-minimal-release"
-	)
+	var shape func(files map[string]string)
+	if declaration != "" {
+		shape = func(files map[string]string) { files[layerDeclarationFile] = declaration }
+	}
+
+	runLayerRelease(t, "layer-minimal-release", private, objectFormat, adverseTest, shape)
+}
+
+// runLayerRelease is the minimal release in the scratch repository name
+// names. shape, when set, changes the canary's files before they are
+// committed, for an owner that releases the same canary in another form; the
+// release is held to the same assertions either way. It returns the release
+// commit, which the signed final tag points at.
+func runLayerRelease(t *testing.T, name string, private bool, objectFormat, adverseTest string, shape func(files map[string]string)) string {
+	t.Helper()
+
+	const workflow = "layer-minimal-release"
 
 	signer, ok := livetest.SignerImage(t)
 	if !ok {
@@ -136,6 +180,8 @@ func runLayerMinimalRelease(t *testing.T, private bool, objectFormat string) {
 
 	scenario := newLayerScenario(t, name, private, objectFormat)
 	target, repo := scenario.target, scenario.repo
+	enforced := livetest.AdminInputs(t, nil)["enforce-application-tests"].(bool)
+	blocked := adverseTest != "" && (enforced || adverseTest == consumerPRCompileError)
 
 	keys := newReleaseKeys(t)
 	livetest.AddDeployKey(t, target, repo, "livetest release bot", keys.sshPublic)
@@ -159,18 +205,29 @@ func runLayerMinimalRelease(t *testing.T, private bool, objectFormat string) {
 		"RENDER_RELEASE_GIT_HOST_KEY_FINGERPRINT", fingerprint,
 	)
 
+	files := map[string]string{
+		"go.mod":                                  "module example.invalid/layer-release-canary\n\ngo 1.27.3\n",
+		".chglog/config-keepachangelog.yml":       chglogKeepConfig,
+		".chglog/CHANGELOG-keepachangelog.tpl":    chglogKeepTemplate,
+		".chglog/config-minimal.yml":              chglogMinimalConfig,
+		".chglog/CHANGELOG-minimal.tpl":           chglogMinimalTemplate,
+		"CHANGELOG.md":                            releaseCanaryChangelog,
+		"cmd/layer-release-canary/main.go":        releaseCanaryMain,
+		".forgejo/workflows/" + workflow + ".yml": rendered,
+	}
+	if adverseTest != "" {
+		files[releaseCanaryTest] = adverseTest
+	}
+
+	if shape != nil {
+		shape(files)
+	}
+
+	// A canary that carries a declaration is the meta case.
+	declaration := files[layerDeclarationFile]
+
 	request := livetest.CommitFiles(t, target, repo, livetest.FileCommit{
-		Branch: layerMain, Message: "feat: add the minimal signed binary release canary",
-		Files: map[string]string{
-			"go.mod":                                  "module example.invalid/layer-release-canary\n\ngo 1.27.3\n",
-			".chglog/config-keepachangelog.yml":       chglogKeepConfig,
-			".chglog/CHANGELOG-keepachangelog.tpl":    chglogKeepTemplate,
-			".chglog/config-minimal.yml":              chglogMinimalConfig,
-			".chglog/CHANGELOG-minimal.tpl":           chglogMinimalTemplate,
-			"CHANGELOG.md":                            releaseCanaryChangelog,
-			"cmd/layer-release-canary/main.go":        releaseCanaryMain,
-			".forgejo/workflows/" + workflow + ".yml": rendered,
-		},
+		Branch: layerMain, Message: "feat: add the minimal signed binary release canary", Files: files,
 	})
 
 	packages := livetest.OwnerPackages(t, target)
@@ -180,33 +237,75 @@ func runLayerMinimalRelease(t *testing.T, private bool, objectFormat string) {
 	livetest.AnnotateTag(t, target, repo, releaseRequestTag, layerMain, "Request release v0.0.1")
 
 	run := livetest.WaitForLayerRun(t, target, repo, workflow, "push")
-	jobs := scenario.requireStatus(t, run, jobSuccess, secrets)
 
-	requireReleaseJobs(t, jobs, run.ID, scenario.label)
+	wantRun := jobSuccess
+	if blocked {
+		wantRun = jobFailure
+	}
+
+	jobs := scenario.requireStatus(t, run, wantRun, secrets)
+
+	if !blocked {
+		requireReleaseJobs(t, jobs, run.ID, scenario.label)
+	}
+
+	// The prepare workflow ended before the build began, so the release
+	// commit and the signed final tag are there whatever the build did next.
 	main := requireReleaseGit(t, target, repo, keys, request, releaseRequestTag, releaseFinalTag)
 	scenario.requireBranches(t, map[string]string{layerMain: main})
 
-	signed := requireReleaseHandOff(t, scenario, run.ID)
-	requireReleaseAssets(t, scenario, keys, request, signed)
+	if blocked {
+		requireReleaseBlocked(t, scenario, jobs, run.ID)
+	} else {
+		signed := requireReleaseHandOff(t, scenario, run.ID)
+		requireReleaseAssets(t, scenario, keys, request, signed)
+	}
 
-	// A log is the one place a key would surface, so every job's is read.
+	// A log is the one place a key would surface, so the log of every job
+	// that ran is read. The build's also holds what the adverse test did, and
+	// the release commit job's what the bump read from a declaration.
+	var (
+		names     []string
+		commitLog string
+	)
+
 	for _, job := range jobs {
-		if len(job.RunsOn) == 0 {
+		names = append(names, job.Name)
+
+		if len(job.RunsOn) == 0 || job.Status != jobSuccess && job.Status != jobFailure {
 			continue
 		}
 
 		log := livetest.JobLog(t, target, repo, job)
-
-		for what, secret := range map[string]string{"SSH signing key": keys.sshPrivate, "Cosign private key": keys.cosignPrivate} {
-			for line := range strings.SplitSeq(strings.TrimSpace(secret), "\n") {
-				if !strings.HasPrefix(line, "-----") && len(line) >= 16 && strings.Contains(log, line) {
-					t.Errorf("the log of job %q holds a line of the %s", job.Name, what)
-				}
-			}
+		if job.Name == releaseCommitJob {
+			commitLog = log
 		}
 
-		if strings.Contains(log, keys.passphrase) {
-			t.Errorf("the log of job %q holds the Cosign passphrase", job.Name)
+		if adverseTest != "" && job.Name == releaseBuildJob {
+			requireAdverseTestLog(t, log, adverseTest, enforced)
+		}
+
+		requireNoReleaseKey(t, job.Name, log, keys)
+	}
+
+	if declaration != "" {
+		mirror := livetest.MirrorRepo(t, target, repo)
+
+		changed, err := mirror.Git(t, "diff-tree", "--no-commit-id", "--name-only", "-r", request, main)
+		if err != nil {
+			t.Fatalf("release commit of the meta release: %v", err)
+		}
+
+		before, _ := mirror.Git(t, "show", request+":"+releaseChangelog)
+
+		after, err := mirror.Git(t, "show", main+":"+releaseChangelog)
+		if err != nil {
+			t.Fatalf("changelog of the meta release: %v", err)
+		}
+
+		findings := metaReleaseFindings(declaration, names, strings.Fields(changed), commitLog)
+		for _, finding := range append(findings, releaseChangelogFindings(before, after, strings.TrimPrefix(releaseFinalTag, "v"))...) {
+			t.Error(finding)
 		}
 	}
 
@@ -214,6 +313,85 @@ func runLayerMinimalRelease(t *testing.T, private bool, objectFormat string) {
 
 	if keysOnRepo := livetest.RepoCount(t, target, repo, "/keys"); keysOnRepo != 1 {
 		t.Errorf("the repository has %d deploy keys, want only the bot's", keysOnRepo)
+	}
+
+	return main
+}
+
+// requireNoReleaseKey holds one job's log to none of the release's signing
+// material: no line of either private key, and not the passphrase.
+func requireNoReleaseKey(t *testing.T, job, log string, keys releaseKeys) {
+	t.Helper()
+
+	for what, secret := range map[string]string{"SSH signing key": keys.sshPrivate, "Cosign private key": keys.cosignPrivate} {
+		for line := range strings.SplitSeq(strings.TrimSpace(secret), "\n") {
+			if !strings.HasPrefix(line, "-----") && len(line) >= 16 && strings.Contains(log, line) {
+				t.Errorf("the log of job %q holds a line of the %s", job, what)
+			}
+		}
+	}
+
+	if keys.passphrase != "" && strings.Contains(log, keys.passphrase) {
+		t.Errorf("the log of job %q holds the Cosign passphrase", job)
+	}
+}
+
+// requireReleaseBlocked holds a run whose build refused the tests to what
+// that leaves: the prepare workflow's jobs successful, the build failed on the
+// runner, every other job never started, and nothing a release would publish.
+// The renderer's changelog is the one artifact: it is uploaded before the
+// build, and the build fails before it uploads the dist hand-off.
+func requireReleaseBlocked(t *testing.T, scenario layerScenario, jobs []livetest.RunJob, runID int64) {
+	t.Helper()
+
+	// A job that never started is one no runner took. The status the forge
+	// gives it is its own: it listed the unstarted publishing caller as blocked
+	// in lab run 557 and as failure in run 560 (2026-11-09). Only the jobs
+	// that ran are held to a first attempt on the runner.
+	var ran []livetest.RunJob
+
+	statuses := make(map[string]string, len(jobs))
+
+	for _, job := range jobs {
+		statuses[job.Name] = job.Status
+
+		want := ""
+
+		switch {
+		case job.Name == releaseBuildJob:
+			want = jobFailure
+		case job.Name == "prepare" || job.Name == "Check: release settings" || strings.HasPrefix(job.Name, "Prepare: "):
+			want = jobSuccess
+		case job.TaskID == nil || *job.TaskID != 0:
+			t.Errorf("a runner took job %q (%s) after the build failed, want it never started", job.Name, job.Status)
+		}
+
+		if want == "" {
+			continue
+		}
+
+		if job.Status != want {
+			t.Errorf("job %q is %s, want %s", job.Name, job.Status, want)
+		}
+
+		ran = append(ran, job)
+	}
+
+	if statuses[releaseBuildJob] == "" || statuses["Prepare: release commit and tag"] == "" {
+		t.Errorf("job statuses are %v, want the prepared release and its build among them", statuses)
+	}
+
+	requireJobsOnRunner(t, ran, runID, scenario.label)
+
+	target, repo := scenario.target, scenario.repo
+
+	if releases, tags := livetest.RepoCount(t, target, repo, "/releases"), livetest.RepoCount(t, target, repo, "/tags"); releases != 0 || tags != 2 {
+		t.Errorf("the repository has %d releases and %d tags, want no release and only the request and final tags", releases, tags)
+	}
+
+	artifacts := livetest.RunArtifacts(t, target, repo, runID)
+	if len(artifacts) != 1 || artifacts[0].Name != "release-changelog" {
+		t.Errorf("the blocked run left artifacts %+v, want only release-changelog and no dist hand-off", artifacts)
 	}
 }
 
@@ -306,20 +484,26 @@ func trialCosignKey(t *testing.T, dir string) (string, string) {
 	return livetest.CosignKeyWithPassword(t, dir, passphrase)
 }
 
+// releaseEmptyBumpJob is the version-bump row of a release whose plan bumps no
+// project with a native version tool.
+const releaseEmptyBumpJob = releaseVersionNoBump
+
 // requireReleaseJobs holds the run to the two called workflows' jobs and the
 // consumer's build, each successful, under the two calling jobs.
 func requireReleaseJobs(t *testing.T, jobs []livetest.RunJob, runID int64, label string) {
 	t.Helper()
 
 	want := []string{
-		"Build minimal binary release",
+		releaseBuildJob,
 		"Check: release settings",
 		"Check: signing settings",
 		"Prepare: changelog",
 		"Prepare: release commit and tag",
-		// Runs with every step skipped when no bump is asked for: Forgejo
-		// skips the dependant of a skipped job on the server.
-		"Prepare: version",
+		// The bump's one empty row, which runs with every step skipped when
+		// the plan names no family: Forgejo skips the dependant of a skipped
+		// job on the server.
+		releaseEmptyBumpJob,
+		"Prepare: version plan",
 		"Publish: images",
 		"Publish: release",
 		"Publish: tidy up",
@@ -327,6 +511,14 @@ func requireReleaseJobs(t *testing.T, jobs []livetest.RunJob, runID int64, label
 	}
 
 	onRunner, wrappers := requireJobsOnRunner(t, jobs, runID, label)
+
+	// Forgejo appends a matrix row's values to the name the workflow gives it.
+	for i, name := range onRunner {
+		if strings.HasPrefix(name, releaseEmptyBumpJob+" (") {
+			onRunner[i] = releaseEmptyBumpJob
+		}
+	}
+
 	if !slices.Equal(onRunner, want) || len(wrappers) != 2 {
 		t.Errorf("the run's jobs are %v on the runner and %v without one, want %v under two callers", onRunner, wrappers, want)
 	}
@@ -367,20 +559,23 @@ func requireReleaseGit(t *testing.T, target livetest.Target, repo string, keys r
 		t.Errorf("%s moved to %s, want it left at %s", requestTag, requested, request)
 	}
 
-	// The principal is only a name for the one key in the file: git asks
-	// which principal the signing key belongs to and verifies as that one.
-	allowed := filepath.Join(keys.dir, "allowed-signers")
-	if err := os.WriteFile(allowed, []byte(releaseBotEmail+" "+keys.sshPublic+"\n"), 0o600); err != nil {
-		t.Fatal(err)
+	// The bot's key as the only allowed signer, and a control file whose only
+	// key was made here and signed nothing. The principal is only a name for
+	// the one key in each file.
+	trust := releaseSignerTrust{
+		allowed: filepath.Join(keys.dir, "allowed-signers"), foreign: filepath.Join(keys.dir, "foreign-signers"),
+		publicKey: keys.sshPublic,
+	}
+	_, foreignKey := livetest.SSHKey(t, t.TempDir())
+
+	for path, key := range map[string]string{trust.allowed: keys.sshPublic, trust.foreign: foreignKey} {
+		if err := os.WriteFile(path, []byte(releaseBotEmail+" "+key+"\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
 	}
 
-	signature := []string{"-c", "gpg.format=ssh", "-c", "gpg.ssh.allowedSignersFile=" + allowed}
-	if _, err := mirror.Git(t, append(signature, "verify-commit", main)...); err != nil {
-		t.Errorf("the release commit is not signed by the bot's key: %v", err)
-	}
-
-	if _, err := mirror.Git(t, append(signature, "verify-tag", "refs/tags/"+finalTag)...); err != nil {
-		t.Errorf("%s is not a tag signed by the bot's key: %v", finalTag, err)
+	for _, finding := range releaseSignerFindings(func(args ...string) (string, error) { return mirror.Git(t, args...) }, trust, main, finalTag) {
+		t.Error(finding)
 	}
 
 	// Read fixture expectations from the admitted request, never mutable host

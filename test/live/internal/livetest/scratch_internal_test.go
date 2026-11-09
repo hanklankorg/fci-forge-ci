@@ -140,3 +140,66 @@ func TestPrepareGitLabTagStopsOnBranchOrSeedFailure(t *testing.T) {
 		})
 	}
 }
+
+// A teardown's receipt is what a fresh read found. What the teardown owns and
+// left behind fails it; a package beside the name is reported and not judged.
+func TestScratchAbsenceReceipts(t *testing.T) {
+	t.Parallel()
+
+	const repo = "fci-consumer-trial"
+
+	for name, test := range map[string]struct {
+		exists   bool
+		packages []OwnerPackage
+		want     []string
+		left     bool
+	}{
+		"everything is gone": {want: []string{
+			"FORGE_CI_LIVE_CLEANUP repository forgeci/fci-consumer-trial absent",
+			"FORGE_CI_LIVE_CLEANUP packages forgeci/fci-consumer-trial absent",
+			"FORGE_CI_LIVE_CLEANUP packages-beside forgeci/fci-consumer-trial-* absent",
+		}},
+		"the repository survived": {exists: true, left: true, want: []string{
+			"FORGE_CI_LIVE_CLEANUP repository forgeci/fci-consumer-trial present",
+			"FORGE_CI_LIVE_CLEANUP packages forgeci/fci-consumer-trial absent",
+			"FORGE_CI_LIVE_CLEANUP packages-beside forgeci/fci-consumer-trial-* absent",
+		}},
+		"its package survived": {
+			packages: []OwnerPackage{{Type: "container", Name: repo, Version: "v0.0.1"}, {Type: "npm", Name: "unrelated", Version: "1.0.0"}},
+			left:     true,
+			want: []string{
+				"FORGE_CI_LIVE_CLEANUP repository forgeci/fci-consumer-trial absent",
+				"FORGE_CI_LIVE_CLEANUP package forgeci/container:fci-consumer-trial@v0.0.1 present",
+				"FORGE_CI_LIVE_CLEANUP packages-beside forgeci/fci-consumer-trial-* absent",
+			},
+		},
+		"a package linked to it survived": {
+			packages: []OwnerPackage{{Type: "maven", Name: "org.example:library", Version: "1.0.0", Repository: repo}},
+			left:     true,
+			want: []string{
+				"FORGE_CI_LIVE_CLEANUP repository forgeci/fci-consumer-trial absent",
+				"FORGE_CI_LIVE_CLEANUP package forgeci/maven:org.example:library@1.0.0 present",
+				"FORGE_CI_LIVE_CLEANUP packages-beside forgeci/fci-consumer-trial-* absent",
+			},
+		},
+		"a package beside the name is another cleanup's": {
+			packages: []OwnerPackage{{Type: "container", Name: repo + "-base", Version: "sha256-0"}, {Type: "container", Name: repo + "x", Version: "1"}},
+			want: []string{
+				"FORGE_CI_LIVE_CLEANUP repository forgeci/fci-consumer-trial absent",
+				"FORGE_CI_LIVE_CLEANUP package-beside forgeci/container:fci-consumer-trial-base@sha256-0 present",
+				"FORGE_CI_LIVE_CLEANUP packages forgeci/fci-consumer-trial absent",
+			},
+		},
+	} {
+		receipts, err := scratchAbsenceReceipts("forgeci", repo, test.exists, test.packages, true)
+		if !reflect.DeepEqual(receipts, test.want) || (err != nil) != test.left {
+			t.Errorf("%s: receipts are %q and the error %v, want %q and an error: %t", name, receipts, err, test.want, test.left)
+		}
+	}
+
+	// Packages nobody listed are not reported absent.
+	receipts, err := scratchAbsenceReceipts("forgeci", repo, false, nil, false)
+	if want := []string{"FORGE_CI_LIVE_CLEANUP repository forgeci/fci-consumer-trial absent"}; !reflect.DeepEqual(receipts, want) || err != nil {
+		t.Errorf("unlisted packages: receipts are %q and the error %v, want %q", receipts, err, want)
+	}
+}

@@ -24,7 +24,10 @@ package conformance_test
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 
@@ -121,4 +124,105 @@ func TestJSON_DoctorReport_HasTheSameShapeOnEveryForge(t *testing.T) {
 			}
 		}
 	})
+}
+
+// A repository without .forge-ci/artifacts.yml is still configured when its
+// root holds one ecosystem manifest, and is refused when it holds two: a
+// polyglot root has no single artifact to derive.
+//
+// GitHub's reusable workflows reach that rule through the planner. Forgejo and
+// GitLab reach it through the CLI alone, and doctor is the verb that reports
+// which way it went, so the two answers are read from its checks here, on
+// every forge, in a directory holding nothing but the manifests.
+func TestDoctor_AutoDerive_ReadsOneRootManifestAndRefusesAPolyglotRoot(t *testing.T) {
+	livetest.RegisterLiveScenario(t)
+
+	const (
+		check   = "configuration auto-derives"
+		goMod   = "module example.invalid/autoderive-canary\n\ngo 1.27.3\n"
+		cargo   = "[package]\nname = \"autoderive-canary\"\nversion = \"0.1.0\"\nedition = \"2021\"\n"
+		derived = `no .forge-ci/artifacts.yml; using the go artifact "autoderive-canary" derived from the root manifest (write the file to configure more)`
+	)
+
+	for _, forge := range forgesClaiming(t, alwaysValidatesTokens, "a JSON report") {
+		t.Run(string(forge), func(t *testing.T) {
+			t.Parallel()
+
+			target := livetest.Accept(t, forge)
+			repo := livetest.NewScratchRepo(t, target, "doctor-autoderive")
+
+			for _, tc := range []struct {
+				name      string
+				manifests map[string]string
+				severity  string
+				message   []string
+			}{
+				{"one-manifest", map[string]string{"go.mod": goMod}, "ok", []string{derived}},
+				// Both manifests are named, in the order the probes list them.
+				{"polyglot-root", map[string]string{"go.mod": goMod, "Cargo.toml": cargo}, "fail", []string{
+					"multiple manifests at root: Cargo.toml, go.mod",
+					"Cannot auto-derive — a polyglot repo needs an explicit artifacts.yml.",
+				}},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					root := t.TempDir()
+					for file, content := range tc.manifests {
+						if err := os.WriteFile(filepath.Join(root, file), []byte(content), 0o600); err != nil {
+							t.Fatal(err)
+						}
+					}
+
+					run := livetest.CLIIn(t, target, repo, livetest.RunOptions{Dir: root}, "doctor", "--json")
+
+					var report struct {
+						Checks []struct {
+							Name     string `json:"name"`
+							Severity string `json:"severity"`
+							Message  string `json:"message"`
+						} `json:"checks"`
+						Failures int `json:"failures"`
+					}
+					if err := json.Unmarshal([]byte(run.Stdout), &report); err != nil {
+						t.Fatalf("doctor --json did not emit parsable JSON on stdout (exit %d): %v\nstdout: %s\nstderr: %s",
+							run.ExitCode, err, run.Stdout, run.Stderr)
+					}
+
+					found, failing := 0, 0
+
+					for _, reported := range report.Checks {
+						if reported.Severity == "fail" {
+							failing++
+						}
+
+						if reported.Name != check {
+							continue
+						}
+
+						found++
+
+						if reported.Severity != tc.severity {
+							t.Errorf("%q is %s, want %s: %s", check, reported.Severity, tc.severity, reported.Message)
+						}
+
+						for _, want := range tc.message {
+							if !strings.Contains(reported.Message, want) {
+								t.Errorf("%q says %q, want it to hold %q", check, reported.Message, want)
+							}
+						}
+					}
+
+					if found != 1 {
+						t.Errorf("doctor reported %q %d times, want once:\n%s", check, found, run.Stdout)
+					}
+
+					// doctor exits 1 exactly when a check fails, so a refused
+					// root exits 1. The bare directory fails other checks as
+					// well, which is why one manifest is not held to exit 0.
+					if report.Failures != failing || (run.ExitCode == 1) != (failing > 0) || (run.ExitCode != 0 && run.ExitCode != 1) {
+						t.Errorf("doctor exited %d and counted %d failures with %d failing checks listed", run.ExitCode, report.Failures, failing)
+					}
+				})
+			}
+		})
+	}
 }

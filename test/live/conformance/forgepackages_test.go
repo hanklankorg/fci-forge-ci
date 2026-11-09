@@ -213,6 +213,33 @@ VERIFY
 const assert = require('node:assert/strict');
 assert.equal(require('./dist-tags.json')['` + tagPrefix + version + `'], '` + version + `');
 VERIFY
+)
+# A published version is immutable. The second publication carries other
+# bytes under the same version: it must be refused because the version exists,
+# not for a reason that would refuse any upload, and a fresh install must still
+# deliver the first's bytes.
+echo "module.exports = 2;" > pkg/index.js
+rm -f pkg/*.tgz
+( cd pkg && npm pack --silent )
+if run_product publish forge-packages deploy --project-type npm --working-dir pkg --npm-tag '` + tagPrefix + `{version}'; then
+  echo 'the registry accepted a second publication of ` + name + `@` + version + `' >&2
+  exit 1
+fi
+# npm's own refusal on Forgejo (lab run 2026-11-09), or the registry's status.
+if ! grep -Eq 'cannot publish over the previously published versions|E409|E403|EPUBLISHCONFLICT' product-out.txt; then
+  echo 'the second publication failed, and not on the version existing' >&2
+  exit 1
+fi
+(
+  cd "$consumer"
+  export npm_config_userconfig="$consumer/.npmrc"
+  export npm_config_cache="$consumer/cache"
+  rm -rf node_modules cache
+  npm install --registry "$registry" --ignore-scripts --no-audit --no-fund --package-lock=false --save-exact '` + name + `@` + version + `'
+  node <<'VERIFY'
+const assert = require('node:assert/strict');
+assert.equal(require('` + name + `'), 1);
+VERIFY
 )`
 
 	if target.Forge == provider.ForgeGitLab {
@@ -291,8 +318,16 @@ func TestNPMPublishWorkflow_RenderedShell(t *testing.T) {
 
 			stub := `set -eu
 origin="$PWD"
+mkdir pkg
 run_product() {
   test "$PWD" = "$origin"
+  if [ "$1 $2 $3" = 'publish forge-packages deploy' ]; then
+    test "$METADATA_STATE" != republished || return 0
+    : > product-out.txt
+    : > refused
+    test "$METADATA_STATE" = unavailable || printf '%s\n' 'npm error You cannot publish over the previously published versions: 1.2.3.' > product-out.txt
+    return 1
+  fi
   test "$1 $2 $3" = 'publish npm write-npmrc'
   test "$4" = --registry
   test "$5" = "$EXPECTED_REGISTRY"
@@ -301,6 +336,9 @@ run_product() {
 }
 npm() {
   test "$PWD" != "$origin"
+  if [ "$1" = pack ]; then
+    return 0
+  fi
   test -f "$npm_config_userconfig"
   test "$npm_config_cache" = "$PWD/cache"
   if [ "$1" = view ] && [ "$3" = version ]; then
@@ -319,8 +357,10 @@ npm() {
     fi
     printf '%s\n' '"1.2.3"'
   elif [ "$1" = install ]; then
-    test "$METADATA_STATE" = ready
-    test "$attempts" = 3
+    test "$METADATA_STATE" = ready || test "$METADATA_STATE" = republished || test "$METADATA_STATE" = unavailable
+    # The first install follows the wait for the version's metadata; the one
+    # after the refused publication is a subshell of its own and waits for none.
+    test "$attempts" = 3 || test -f "$origin/refused"
   fi
 }
 sleep() {
@@ -337,7 +377,13 @@ node() {
 				registry = "https://fixture.invalid/api/v4/projects/123/packages/npm/"
 			}
 
-			for _, state := range []string{"ready", "missing", "auth"} {
+			if !strings.Contains(script, "if run_product publish forge-packages deploy --project-type npm --working-dir pkg --npm-tag '"+tagPrefix+"{version}'; then") {
+				t.Fatal("the second publication is not the first's deployment")
+			}
+
+			// republished is a registry that accepts the same version twice,
+			// unavailable one that refuses the second for another reason.
+			for _, state := range []string{"ready", "missing", "auth", "republished", "unavailable"} {
 				t.Run(state, func(t *testing.T) {
 					err := runProbeShell(t, "attempts=0\n"+stub+consume,
 						"METADATA_STATE="+state, "EXPECTED_REGISTRY="+registry, "CI_API_V4_URL=https://fixture.invalid/api/v4",
@@ -496,7 +542,36 @@ sha256sum pom.xml target/` + artifactID + `-` + version + `.jar target/` + artif
 		deploy += "run_product release attachments upload --tag " + tag + " --pattern build-digests.sha256\n"
 	}
 
-	deploy += `run_product publish forge-packages deploy --project-type maven --from-build --working-dir . --version ` + version
+	deploy += `run_product publish forge-packages deploy --project-type maven --from-build --working-dir . --version ` + version + "\n"
+
+	// A stranger's Maven: empty settings, no token in its environment and a
+	// local repository of its own, so the JAR it resolves came from the public
+	// registry and is the one built here.
+	registry := `"${FORGEJO_SERVER_URL}/api/packages/` + target.Owner + `/maven"`
+	if target.Forge == provider.ForgeGitLab {
+		registry = `"${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/maven"`
+	}
+
+	deploy += `echo '<settings/>' > anonymous-settings.xml
+env -u FORGEJO_TOKEN -u CI_JOB_TOKEN mvn -B --no-transfer-progress -s anonymous-settings.xml -gs anonymous-settings.xml \
+  -Dmaven.repo.local="$PWD/anonymous-repository" dependency:get \
+  -Dartifact=` + groupID + `:` + artifactID + `:` + version + ` -Dtransitive=false -DremoteRepositories=forge::default::` + registry + `
+cmp target/` + artifactID + `-` + version + `.jar anonymous-repository/` + strings.ReplaceAll(groupID, ".", "/") + `/` + artifactID + `/` + version + `/` + artifactID + `-` + version + `.jar
+`
+
+	// Forgejo refuses a second upload of a release file. GitLab's registry
+	// accepts duplicates unless a group setting forbids them, and the product
+	// has no check of its own, so there the refusal is not the product's to
+	// show. The second attempt carries a different POM: had it been accepted,
+	// the registry's POM would no longer be the one the receipt names.
+	if target.Forge == provider.ForgeForgejo {
+		deploy += `printf '<!-- a second publication -->\n' >> pom.xml
+if run_product publish forge-packages deploy --project-type maven --from-build --working-dir . --version ` + version + `; then
+  echo 'the registry accepted a second publication of ` + artifactID + ` ` + version + `' >&2
+  exit 1
+fi
+`
+	}
 
 	if target.Forge == provider.ForgeGitLab {
 		return `publish:

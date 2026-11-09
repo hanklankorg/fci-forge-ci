@@ -27,7 +27,8 @@ import (
 
 // The prepared commit was verified by requireReleaseGit. Re-plan its immutable
 // declaration through the engine owner, never the host checkout or ledger.
-func requireLocalReleaseImageOutputs(t *testing.T, target livetest.Target, repo string, runID int64, prepared string, keys releaseKeys, settings livetest.TrialSettings) {
+// The plan is returned for what else is read back from it.
+func requireLocalReleaseImageOutputs(t *testing.T, target livetest.Target, repo string, runID int64, prepared string, keys releaseKeys, settings livetest.TrialSettings) pipeline.ReleaseImagesPlan {
 	t.Helper()
 
 	mirror := livetest.MirrorRepo(t, target, repo)
@@ -124,4 +125,110 @@ func requireLocalReleaseImageOutputs(t *testing.T, target livetest.Target, repo 
 	}, resolve, verifier, os.Stdout); err != nil {
 		t.Fatal("local release image readback: ", err)
 	}
+
+	return plan
+}
+
+// maxHandOverArtifact bounds the run artifacts searched for an image build's
+// context: below what ArtifactZIP reads at all.
+const maxHandOverArtifact = 24 << 20
+
+// requireImagesCarryReleasedFiles holds every planned image that copies a
+// file of the release's hand-off to that file. Which files, and where to, is
+// read from the planned Containerfile at the verified prepared commit; the
+// release serves the file, an artifact of the run holds it at the path the
+// Containerfile copies, and the published linux/amd64 image holds the same
+// bytes. An image whose Containerfile builds for itself copies none, and is
+// not compared.
+func requireImagesCarryReleasedFiles(t *testing.T, target livetest.Target, repo string, runID int64, prepared, tag string, plan pipeline.ReleaseImagesPlan) {
+	t.Helper()
+
+	mirror := livetest.MirrorRepo(t, target, repo)
+
+	copies, problems := plannedReleaseFileCopies(plan, "amd64", func(file string) (string, error) {
+		return mirror.Git(t, "show", prepared+":"+file)
+	})
+	for _, problem := range problems {
+		t.Error(problem)
+	}
+
+	if len(copies) == 0 {
+		t.Logf("no planned linux/amd64 image of %s copies a file of the release; none is compared", tag)
+
+		return
+	}
+
+	released, handedOver := map[string]string{}, map[string][]string{}
+
+	for _, files := range copies {
+		for _, file := range files {
+			released[file.Asset], handedOver[file.Source] = "", nil
+		}
+	}
+
+	for _, release := range livetest.Releases(t, target, repo) {
+		if release.TagName != tag {
+			continue
+		}
+
+		for _, asset := range release.Assets {
+			if _, copied := released[asset.Name]; copied {
+				released[asset.Name] = sha256Hex(livetest.Download(t, target, asset.URL, maxReleaseFile))
+			}
+		}
+	}
+
+	// Which artifact is the image build's context is the consumer's to name,
+	// so each is searched. One too large to read, or not a plain tree, holds
+	// no hand-off as far as this reader knows: a copy only it held is a
+	// finding below, with these lines beside it.
+	for _, artifact := range livetest.RunArtifacts(t, target, repo, runID) {
+		if artifact.Expired || artifact.SizeInBytes > maxHandOverArtifact {
+			t.Logf("run artifact %s (%d bytes, expired %t) is not searched for the image build's files", artifact.Name, artifact.SizeInBytes, artifact.Expired)
+
+			continue
+		}
+
+		tree, err := livetest.ZIPTree(livetest.ArtifactZIP(t, target, repo, artifact.ID), maxReleaseFile)
+		if err != nil {
+			t.Logf("run artifact %s is not searched for the image build's files: %v", artifact.Name, err)
+
+			continue
+		}
+
+		for source := range handedOver {
+			if body, held := tree[source]; held {
+				handedOver[source] = append(handedOver[source], sha256Hex(body))
+			}
+		}
+	}
+
+	compared := 0
+
+	for _, image := range plan.Images {
+		files := copies[image.Name]
+		if len(files) == 0 {
+			continue
+		}
+
+		digest, found := livetest.ImageDigest(t, target, repo, image.FinalTagName)
+		if !found {
+			t.Errorf("planned image %s is not served under %s", image.Name, image.FinalTagName)
+
+			continue
+		}
+
+		paths := make([]string, 0, len(files))
+		for _, file := range files {
+			paths = append(paths, file.Path)
+		}
+
+		for _, finding := range imageReleaseFileFindings(image.Name, files, released, handedOver, livetest.ImageFileSHA256(t, target, repo, digest, paths)) {
+			t.Error(finding)
+		}
+
+		compared += len(files)
+	}
+
+	t.Logf("release %s: %d image files compared with the released files they were built from", tag, compared)
 }

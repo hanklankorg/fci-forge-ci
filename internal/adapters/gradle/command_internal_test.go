@@ -84,3 +84,27 @@ func TestCommand_BindsDirectoryEnvironmentArgsAndWriters(t *testing.T) {
 		}
 	}
 }
+
+// A daemon outlives the invocation that started it and keeps its environment,
+// so an adapter holding dependency credentials ends every command line with
+// --no-daemon, and one without them adds nothing.
+func TestCommand_NoDaemonEndsEveryInvocation(t *testing.T) {
+	for _, noDaemon := range []bool{false, true} {
+		for _, args := range [][]string{nil, {"lib:test"}, {"--init-script", "/owned/init file.gradle", "cyclonedxBom"}} {
+			t.Run(fmt.Sprintf("no_daemon_%t/%s", noDaemon, strings.Join(args, " ")), func(t *testing.T) {
+				adapter := &Adapter{Env: []string{"DEPENDENCY_TOKEN=synthetic-private-token"}, NoDaemon: noDaemon}
+				cmd := adapter.command(t.Context(), "/owned/selected project", nil, nil, nil, args...)
+
+				want := append([]string{"./gradlew"}, args...)
+				if noDaemon {
+					want = append(want, "--no-daemon")
+				}
+
+				require.Equal(t, want, cmd.Args)
+				require.Contains(t, cmd.Env, "DEPENDENCY_TOKEN=synthetic-private-token")
+				require.NotContains(t, strings.Join(cmd.Args, " "), "synthetic-private-token")
+				require.Nil(t, cmd.Process, "builder must not start a process")
+			})
+		}
+	}
+}

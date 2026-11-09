@@ -44,6 +44,7 @@ func layerFixtureFacts() []string {
 		"RENDER_RELEASE_GIT_HOST_KEY_FINGERPRINT", "SHA256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
 		"RENDER_BASE_REPOSITORY", "forgejo.compose.forgelab:8443/forgeci/fci-layer-registry-smoke-base",
 		"RENDER_PLATFORM", "linux/amd64",
+		"RENDER_LINT_JOB_IMAGE", "forgejo.compose.forgelab:8443/forgeci/fci-layer-lint@sha256:" + unrunDigest,
 	}
 }
 

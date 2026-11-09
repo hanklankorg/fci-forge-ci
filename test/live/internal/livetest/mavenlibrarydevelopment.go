@@ -7,9 +7,12 @@ import (
 	"context"
 	"encoding/xml"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
+	"strconv"
 	"strings"
 )
 
@@ -24,10 +27,40 @@ var (
 	errOracleJavaPath         = errors.New("oracle must be an absolute Java source path with a simple class name")
 	errOracleNotRegular       = errors.New("oracle must be a regular source file")
 	errDevelopmentPOMIdentity = errors.New("development requires literal group/artifact and an existing SNAPSHOT version")
+	errDevelopmentReactor     = errors.New("development reactor requires a pom aggregator of literal jar modules sharing its version, one of which depends on a sibling and has no dependent sibling")
+
+	// mavenLiteral is a coordinate or module directory stated without a property.
+	mavenLiteral = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]*$`)
 )
 
-// MavenLibraryDevelopment is the admitted project's native snapshot identity.
-type MavenLibraryDevelopment struct{ Group, Artifact, Version string }
+// The packagings the Maven library fixtures admit.
+const (
+	mavenPackagingJar = "jar"
+	mavenPackagingPOM = "pom"
+)
+
+// MavenLibraryDevelopment is the admitted project's native snapshot identity:
+// the coordinate the fresh registry consumer declares. Modules is empty for a
+// single library. For an opted-in reactor it lists every publication, the
+// aggregator first, and the identity is the one module no sibling depends on.
+type MavenLibraryDevelopment struct {
+	Group, Artifact, Version string
+	Modules                  []MavenDevelopmentModule
+}
+
+// MavenDevelopmentModule is one publication of the development workflow.
+// Directory is "." for the root; Packaging is jar or, for the aggregator, pom.
+type MavenDevelopmentModule struct{ Directory, Group, Artifact, Version, Packaging string }
+
+// Publications lists every coordinate the development workflow publishes:
+// the single library, or all modules of a reactor with its parent POM.
+func (model MavenLibraryDevelopment) Publications() []MavenDevelopmentModule {
+	if len(model.Modules) != 0 {
+		return model.Modules
+	}
+
+	return []MavenDevelopmentModule{{Directory: ".", Group: model.Group, Artifact: model.Artifact, Version: model.Version, Packaging: mavenPackagingJar}}
+}
 
 // NewMavenLibraryDevelopmentFixture overlays only a private index. Oracle is a
 // caller-owned Java source file, kept separate from generic library behavior.
@@ -51,16 +84,7 @@ func mavenLibraryDevelopmentFixture(ctx context.Context, source Consumer, config
 		return source, identity, err
 	}
 
-	if _, err := mavenLibraryArtifact(ctx, source); err != nil {
-		return source, identity, err
-	}
-
-	pom, err := githubWorkflow(ctx, source, "pom.xml")
-	if err != nil {
-		return source, identity, err
-	}
-
-	identity, err = parseMavenDevelopmentPOM(pom)
+	identity, err := mavenDevelopmentIdentity(ctx, source, config.Reactor)
 	if err != nil {
 		return source, identity, err
 	}
@@ -126,11 +150,243 @@ func parseMavenDevelopmentPOM(pom string) (MavenLibraryDevelopment, error) {
 		return MavenLibraryDevelopment{}, errDevelopmentPOMIdentity
 	}
 
-	return MavenLibraryDevelopment{model.Group, model.Artifact, model.Version}, nil
+	return MavenLibraryDevelopment{Group: model.Group, Artifact: model.Artifact, Version: model.Version}, nil
 }
 
+// mavenDevelopmentIdentity reads the admitted revision's regular POM blobs.
+// A reactor is admitted only when the caller opted in; the single library
+// keeps its refusal of an aggregator.
+func mavenDevelopmentIdentity(ctx context.Context, source Consumer, reactor bool) (MavenLibraryDevelopment, error) {
+	if reactor {
+		return parseMavenDevelopmentReactor(func(path string) (string, error) { return githubWorkflow(ctx, source, path) })
+	}
+
+	if _, err := mavenLibraryArtifact(ctx, source); err != nil {
+		return MavenLibraryDevelopment{}, err
+	}
+
+	pom, err := githubWorkflow(ctx, source, "pom.xml")
+	if err != nil {
+		return MavenLibraryDevelopment{}, err
+	}
+
+	return parseMavenDevelopmentPOM(pom)
+}
+
+// mavenReactorPOM is what the development reactor reads of each POM.
+type mavenReactorPOM struct {
+	Group     string   `xml:"groupId"`
+	Artifact  string   `xml:"artifactId"`
+	Version   string   `xml:"version"`
+	Packaging string   `xml:"packaging"`
+	Modules   []string `xml:"modules>module"`
+	Parent    struct {
+		Group    string `xml:"groupId"`
+		Artifact string `xml:"artifactId"`
+		Version  string `xml:"version"`
+	} `xml:"parent"`
+	Dependencies []struct {
+		Group    string `xml:"groupId"`
+		Artifact string `xml:"artifactId"`
+		Version  string `xml:"version"`
+		Scope    string `xml:"scope"`
+		Type     string `xml:"type"`
+		Optional string `xml:"optional"`
+		Class    string `xml:"classifier"`
+	} `xml:"dependencies>dependency"`
+}
+
+// parseMavenDevelopmentReactor derives every publication from the POMs read
+// by path: a SNAPSHOT pom aggregator and its direct jar modules, each naming
+// the aggregator as parent at its version. The product publishes each
+// module's own POM bytes, so a fresh consumer resolves the parent and the
+// siblings from the registry. The consumed module is the one no sibling
+// depends on; it must itself depend on a sibling at the shared version.
+func parseMavenDevelopmentReactor(read func(path string) (string, error)) (MavenLibraryDevelopment, error) {
+	body, err := read("pom.xml")
+	if err != nil {
+		return MavenLibraryDevelopment{}, err
+	}
+
+	root, err := parseMavenDevelopmentPOM(body)
+	if err != nil {
+		return MavenLibraryDevelopment{}, err
+	}
+
+	var aggregator mavenReactorPOM
+	if err = xml.Unmarshal([]byte(body), &aggregator); err != nil {
+		return MavenLibraryDevelopment{}, err
+	}
+
+	if aggregator.Packaging != mavenPackagingPOM || len(aggregator.Modules) == 0 {
+		return MavenLibraryDevelopment{}, fmt.Errorf("%w: root is not an aggregator", errDevelopmentReactor)
+	}
+
+	modules := []MavenDevelopmentModule{{Directory: ".", Group: root.Group, Artifact: root.Artifact, Version: root.Version, Packaging: mavenPackagingPOM}}
+	children := make([]mavenReactorPOM, 0, len(aggregator.Modules))
+
+	for _, directory := range aggregator.Modules {
+		if !mavenLiteral.MatchString(directory) || slices.ContainsFunc(modules, func(module MavenDevelopmentModule) bool { return module.Directory == directory }) {
+			return MavenLibraryDevelopment{}, fmt.Errorf("%w: module %q is not a distinct direct subdirectory", errDevelopmentReactor, directory)
+		}
+
+		body, err = read(directory + "/pom.xml")
+		if err != nil {
+			return MavenLibraryDevelopment{}, fmt.Errorf("%w: module %s: %w", errDevelopmentReactor, directory, err)
+		}
+
+		child, err := parseMavenReactorModule(body, root)
+		if err != nil {
+			return MavenLibraryDevelopment{}, fmt.Errorf("%w: module %s", err, directory)
+		}
+
+		modules = append(modules, MavenDevelopmentModule{Directory: directory, Group: child.Group, Artifact: child.Artifact, Version: child.Version, Packaging: mavenPackagingJar})
+		children = append(children, child)
+	}
+
+	consumed, err := mavenReactorConsumed(children, root.Version)
+	if err != nil {
+		return MavenLibraryDevelopment{}, err
+	}
+
+	return MavenLibraryDevelopment{Group: consumed.Group, Artifact: consumed.Artifact, Version: consumed.Version, Modules: modules}, nil
+}
+
+// parseMavenReactorModule resolves a module's inherited group and version and
+// requires a literal jar module that is the aggregator's child at its version.
+func parseMavenReactorModule(body string, root MavenLibraryDevelopment) (mavenReactorPOM, error) {
+	var child mavenReactorPOM
+	if err := xml.Unmarshal([]byte(body), &child); err != nil {
+		return child, err
+	}
+
+	if child.Group == "" {
+		child.Group = child.Parent.Group
+	}
+
+	if child.Version == "" {
+		child.Version = child.Parent.Version
+	}
+
+	if child.Parent.Group != root.Group || child.Parent.Artifact != root.Artifact || child.Parent.Version != root.Version || child.Version != root.Version {
+		return child, fmt.Errorf("%w: not the aggregator's child at its version", errDevelopmentReactor)
+	}
+
+	if !mavenLiteral.MatchString(child.Group) || !mavenLiteral.MatchString(child.Artifact) || (child.Packaging != "" && child.Packaging != mavenPackagingJar) || len(child.Modules) != 0 {
+		return child, fmt.Errorf("%w: not a literal jar module", errDevelopmentReactor)
+	}
+
+	return child, nil
+}
+
+// mavenReactorConsumed follows the sibling edges: a module with a dependent
+// is not the consumed one, and the consumed one must reach a sibling at the
+// shared version so the fresh consumer's resolution is transitive. Only an
+// edge a consumer inherits counts: the sibling's plain JAR, required, in the
+// compile or runtime scope.
+func mavenReactorConsumed(children []mavenReactorPOM, version string) (mavenReactorPOM, error) {
+	depended, depends := map[string]bool{}, map[string]bool{}
+
+	for _, child := range children {
+		for _, dependency := range child.Dependencies {
+			group := strings.ReplaceAll(dependency.Group, "${project.groupId}", child.Group)
+			sibling := slices.ContainsFunc(children, func(other mavenReactorPOM) bool { return other.Group == group && other.Artifact == dependency.Artifact })
+
+			if sibling && dependency.Version != "${project.version}" && dependency.Version != version {
+				return mavenReactorPOM{}, fmt.Errorf("%w: %s depends on sibling %s at another version", errDevelopmentReactor, child.Artifact, dependency.Artifact)
+			}
+
+			if sibling && mavenInheritedEdge(dependency.Scope, dependency.Type, dependency.Optional, dependency.Class) {
+				depended[group+":"+dependency.Artifact], depends[child.Group+":"+child.Artifact] = true, true
+			}
+		}
+	}
+
+	consumed := slices.DeleteFunc(slices.Clone(children), func(child mavenReactorPOM) bool { return depended[child.Group+":"+child.Artifact] })
+	if len(consumed) != 1 || !depends[consumed[0].Group+":"+consumed[0].Artifact] {
+		return mavenReactorPOM{}, fmt.Errorf("%w: want one module no sibling depends on, itself depending on a sibling; %d have no dependent", errDevelopmentReactor, len(consumed))
+	}
+
+	return consumed[0], nil
+}
+
+// mavenInheritedEdge reports whether a dependency reaches the consumers of the
+// module that declares it: a plain JAR, required, in the compile or runtime
+// scope.
+func mavenInheritedEdge(scope, kind, optional, classifier string) bool {
+	skipped, _ := strconv.ParseBool(strings.TrimSpace(optional))
+
+	return (scope == "" || scope == "compile" || scope == "runtime") && (kind == "" || kind == mavenPackagingJar) && !skipped && classifier == ""
+}
+
+// prefix is the module's path prefix in the checkout and in the build handoff.
+func (module MavenDevelopmentModule) prefix() string {
+	if module.Directory == "." {
+		return ""
+	}
+
+	return module.Directory + "/"
+}
+
+// mavenDevelopmentExport copies each publication's original POM, and a jar
+// module's main, sources and Javadoc JARs, to the layout the product's
+// --from-build publisher reads: <module>/pom.xml and <module>/target/.
+func mavenDevelopmentExport(modules []MavenDevelopmentModule) string {
+	lines := make([]string, 0, 3*len(modules))
+
+	for _, module := range modules {
+		prefix := module.prefix()
+		if module.Packaging == mavenPackagingPOM {
+			lines = append(lines, "mkdir -p dist/"+prefix, "cp "+prefix+"pom.xml dist/"+prefix+"pom.xml")
+
+			continue
+		}
+
+		stem := prefix + "target/" + module.Artifact + "-" + module.Version
+		lines = append(lines, "mkdir -p dist/"+prefix+"target", "cp "+prefix+"pom.xml dist/"+prefix+"pom.xml", "cp "+stem+".jar "+stem+"-sources.jar "+stem+"-javadoc.jar dist/"+prefix+"target/")
+	}
+
+	return strings.Join(lines, "\n          ")
+}
+
+// mavenDevelopmentReadback resolves each publication's files by coordinate
+// into the fresh local repository and compares them with the producer's
+// bytes. An aggregator has a POM only.
+func mavenDevelopmentReadback(modules []MavenDevelopmentModule) string {
+	blocks := make([]string, 0, len(modules))
+
+	for _, module := range modules {
+		block, types := mavenDevelopmentReadbackPOM+mavenDevelopmentReadbackJars, "pom jar sources javadoc"
+		if module.Packaging == mavenPackagingPOM {
+			block, types = mavenDevelopmentReadbackPOM, mavenPackagingPOM
+		}
+
+		blocks = append(blocks, strings.NewReplacer("@TYPES@", types, "@PREFIX@", module.prefix(), "@GROUP@", module.Group, "@ARTIFACT@", module.Artifact, "@VERSION@", module.Version).Replace(block))
+	}
+
+	return strings.Join(blocks, "\n          ")
+}
+
+const (
+	mavenDevelopmentReadbackPOM = `for type in @TYPES@; do
+            case "$type" in
+              pom) coordinate='@GROUP@:@ARTIFACT@:@VERSION@:pom' ;;
+              jar) coordinate='@GROUP@:@ARTIFACT@:@VERSION@:jar' ;;
+              *) coordinate="@GROUP@:@ARTIFACT@:@VERSION@:jar:$type" ;;
+            esac
+             forge-ci build maven exec --working-dir . -- --batch-mode --no-transfer-progress -U -Dmaven.repo.local="$fresh" org.apache.maven.plugins:maven-dependency-plugin:3.8.1:get -Dartifact="$coordinate" -DremoteRepositories="scratch::default::$MAVEN_REGISTRY_URL"
+          done
+          group='@GROUP@'
+          localpath="$fresh/${group//.//}/@ARTIFACT@/@VERSION@"
+          cmp "$fresh/producer/@PREFIX@pom.xml" "$localpath/@ARTIFACT@-@VERSION@.pom"`
+	mavenDevelopmentReadbackJars = `
+          for suffix in .jar -sources.jar -javadoc.jar; do
+            cmp "$fresh/producer/@PREFIX@target/@ARTIFACT@-@VERSION@$suffix" "$localpath/@ARTIFACT@-@VERSION@$suffix"
+          done`
+)
+
 func mavenDevelopmentWorkflow(config MavenLibraryFixtureConfig, pin ConsumerPin, model MavenLibraryDevelopment, main string) string {
-	return strings.NewReplacer("@IMAGE@", config.JavaImage, "@PROFILE@", config.Profile, "@ACTIONS@", pin.Actions, "@PIN@", pin.Commit, "@GROUP@", model.Group, "@ARTIFACT@", model.Artifact, "@VERSION@", model.Version, "@MAIN@", main).Replace(`name: Library development
+	return strings.NewReplacer("@IMAGE@", config.JavaImage, "@PROFILE@", config.Profile, "@ACTIONS@", pin.Actions, "@PIN@", pin.Commit, "@EXPORT@", mavenDevelopmentExport(model.Publications()), "@READBACK@", mavenDevelopmentReadback(model.Publications()), "@VERSION@", model.Version, "@MAIN@", main).Replace(`name: Library development
 on:
   push:
     branches: [development]
@@ -150,9 +406,7 @@ jobs:
       - name: Export original unsigned library build
         run: |
           set -euo pipefail
-          mkdir -p dist/target
-          cp pom.xml dist/pom.xml
-          cp target/@ARTIFACT@-@VERSION@.jar target/@ARTIFACT@-@VERSION@-sources.jar target/@ARTIFACT@-@VERSION@-javadoc.jar dist/target/
+          @EXPORT@
       - uses: @ACTIONS@upload-dist@@PIN@
         with:
           artifact-name: library-${{ forgejo.sha }}
@@ -192,20 +446,7 @@ jobs:
           forge-ci artifact download --name "library-$SOURCE_SHA" --dir "$fresh/producer"
           cd .forge-ci/registry-consumer
            forge-ci build maven exec --working-dir . -- --batch-mode --no-transfer-progress -U -Dmaven.repo.local="$fresh" package org.apache.maven.plugins:maven-dependency-plugin:3.8.1:copy-dependencies
-          for type in pom jar sources javadoc; do
-            case "$type" in
-              pom) coordinate='@GROUP@:@ARTIFACT@:@VERSION@:pom' ;;
-              jar) coordinate='@GROUP@:@ARTIFACT@:@VERSION@:jar' ;;
-              *) coordinate="@GROUP@:@ARTIFACT@:@VERSION@:jar:$type" ;;
-            esac
-             forge-ci build maven exec --working-dir . -- --batch-mode --no-transfer-progress -U -Dmaven.repo.local="$fresh" org.apache.maven.plugins:maven-dependency-plugin:3.8.1:get -Dartifact="$coordinate" -DremoteRepositories="scratch::default::$MAVEN_REGISTRY_URL"
-          done
-          group='@GROUP@'
-          localpath="$fresh/${group//.//}/@ARTIFACT@/@VERSION@"
-          cmp "$fresh/producer/pom.xml" "$localpath/@ARTIFACT@-@VERSION@.pom"
-          for suffix in .jar -sources.jar -javadoc.jar; do
-            cmp "$fresh/producer/target/@ARTIFACT@-@VERSION@$suffix" "$localpath/@ARTIFACT@-@VERSION@$suffix"
-          done
+          @READBACK@
           java -cp 'target/classes:target/dependency/*' @MAIN@
           echo "LIBRARY_REGISTRY_ORACLE_OK:$SOURCE_SHA"
 `)

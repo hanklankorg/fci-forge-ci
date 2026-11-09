@@ -4,6 +4,7 @@
 package livetest
 
 import (
+	"cmp"
 	"errors"
 	"io/fs"
 	"os"
@@ -336,14 +337,18 @@ func TestServiceSnapshotDeclarationStagesOnlyTheDeclaration(t *testing.T) {
 // builds in the java image the repository variable names; the Cargo
 // container, container-first from its release-images declaration, with no
 // producer and no variable. The demos' bytes and modes stay as they are.
+// The Maven service's variant declaration, which a snapshot trial selects,
+// keeps the producer and plans the image without an SBOM.
 func TestServiceDevelopmentPreservesDemoRoutes(t *testing.T) {
 	for _, demo := range []struct {
-		name, declaration, producer, family string
+		name, declaration, variant, producer, family string
+		sbom                                         bool
 	}{
-		{"hello-maven-service", GitLabDefaultArtifactsConfig, "hello-maven-service", snapshotimage.FamilyJava},
-		{"hello-cargo-container", GitLabDedicatedReleaseImagesConfig, "", ""},
+		{"hello-maven-service", GitLabDefaultArtifactsConfig, "", "hello-maven-service", snapshotimage.FamilyJava, true},
+		{"hello-maven-service", GitLabDefaultArtifactsConfig, mavenServiceBuildSBOMDeclaration, "hello-maven-service", snapshotimage.FamilyJava, false},
+		{"hello-cargo-container", GitLabDedicatedReleaseImagesConfig, "", "", "", false},
 	} {
-		t.Run(demo.name, func(t *testing.T) {
+		t.Run(demo.name+demo.variant, func(t *testing.T) {
 			recipe, root, source, git := stageTestDemo(t, demo.name)
 
 			declaration, err := ServiceSnapshotSource(recipe)
@@ -352,7 +357,7 @@ func TestServiceDevelopmentPreservesDemoRoutes(t *testing.T) {
 			}
 
 			fixture, err := serviceDevelopmentFixture(t.Context(), source, ServiceDevelopmentConfig{
-				RecipeDirectory: recipe, Declaration: declaration, JobImage: serviceTestJobImage,
+				RecipeDirectory: recipe, Declaration: cmp.Or(demo.variant, declaration), JobImage: serviceTestJobImage,
 				Branch: "development", ReadinessURL: "http://127.0.0.1:8080/health",
 			})
 			if err != nil {
@@ -385,6 +390,10 @@ func TestServiceDevelopmentPreservesDemoRoutes(t *testing.T) {
 
 			if len(plan.Builds) != 1 || plan.Builds[0].Arch != "amd64" || plan.Images[0].Signing != "NONE" {
 				t.Fatalf("one unsigned native build expected: %+v", plan)
+			}
+
+			if plan.Images[0].SBOM != demo.sbom || !plan.Images[0].Scan {
+				t.Fatalf("staged declaration plans image SBOM %t, want %t beside the scan", plan.Images[0].SBOM, demo.sbom)
 			}
 
 			variables := ServiceSnapshotJobImageVariables(t.Context(), t, fixture, serviceTestJobImage)

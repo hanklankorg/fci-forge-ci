@@ -77,12 +77,16 @@ fresh registry readback and package cleanup are deliberately single-library owne
 A native reactor fixture needs a separately reviewed multi-publication oracle and
 complete module handoff/cleanup at those existing owners; merely allowing extra
 release assets or treating the parent POM as the library would weaken acceptance.
-There is no maintained native reactor selector yet. The stable selector above and
-the development selector in `mavenlibrarydevelopment.md` retain their scope.
+The stable selector above and the single-library development selector in
+`mavenlibrarydevelopment.md` retain their scope and their refusal. Development
+has a separate, opted-in reactor selector,
+`TestForgejoMavenReactorConsumer_Development`, with per-module handoff,
+readback and cleanup; it has not run natively, and there is no stable reactor
+selector.
 
 ## Native checkpoint — 2026-10-30
 
-Public Forgejo run **314** passed with the original `cose-lib` source at
+Public Forgejo run **314** passed with an external Maven library's original source at
 `25a3e92ceec72b869e2d04e4cbdebd9660ad8b7a` and release version `4.0.1`.
 The native signed-file verdict above passed; this does not establish Maven
 Central or stable package-registry publication. Independent snapshot registry

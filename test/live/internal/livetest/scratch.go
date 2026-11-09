@@ -6,11 +6,13 @@ package livetest
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -174,8 +176,109 @@ func keepOrDeleteAfter(tb TB, target Target, repo string) {
 		// repository must be visible in the result rather than swallowed.
 		if err := DeleteScratchRepo(cleanupCtx, target, repo); err != nil {
 			tb.Errorf("livetest: cleanup %s/%s: %v", target.Owner, repo, err)
+
+			return
+		}
+
+		// A delete that reports no error has said what it did, not what the
+		// forge now holds. Ask the forge.
+		receipts, err := readScratchAbsence(cleanupCtx, target, repo)
+		for _, receipt := range receipts {
+			tb.Logf("%s", receipt)
+		}
+
+		if err != nil {
+			tb.Errorf("livetest: cleanup %s/%s: %v", target.Owner, repo, err)
 		}
 	})
+}
+
+// scratchCleanupPrefix starts each line that says what a fresh read of the
+// forge found of one scratch resource after its teardown: absent, present or,
+// when the read itself failed, unverified. What was not read gets no line.
+const scratchCleanupPrefix = "FORGE_CI_LIVE_CLEANUP "
+
+// readScratchAbsence reads back, after a scratch repository's teardown, the
+// repository and, on Forgejo, the owner's packages the teardown takes with it.
+// GitLab's packages belong to the project and are not listed here, so they get
+// no receipt.
+// A read that fails is reported as unverified and is an error: the receipt is
+// of absence, and silence is not one.
+func readScratchAbsence(ctx context.Context, target Target, repo string) ([]string, error) {
+	name := target.Owner + "/" + repo
+
+	exists, err := repoExists(ctx, target, repo)
+	if err != nil {
+		return []string{scratchCleanupPrefix + "repository " + name + " unverified"}, fmt.Errorf("read back the deleted repository: %w", err)
+	}
+
+	if target.Forge != provider.ForgeForgejo {
+		return scratchAbsenceReceipts(target.Owner, repo, exists, nil, false)
+	}
+
+	packages, err := ownerPackages(ctx, target)
+	if err != nil {
+		receipts, left := scratchAbsenceReceipts(target.Owner, repo, exists, nil, false)
+
+		return append(receipts, scratchCleanupPrefix+"packages "+name+" unverified"),
+			errors.Join(left, fmt.Errorf("read back the packages of the deleted repository: %w", err))
+	}
+
+	return scratchAbsenceReceipts(target.Owner, repo, exists, packages, true)
+}
+
+// scratchAbsenceReceipts judges what was read after a teardown. The
+// repository must be gone, and with it every package version named as the
+// repository is or linked to it: those are the teardown's to remove. A package
+// beside the name, <repository>-base for one, is another cleanup's
+// (SweepPackagesAfter) and is reported, present or not, without judging this
+// teardown by it. Packages that were not read (listed false) get no line.
+func scratchAbsenceReceipts(owner, repo string, exists bool, packages []OwnerPackage, listed bool) ([]string, error) {
+	name := owner + "/" + repo
+
+	var (
+		receipts []string
+		left     []string
+	)
+
+	if exists {
+		receipts = append(receipts, scratchCleanupPrefix+"repository "+name+" present")
+		left = append(left, "the repository")
+	} else {
+		receipts = append(receipts, scratchCleanupPrefix+"repository "+name+" absent")
+	}
+
+	owned, beside := 0, 0
+
+	for _, pkg := range packages {
+		coordinate := pkg.Type + ":" + pkg.Name + "@" + pkg.Version
+
+		switch {
+		case pkg.Name == repo || pkg.Repository == repo:
+			owned++
+
+			receipts = append(receipts, scratchCleanupPrefix+"package "+owner+"/"+coordinate+" present")
+			left = append(left, "the package "+coordinate)
+		case strings.HasPrefix(pkg.Name, repo+"-"):
+			beside++
+
+			receipts = append(receipts, scratchCleanupPrefix+"package-beside "+owner+"/"+coordinate+" present")
+		}
+	}
+
+	if listed && owned == 0 {
+		receipts = append(receipts, scratchCleanupPrefix+"packages "+name+" absent")
+	}
+
+	if listed && beside == 0 {
+		receipts = append(receipts, scratchCleanupPrefix+"packages-beside "+name+"-* absent")
+	}
+
+	if len(left) != 0 {
+		return receipts, fmt.Errorf("the teardown reported no error and left %s: %w", strings.Join(left, ", "), errs.ErrValidation)
+	}
+
+	return receipts, nil
 }
 
 // NewBareScratchRepo is NewScratchRepo for a repository that receives its

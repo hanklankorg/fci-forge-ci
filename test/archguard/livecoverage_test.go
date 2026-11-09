@@ -51,7 +51,7 @@ func TestEveryCommandGroupHasALiveDisposition(t *testing.T) {
 		"security":  {scenario: "TestDegradation_SARIFUpload_NoticesAndSucceeds"},
 		"toolchain": {gap: "DEFERRED: cienv reaches runcontext; no toolchain CLI conformance invocation, and native installer parity is not established"},
 		"validate":  {scenario: "TestToken_RejectedCredential_FailsTheCommandWithAReason"},
-		"version":   {gap: "MISSING (D179): commit-changelog-release reads runcontext and performs signed Git mutations; JSON version fields are not coverage; a separately authorized live scenario remains unimplemented"},
+		"version":   {scenario: "TestInRunner_VersionCommitsTheChangelogRelease"},
 	}
 
 	root := reporoot.Path(t)
