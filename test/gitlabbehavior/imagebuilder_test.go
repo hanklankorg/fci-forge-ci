@@ -242,7 +242,7 @@ const exportsCheck = "rc_check_exports '$[[ inputs.export-files ]]' '$[[ inputs.
 	"$[[ inputs.export ]]\nRC_EXPORT_COMMANDS\n"
 
 const releaseImagesCheck = "rc_check_release_images '$[[ inputs.release-images ]]' '$[[ inputs.image-builder ]]' " +
-	"'$[[ inputs.builder-job-image ]]' '$[[ inputs.artifacts-config ]]' '$[[ inputs.release-platforms ]]' '$[[ inputs.build-runner-tags-linux-arm64 ]]'"
+	"'$[[ inputs.builder-job-image ]]' '$[[ inputs.artifacts-config ]]' '$[[ inputs.release-platforms ]]'"
 
 // The release request check, which runs before Prepare pushes anything,
 // refuses an image stage that would stop later: either builder without the
@@ -277,9 +277,10 @@ func TestReleaseRequestCheckRefusesAnImageStageThatWouldStop(t *testing.T) {
 
 			work := t.TempDir()
 			env := append([]string{"RC_WORK=" + work, "RELEASE_TAG=v1.2.3", "RC_REGISTRY=registry.invalid", "RC_REGISTRY_IMAGE=registry.invalid/team/app",
-				"RC_SERVER_URL=https://gitlab.invalid", "CI_PROJECT_PATH=team/app", "RC_IMAGE_LABELS=" + tc.labels}, tc.env...)
+				"RC_SERVER_URL=https://gitlab.invalid", "CI_PROJECT_PATH=team/app", "RC_IMAGE_LABELS=" + tc.labels,
+				"RC_RUNNER_TAGS=[]", "RC_SIGNER_RUNNER_TAGS=[]", `RC_BUILD_RUNNER_TAGS_LINUX_AMD64=["amd64"]`, "RC_BUILD_RUNNER_TAGS_LINUX_ARM64=[]"}, tc.env...)
 
-			output, err := runReleaseFunction(t, work, "rc_check_release_images "+tc.args+" .forge-ci/artifacts.yml '' '[]'", env...)
+			output, err := runReleaseFunction(t, work, "rc_check_release_images "+tc.args+" .forge-ci/artifacts.yml ''", env...)
 			if (err == nil) != (tc.wantError == "") || !strings.Contains(output, tc.wantError) {
 				t.Fatalf("err = %v:\n%s", err, output)
 			}
@@ -291,7 +292,7 @@ func TestReleaseRequestCheckRefusesAnImageStageThatWouldStop(t *testing.T) {
 
 			plan := "engine: container release-images plan --file .forge-ci/artifacts.yml --image-plan-json  --release-tag v1.2.3 --release-platforms  " + labelArgs +
 				"--image-repository registry.invalid/team/app --server-url https://gitlab.invalid --repository team/app " +
-				"--registry-username gitlab-ci-token --runner-archs amd64 --output " + work + "/release-images-plan.json"
+				`--registry-username gitlab-ci-token --runner-input runner-tags=[] --runner-input signer-runner-tags=[] --runner-input build-runner-tags-linux-amd64=["amd64"] --runner-input build-runner-tags-linux-arm64=[] --output ` + work + "/release-images-plan.json"
 			if strings.Contains(output, plan) != tc.planned {
 				t.Fatalf("planned=%t, want %t:\n%s", strings.Contains(output, plan), tc.planned, output)
 			}

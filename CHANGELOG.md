@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- GitLab release-image plans now receive every declared runner input from
+  readonly policy bindings, both before release preparation and at the image
+  planning job. Missing native build runners are refused by shared admission,
+  not an inferred architecture list. There are no new component input names
+  or contract/SDK requirements; policies must name each selected platform's
+  build runner. Export/base admission remains on its separate interface.
 - GitHub release and snapshot plans now receive all declared runner inputs
   after workflow defaults, and refuse image/Xcode platforms without their
   own runner before emitting plan outputs. `plan snapshot-release` accepts

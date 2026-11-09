@@ -239,6 +239,10 @@ stages: [check, prepare, build, images, sign, publish]
       RC_SERVER_URL='$[[ inputs.server-url ]]' \
       RC_REGISTRY='$[[ inputs.registry ]]' \
       RC_IMAGE_LABELS='$[[ inputs.labels ]]' \
+      RC_RUNNER_TAGS='$[[ inputs.runner-tags ]]' \
+      RC_SIGNER_RUNNER_TAGS='$[[ inputs.signer-runner-tags ]]' \
+      RC_BUILD_RUNNER_TAGS_LINUX_AMD64='$[[ inputs.build-runner-tags-linux-amd64 ]]' \
+      RC_BUILD_RUNNER_TAGS_LINUX_ARM64='$[[ inputs.build-runner-tags-linux-arm64 ]]' \
       RC_PUBLICATION_PROJECT='$[[ inputs.publication-project ]]' \
       RC_PUBLICATION_IMAGE_REPOSITORY='$[[ inputs.publication-image-repository ]]' \
       RC_PUBLIC_KEY_SHA256='$[[ inputs.cosign-public-key-sha256 ]]' \
@@ -388,7 +392,7 @@ stages: [check, prepare, build, images, sign, publish]
       optional: true
   script:
     - rc_request_checkout
-    - rc_check_release_images '$[[ inputs.release-images ]]' '$[[ inputs.image-builder ]]' '$[[ inputs.builder-job-image ]]' '$[[ inputs.artifacts-config ]]' '$[[ inputs.release-platforms ]]' '$[[ inputs.build-runner-tags-linux-arm64 ]]'
+    - rc_check_release_images '$[[ inputs.release-images ]]' '$[[ inputs.image-builder ]]' '$[[ inputs.builder-job-image ]]' '$[[ inputs.artifacts-config ]]' '$[[ inputs.release-platforms ]]'
     # The export commands as data, never run here: set without export-files
     # they would have no effect, and are refused.
     - |
@@ -580,7 +584,7 @@ stages: [check, prepare, build, images, sign, publish]
     - job: "Prepare: release commit and tag"
       artifacts: false
   script:
-    - rc_images_plan '$[[ inputs.artifacts-config ]]' '$[[ inputs.release-platforms ]]' '$[[ inputs.build-runner-tags-linux-arm64 ]]'
+    - rc_images_plan '$[[ inputs.artifacts-config ]]' '$[[ inputs.release-platforms ]]'
   artifacts:
     expire_in: 1 day
     paths: [_release-images-plan/]

@@ -305,14 +305,13 @@ rc_gather_exports() {
 rc_images_plan() {
   rc_release_checkout
   rc_new_handoff "${CI_PROJECT_DIR}/_release-images-plan" || return
-  rc_plan_release_images "$1" "$2" "$3" "${CI_PROJECT_DIR}/_release-images-plan/plan.json"
+  rc_plan_release_images "$1" "$2" "${CI_PROJECT_DIR}/_release-images-plan/plan.json"
 }
 
 # rc_plan_release_images writes the image jobs' plan of the checkout to
 # output, refusing what no image job would carry out.
 rc_plan_release_images() {
-  local config=$1 platforms=$2 arm64_tags=$3 output=$4 archs=amd64 label labels=()
-  if [ "${arm64_tags}" != '[]' ]; then archs=amd64,arm64; fi
+  local config=$1 platforms=$2 output=$3 label labels=()
   # The labels input as written, one key=value a line; the engine admits
   # each and refuses one that replaces a standard provenance label.
   while IFS= read -r label; do
@@ -321,7 +320,12 @@ rc_plan_release_images() {
   rc_engine container release-images plan --file "${config}" --image-plan-json '' \
     --release-tag "${RELEASE_TAG}" --release-platforms "${platforms}" "${labels[@]}" \
     --image-repository "${RC_REGISTRY_IMAGE:?}" --server-url "${RC_SERVER_URL}" --repository "${CI_PROJECT_PATH}" \
-    --registry-username gitlab-ci-token --runner-archs "${archs}" --output "${output}"
+    --registry-username gitlab-ci-token \
+    --runner-input "runner-tags=${RC_RUNNER_TAGS?}" \
+    --runner-input "signer-runner-tags=${RC_SIGNER_RUNNER_TAGS?}" \
+    --runner-input "build-runner-tags-linux-amd64=${RC_BUILD_RUNNER_TAGS_LINUX_AMD64?}" \
+    --runner-input "build-runner-tags-linux-arm64=${RC_BUILD_RUNNER_TAGS_LINUX_ARM64?}" \
+    --output "${output}"
 }
 
 # rc_check_release_images refuses, at the release request and before Prepare
@@ -331,7 +335,7 @@ rc_plan_release_images() {
 # policy's literal inputs. The image jobs plan again at the release commit,
 # which differs from the request only by the changelog and version bump.
 rc_check_release_images() {
-  local images=$1 builder=$2 job_image=$3 config=$4 platforms=$5 arm64_tags=$6
+  local images=$1 builder=$2 job_image=$3 config=$4 platforms=$5
   case "${images}" in
   true) ;;
   false)
@@ -352,7 +356,7 @@ rc_check_release_images() {
     return 1
   fi
   rc_publication_scope || return
-  rc_plan_release_images "${config}" "${platforms}" "${arm64_tags}" "${RC_WORK:?}/release-images-plan.json"
+  rc_plan_release_images "${config}" "${platforms}" "${RC_WORK:?}/release-images-plan.json"
 }
 
 rc_images_build() {

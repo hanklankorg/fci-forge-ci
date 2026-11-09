@@ -157,9 +157,17 @@ GitHub's release and snapshot orchestrators pass every declared runner input
 through environment variables to `--runner-input`; empty caller values are
 not replaced by another role or architecture's input. This is an admission
 check, not proof that a registered runner has the promised capabilities.
+GitLab's release-image request check and image planning job likewise pass all
+of the release component's runner inputs from readonly policy bindings. The
+same image planner admits both phases: a missing native build runner is
+refused before a frozen plan is written, including when the ordinary runner
+has matching architecture tags. `release-platforms`, not runner availability,
+selects the images' platforms. Unselected build inputs may remain empty.
 A layer that passes no `--runner-input` is not checked. The flag remains
-optional for compatibility until GitLab and Forgejo pass their inputs too;
-their existing arm64 checks remain in place until admission replaces them.
+optional for compatibility until all layers pass their inputs. GitLab export
+and base planning and Forgejo retain their existing architecture checks until
+their own admission migration replaces them; image-plan wiring alone does
+not authorize deleting those separate checks.
 ## GitHub runners
 
 The GitHub layer takes its runners as `workflow_call` inputs, not variables.
