@@ -394,8 +394,8 @@ each one needs and what it leaves behind.
 ```bash
 # In Forge Lab: providers, fixtures, runners and the forgeci contract.
 just lab --account forgeci --fixtures --runners gitlab forgejo
-# Here: the contract and CA check alone, in seconds, before anything heavier.
-just test-live-preflight full
+# Here: the run's preflight, every admission it makes and no lab writes.
+just test-live-preflight
 # A consumer's own workflow against this checkout, both visibilities.
 just test-live-consumer forgejo /absolute/consumer pull-request CI_JOB_IMAGE=<digest reference>
 # A kept demo: make one, see what exists, delete one when done with.
@@ -475,7 +475,8 @@ The launcher drains the redacted log before releasing its lock and returns
 130 for interruption. When supervising the launcher directly with systemd,
 allow at least `TimeoutStopSec=180` so it does not kill this cleanup early.
 When using Forge Lab's full-release wrapper, run `just test-live-preflight`
-first: the wrapper swaps the privileged runner in before the launcher's own
+with the run's arguments first (see
+[the live preflight](live-campaigns.md#preflight-a-run)): the wrapper swaps the privileged runner in before the launcher's own
 preflight runs, so a stale contract refused inside it costs two runner swaps
 instead of seconds. The wrapper's child shutdown grace must
 cover the suite's two-minute cleanup. Use the current three-minute default

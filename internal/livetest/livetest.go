@@ -200,6 +200,10 @@ func Accept(tb TB, forge provider.ForgeAPI) Target {
 		tb.Fatalf("livetest: run interrupted: %v", err)
 	}
 
+	if err := requireAdmittedScenario(tb); err != nil {
+		tb.Fatalf("livetest: %v", err)
+	}
+
 	if !Selected(tb, forge) {
 		tb.Skipf("livetest: the contract carries no %s endpoint", forge)
 	}
@@ -221,6 +225,11 @@ func Accept(tb TB, forge provider.ForgeAPI) Target {
 	target, err = captureTargetCA(target)
 	if err != nil {
 		tb.Fatalf("livetest: contract ca_file refused this run: %v", err)
+	}
+
+	// A preflight admits the credential's lifetime above and never uses it.
+	if PreflightRun() {
+		target.Token, target.endpoint.Credential.Token = "", ""
 	}
 
 	return target
@@ -260,10 +269,14 @@ func acceptTarget(lab *labcontract.Contract, forge provider.ForgeAPI, now time.T
 		return Target{}, err
 	}
 
-	// The contract module says what is wrong with the credential; the recipe
-	// that mints the next generation is this tier's to name, account included.
+	// The contract module says what is wrong with the credential; what the
+	// operator does next is this tier's to say. Other sessions may hold the
+	// account's contract, and emitting it again in place revokes their
+	// tokens, so the advice is a contract of the operator's own beside it.
 	if err = endpoint.Credential.CheckLifetime(now); err != nil {
-		return Target{}, fmt.Errorf("%s credential: %w; mint it in Forge Lab with: just targets --account %s gitlab forgejo",
+		return Target{}, fmt.Errorf("%s credential: %w; other sessions may hold this account's contract, and emitting it again in place revokes their tokens: "+
+			"mint a contract of your own beside it in Forge Lab with LAB_TARGETS_FILE=/absolute/path/own.json just targets --account %s gitlab forgejo, "+
+			"then set LAB_TARGETS_FILE to that path here",
 			forge, refused(err), labAccount)
 	}
 

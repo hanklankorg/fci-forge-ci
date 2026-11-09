@@ -66,6 +66,57 @@ session and SDK/GHCR publication keep their existing credential unchanged.
 Token kind admission does not prove repository selection or write permissions;
 the ordinary release workflow and its content-write assertions remain authoritative.
 
+## Preflight a run
+
+A preflight makes every admission check a run makes and stops before the run's
+first effect. It writes nothing to the lab, so it takes no live lock and may run
+beside another run. It takes the same arguments as the run:
+
+```bash
+just test-live-preflight                                   # as just test-live
+just test-live-preflight '^TestGitLabLayer_ConsumerTrial$' # as just test-live <scenario>
+FORGE_CI_LIVE_PREFLIGHT=1 just test-live-consumer gitlab /absolute/consumer pull-request
+FORGE_CI_LIVE_PREFLIGHT=1 just campaign-lane ~/campaigns/k3s gitlab test/live/campaigns/k3s-private-gitlab.cases
+```
+
+`FORGE_CI_LIVE_PREFLIGHT=1` reaches the launcher, `scripts/ci/run-live-tests.sh`,
+which every recipe above ends in. The launcher reads the real lab contract the
+run would use and checks it, its CA, the host tools and the build as for the
+run. Each scenario then runs up to its admission boundary: everything it
+checks before its first effect, such as the runner capabilities the contract
+declares, the contract's credential for that forge, and the consumer checkout
+and gate it was given. Runner inputs are not judged here: the engine refuses a
+plan whose platform has no runner when the run plans it. A campaign lane first
+plans the cases file, as for the run, and then preflights each case.
+
+A scenario declares its boundary with `livetest.RegisterAdmittedScenario(t)` in
+place of `RegisterLiveScenario`, and calls `livetest.Admitted(t)` before its
+first lab write. A preflight run stops the scenario at `Admitted` and reports it
+admitted; one with a subtest per visibility is admitted only when every
+subtest was. A scenario that declares no boundary does not run, and the
+verdict is `unadmitted`, because a preflight that skipped its admission cannot
+vouch for the run. A test that reaches the lab contract without having
+registered, itself or a parent, fails. `TestAdmittedScenariosEndTheirAdmission` holds every registration to a
+boundary. As a backstop, a preflight run blanks the credential the scenario is
+handed and refuses the lab client. Today only the GitLab consumer trial declares
+a boundary; adopting `Admitted` in another scenario is what makes it
+preflightable. The verdict is `admitted` (exit 0), `unadmitted`, `skipped`
+(nothing ran) or `failed` (an admission check refused); `verdict.json` beside the
+log lists the admitted scenarios.
+
+The preflight judges only the credentials of the endpoints the run uses: both
+forges' for an unscoped run, and one forge's under `FORGE_CI_LIVE_PROVIDER`. An
+unused endpoint's credential is not judged and is not mentioned. A used one is
+refused when it is stale. A credential without an expiry is stale 24 hours after
+it was created. One with an expiry is stale when less than five minutes of it
+remain, or when the expiry is more than 31 days away. A stale credential stops
+the preflight, and the refusal names the safe step. Other sessions may hold the
+shared account's contract, and emitting it again in place revokes their tokens.
+Instead, mint a contract of your own beside it in Forge Lab with
+`LAB_TARGETS_FILE=/absolute/path/own.json just targets --account forgeci gitlab forgejo`,
+then point `LAB_TARGETS_FILE` at that path here. An unscoped run is also told it
+can select the other forge with `FORGE_CI_LIVE_PROVIDER`.
+
 ## Run a campaign
 
 Prepare once, from a clean checkout whose engine checksum is fresh, naming

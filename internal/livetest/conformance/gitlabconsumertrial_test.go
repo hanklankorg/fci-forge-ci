@@ -29,7 +29,7 @@ import (
 // that same canary to the protected signer environment then permits the actual
 // checks, on the same MR commit. No signing credential is used by this trial.
 func TestGitLabLayer_ConsumerTrial(t *testing.T) {
-	livetest.RegisterLiveScenario(t)
+	livetest.RegisterAdmittedScenario(t)
 
 	root := os.Getenv(consumerCheckoutEnv)
 	if root == "" {
@@ -60,6 +60,8 @@ func runGitLabConsumerTrial(t *testing.T, root string, private bool) {
 	if gate := os.Getenv("FORGE_CI_LIVE_GITLAB_GATE_SOURCE"); gate != "" {
 		consumer = consumer.WithGitLabGateFromSource(t, gate)
 	}
+
+	livetest.Admitted(t)
 
 	engineRepo := livetest.NewPublicScratchRepo(t, target, "gitlab-consumer-layer", livetest.ReadLayerAnonymously)
 	layer := livetest.PushLayer(t, target, engineRepo)

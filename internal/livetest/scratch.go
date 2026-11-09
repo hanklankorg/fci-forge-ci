@@ -626,6 +626,10 @@ func scratchRepos(target Target) (*labclient.Repositories, error) {
 // lab-only transport with the frozen CA in place of the module's, so a
 // credential reaches exactly the hosts every other call of the kit may reach.
 func scratchClient(target Target) (*labclient.Client, error) {
+	if PreflightRun() {
+		return nil, errPreflightEffect
+	}
+
 	key := string(target.Forge) + "@" + target.Host + "/" + target.Owner
 
 	if cached, ok := labClients.Load(key); ok {
