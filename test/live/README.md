@@ -3,8 +3,9 @@
 
 # Live test ownership
 
-- `internal/livetest`: test-only support kit, raw reference oracle, embedded
-  probes, support fixtures and remaining kit-local tagged scenarios. Its harness
+- `internal/livetest` (relative to this directory): test-only support kit, raw
+  reference oracle, embedded probes, support fixtures and remaining kit-local
+  tagged scenarios. Its harness
   commands are `preflight`, `demoadmin`, `credentialproxy` and `probejson`.
 - `conformance`: shared provider scenarios and their layer fixtures.
 - `githubconsumer`: hosted GitHub consumer scenarios.

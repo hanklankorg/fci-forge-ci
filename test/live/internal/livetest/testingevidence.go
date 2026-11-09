@@ -240,8 +240,9 @@ func hostedEvidenceKey(script, consumer, flow string) string {
 
 // evidenceKey names the overlay row a run is evidence for, "<provider>
 // <demo> <flow>", or nothing for a run of no demo consumer: the demo
-// is the consumer path's test/live/fixtures/consumers/<demo>/consumer, the flow the
-// recorded event or, where the scenario is the flow, the scenario's.
+// is read from the prepared consumer path <dir>/demos/<demo> (optionally
+// ending in /consumer), not the source recipe path. The flow is the recorded
+// event or, where the scenario is the flow, the scenario's.
 func evidenceKey(run LiveRunHeader) string {
 	_, path, found := strings.Cut(filepath.ToSlash(run.Inputs["forge_ci_live_consumer"]), "/demos/")
 

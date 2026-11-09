@@ -20,7 +20,7 @@ func testWorkflowAdmin(t *testing.T) *workflowAdmin {
 	t.Helper()
 
 	root := reporoot.Path(t)
-	commit := stageTestGit(t, githubStageGit(), root, "rev-parse", "HEAD")
+	commit := mustLayerGit(t, githubStageGit(), root, "rev-parse", "HEAD")
 
 	admin, err := newWorkflowAdmin(t.Context(), root, commit, func(key string) string {
 		if key == adminInputEnvironment(enforcement.ReproducibleBuilds) {
@@ -267,7 +267,7 @@ func TestAdminDeclarationsComeFromThePinnedGitTree(t *testing.T) {
 	path := ".github/workflows/check.yml"
 	stageTestWrite(t, root, path, "on:\n  workflow_call:\n    inputs:\n      enforce-lint:\n        type: boolean\n", 0o600)
 	stageTestCommit(t, git, root)
-	commit := stageTestGit(t, git, root, "rev-parse", "HEAD")
+	commit := mustLayerGit(t, git, root, "rev-parse", "HEAD")
 	stageTestWrite(t, root, path, "on:\n  workflow_call:\n    inputs:\n      enforce-vulnerabilities:\n        type: boolean\n", 0o600)
 
 	admin, err := newWorkflowAdmin(t.Context(), root, commit, func(string) string { return "false" })
@@ -302,7 +302,7 @@ func TestDevelopmentAdminPolicyPreservesRootPushAdmissionAndJobs(t *testing.T) {
 	stageTestWrite(t, root, gitlabCIFile, pipeline, 0o600)
 	stageTestWrite(t, root, GitLabGateFile, gate, 0o600)
 	stageTestCommit(t, git, root)
-	consumer := Consumer{git: git, stage: root, Commit: stageTestGit(t, git, root, "rev-parse", "HEAD")}
+	consumer := Consumer{git: git, stage: root, Commit: mustLayerGit(t, git, root, "rev-parse", "HEAD")}
 	layer := Layer{ServerURL: "https://gitlab.k3s.forgelab", Repository: "forgeci/engine", admin: testWorkflowAdmin(t)}
 	layer.Commit = layer.admin.commit
 	images := GitLabGateImages{Job: "registry.invalid/tools@sha256:" + strings.Repeat("c", 64)}
@@ -316,7 +316,7 @@ func TestDevelopmentAdminPolicyPreservesRootPushAdmissionAndJobs(t *testing.T) {
 		t.Fatalf("development root did not select its pinned administrator gate: root=%s gate=%s", selected, renderedGate)
 	}
 
-	if got := stageTestGit(t, git, root, "show", consumer.Commit+":"+gitlabCIFile); got != strings.TrimSpace(pipeline) {
+	if got := mustLayerGit(t, git, root, "show", consumer.Commit+":"+gitlabCIFile); got != strings.TrimSpace(pipeline) {
 		t.Fatal("development policy rendering modified the consumer's source tree")
 	}
 

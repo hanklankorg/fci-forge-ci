@@ -5,6 +5,7 @@ package livetest
 
 import (
 	"errors"
+	"fmt"
 	"path/filepath"
 	"reflect"
 	"slices"
@@ -17,6 +18,140 @@ import (
 	"github.com/diggsweden/forge-ci/internal/domain/snapshotimage"
 	"github.com/diggsweden/forge-ci/internal/testutil/reporoot"
 )
+
+// These are overlay/plan regressions, not native SBOM-generation evidence.
+// Both existing snapshot routes stage this overlay; policy must survive it
+// without acquiring a second producer for a container-first consumer.
+func TestServiceSnapshotDeclarationSBOMPolicies(t *testing.T) {
+	for _, mode := range []string{"artifact-first", "container-first"} {
+		for _, policy := range []struct {
+			name, declaration string
+			layers            []config.SBOMLayer
+			container         bool
+		}{
+			{"default", "", []config.SBOMLayer{config.SBOMLayerBuild, config.SBOMLayerAnalyzedArtifact, config.SBOMLayerAnalyzedContainer}, true},
+			{"all", "all", []config.SBOMLayer{config.SBOMLayerBuild, config.SBOMLayerAnalyzedArtifact, config.SBOMLayerAnalyzedContainer}, true},
+			{"none", "none", nil, false},
+			{"build", "build", []config.SBOMLayer{config.SBOMLayerBuild}, false},
+			{"mixed", "build,analyzed-container", []config.SBOMLayer{config.SBOMLayerBuild, config.SBOMLayerAnalyzedContainer}, true},
+		} {
+			t.Run(mode+"/"+policy.name, func(t *testing.T) {
+				setting := ""
+				if policy.declaration != "" {
+					setting = fmt.Sprintf("sboms: %q, ", policy.declaration)
+				}
+
+				body := fmt.Sprintf("artifacts: [{name: app, project-type: go, %sconfig: {build-mode: %s, main-package: ./cmd/app, binary-name: app}}]\ncontainers: [{name: service, from: [app]}]\n", setting, mode)
+
+				overlay, plan, err := serviceSnapshotDeclarationOverlay(body)
+				if err != nil {
+					t.Fatal(err)
+				}
+
+				before, after := serviceTestConfigPlan(t, body), serviceTestConfigPlan(t, overlay)
+				if !reflect.DeepEqual(before.Artifacts, after.Artifacts) || !slices.Equal(after.Artifacts.All[0].EffectiveSBOMs, policy.layers) {
+					t.Fatalf("overlay changed required/forbidden layers: %s", overlay)
+				}
+
+				if len(plan.Images) != 1 || plan.Images[0].SBOM != policy.container || !plan.Images[0].Scan || plan.Images[0].Provenance {
+					t.Fatalf("snapshot image evidence policy changed: %+v", plan.Images)
+				}
+
+				wantProducers := 0
+				if mode == "artifact-first" {
+					wantProducers = 1
+				}
+
+				if len(plan.Artifacts) != wantProducers || len(plan.Builds) != 1 || len(plan.Builds[0].RequiredArtifacts) != wantProducers {
+					t.Fatalf("missing producer or forbidden eager producer: %+v", plan)
+				}
+			})
+		}
+	}
+}
+
+// The release inclusion input is not the snapshot overlay's generation policy.
+// In particular none suppresses SBOM downloads and container-first SBOM jobs,
+// but must not erase artifact-first Build layers or container generation.
+func TestServiceSnapshotSBOMPolicyReleaseBoundary(t *testing.T) {
+	for _, mode := range []string{"artifact-first", "container-first"} {
+		for _, selection := range []struct {
+			name, value      string
+			build, container bool
+		}{
+			{"all", "all", true, true},
+			{"none", "none", false, false},
+			{"build", "build", true, false},
+			{"mixed", "build,analyzed-container", true, true},
+		} {
+			t.Run(mode+"/"+selection.name, func(t *testing.T) {
+				body := fmt.Sprintf("artifacts: [{name: app, project-type: go, config: {build-mode: %s, main-package: ./cmd/app, binary-name: app}}]\ncontainers: [{name: service, from: [app]}]\n", mode)
+
+				overlay, snapshot, err := serviceSnapshotDeclarationOverlay(body)
+				if err != nil {
+					t.Fatal(err)
+				}
+
+				cfg := serviceTestConfigPlan(t, overlay)
+
+				release, err := pipeline.NewReleasePlan(pipeline.ReleasePlanInput{ConfigPlan: cfg, ReleaseSBOMs: selection.value})
+				if err != nil {
+					t.Fatal(err)
+				}
+
+				wantLayers, err := config.ExpandSBOMs(selection.value)
+				if err != nil {
+					t.Fatal(err)
+				}
+
+				gotLayers, err := config.ExpandSBOMs(release.Policy.SBOMs)
+				if err != nil || !slices.Equal(gotLayers, wantLayers) || release.Policy.SBOMConflict != nil {
+					t.Fatalf("release inclusion changed required/forbidden layers: %+v, %v", release.Policy, err)
+				}
+
+				// Exact inventory checks enforce absence as well as presence.
+				var got []pipeline.ArtifactTransfer
+
+				for _, item := range release.ArtifactTransfers.Items {
+					if item.Kind == pipeline.ArtifactTransferBuildSBOM || item.Kind == pipeline.ArtifactTransferAnalyzedContainerSBOM {
+						got = append(got, item)
+					}
+				}
+
+				var want []pipeline.ArtifactTransfer
+				if selection.build {
+					want = append(want, pipeline.ArtifactTransfer{Kind: pipeline.ArtifactTransferBuildSBOM, Name: cfg.Artifacts.All[0].BuildSBOMArtifactName, Path: "./release-artifacts/", Required: true})
+				}
+
+				if selection.container {
+					want = append(want, pipeline.ArtifactTransfer{Kind: pipeline.ArtifactTransferAnalyzedContainerSBOM, NameTemplate: "analyzed-container-sbom-{run_id}-service-amd64", Path: "./sbom-artifacts/", Required: true})
+				}
+
+				if !slices.Equal(got, want) {
+					t.Fatalf("SBOM transfers = %+v, want exactly %+v", got, want)
+				}
+
+				artifactFirst := mode == "artifact-first"
+				if release.Stages.Build.Targets.Go.Runs != artifactFirst || release.Stages.Publish.Targets.GoContainerFirst.Runs != (!artifactFirst && selection.build) {
+					t.Fatalf("wrong build/SBOM job placement: %+v", release.Stages)
+				}
+
+				wantSBOMJobs := 0
+				if !artifactFirst && selection.build {
+					wantSBOMJobs = 1
+				}
+
+				if len(release.Stages.Publish.Targets.GoContainerFirst.Items) != wantSBOMJobs {
+					t.Fatalf("missing or forbidden container-first SBOM target: %+v", release.Stages.Publish.Targets.GoContainerFirst)
+				}
+
+				if !slices.Contains(cfg.Artifacts.All[0].EffectiveSBOMs, config.SBOMLayerBuild) || !cfg.Containers.All[0].EnableAnalyzedContainerSBOM || !snapshot.Images[0].SBOM {
+					t.Fatal("release inclusion rewrote per-artifact or snapshot generation policy")
+				}
+			})
+		}
+	}
+}
 
 func TestServiceSnapshotDeclarationPreservesBuildSettings(t *testing.T) {
 	body := `artifacts:

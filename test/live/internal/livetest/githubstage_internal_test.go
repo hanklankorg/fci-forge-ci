@@ -15,20 +15,9 @@ func stageTestRepo(t *testing.T, format string) (string, layerGit) {
 	root := t.TempDir()
 	git := githubStageGit()
 	git.env = append(git.env, "GIT_AUTHOR_NAME=fixture", "GIT_AUTHOR_EMAIL=fixture@example.invalid", "GIT_COMMITTER_NAME=fixture", "GIT_COMMITTER_EMAIL=fixture@example.invalid")
-	stageTestGit(t, git, root, "init", "--quiet", "--template=", "--object-format="+format)
+	mustLayerGit(t, git, root, "init", "--quiet", "--template=", "--object-format="+format)
 
 	return root, git
-}
-
-func stageTestGit(t *testing.T, git layerGit, dir string, args ...string) string {
-	t.Helper()
-
-	out, err := git.run(t.Context(), dir, args...)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	return out
 }
 
 func stageTestWrite(t *testing.T, root, name, body string, mode os.FileMode) {
@@ -50,8 +39,8 @@ func stageTestWrite(t *testing.T, root, name, body string, mode os.FileMode) {
 
 func stageTestCommit(t *testing.T, git layerGit, root string) {
 	t.Helper()
-	stageTestGit(t, git, root, "add", "--all")
-	stageTestGit(t, git, root, "commit", "--quiet", "-m", "fixture")
+	mustLayerGit(t, git, root, "add", "--all")
+	mustLayerGit(t, git, root, "commit", "--quiet", "-m", "fixture")
 }
 
 func TestGitHubStageRejectsControlLinksWithoutTouchingSource(t *testing.T) {
@@ -76,7 +65,7 @@ func TestGitHubStageRejectsControlLinksWithoutTouchingSource(t *testing.T) {
 			}
 
 			stageTestCommit(t, git, root)
-			before := stageTestGit(t, git, root, "rev-parse", "HEAD", "HEAD^{tree}")
+			before := mustLayerGit(t, git, root, "rev-parse", "HEAD", "HEAD^{tree}")
 
 			index, err := os.ReadFile(filepath.Join(root, ".git/index"))
 			if err != nil {
@@ -93,7 +82,7 @@ func TestGitHubStageRejectsControlLinksWithoutTouchingSource(t *testing.T) {
 				t.Fatal("outside sentinel changed")
 			}
 
-			if got := stageTestGit(t, git, root, "rev-parse", "HEAD", "HEAD^{tree}"); got != before {
+			if got := mustLayerGit(t, git, root, "rev-parse", "HEAD", "HEAD^{tree}"); got != before {
 				t.Fatal("source refs changed")
 			}
 
@@ -102,7 +91,7 @@ func TestGitHubStageRejectsControlLinksWithoutTouchingSource(t *testing.T) {
 				t.Fatal("source index changed")
 			}
 
-			if stageTestGit(t, git, root, "status", "--porcelain", "--untracked-files=all") != "" {
+			if mustLayerGit(t, git, root, "status", "--porcelain", "--untracked-files=all") != "" {
 				t.Fatal("source changed")
 			}
 		})
@@ -147,15 +136,15 @@ func TestGitHubStagePreservesBlobsModesAndExportAttributes(t *testing.T) {
 				}
 			}
 
-			if !strings.HasPrefix(stageTestGit(t, git, staged.stage, "ls-files", "--stage", "--", "keep"), "100755 ") {
+			if !strings.HasPrefix(mustLayerGit(t, git, staged.stage, "ls-files", "--stage", "--", "keep"), "100755 ") {
 				t.Fatal("executable mode lost")
 			}
 
-			if !strings.HasPrefix(stageTestGit(t, git, staged.stage, "ls-files", "--stage", "--", "data-link"), "120000 ") {
+			if !strings.HasPrefix(mustLayerGit(t, git, staged.stage, "ls-files", "--stage", "--", "data-link"), "120000 ") {
 				t.Fatal("data symlink lost")
 			}
 
-			if stageTestGit(t, git, staged.stage, "ls-files", "--", ".github/workflows") != "" {
+			if mustLayerGit(t, git, staged.stage, "ls-files", "--", ".github/workflows") != "" {
 				t.Fatal("original workflows not removed from private index")
 			}
 		})
@@ -172,11 +161,11 @@ func TestGitHubStageConsumerUsesObjectSnapshot(t *testing.T) {
 		trial := GitHubTrial{tb: t, history: history}
 
 		dir, _ := trial.stageConsumer(root, "fixtures", trialEngine, nil)
-		if got := stageTestGit(t, git, dir, "show", "HEAD:keep"); got != "retained" {
+		if got := mustLayerGit(t, git, dir, "show", "HEAD:keep"); got != "retained" {
 			t.Fatal("existing trial lost content")
 		}
 
-		if stageTestGit(t, git, root, "status", "--porcelain") != "" {
+		if mustLayerGit(t, git, root, "status", "--porcelain") != "" {
 			t.Fatal("source changed")
 		}
 	}

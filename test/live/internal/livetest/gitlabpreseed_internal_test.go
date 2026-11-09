@@ -21,7 +21,7 @@ func TestPreseededProvenanceFixtureUsesOnlyThePrivateConsumerIndex(t *testing.T)
 	original := "#!/bin/sh\nset -eu\nprintf original-build\n"
 	stageTestWrite(t, root, GitLabConsumerBuildScript, original, 0o600)
 	stageTestCommit(t, git, root)
-	before := stageTestGit(t, git, root, "rev-parse", "HEAD", "HEAD^{tree}")
+	before := mustLayerGit(t, git, root, "rev-parse", "HEAD", "HEAD^{tree}")
 
 	consumer, err := openConsumer(t.Context(), git, root, t.TempDir())
 	if err != nil {
@@ -33,17 +33,17 @@ func TestPreseededProvenanceFixtureUsesOnlyThePrivateConsumerIndex(t *testing.T)
 		t.Fatal("negative fixture did not create its own admitted tree")
 	}
 
-	backup := stageTestGit(t, git, fixture.stage, "show", fixture.Commit+":"+gitlabPreseedOriginalBuild)
+	backup := mustLayerGit(t, git, fixture.stage, "show", fixture.Commit+":"+gitlabPreseedOriginalBuild)
 
-	wrapper := stageTestGit(t, git, fixture.stage, "show", fixture.Commit+":"+GitLabConsumerBuildScript)
+	wrapper := mustLayerGit(t, git, fixture.stage, "show", fixture.Commit+":"+GitLabConsumerBuildScript)
 	if backup != strings.TrimSpace(original) || !strings.Contains(wrapper, "bash "+gitlabPreseedOriginalBuild+" \"$@\"") ||
 		!strings.Contains(wrapper, "> dist/slsa-provenance.intoto.json") {
 		t.Fatalf("fixture lost original build or negative handoff: backup=%s wrapper=%s", backup, wrapper)
 	}
 
-	if stageTestGit(t, git, root, "rev-parse", "HEAD", "HEAD^{tree}") != before ||
-		stageTestGit(t, git, root, "show", "HEAD:"+GitLabConsumerBuildScript) != strings.TrimSpace(original) ||
-		stageTestGit(t, git, root, "status", "--porcelain") != "" {
+	if mustLayerGit(t, git, root, "rev-parse", "HEAD", "HEAD^{tree}") != before ||
+		mustLayerGit(t, git, root, "show", "HEAD:"+GitLabConsumerBuildScript) != strings.TrimSpace(original) ||
+		mustLayerGit(t, git, root, "status", "--porcelain") != "" {
 		t.Fatal("negative fixture modified the source checkout, index or identity")
 	}
 

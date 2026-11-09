@@ -127,6 +127,32 @@ func TestCampaignAdminDeclarationsNameConsumedInputsOnly(t *testing.T) {
 // must keeps only the error of a two-valued call, for a table of refusals.
 func must[T any](_ T, err error) error { return err }
 
+// The adverse PR documentation uses a bare scenario selector under either
+// existing lane input, optionally checked by a matching setting declaration.
+func TestCampaignConsumerPREnforcementUsesBareScenarioSelector(t *testing.T) {
+	const scenario = "TestForgejoLayer_ConsumerPullRequest"
+
+	for _, value := range []string{"false", "true"} {
+		t.Run(value, func(t *testing.T) {
+			for _, declaration := range []string{"", "setting admin-application-tests=" + value + "\n"} {
+				dir, path := newCampaign(t, "CAMPAIGN_COMMIT="+campaignHead+"\n", declaration+"scenario "+scenario+"\n")
+				run := operatorCampaignRun(t, "forgejo", map[string]string{"FORGE_CI_LIVE_ADMIN_APPLICATION_TESTS": value})
+				run.Select = []string{scenario}
+
+				plan, err := PlanCampaignLane(reporoot.Path(t), dir, "forgejo", path, campaignHead, run)
+				if err != nil || len(plan.Cases) != 1 || !reflect.DeepEqual(plan.Cases[0].Args, []string{"test-live", "^" + scenario + "$"}) || run.Settings["admin-application-tests"] != value {
+					t.Fatalf("bare scenario with lane input %s: plan=%+v err=%v", value, plan, err)
+				}
+
+				run.Select = []string{scenario + "/admin-application-tests=" + value}
+				if plan, err := PlanCampaignLane(reporoot.Path(t), dir, "forgejo", path, campaignHead, run); !errors.Is(err, errs.ErrValidation) || len(plan.Cases) != 0 || !strings.Contains(err.Error(), "matches no case") {
+					t.Fatalf("unsupported scenario suffix was not refused: plan=%+v err=%v", plan, err)
+				}
+			}
+		})
+	}
+}
+
 func TestCampaignRunSettingsUseTheSameDefaultsAsTheScenarios(t *testing.T) {
 	t.Parallel()
 

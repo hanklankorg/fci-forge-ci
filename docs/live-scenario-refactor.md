@@ -27,10 +27,22 @@ retains the reviewed discovery/help and Phase 1 mapping corrections. This
 handoff integrates the independently GO-reviewed fixture slice
 `5b5618c9d7d9e2cc580394c0bd5b7e8e9836bb0a` (reviewed against native-entrypoint
 boundary `bc7a155b8a1f00276596e106daa6d97906648c53`) onto those newer support
-owners, not by replacing them with older files. The external integration receipt
-records the resulting staged tree (a document cannot contain its own Git tree
-identity). HEAD remains the baseline; these are uncommitted source identities,
-not new release or native acceptance identities.
+owners, not by replacing them with older files. The integrated source is now
+frozen in signed/DCO local commit
+`af9da105f9f86ef8a0d604e2a7f40e569e13610a`, tree
+`258a56e06d2ff0f1e3c989112eb6a75b8d0f0a00`. Independent combined review,
+the full ordinary untagged race suite, maintained canonical binary refresh/check
+(no checksum delta), and integration/smoke/live-tag compile/vet passed on that
+boundary. Signature verification and clean source freeze were recorded by the
+parent session; these are source checks, not native acceptance. No push or tag
+is implied. Earlier staged/uncommitted identities above are historical boundaries.
+
+The Phase 6 reconciliation below compares the original baseline with **signed
+`af9da105` only**. The parent subsequently reported independent Phase 5 helper
+integration review GO and pure checks PASS. That combination is not audited
+here, has no final tree identity in this handoff, and is not signed qualification
+input.
+These documentation updates likewise do not change the frozen native source.
 
 - **Phase 1: COMPLETE for mapping/disposition, independently reviewed.** The
   recursive inventory, exact first-slice/Maven coverage baseline,
@@ -38,21 +50,31 @@ not new release or native acceptance identities.
   scenario/assertion/input owner or an explicit gap, refusal, exclusion or
   unresolved evidence decision in the appendices. Missing native proof and
   historical conflicts are recorded decisions, not silently excluded rows.
-- **Phase 2: SOURCE READY; REQUIRED NATIVE PROOF NOT RUN.** Existing selection,
-  exporter, admission, native orchestration and assertions now have coherent
+- **Phase 2: SOURCE READY; NATIVE QUALIFICATION FAILED, not accepted.** Existing
+  selection, exporter, admission, native orchestration and assertions now have coherent
   source owners. No parallel pilot driver or case parser was added. The full
-  done criterion still requires approved native proof on this source.
+  done criterion still requires passing native proof on this source. The approved
+  attempt passed PR/merge but failed development before Maven build; blocked
+  downstream phases and release were NOT RUN. No retry was performed.
 - **Phase 3:** source/discovery mapping ready on all three roads; **native
   acceptance remains outstanding and provider restrictions still apply**.
   Commands and prerequisites are not provider passes or launch authorization.
-- **Phase 4: SOURCE INTEGRATED; combined independent review outstanding.** All
+- **Phase 4: SOURCE INTEGRATED; combined independent review GO.** All
   40 fixture members retain suffixes/modes, eight have reviewed path/depth edits,
   and the generic-CLI support import retains its new internal owner. Guard roots,
   references and licensing are merged with the support relocation. This is not
   native acceptance or a claim that all phases 2–4 are complete.
-- Phases 5–6 remain incomplete. Helper tree
-  `e783a04f407033eceba302ad2b3e15fcd6285a2e` remains isolated, **not integrated**.
-  No witness or case is retired by this handoff.
+- **Phase 5: helper integration independently reviewed GO outside the signed freeze.** Previously
+  reviewed isolated helper tree `e783a04f407033eceba302ad2b3e15fcd6285a2e`
+  was adapted to current support owners in a separate worktree. The parent reports
+  integration review GO and pure checks PASS; **final tree not audited here**.
+  Primary `af9da105` is unchanged. Helper code is not natively qualified; source
+  review does not complete image-graph/specialized native acceptance.
+- **Phase 6: signed-source inventory/retirement reconciled locally; residual
+  guard disposition, final combined-source identity/accounting and acceptance
+  remain open.** No
+  further unique code, scenario or case retirement is justified. Neither this
+  audit nor source readiness declares full phase completion or native PASS.
 
 ## Exhaustive recursive group dispositions
 
@@ -91,6 +113,76 @@ the maintained preflight CLI's **`classify-run` only**, replacing the obsolete
 `TestLiveClassifierProcessFixture` subprocess shortcut. Both classifier parent
 assertions and package-separation cases remain. This is not retirement of a
 native witness. Ordinary untagged checks still own both transferred assertions.
+
+## Signed-source retirement and inventory reconciliation
+
+This audit uses immutable baseline `afd06f71` → signed `af9da105`, not a pending
+combined tree. All **638 original mapped members** (253 consumer, 90 native,
+255 support, 40 other fixture files) survive at the recursive destinations
+above with suffixes and Git modes preserved. All 14 embedded live-suite payloads
+and every mapped Go build/embed directive retain identity. Repository build
+constraints remain 91 `live`, 66 `linux`, 36 `integration`, eight `unix`, six
+`!linux`, four `smoke` and one `!unix`; no tagged scenario became ordinary proof.
+
+Static column-zero Test declarations change **5806 → 5807**, excluding 18
+`TestMain` and 19 fuzz declarations in both trees (5843 → 5844 total records).
+The two exporter regressions are additions; the classifier subprocess shortcut
+is the one intentional removal, for the real-CLI-backed reason above. Both
+transferred assertions remain ordinary tests. Conformance retains 114 Tests,
+hosted 15, and support grows 493 → 495 through those two transfers. Counts are
+source declarations across all tags/platforms, not executed tests or assertions.
+
+All **51 original suffix-aware HAR/PAR IDs and 89 occurrences at their original
+owners** survive. Added explanatory mappings increase whole-tree mentions, not
+requirements or proof. Appendices A–C continue to map the existing matrix's
+12 project kinds × five flows (three provider cells each), 27 axis/value rows,
+seven platform families, 18 kept scenario rows and 51 requirement IDs. They are
+not another authoritative registry. All 12 campaign files (93 noncomment input
+lines, including settings) are byte/mode-identical. All 56 evidence data rows
+are unchanged; only their maintained command comment moved. Both generated
+matrix blocks retain exact bytes; the existing generator and
+`TestTestingMatricesInSync` remain their sole synchronization mechanism.
+
+**Retirement decision: retain every unique witness.** Standalone PR, snapshot
+and release preserve event/input-specific admission and output checks;
+multi-image and library/package roads cannot be replaced by one-service
+lifecycle success. Refusal/security, interrupted recovery, cold/partial/warm
+cache, private-read/private-image and protected-job witnesses preserve distinct
+authority, prior state, readback and cleanup contracts. Only the obsolete test
+transport shortcut above was replaced; no native witness or campaign row was
+removed. No permanent dual driver, compatibility fixture root, settings parser
+or scenario catalogue was introduced. Further retirement requires reviewed
+assertion/input equivalence and applicable replacement proof, not similar names.
+
+Old active roots are absent. Whole tracked-tree searches include hidden tool
+configuration, imports, scripts, maintained commands and compound literals.
+Remaining apparent old-root references are explained, not fallback discovery:
+
+- The recursive disposition table intentionally names historical source paths.
+- `internal/livetest` in the live README is relative to `test/live`, not the
+  removed repository-root package.
+- The successor narrows lint globs to `**/test/live/internal/livetest/**` and its
+  `rawref` child, preserving current kit layering and raw-oracle independence
+  without exempting a hypothetical reintroduced root-internal live kit.
+- `TestReleaseEvidenceRejectsCheckoutDestinations` constructs a disposable
+  `internal`/`livetest` directory under a fake Git root to test ancestor-based
+  checkout refusal. It neither reads nor discovers the removed source root.
+- The successor removes the dormant root-internal `livetest` test-layer exemption
+  from `test/archguard/layers_test.go`. Its existing classifier and run-context
+  table cases now require utility-layer enforcement for that old name. They
+  remain regressions against a reintroduced exemption, not a supported legacy
+  source owner or a migrated current-package guard witness.
+- Exported campaign `<prepared-dir>/demos` and consumers' own `test/live/github`
+  or GPG workflow profiles are maintained runtime interfaces, not legacy source
+  roots. Historical evidence coordinates and authenticated regression fixtures
+  remain historical; they must not be modernized into new acceptance claims.
+
+No active old-root reader/fallback or source-preservation loss was found at
+`af9da105`; the successor resolves its dormant guard-category exception as above.
+This immutable-source conclusion excludes the concurrent helper integration. The
+final combined tree must receive its own identity/accounting and retain its
+reported review/affected checks; it must not replace `af9da105` as the source
+identity for the failed native attempt.
 
 ## Maven application pilot and no-loss owners
 
@@ -142,7 +234,9 @@ exported with `bash scripts/ci/demo-checkout.sh hello-maven-service <empty-dir>`
 do not pass the nested recipe in the engine Git checkout. Campaign preparation
 exports its own consumer checkouts.
 
-The following are **proposed commands after approval/preparation, not executed**:
+The following commands describe the maintained roads, **not executed by this
+audit**. Only the bounded Forgejo cell has separate launch-scope approval;
+the approved attempt failed and does not establish native acceptance:
 
 | Road | Maintained Maven-service lifecycle command | Prerequisites, owner and evidence distinction |
 |---|---|---|
@@ -200,27 +294,54 @@ graph and full-versus-reduced inventories. Dated parity prose and newer matrix
 marks can refer to different milestones; resolve their evidence coordinates at
 the existing owners rather than promoting or erasing either here. R/G cache
 source/run linkage and independent cleanup-absence receipts remain explicit
-evidence limitations. No current-tree native PASS is established by this page.
+evidence limitations. No current-tree full lifecycle PASS is established by this page.
 
-## Minimal proposed native acceptance, awaiting authorization
+## Bounded native acceptance: failed qualification, no retry
 
-Request approval for **one Forgejo public Buildah Linux/amd64 Maven-service
-lifecycle cell**, the exact first command above, before any other native road.
+The parent recorded user approval for required preparation and **one Forgejo
+public Buildah Linux/amd64 Maven-service lifecycle cell**, the exact first
+command above, using signed `af9da105` in the named scratch repositories
+`forgeci/fci-consumer-lifecycle` and `forgeci/fci-consumer-trial-layer`.
 It includes PR, native merge, artifact-first snapshot/readiness, stable release
 and owned cleanup. It is not approval for the whole cases file, private/Kaniko
 variants, other consumers or held provider lanes. Serializing this bounded first
 acceptance is deliberate scope control, not a recommendation to serialize future
 independent ready providers.
 
-Still required before launch:
+The parent reports that the approved single qualification on frozen `af9da105`
+completed **FAILED**, exit 1 after 90.27 seconds, with **no retry**:
 
-1. Explicit user approval of road, public visibility, builder, native effects,
-   source candidate and mutable repository/package coordinates; approval for any
-   required source commit/checksum and image preparation is separate. This
-   uncommitted review tree cannot be passed off as a clean admitted engine.
-2. Independent review of the final staged source tree and an immutable clean
-   engine/consumer source and checksum/digest binding. Record declaration and
-   settings hashes; do not reuse historical passes as this tree's proof.
+- PR run **545 PASS** and native PR merge **PASS**.
+- Development run **546 FAILED** in producer job **7539**, before Maven build:
+  Java runtime discovery's ten-second deadline killed the process. This is the
+  confirmed failure boundary, not a diagnosis of why discovery exceeded it.
+- Downstream context/build/publish/readiness were blocked, not dispatched:
+  **NOT RUN**. Stable release **NOT RUN**. This is not a Phase 2 pass.
+- Exact retained verdict (external evidence, not regenerated here):
+  `/home/jos/development/.opencode-itiquette-evidence/forgejo-maven-refactor-20261109/native-runs/20261109T193041Z-599727/verdict.json`.
+- Parent read-only status at **20:32:39**: both providers idle, zero active and
+  zero retained jobs. Network unchanged at 228 leases / 25 free / eight attached /
+  220 historical leaked; no observed persistent lease growth. This does not
+  provide independent repository/package absence proof.
+
+These results are parent-supplied, not a native run or evidence modification by
+this audit. Historical matrix/evidence marks are unchanged and are not this
+source's proof. A separate parent-owned read-only diagnostic investigates the
+Java failure; no producer fix, source edit, retry or broader scope is authorized
+here. GitLab/GitHub and protected/classified campaign holds remain in force.
+The capacity/no-network-reset/no-automatic-retry and no-public-log conditions
+remain explicit for any separately approved continuation.
+
+Retained acceptance obligations for a separately authorized continuation:
+
+1. Stay within that approved road, visibility, builder, source and exact mutable
+   coordinates/cleanup authority. Additional roads or broader effects require
+   separate approval; approval is not a successful preparation or native result.
+2. Preserve the independently reviewed, signed clean `af9da105` engine and its
+   canonical checksum binding. Retain preparation's exact consumer source,
+   declaration/settings hashes and image digest bindings. The separately reviewed helper
+   and these new docs are not qualification inputs; do not reuse historical
+   passes as this source's proof.
 3. Current Forge Lab instructions, authorized fresh target/CA/acknowledgements,
    free supported provider lock, Linux/amd64 container/readiness runner, verified
    Java nanolinter and signer images, signing tools and supported key-backed
@@ -230,15 +351,19 @@ Still required before launch:
    and any shared image/runner resources before effects. Never sweep kept demos
    or reusable prerequisite images as disposable trial resources.
 5. Observed host/runner CPU, RAM, disk, concurrency and a bounded preparation/run
-   budget with headroom, including cleanup. Estimates and current capacity have
-   not been collected for a native run by this source-only task.
+   budget with headroom, including cleanup. The parent recorded a 25-free-address/
+   220-leaked-lease warning; separate address-budget analysis and current capacity
+   admission remain required for further effects. The post-run unchanged network
+   observation above is not future capacity admission. This audit neither
+   refreshes capacity nor authorizes network repair or broad cleanup.
 6. Retain source identities, native run/attempt and merge/request/tag identities,
    planned output/receipt/digest/signature/readiness readbacks, exact exit/verdict
    and cleanup results (with absence-proof limitations explicit).
 
 No providers, default/live preflight, mutable preparation, evidence regeneration,
-commits, pushes or tags are authorized or performed by this handoff. Phase 2's
-required native proof and Phase 3's road-specific acceptance cannot honestly be
+commits, pushes or tags are performed by this documentation audit. The parent's
+separately approved source freeze/preparation and failed attempt do not establish
+acceptance. Phase 2's required native proof and Phase 3's road-specific acceptance cannot honestly be
 closed until those separately approved results exist.
 
 ## Appendix A: every project-kind and flow row

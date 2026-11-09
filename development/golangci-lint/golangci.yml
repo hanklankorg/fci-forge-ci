@@ -130,7 +130,7 @@ linters:
             - "!**/internal/app/**"
             - "!**/internal/cli/**"
             - "!**/internal/testutil/**"
-            - "!**/internal/livetest/**"
+            - "!**/test/live/internal/livetest/**"
             - "!$test"
           deny:
             - pkg: "github.com/diggsweden/forge-ci/internal/app$"
@@ -162,7 +162,7 @@ linters:
               desc: frozen and unsafe by design (GO-2026-5932); use github.com/ProtonMail/go-crypto/openpgp
         rawref-stays-independent:
           files:
-            - "**/internal/livetest/rawref/**"
+            - "**/test/live/internal/livetest/rawref/**"
           deny:
             - pkg: github.com/diggsweden/forge-ci/internal/adapters
               desc: the raw oracle must not use the adapters it is the oracle for

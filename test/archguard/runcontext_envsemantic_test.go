@@ -147,7 +147,7 @@ func TestRunContextEnvGuardLayers(t *testing.T) {
 	}{
 		{"domain/release", true}, {"app/build", true}, {"cli/cienv", true},
 		{"neutralhelper", true}, {"runcontext", true}, {"cliio", true},
-		{"adapters/github", false}, {"testutil/fixture", false}, {"livetest", false},
+		{"adapters/github", false}, {"testutil/fixture", false}, {"livetest", true},
 	} {
 		t.Run(tc.path, func(t *testing.T) {
 			t.Parallel()

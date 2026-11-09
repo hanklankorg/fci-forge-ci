@@ -63,6 +63,9 @@ jobs:
 
   consumer-test:
     name: Test consumer pull request
+    # Report-only findings must reach this consumer; enforcing findings and
+    # operational errors must leave it skipped, not merely fail a shell probe.
+    needs: [consumer-build]
     runs-on: ${{ fromJSON(vars.CI_RUNNER_LABEL) }}
     timeout-minutes: 10
     steps:

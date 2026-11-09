@@ -19,15 +19,14 @@ import (
 // Exercise the maintained exporter, not a second fixture-copy implementation.
 // Its source location may change; consumer contents and checkout behavior may not.
 func TestDemoCheckoutPreservesConsumer(t *testing.T) {
-	for _, name := range []string{
-		"hello-android", "hello-cargo-container", "hello-cargo-workspace",
-		"hello-go-cli", "hello-go-service", "hello-gradle", "hello-ios",
-		"hello-maven", "hello-maven-service", "hello-monorepo",
-		"hello-npm-package", "hello-npm-service",
-	} {
+	root := reporoot.Path(t)
+	sources, err := filepath.Glob(filepath.Join(root, "test", "live", "fixtures", "consumers", "*", "consumer"))
+	require.NoError(t, err)
+	require.NotEmpty(t, sources)
+
+	for _, source := range sources {
+		name := filepath.Base(filepath.Dir(source))
 		t.Run(name, func(t *testing.T) {
-			root := reporoot.Path(t)
-			source := filepath.Join(root, "test", "live", "fixtures", "consumers", name, "consumer")
 			destination := filepath.Join(t.TempDir(), "consumer")
 
 			ctx, cancel := context.WithTimeout(t.Context(), liveCommandBound)

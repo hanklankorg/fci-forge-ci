@@ -7,18 +7,15 @@
 package conformance_test
 
 import (
-	_ "embed"
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/diggsweden/forge-ci/internal/testutil/reporoot"
 	"github.com/diggsweden/forge-ci/test/live/internal/livetest"
 )
-
-//go:embed testdata/layer/consumer-pr.yml
-var layerConsumerPRFixture string
 
 // The consumer the pull request is opened in: one Go module, small enough to
 // read here, and a canary file the pull request changes.
@@ -57,7 +54,7 @@ func TestBanner(t *testing.T) {
 // LAYER-3: a consumer's pull-request workflow builds, tests and passes the
 // isolation gate with the layer's actions, and publishes nothing.
 //
-// The three jobs assert for themselves: the layer's Go build produces a binary
+// The clean case's three jobs assert for themselves: the layer's Go build produces a binary
 // stamped with the version the caller gave; the checkout is the pull
 // request's head, in this repository, for a pull_request event from the head
 // branch into main, and holds the change the pull request makes; and
@@ -70,18 +67,31 @@ func TestBanner(t *testing.T) {
 // left no tag, release, artifact, deploy key or secret, and no package on the
 // account. A pull request is unreviewed code, so "it published nothing" is
 // the half of this scenario that matters most.
+//
+// The two adverse cases change only the PR's Go test source. A real assertion
+// failure must reach the binary verification and downstream identity job under
+// report-only policy, and block both under enforcing policy. A compiler error
+// blocks under either policy. Layer.Render supplies the current administrator
+// input from the pinned action contract, not from application source. These
+// are PR non-publication checks, not proof of a release publisher being gated.
 func TestForgejoLayer_ConsumerPullRequest(t *testing.T) {
 	livetest.RegisterLiveScenario(t)
 
 	for _, visibility := range livetest.ConsumerVisibilities(t) {
 		t.Run(visibility.Name, func(t *testing.T) {
 			format := pairedObjectFormat(visibility)
-			t.Run(format, func(t *testing.T) { runLayerConsumerPR(t, visibility.Private, format) })
+			t.Run(format, func(t *testing.T) {
+				t.Run("clean", func(t *testing.T) { runLayerConsumerPR(t, visibility.Private, format, "") })
+
+				for _, adverse := range consumerPRAdverseTests {
+					t.Run(adverse.name, func(t *testing.T) { runLayerConsumerPR(t, visibility.Private, format, adverse.source) })
+				}
+			})
 		})
 	}
 }
 
-func runLayerConsumerPR(t *testing.T, private bool, objectFormat string) {
+func runLayerConsumerPR(t *testing.T, private bool, objectFormat, adverseTest string) {
 	t.Helper()
 
 	const (
@@ -91,6 +101,8 @@ func runLayerConsumerPR(t *testing.T, private bool, objectFormat string) {
 
 	scenario := newLayerScenario(t, "layer-consumer-pr", private, objectFormat)
 	target, repo := scenario.target, scenario.repo
+	enforced := livetest.AdminInputs(t, nil)["enforce-application-tests"].(bool)
+	blocked := adverseTest != "" && (enforced || adverseTest == consumerPRCompileError)
 
 	example, err := os.ReadFile(filepath.Join(reporoot.Path(t), "examples/go-cli/forgejo/release.yml"))
 	if err != nil {
@@ -116,9 +128,14 @@ func runLayerConsumerPR(t *testing.T, private bool, objectFormat string) {
 		},
 	})
 
+	changes := map[string]string{consumerPRCanary: "consumer-pr-feature\n"}
+	if adverseTest != "" {
+		changes["main_test.go"] = adverseTest
+	}
+
 	feature := livetest.CommitFiles(t, target, repo, livetest.FileCommit{
 		Branch: layerMain, NewBranch: head, Message: "livetest: the change under review",
-		Files: map[string]string{consumerPRCanary: "consumer-pr-feature\n"},
+		Files: changes,
 	})
 
 	packages := livetest.OwnerPackages(t, target)
@@ -127,17 +144,63 @@ func runLayerConsumerPR(t *testing.T, private bool, objectFormat string) {
 	requirePullRequest(t, opened, head, feature, main)
 
 	run := livetest.WaitForLayerRun(t, target, repo, workflow, "pull_request")
-	jobs := scenario.requireStatus(t, run, jobSuccess)
 
-	onRunner, wrappers := requireJobsOnRunner(t, jobs, run.ID, scenario.label)
-	if want := []string{"Build consumer pull request", "Test consumer pull request", "Verify consumer release isolation"}; !slices.Equal(onRunner, want) || len(wrappers) != 0 {
-		t.Errorf("the run's jobs are %v on the runner and %v without one, want exactly %v", onRunner, wrappers, want)
+	wantRun, wantBuild, wantDownstream := jobSuccess, jobSuccess, jobSuccess
+	if blocked {
+		wantRun, wantBuild, wantDownstream = jobFailure, jobFailure, "skipped"
+	}
+
+	jobs := scenario.requireStatus(t, run, wantRun)
+	requireRunIDs(t, target, repo, run.ID)
+	requireJobsOnRunner(t, jobs, run.ID, scenario.label)
+
+	wantJobs := map[string]string{
+		"Build consumer pull request":       wantBuild,
+		"Test consumer pull request":        wantDownstream,
+		"Verify consumer release isolation": jobSuccess,
+	}
+	if len(jobs) != len(wantJobs) {
+		t.Fatalf("got %d jobs, want %d", len(jobs), len(wantJobs))
 	}
 
 	for _, job := range jobs {
-		if job.Status != jobSuccess {
-			t.Errorf("job %q is %s in a successful run", job.Name, job.Status)
+		if want, ok := wantJobs[job.Name]; !ok || job.Status != want {
+			t.Errorf("job %q is %s, want %s", job.Name, job.Status, want)
 		}
+
+		delete(wantJobs, job.Name)
+
+		if job.Status != "skipped" && !slices.Equal(job.RunsOn, []string{scenario.label}) {
+			t.Errorf("job %q ran on %v, want [%s]", job.Name, job.RunsOn, scenario.label)
+		}
+
+		if adverseTest != "" && job.Name == "Build consumer pull request" {
+			log := livetest.JobLog(t, target, repo, job)
+
+			marker := "controlled application assertion"
+			if adverseTest == consumerPRCompileError {
+				marker = "undefined: enforcementCompileError"
+			}
+
+			if !strings.Contains(log, marker) {
+				t.Errorf("build log lacks the actual Go failure %q", marker)
+			}
+
+			if !enforced {
+				receipt := "application-tests result=findings count=1 enforcement=false source=flag"
+				if adverseTest == consumerPRCompileError {
+					receipt = "application-tests result=not-waivable enforcement=false source=flag"
+				}
+
+				if !strings.Contains(log, receipt) {
+					t.Errorf("build log lacks the engine classification %q", receipt)
+				}
+			}
+		}
+	}
+
+	if len(wantJobs) != 0 {
+		t.Errorf("missing jobs: %v", wantJobs)
 	}
 
 	requirePullRequest(t, livetest.ReadPullRequest(t, target, repo, opened.Number), head, feature, main)

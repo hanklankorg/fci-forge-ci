@@ -13,7 +13,7 @@ import (
 )
 
 // GitLab artifact archives contain explicit directory records. Validate those
-// records before ignoring them; production ZIPTree remains strictly file-only.
+// records before ignoring them; the shared kit's ZIPTree remains strictly file-only.
 func snapshotArtifactZIPTree(body []byte, limit int64) (map[string][]byte, error) {
 	reader, err := zip.NewReader(bytes.NewReader(body), int64(len(body)))
 	if err != nil {

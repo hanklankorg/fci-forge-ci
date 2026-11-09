@@ -6,6 +6,7 @@
 package conformance_test
 
 import (
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -87,19 +88,10 @@ func TestForgejoLayer_ResolvedImagePlan(t *testing.T) {
 		afterID = run.ID
 		artifactName := "resolved-base-review-" + phase
 
-		var tree map[string][]byte
-
-		for _, artifact := range livetest.RunArtifacts(t, target, repo, run.ID) {
-			if artifact.Name == artifactName {
-				if tree != nil {
-					t.Fatalf("run %d has duplicate review artifacts", run.ID)
-				}
-
-				tree, err = livetest.ZIPTree(livetest.ArtifactZIP(t, target, repo, artifact.ID), maxReleaseFile)
-				if err != nil {
-					t.Fatal(err)
-				}
-			}
+		tree, err := imagePlanArtifactTree(livetest.RunArtifacts(t, target, repo, run.ID), artifactName, maxReleaseFile,
+			func(id int64) []byte { return livetest.ArtifactZIP(t, target, repo, id) })
+		if err != nil {
+			t.Fatalf("run %d review artifacts: %v", run.ID, err)
 		}
 
 		entries, err := imagePlanReview(tree, baseRepository)
@@ -170,21 +162,10 @@ func TestForgejoLayer_ResolvedImagePlan(t *testing.T) {
 
 		finalArtifact := "resolved-final-review-" + artifactName
 
-		var finalTree map[string][]byte
-
-		for _, artifact := range livetest.RunArtifacts(t, target, repo, run.ID) {
-			if artifact.Name != finalArtifact {
-				continue
-			}
-
-			if finalTree != nil {
-				t.Fatalf("run %d has duplicate final review artifacts", run.ID)
-			}
-
-			finalTree, err = livetest.ZIPTree(livetest.ArtifactZIP(t, target, repo, artifact.ID), maxReleaseFile)
-			if err != nil {
-				t.Fatal(err)
-			}
+		finalTree, err := imagePlanArtifactTree(livetest.RunArtifacts(t, target, repo, run.ID), finalArtifact, maxReleaseFile,
+			func(id int64) []byte { return livetest.ArtifactZIP(t, target, repo, id) })
+		if err != nil {
+			t.Fatalf("run %d final review artifacts: %v", run.ID, err)
 		}
 
 		urlPrefix := strings.TrimRight(target.BaseURL(), "/") + "/" + livetest.RepoSlug(target, repo) + "/releases/download/v0.0.1"
@@ -225,4 +206,30 @@ func TestForgejoLayer_ResolvedImagePlan(t *testing.T) {
 
 		t.Logf("final release evidence verified: phase=%s run=%d index=%s child=%s inventory-sha256=%s index-bom-sha256=%s url-prefix=%s artifact=%s", phase, run.ID, final.Ref, child, imagePlanSHA256(finalTree["sbom-distroless-amd64.json"]), final.SBOMSHA256, urlPrefix, finalArtifact)
 	}
+}
+
+// imagePlanArtifactTree shares only byte acquisition mechanics. A missing tree
+// remains nil for the separate base/final review validators to reject. Listing
+// and bounded download stay with the caller's exact target, repository and run.
+func imagePlanArtifactTree(artifacts []livetest.RunArtifact, name string, limit int64, download func(int64) []byte) (map[string][]byte, error) {
+	var tree map[string][]byte
+
+	for _, artifact := range artifacts {
+		if artifact.Name != name {
+			continue
+		}
+
+		if tree != nil {
+			return nil, fmt.Errorf("duplicate review artifact %q", name)
+		}
+
+		var err error
+
+		tree, err = livetest.ZIPTree(download(artifact.ID), limit)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return tree, nil
 }
