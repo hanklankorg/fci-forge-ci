@@ -84,7 +84,13 @@ EXAMPLE:
    CONFIG_PLAN_JSON="$config_plan" forge-ci --runner local --json plan release \
      --tag v1.2.3 --branch main --repository-visibility public
 
-Composition does not execute a release or establish signing/publication readiness.`,
+Composition does not execute a release or establish signing/publication readiness.
+
+The layer passes its runner inputs with --runner-input. The plan is then
+refused when a platform its containers build, or its Xcode jobs, has no
+runner: the input of that role and platform has no value.`,
+		// A --runner-input value is a JSON array, whose commas separate nothing.
+		DisableSliceFlagSeparator: true,
 		Flags: []cli.Flag{
 			&cli.StringFlag{Name: "repository-visibility", Sources: cli.EnvVars("REPOSITORY_VISIBILITY"), Usage: "public, private, internal or unknown; unknown requires explicit public-transparency consent"},
 			&cli.StringFlag{Name: configPlanJSONFlag, Sources: cli.EnvVars("CONFIG_PLAN_JSON"), Usage: "typed config-plan JSON (output of 'config parse-artifacts')"},
@@ -100,10 +106,16 @@ Composition does not execute a release or establish signing/publication readines
 			&cli.StringFlag{Name: "changelog-creator", Sources: cli.EnvVars("CHANGELOG_CREATOR"), Usage: "changelog renderer: git-cliff, the only one the GitHub release runs, or empty for no changelog"},
 			&cli.BoolFlag{Name: "changelog-skip-version-bump", Sources: cli.EnvVars("CHANGELOG_SKIP_VERSION_BUMP"), Usage: "skip the version-bump commit (caller already committed)"},
 			&cli.StringFlag{Name: "release-platforms", Sources: cli.EnvVars("RELEASE_PLATFORMS"), Usage: "comma-separated subset of each container's platforms this run builds; empty plans every declared platform"},
+			commonflags.RunnerInput(),
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			return deps.FromCmd(ctx, cmd, func(d *deps.Deps) error {
-				_, err := appplan.Release(ctx, d.OutputSink, d.SummarySink, appplan.ReleaseInput{
+				runnerInputs, err := commonflags.RunnerInputs(cmd, d.Platform)
+				if err != nil {
+					return err
+				}
+
+				_, err = appplan.Release(ctx, d.OutputSink, d.SummarySink, appplan.ReleaseInput{
 					RepositoryVisibility:            cmd.String("repository-visibility"),
 					ConfigPlanJSON:                  cmd.String(configPlanJSONFlag),
 					Branch:                          cmd.String("branch"),
@@ -118,6 +130,7 @@ Composition does not execute a release or establish signing/publication readines
 					ChangelogCreator:                cmd.String("changelog-creator"),
 					ChangelogSkipVersionBump:        cmd.Bool("changelog-skip-version-bump"),
 					ReleasePlatforms:                cmd.String("release-platforms"),
+					Runners:                         runnerInputs,
 				})
 
 				return err

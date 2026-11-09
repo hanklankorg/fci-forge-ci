@@ -12,7 +12,9 @@ import (
 	"github.com/diggsweden/forge-ci/internal/domain/errs"
 	"github.com/diggsweden/forge-ci/internal/domain/pipeline"
 	"github.com/diggsweden/forge-ci/internal/domain/projecttype"
+	"github.com/diggsweden/forge-ci/internal/domain/provider"
 	domainrelease "github.com/diggsweden/forge-ci/internal/domain/release"
+	"github.com/diggsweden/forge-ci/internal/domain/runners"
 )
 
 func TestNewReleasePlan_ComputesPolicyAndStagePlans(t *testing.T) {
@@ -444,5 +446,68 @@ func TestNewReleasePlan_VersionBumpTargetNeedsAnArtifact(t *testing.T) {
 
 	if target := plan.Stages.Prepare.Targets.VersionBump; target.Runs || len(target.Items) != 0 {
 		t.Errorf("version bump target = %+v, want not running with no artifacts", target)
+	}
+}
+
+// The plan is refused when a platform it builds has no runner, after
+// RELEASE_PLATFORMS narrowed it, and when its Xcode jobs have no macOS runner.
+func TestNewReleasePlan_RefusesAPlatformWithoutARunner(t *testing.T) {
+	t.Parallel()
+
+	newPlan := func(t *testing.T, selection string, xcode bool, pairs ...string) error {
+		t.Helper()
+
+		cfg := &config.Config{
+			Sign:       config.SignConfig{Method: domainrelease.SignMethodSigstore, Transparency: domainrelease.TransparencyPublic},
+			Artifacts:  []config.Artifact{{Name: "go-service", ProjectType: projecttype.Go, Go: &config.GoConfig{BuildMode: config.GoBuildModeContainerFirst}}},
+			Containers: []config.Container{{Name: "api", From: []string{"go-service"}, Platforms: "linux/amd64,linux/arm64"}},
+		}
+
+		if xcode {
+			no := false
+			cfg.Artifacts = append(cfg.Artifacts, config.Artifact{Name: "ios", ProjectType: projecttype.XcodeIOS, XcodeIOS: &config.XcodeIOSConfig{EnableCodeSigning: &no}})
+		}
+
+		if err := config.Derive(cfg); err != nil {
+			t.Fatal(err)
+		}
+
+		inputs, err := runners.ParseInputs(provider.ForgeForgejo, pairs)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		_, err = pipeline.NewReleasePlan(pipeline.ReleasePlanInput{
+			ConfigPlan:           pipeline.NewConfigPlan(cfg),
+			RefName:              "v1.2.3",
+			ReleaseSBOMs:         "none",
+			ReleaseSignArtifacts: true,
+			ReleasePlatforms:     selection,
+			Runners:              inputs,
+		})
+
+		return err
+	}
+
+	amd64 := `build-runs-on-linux-amd64=["pool"]`
+
+	if err := newPlan(t, "", false, amd64); !errors.Is(err, errs.ErrUsage) || !strings.Contains(err.Error(), "build-runs-on-linux-arm64") {
+		t.Errorf("arm64 build without its runner: err = %v, want a refusal naming build-runs-on-linux-arm64", err)
+	}
+
+	if err := newPlan(t, "linux/amd64", false, amd64); err != nil {
+		t.Errorf("a run narrowed to amd64 needs no arm64 runner: %v", err)
+	}
+
+	if err := newPlan(t, "", false, amd64, `build-runs-on-linux-arm64=["arm64"]`); err != nil {
+		t.Errorf("both runners passed: %v", err)
+	}
+
+	if err := newPlan(t, "linux/amd64", true, amd64); !errors.Is(err, errs.ErrUsage) || !strings.Contains(err.Error(), "runs-on-darwin-arm64") {
+		t.Errorf("Xcode jobs on Forgejo: err = %v, want a refusal naming runs-on-darwin-arm64", err)
+	}
+
+	if err := newPlan(t, "", true); err != nil {
+		t.Errorf("a layer that passes no runner inputs is not checked: %v", err)
 	}
 }

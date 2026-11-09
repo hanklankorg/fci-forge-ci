@@ -56,6 +56,42 @@ Where image builds run is the installation's choice:
 | your own runners with rootless Podman | their labels | unset |
 | a hosted pool that denies them; borrow a runner | the labels the lender registers, e.g. `["gh-vm","arch=amd64"]` | `github` |
 
+## A planned platform needs its runner
+
+Every runner input is named `[role-]<keyword>[-<os>-<arch>]`:
+
+- the role: none for ordinary jobs, `build-` for privileged image builds,
+  `signer-` for the jobs that hold the signing credentials;
+- the keyword: `runner-tags` on GitLab, `runs-on` on Forgejo and GitHub;
+- the platform, only on an input whose jobs run on that one platform: its
+  `RELEASE_PLATFORMS` name with `/` turned into `-`, such as `linux-arm64` or
+  `darwin-arm64`.
+
+So `build-runner-tags-linux-arm64` chooses GitLab's arm64 image build runner
+and `runs-on-darwin-arm64` the Forgejo or GitHub macOS runner. The engine owns
+this table (`internal/domain/runners`); the layers and their guards take the
+names from it.
+
+`forge-ci plan release` and `forge-ci container release-images plan` take
+each runner input of the calling layer with `--runner-input name=value`, as
+the layer passed it after its own defaults. The plan is refused when one of
+its jobs has no runner:
+
+- an image build for a platform the plan includes after `RELEASE_PLATFORMS`
+  narrowed it, whose `build-` input of that platform has no value;
+- an Xcode or App Store job, whose ordinary `darwin-arm64` input has no value.
+
+The refusal names the input, the platform and the forge. There is no
+fallback across platforms or roles: an arm64 build never runs on the amd64
+runner, and an image build never on the ordinary one. A default counts as a
+value. GitLab's empty list `[]` means untagged, which is a choice; on Forgejo
+and GitHub an empty label list selects no runner, so it is refused. The
+refusal therefore fires where the forge has no default and none was given,
+and for macOS jobs where the forge has no macOS runner, as on Forgejo.
+
+A layer that passes no `--runner-input` is not checked; the layers pass
+their runner inputs as they move to these names.
+
 ## Runner lending
 
 A lender starts one ephemeral runner on a machine that permits user

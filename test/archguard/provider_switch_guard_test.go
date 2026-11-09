@@ -21,6 +21,7 @@ func TestDomainPlatformBranchingIsConfinedToPresentation(t *testing.T) {
 	allowed := map[string]string{
 		"internal/domain/summary/urls.go":        "run/commit URL shapes differ per forge",
 		"internal/domain/consumerinit/layout.go": "a consumer's file layout and an example's placeholder tokens differ per forge",
+		"internal/domain/runners/runners.go":     "a runner input's keyword and an empty runner list's meaning are each forge's own: tags on GitLab, labels on Forgejo and GitHub",
 	}
 
 	branches := []string{

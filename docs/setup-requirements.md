@@ -70,6 +70,9 @@ required is not necessarily missing: remote secrets have not been inspected.
 See [signing-key setup](quickstart-setup-secrets.md),
 [Forgejo secrets](forgejo.md#secrets-and-tokens),
 [GitHub permissions](reference.md), and [publisher credentials](publishing.md).
+The report does not check runner inputs. A release plan is refused at plan
+time when a platform or macOS job it includes has no runner; see
+[A planned platform needs its runner](runners.md#a-planned-platform-needs-its-runner).
 Local checks cannot establish runner isolation, protected-branch access, package
 visibility or successful publication. Verify these through the appropriate
 trusted preflight and hosted release acceptance process.
