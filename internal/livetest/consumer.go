@@ -22,6 +22,7 @@ import (
 	"github.com/diggsweden/forge-ci/internal/domain/container"
 	"github.com/diggsweden/forge-ci/internal/domain/errs"
 	"github.com/diggsweden/forge-ci/internal/domain/provider"
+	"github.com/diggsweden/forge-ci/internal/pathsafe"
 )
 
 // A consumer trial runs a real repository's own workflow on the lab against
@@ -141,6 +142,9 @@ type TrialSettings struct {
 	// released; requesting the same version again shows what the rerun does
 	// with what the cancelled run left.
 	InterruptAfter string
+	// ReleaseImagesConfig opts into local-registry output readback. The
+	// declaration is read from the verified prepared commit, not the host tree.
+	ReleaseImagesConfig string
 }
 
 var (
@@ -152,13 +156,14 @@ var (
 
 // The trial's own settings, and the workflow each event judges by default.
 const (
-	settingWorkflow    = "workflow"
-	settingVersion     = "version"
-	settingNextVersion = "next-version"
-	settingToken       = "token"
-	settingSecretFile  = "secret-file"
-	settingImage       = "image"
-	settingInterrupt   = "interrupt-after"
+	settingWorkflow            = "workflow"
+	settingVersion             = "version"
+	settingNextVersion         = "next-version"
+	settingToken               = "token"
+	settingSecretFile          = "secret-file"
+	settingImage               = "image"
+	settingInterrupt           = "interrupt-after"
+	settingReleaseImagesConfig = "release-images-config"
 
 	trialPullRequestWorkflow = "pullrequest.yml"
 	trialReleaseWorkflow     = "release.yml"
@@ -194,6 +199,7 @@ func ParseTrialSettings(event string, words []string) (TrialSettings, error) {
 		if key, value, _ := strings.Cut(word, "="); value == "" || !settings.set(key, value) {
 			return TrialSettings{}, fmt.Errorf("setting %q is none of %s=<file>.yml (not lifecycle), %s=<X.Y.Z> (release or lifecycle), %s=<X.Y.Z> (second release), %s=<SECRET_NAME>, "+
 				settingSecretFile+"=<SECRET_NAME>:<absolute file>, "+
+				settingReleaseImagesConfig+"=<relative declaration> (release only), "+
 				"%s=<registry>/<repository>[:<tag>] (release or lifecycle), %s=<job name> (release only) or <VARIABLE_NAME>=<value>, "+
 				"each name once, where a value starting with @ is %s or %s: %w",
 				word, settingWorkflow, settingVersion, settingNextVersion, settingToken, settingImage, settingInterrupt, trialLayerCommit, trialRequestCommit, errs.ErrValidation)
@@ -202,6 +208,10 @@ func ParseTrialSettings(event string, words []string) (TrialSettings, error) {
 
 	if settings.NextVersion != "" && (settings.InterruptAfter != "" || semver.Compare("v"+settings.NextVersion, "v"+settings.Version) <= 0) {
 		return TrialSettings{}, fmt.Errorf("next-version requires an increasing release version and cannot accompany interrupt-after: %w", errs.ErrValidation)
+	}
+
+	if settings.ReleaseImagesConfig != "" && len(settings.Images) != 0 {
+		return TrialSettings{}, fmt.Errorf("release-images-config selects local readback and cannot accompany external image=: %w", errs.ErrValidation)
 	}
 
 	if settings.Event == TrialLifecycle {
@@ -259,6 +269,14 @@ func (settings *TrialSettings) lifecycleImages() error {
 // set takes one setting and reports whether it is one.
 func (settings *TrialSettings) set(key, value string) bool {
 	switch key {
+	case settingReleaseImagesConfig:
+		if settings.Event != TrialRelease || settings.ReleaseImagesConfig != "" || !pathsafe.Relative(value) {
+			return false
+		}
+
+		settings.ReleaseImagesConfig = value
+
+		return true
 	case settingWorkflow:
 		settings.Workflow = value
 

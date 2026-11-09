@@ -165,6 +165,9 @@ func runForgejoConsumerTrial(t *testing.T, root string, private bool) {
 	)
 
 	external := externalRegistry(t, settings)
+	if settings.ReleaseImagesConfig != "" && external != nil {
+		t.Fatal("release-images-config readback requires the accepted local registry, not an external registry")
+	}
 
 	if release {
 		keys = trialReleaseFacts(t, target, repoName, &facts)
@@ -327,6 +330,11 @@ func requestRelease(t *testing.T, scenario layerScenario, requester livetest.Req
 
 	released := requireReleaseGit(t, target, repo, keys, request, requestTag, finalTag)
 	requireSignedRelease(t, target, repo, keys, finalTag, request)
+
+	if settings.ReleaseImagesConfig != "" {
+		requireLocalReleaseImageOutputs(t, target, repo, run.ID, released, keys, settings)
+	}
+
 	requireExternalImages(t, external, keys, settings)
 
 	return run, released

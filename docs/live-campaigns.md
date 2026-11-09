@@ -336,6 +336,36 @@ An image snapshot cannot establish archive/package snapshot coverage.
 Consumer-specific bindings, rollout plans and operational coverage maps belong
 outside this repository.
 
+#### Local release-image output readback
+
+`test/live/campaigns/release-images-forgejo.cases` opts a native image release into
+`release-images-config=<repository-relative declaration>`. The setting is
+release-only, mutually exclusive with external `image=` verification, and does
+not change the consumer build or declaration. It requires the accepted local
+registry and the standard engine `release-images` run artifact; a missing,
+duplicate, expired or empty receipt is a failure, not an image-free success.
+An explicit external-registry session is refused before the release starts.
+
+After verifying the prepared Git commit/tag, the oracle reads that commit's
+regular declaration blob and resolves it through the existing engine planner.
+It admits the complete collected ledger against this independently expected
+output set and repository before any registry reads. The ledger is not a trust
+root: every final tag must serve its exact top-level digest, and the existing
+release-image verifier then authenticates that digest's Cosign signature,
+CycloneDX attestation and SLSA release source, prepared commit, tag and caller
+workflow. Re-attestation eligibility is never accepted as verified output.
+The lab's no-public-transparency policy and existing scoped auth/CA transport
+apply unchanged.
+
+This bounded route supports declarative release images, not custom resolved/base
+plans, moving-tag policies or custom artifact namespaces. It checks planned
+image presence and final digest/evidence readback, not full architecture/payload
+inventory, package signatures, arbitrary provenance extensions or equality with
+an independently authenticated pre-signing build digest. The internal ledger
+alone cannot prove that last property. Releases without this explicit readback
+setting retain their existing, narrower oracle; workflow success must not be
+reported as independent image verification.
+
 ### Explicit-input GitLab regressions
 
 The normal consumer release recipe also selects these exact scenarios with
