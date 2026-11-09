@@ -158,7 +158,7 @@ edit or checksum rebuild is needed to choose the run's settings.
 
 A cases file then holds one case a line: `consumer <demo> <pull-request|release>
 [key=value ...]` or `scenario <TestName> [key=value ...]`. Explicit scenario inputs
-are supported by the GitLab recipes described below. A value `@NAME` is campaign.env's
+are supported by the native consumer recipes described below. A value `@NAME` is campaign.env's
 `NAME`; a GitLab consumer names its archives with `job-archive=` (and for a
 release `build-archive=` and `signer-archive=`), for example
 `job-archive=@FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_JAVA`, which a campaign prepared
@@ -307,6 +307,34 @@ Standalone `test-live-consumer <forgejo|gitlab> <checkout> lifecycle …` runs
 the same test outside a campaign. The standalone pull-request, release and
 snapshot trials remain the single-phase entrypoints; the lifecycle calls their
 extracted checks.
+
+### Explicit-input Forgejo consumer trials
+
+`test/live/campaigns/harness-inputs-forgejo.cases` illustrates the existing native
+`TestForgejoLayer_ConsumerTrial` with `checkout=@NATIVE_CONSUMER`. Add an absolute,
+clean, reviewed Git root as `NATIVE_CONSUMER` in `campaign.env` and keep it frozen.
+The example PR also requires `JOB_IMAGE_GO`, prepared with
+`job-image=go:<reviewed local image>`; choose an image satisfying the consumer's
+actual tool contract. The case declarations require private visibility and
+Buildah. These are expectations, not environment overrides.
+
+Explicit inputs select `test-live-consumer forgejo <checkout> <event>`, defaulting
+to release. `event=pull-request` selects the native PR route. Only those two
+events are admitted here: development snapshots have a distinct scenario and
+must not be relabelled as releases. Bare scenario selection is unchanged.
+Missing references, duplicate checkout/event selectors, unknown settings and
+other providers refuse the whole plan before the first case executes. All
+normal source, target, acknowledgement, resource, locking and cleanup gates remain.
+The consumer's own workflows and packaging run without a replacement build.
+
+The release oracle verifies offered Cosign bundles. For authenticated
+`checksums.txt` or `*_checksums.txt` it also verifies every uniquely named
+published subject's SHA-256, refusing missing or substituted payloads. This is
+not proof of intended inventory completeness, embedded package signatures,
+local-registry image signature/attestation readback or provenance semantics.
+An image snapshot cannot establish archive/package snapshot coverage.
+Consumer-specific bindings, rollout plans and operational coverage maps belong
+outside this repository.
 
 ### Explicit-input GitLab regressions
 

@@ -675,6 +675,18 @@ func requireSignedRelease(t *testing.T, target livetest.Target, repo string, key
 		t.Errorf("the release of %s offers no Cosign bundle that verifies, among %d files", tag, len(assets))
 	}
 
+	// A valid signature on checksums alone does not authenticate the bytes a
+	// consumer downloads. Check the published inventory, not local build output.
+	for name := range verified {
+		if name == "checksums.txt" || strings.HasSuffix(name, "_checksums.txt") {
+			if err := livetest.VerifyReleaseChecksums(read(name), names, func(subject string) ([]byte, error) {
+				return read(subject), nil
+			}); err != nil {
+				t.Error(err)
+			}
+		}
+	}
+
 	// The size is what one release adds to the owner's storage quota; the
 	// trial deletes its repository afterwards, so it is measured here.
 	t.Logf("release %s: draft %t, %d files (%.1f MB), %d Cosign bundles verified with the trial's key",
