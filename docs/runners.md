@@ -27,6 +27,50 @@ does not replace them. Helpers under `/usr/lib/podman` or `/usr/libexec/podman`
 are recognized outside `PATH`. With `--install-packages=false`, provision these
 runtime packages in the job image.
 
+## Runner roles across the forges
+
+Every forge layer chooses runners for the same roles. Each maps a role to its
+native field: `tags:` on GitLab, an array input interpolated whole; `runs-on`
+on Forgejo and GitHub, a JSON array of labels passed as text and decoded with
+`fromJSON`. A cell without an input says what decides instead. A guard,
+`TestRunnerRolesAreCoherentAcrossForges`, holds this table, the role table in
+its source and the workflows' inputs to each other.
+
+| Role | GitLab | Forgejo | GitHub |
+|---|---|---|---|
+| ordinary | `runner-tags` of `check`, `nanolinter`, `megalinter`, `build-*`, `publish-*`, `release` and `snapshot-images`; default `[]`, untagged | `runner-label` of every reusable workflow; required, no default; callers pass `vars.CI_RUNNER_LABEL` | `runs-on` of `slsa-attestor.yml`, default `["ubuntu-26.04"]`; every other job is the hosted `ubuntu-26.04` literal |
+| image-build | `build-runner-tags` of `release` and `snapshot-images`; default `[]` | `runner-label` of `release-images.yml` and `snapshot-images.yml`, which callers pass `CI_RUNNER_LABEL_CONTAINER` or the pool; `runner-label-container` of `runtime-images.yml` | none: the hosted `ubuntu-26.04` literal, whose VMs permit the user namespaces Buildah needs |
+| image-build-arm64 | `build-runner-tags-arm64` of `release` and `snapshot-images`; default `[]`, no arm64 jobs | `runner-label-arm64` of `release-images.yml`, `snapshot-images.yml` and `runtime-images.yml`; `runner-label-container-arm64` of `runtime-images.yml`; default empty | none: the hosted `ubuntu-26.04-arm` literal |
+| checks | `checks-runner-tags` of `release`; default `[]` | none: the checks are jobs of the caller's own workflow, which names their `runs-on` | none, as on Forgejo |
+| signer | `signer-runner-tags` of `release`; default `[]`; a literal of the separately pinned policy project | `runner-label` of `sign-and-publish-release.yml` and `sign-container-images.yml`, set by the caller workflow | none: the hosted `ubuntu-26.04` literal of the layer, which no caller input or variable changes |
+| macos | `runner-tags` of `publish-apple-appstore`; default `[saas-macos-medium-m1]` | none: the Forgejo layer has no Apple workflows | `macos-version` of `build-xcode-ios.yml`, `lint-swift.yml` and `publish-apple-appstore.yml`; default `macos-26` |
+
+Where the names differ, each has a reason:
+
+- GitLab names each role's input, `build-runner-tags` beside `runner-tags`,
+  because one component holds jobs of several roles. Forgejo passes one
+  `runner-label` per call, because each reusable workflow serves one role,
+  and the caller picks the pool or the container runners for it.
+- GitLab takes arrays and Forgejo and GitHub JSON-array strings, because a
+  GitLab input can be an array and a `workflow_call` input cannot.
+- GitLab says tags and Forgejo labels: each forge's own word for the field.
+- `runner-label-container` exists on `runtime-images.yml` alone, because only
+  that workflow mixes pool jobs and image builds in one call.
+
+Who chooses the signer runner differs by forge. GitLab runs the signer jobs
+from a component the policy project includes, so their tags are that
+project's literals; a tag written as a `$VARIABLE` would let a project
+variable choose the runner that sees the credentials, and the components take
+tags only from inputs. GitHub fixes the hosted runner in the layer. Forgejo
+has no policy project: the caller's release workflow passes `runner-label`,
+and the examples pass the repository variable `CI_RUNNER_LABEL`, so whoever
+may set repository variables chooses the runner the signing jobs run on. The
+Forgejo layer has no separate signer runner setting yet.
+
+GitHub offers no runner input beyond the attestor and macOS: the layer runs
+on GitHub-hosted runners, and self-hosted runners would need a `runs-on`
+input threaded through every reusable workflow.
+
 ## How a workflow names its runners
 
 Runner selection is a repository or organization variable, never a literal in

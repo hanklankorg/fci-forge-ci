@@ -450,6 +450,31 @@ func interpolateString(value string, values map[string]any) (any, error) {
 	return text, err
 }
 
+// Jobs renders a component with the given inputs, the inputs it requires and
+// its defaults, and returns each of its visible jobs with its parents merged
+// in, as the runner receives it. It fails the test on a refused input.
+func Jobs(t *testing.T, path string, given map[string]any) map[string]map[string]any {
+	t.Helper()
+
+	body, problems := component(t, path, given, true)
+	if len(problems) != 0 {
+		t.Fatal(strings.Join(problems, "\n"))
+	}
+
+	jobs := map[string]map[string]any{}
+
+	for name, value := range body {
+		job, isJob := value.(map[string]any)
+		if !isJob || strings.HasPrefix(name, ".") || slices.Contains(gitlabGlobalKeywords, name) {
+			continue
+		}
+
+		jobs[name] = ResolveExtends(t, body, job)
+	}
+
+	return jobs
+}
+
 // gitlabGlobalKeywords are the top-level keys that are not jobs.
 var gitlabGlobalKeywords = []string{
 	"after_script", "before_script", "cache", "default", "image", "include",

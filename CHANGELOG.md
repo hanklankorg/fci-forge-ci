@@ -21,6 +21,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `runs-on-darwin-arm64: '["macos-26"]'`, and drop the key from
   `artifacts.yml`, which now refuses it. App Store publication runs on
   `macos-26`. See docs/runners.md, GitHub runners.
+- GitLab components take their runner tags as inputs: `runner-tags` on
+  `check`, `nanolinter`, `megalinter`, `build-*`, `publish-maven-central`,
+  `publish-forge-packages` and `release`, and `signer-runner-tags` on
+  `release` for the jobs in `signer-image`. Each defaults to `[]`, untagged,
+  as before. No runner input was renamed. docs/runners.md gains one table of
+  the runner roles and their input on each forge.
 - Add credential-free root-only plan and canonical-payload admission against
   independently approved exact plan bytes and explicit producer source facts.
   Verify retained producer SBOM pins without regeneration; content revisions

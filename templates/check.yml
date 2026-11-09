@@ -46,9 +46,14 @@ spec:
       type: boolean
       default: false
       description: Enforcement setting the job's forge-ci and FORGE_CI_BIN apply, set only in the administrator's entry point; false reports missing reproducible-build settings without failing.
+    runner-tags:
+      type: array
+      default: []
+      description: Runner tags of the job, all of which one runner must carry; empty, the default, leaves it untagged. Name literal tags only, never a $VARIABLE, which a project variable could set.
 ---
 "$[[ inputs.job-name ]]":
   stage: $[[ inputs.stage ]]
+  tags: $[[ inputs.runner-tags ]]
   rules:
     - when: on_success
   needs: []

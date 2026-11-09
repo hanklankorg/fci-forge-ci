@@ -209,7 +209,8 @@ images and pins, a validating regex. The inputs that are not obvious:
 | | `image-builder`, `builder-job-image` | The image jobs' builder, `buildah` (default) or `kaniko`, and the digest-pinned job image they run in: the Buildah job image or the kaniko job image. |
 | | `build-runner-tags-arm64` | Tags of a native arm64 runner. The arm64 image and export jobs exist only when they are set. |
 | | `export-files`, `export` | `true` runs the `export` commands once per selected architecture, natively, in `builder-job-image` with `image-builder`, before the build job, and lays their `dist/` into its own. See [Files exported from a Containerfile](#files-exported-from-a-containerfile). |
-| | `checks-runner-tags` | Runner tags for consumer checks after restricted signed-request authorization. Empty, the default, leaves checks untagged. Authorization and signing stay untagged. |
+| | `checks-runner-tags` | Runner tags for consumer checks after restricted signed-request authorization. Empty, the default, leaves checks untagged. |
+| | `runner-tags`, `signer-runner-tags` | Runner tags of every other job, request authorization and preparation included, and of the signer jobs, the ones in `signer-image` that hold the release credentials. Empty, the default, leaves them untagged. Write both as literals in this policy, never as a `$VARIABLE`: GitLab expands a variable in a tag, so a project could then choose the runner that sees the credentials. See [Runner roles across the forges](runners.md#runner-roles-across-the-forges). |
 | | `changelog-creator`, `changelog-config`, `commit-body-config` | `git-cliff` (default) or `git-chglog`, and the consumer's configuration files, by default `.forge-ci/gitcliff/keepachangelog.toml` and `.forge-ci/gitcliff/minimal.toml`, copies of this repository's [`templates/gitcliff/`](../templates/gitcliff/) that `forge-ci init` writes. git-cliff renders offline, without remote metadata, and reads stable `vX.Y.Z` tags only, overriding any `tag_pattern` in the configuration. A SHA-256 repository needs `git-chglog`, since git-cliff cannot read one. |
 | | `release-policy` | `stable` (default) or `stable-prerelease`, selected in the trusted external policy. GitLab has no native prerelease flag; see [release policy](workflows.md#stable-and-prerelease-policy). |
 | | `release-branch` | The branch a release lands on; empty, the default, takes the project's default branch. The request must be its head. |
@@ -220,6 +221,7 @@ images and pins, a validating regex. The inputs that are not obvious:
 | | `enforce-lint`, `enforce-vulnerabilities`, `enforce-application-tests`, `enforce-reproducible-builds` | The administrator's [check enforcement](admin-policy.md) for the checks and build jobs and the image scans; default `false`. |
 | `nanolinter` | `forge-ci-repository`, `server-url`, `nanolinter-image`, `required-lints`, `enable-gitlab-sast` | The project serving the component and its engine package (required), the flavour image (required, pinned by digest, as the examples show), the mandated floor (default `secrets,sast`), and the SAST report. `enforce-lint` and `enforce-vulnerabilities`, default `false`, are the administrator's [check enforcement](admin-policy.md). |
 | `megalinter` | `forge-ci-repository`, `server-url`, `megalinter-image`, `enable-gitlab-sast` | Required digest-pinned image; the rest as for `nanolinter`. |
+| `check`, `nanolinter`, `megalinter`, `build-*`, `publish-*` | `runner-tags` | Runner tags of the component's job; empty, the default, leaves it untagged, except `publish-apple-appstore`, which defaults to a hosted macOS runner's. |
 | `build-*` | `working-directory`, `version`, `skip-tests`, `enable-build-sbom`, `runtime-image` | Common to every build component; `runtime-image` is required and pinned by `@sha256:`; `build-go` and `build-cargo` add `platforms` and `artifact-name`, `build-go` also `main-package` (relative to `working-directory`), `build-maven` `build-type` and `profile`, `build-gradle-android` the module, flavour and signing inputs. `enforce-application-tests`, default `false`, is the administrator's [check enforcement](admin-policy.md); the job's `runtime-image` must carry an engine from this release or later. |
 | `publish-*` | `project-type`, `working-directory`, `runtime-image` | `runtime-image` as for `build-*`. `publish-maven-central` adds `profile` and `settings-path`; `publish-apple-appstore` takes none of these, only `platform`, `skip-validation`, `runner-tags` and `macos-image`. |
 
@@ -382,13 +384,13 @@ built and pinned by digest like the signer image; it carries Buildah and its
 helpers, and the job installs nothing. Buildah needs user namespaces. Where
 only some runners allow them, tag those runners and name the tags in
 `build-runner-tags`: the build job and the amd64 image job move there, and the
-signing jobs stay on the untagged runners.
+signing jobs stay on `signer-runner-tags`, untagged by default.
 
 Where no runner allows them, set `image-builder: kaniko` and
 `builder-job-image` to the kaniko job image of
 [containers/kaniko-job/Containerfile](../containers/kaniko-job/Containerfile),
-pinned by digest. The image build jobs then run in it, as root, on untagged
-runners. Before a Containerfile is
+pinned by digest. The image build jobs then run in it, as root, on
+`runner-tags`, untagged by default. Before a Containerfile is
 built, the job admits the image as the snapshot builds do: its title must be
 `forge-ci kaniko job image` and its `org.opencontainers.image.source` label
 the engine project, `${CI_SERVER_URL}/<forge-ci-repository>`, read with the

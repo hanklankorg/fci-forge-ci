@@ -202,8 +202,8 @@ func TestCheckJobUserIsAVariableBothExecutorsRead(t *testing.T) {
 	var header struct {
 		Spec struct {
 			Inputs map[string]struct {
-				Default *string `yaml:"default"`
-				Regex   string  `yaml:"regex"`
+				Default any    `yaml:"default"`
+				Regex   string `yaml:"regex"`
 			} `yaml:"inputs"`
 		} `yaml:"spec"`
 	}
@@ -212,7 +212,7 @@ func TestCheckJobUserIsAVariableBothExecutorsRead(t *testing.T) {
 	}
 
 	input := header.Spec.Inputs["job-user"]
-	if input.Default == nil || *input.Default != "" || input.Regex != `^$|^(0|[1-9][0-9]*)(:(0|[1-9][0-9]*))?$` {
+	if input.Default != "" || input.Regex != `^$|^(0|[1-9][0-9]*)(:(0|[1-9][0-9]*))?$` {
 		t.Fatalf("job-user must default to empty and take a numeric UID or UID:GID, got %+v", input)
 	}
 

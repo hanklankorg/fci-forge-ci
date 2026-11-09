@@ -53,6 +53,14 @@ spec:
     checks:
       type: array
       description: Required checks on the request commit, without signing or publication secrets.
+    runner-tags:
+      type: array
+      default: []
+      description: Runner tags of every job that names none of its own below; empty leaves them untagged.
+    signer-runner-tags:
+      type: array
+      default: []
+      description: Runner tags of the jobs in signer-image, which hold the signing and publication credentials; empty leaves them untagged.
     checks-runner-tags:
       type: array
       default: []
@@ -136,6 +144,10 @@ stages: [check, prepare, build, images, sign, publish]
       user: $RC_JOB_USER
     kubernetes:
       user: $RC_JOB_USER
+  # Every job not given its own tags below runs on runner-tags; the signer
+  # jobs on signer-runner-tags. Both are literal inputs of the policy: a tag
+  # GitLab expanded from a variable would let a project choose the runner.
+  tags: $[[ inputs.runner-tags ]]
   cache: []
   interruptible: false
   # Only what the runner reads before the job's shell is a job variable; the
@@ -150,6 +162,7 @@ stages: [check, prepare, build, images, sign, publish]
 .forge-ci-release-signer:
   extends: .forge-ci-release
   image: $[[ inputs.signer-image ]]
+  tags: $[[ inputs.signer-runner-tags ]]
   variables:
     RC_JOB_USER: ''
 # Each job's start, its before_script, is its role, then this. A project,

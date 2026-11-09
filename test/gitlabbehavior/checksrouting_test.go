@@ -110,9 +110,12 @@ func TestReleaseChecksRoutingAndPreparationBarrier(t *testing.T) {
 		}
 	}
 
-	// Only the consumer's commands and image builds are scheduled on tagged
-	// runners: the build runner, and a native arm64 runner for arm64.
+	// Every job runs on the policy's runner-tags and the signer jobs on its
+	// signer-runner-tags; only the consumer's commands and image builds name
+	// other runners: the build runner, and a native arm64 runner for arm64.
 	scheduled := map[string]string{
+		".forge-ci-release":                        "$[[ inputs.runner-tags ]]",
+		".forge-ci-release-signer":                 "$[[ inputs.signer-runner-tags ]]",
 		"Check: consumer checks":                   "$[[ inputs.checks-runner-tags ]]",
 		"Build: release files":                     "$[[ inputs.build-runner-tags ]]",
 		".forge-ci-release-image-builder-buildah":  "$[[ inputs.build-runner-tags ]]",
@@ -126,12 +129,15 @@ func TestReleaseChecksRoutingAndPreparationBarrier(t *testing.T) {
 		}
 	}
 
+	// The defaults leave every job untagged, as before the inputs existed.
 	for _, path := range []string{"templates/release.yml", "templates/release-jobs.yml"} {
 		header, _ := releaseRouting(t, path)
 
-		input := header["spec"].(map[string]any)["inputs"].(map[string]any)["checks-runner-tags"].(map[string]any)
-		if input["type"] != "array" || !reflect.DeepEqual(input["default"], []any{}) {
-			t.Fatalf("%s changed the ordinary-consumer default: %+v", path, input)
+		for _, name := range []string{"runner-tags", "signer-runner-tags", "checks-runner-tags", "build-runner-tags", "build-runner-tags-arm64"} {
+			input := header["spec"].(map[string]any)["inputs"].(map[string]any)[name].(map[string]any)
+			if input["type"] != "array" || !reflect.DeepEqual(input["default"], []any{}) {
+				t.Fatalf("%s changed the untagged default of %s: %+v", path, name, input)
+			}
 		}
 	}
 	// Check the real trigger mapping, not a duplicate rendered fixture.
@@ -149,8 +155,10 @@ func TestReleaseChecksRoutingAndPreparationBarrier(t *testing.T) {
 	trigger := root["release"].(map[string]any)["trigger"].(map[string]any)
 
 	include := trigger["include"].([]any)[0].(map[string]any)
-	if include["inputs"].(map[string]any)["checks-runner-tags"] != "$[[ inputs.checks-runner-tags ]]" {
-		t.Fatal("root component does not forward checks runner tags")
+	for _, name := range []string{"runner-tags", "signer-runner-tags", "checks-runner-tags", "build-runner-tags", "build-runner-tags-arm64"} {
+		if include["inputs"].(map[string]any)[name] != "$[[ inputs."+name+" ]]" {
+			t.Fatalf("root component does not forward %s", name)
+		}
 	}
 }
 
