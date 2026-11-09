@@ -16,7 +16,7 @@ func TestConsumerDraftRendersCoordinatesAndPolicyBeforeServing(t *testing.T) {
 
 	const marker = "PIN_FORGE_CI_SHA"
 
-	source := strings.NewReplacer(consumerPinned, marker, consumerSignerImage, "PIN_SIGNER_IMAGE_DIGEST", consumerKeyDigest, "PIN_COSIGN_PUBLIC_KEY_SHA256").Replace(consumerWorkflow(t, "go-cli-release.yml"))
+	source := strings.NewReplacer(consumerPinned, marker, consumerSignerImage, "PIN_SIGNER_IMAGE_DIGEST", consumerKeyDigest, "PIN_COSIGN_PUBLIC_KEY_SHA256").Replace(consumerWorkflow(t, "hello-cli-release.yml"))
 	layer := sampleLayer()
 
 	plan, err := layer.PlanConsumer(map[string]string{"release.yml": source}, releaseFacts())

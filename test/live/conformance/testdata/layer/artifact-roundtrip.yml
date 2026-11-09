@@ -60,14 +60,14 @@ jobs:
           artifact_name="${ARTIFACT_NAME_PREFIX}-${FORGEJO_RUN_ID}-${FORGEJO_RUN_ATTEMPT}"
           src=$(mktemp -d "${RUNNER_TEMP:-/tmp}/artifact-roundtrip-src.XXXXXX")
           trap 'rm -rf -- "${src}"' EXIT
-          mkdir -p "${src}/nanolinter-pie_x86_64-unknown-linux-gnu" \
-                   "${src}/nanolinter-pie-musl_aarch64-unknown-linux-musl"
-          head -c 3000000 /dev/zero >"${src}/nanolinter-pie_x86_64-unknown-linux-gnu/nanolinter"
-          head -c 2500000 /dev/zero >"${src}/nanolinter-pie-musl_aarch64-unknown-linux-musl/nanolinter"
-          printf 'sha256  artifact\n' >"${src}/nanolinter_9.9.9_checksums.txt"
-          printf 'cosign-bundle\n' >"${src}/nanolinter_9.9.9_checksums.txt.bundle"
-          head -c 40000 /dev/zero >"${src}/nanolinter_9.9.9_amd64.deb"
-          printf '{"bomFormat":"CycloneDX"}\n' >"${src}/nanolinter-9.9.9-linux-x86_64.tar.gz.sbom.json"
+          mkdir -p "${src}/hello-cli-pie_x86_64-unknown-linux-gnu" \
+                   "${src}/hello-cli-pie-musl_aarch64-unknown-linux-musl"
+          head -c 3000000 /dev/zero >"${src}/hello-cli-pie_x86_64-unknown-linux-gnu/hello-cli"
+          head -c 2500000 /dev/zero >"${src}/hello-cli-pie-musl_aarch64-unknown-linux-musl/hello-cli"
+          printf 'sha256  artifact\n' >"${src}/hello-cli_9.9.9_checksums.txt"
+          printf 'cosign-bundle\n' >"${src}/hello-cli_9.9.9_checksums.txt.bundle"
+          head -c 40000 /dev/zero >"${src}/hello-cli_9.9.9_amd64.deb"
+          printf '{"bomFormat":"CycloneDX"}\n' >"${src}/hello-cli-9.9.9-linux-x86_64.tar.gz.sbom.json"
           printf 'hidden\n' >"${src}/.hidden-manifest"
           : >"${src}/empty-marker"
 
@@ -166,14 +166,14 @@ jobs:
           want=$(mktemp -d "${RUNNER_TEMP:-/tmp}/artifact-roundtrip-want.XXXXXX")
           out=$(mktemp -d "${RUNNER_TEMP:-/tmp}/artifact-roundtrip-out.XXXXXX")
           trap 'rm -rf -- "${want}" "${out}"' EXIT
-          mkdir -p "${want}/nanolinter-pie_x86_64-unknown-linux-gnu" \
-                   "${want}/nanolinter-pie-musl_aarch64-unknown-linux-musl"
-          head -c 3000000 /dev/zero >"${want}/nanolinter-pie_x86_64-unknown-linux-gnu/nanolinter"
-          head -c 2500000 /dev/zero >"${want}/nanolinter-pie-musl_aarch64-unknown-linux-musl/nanolinter"
-          printf 'sha256  artifact\n' >"${want}/nanolinter_9.9.9_checksums.txt"
-          printf 'cosign-bundle\n' >"${want}/nanolinter_9.9.9_checksums.txt.bundle"
-          head -c 40000 /dev/zero >"${want}/nanolinter_9.9.9_amd64.deb"
-          printf '{"bomFormat":"CycloneDX"}\n' >"${want}/nanolinter-9.9.9-linux-x86_64.tar.gz.sbom.json"
+          mkdir -p "${want}/hello-cli-pie_x86_64-unknown-linux-gnu" \
+                   "${want}/hello-cli-pie-musl_aarch64-unknown-linux-musl"
+          head -c 3000000 /dev/zero >"${want}/hello-cli-pie_x86_64-unknown-linux-gnu/hello-cli"
+          head -c 2500000 /dev/zero >"${want}/hello-cli-pie-musl_aarch64-unknown-linux-musl/hello-cli"
+          printf 'sha256  artifact\n' >"${want}/hello-cli_9.9.9_checksums.txt"
+          printf 'cosign-bundle\n' >"${want}/hello-cli_9.9.9_checksums.txt.bundle"
+          head -c 40000 /dev/zero >"${want}/hello-cli_9.9.9_amd64.deb"
+          printf '{"bomFormat":"CycloneDX"}\n' >"${want}/hello-cli-9.9.9-linux-x86_64.tar.gz.sbom.json"
           printf 'hidden\n' >"${want}/.hidden-manifest"
           : >"${want}/empty-marker"
 

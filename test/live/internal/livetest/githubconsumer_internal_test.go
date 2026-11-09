@@ -287,7 +287,7 @@ func TestRenderGitHubConsumer_PinsTheEngineUnderTest(t *testing.T) {
 func TestRenderGitHubConsumer_CargoLintImageOverride(t *testing.T) {
 	t.Parallel()
 
-	// Shape of Nanolinter's tests/live/github fixture: cargo does not undo
+	// Shape of a cargo consumer's tests/live/github fixture: cargo does not undo
 	// an explicit Go image. Only the operator's declared override changes it.
 	const fixture = `jobs:
   pr-checks:
@@ -440,12 +440,12 @@ func TestParseGitHubTrialSettings(t *testing.T) {
 
 	pinned := "ghcr.io/o/nanolinter:go@sha256:" + strings.Repeat("d", 64)
 
-	release, err := ParseGitHubTrialSettings(TrialRelease, []string{"version=v1.2.3", "image=gommitlint", "nanolinter-image=" + pinned, "fixtures=tests/live/github"})
+	release, err := ParseGitHubTrialSettings(TrialRelease, []string{"version=v1.2.3", "image=hello-cli", "nanolinter-image=" + pinned, "fixtures=tests/live/github"})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if release.Workflow != "release.yml" || release.Version != "v1.2.3" || release.Image != "gommitlint" ||
+	if release.Workflow != "release.yml" || release.Version != "v1.2.3" || release.Image != "hello-cli" ||
 		release.Fixtures != "tests/live/github" || release.Overrides["nanolinter-image"] != pinned {
 		t.Errorf("release settings = %+v", release)
 	}

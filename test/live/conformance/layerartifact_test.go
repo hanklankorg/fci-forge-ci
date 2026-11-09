@@ -92,12 +92,12 @@ func layerArtifactTree() map[string][]byte {
 	return map[string][]byte{
 		".hidden-manifest": []byte("hidden\n"),
 		"empty-marker":     {},
-		"nanolinter-9.9.9-linux-x86_64.tar.gz.sbom.json":            []byte("{\"bomFormat\":\"CycloneDX\"}\n"),
-		"nanolinter-pie-musl_aarch64-unknown-linux-musl/nanolinter": make([]byte, 2_500_000),
-		"nanolinter-pie_x86_64-unknown-linux-gnu/nanolinter":        make([]byte, 3_000_000),
-		"nanolinter_9.9.9_amd64.deb":                                make([]byte, 40_000),
-		"nanolinter_9.9.9_checksums.txt":                            []byte("sha256  artifact\n"),
-		"nanolinter_9.9.9_checksums.txt.bundle":                     []byte("cosign-bundle\n"),
+		"hello-cli-9.9.9-linux-x86_64.tar.gz.sbom.json":           []byte("{\"bomFormat\":\"CycloneDX\"}\n"),
+		"hello-cli-pie-musl_aarch64-unknown-linux-musl/hello-cli": make([]byte, 2_500_000),
+		"hello-cli-pie_x86_64-unknown-linux-gnu/hello-cli":        make([]byte, 3_000_000),
+		"hello-cli_9.9.9_amd64.deb":                               make([]byte, 40_000),
+		"hello-cli_9.9.9_checksums.txt":                           []byte("sha256  artifact\n"),
+		"hello-cli_9.9.9_checksums.txt.bundle":                    []byte("cosign-bundle\n"),
 	}
 }
 

@@ -20,7 +20,8 @@ import (
 	"github.com/diggsweden/forge-ci/internal/testutil/evidence"
 )
 
-// What the consumers under testdata/consumer pinned when they were copied.
+// What the consumers under testdata/consumer pin: an organization's copy of
+// the layer and its release trust, none of them the lab's.
 const (
 	consumerPinned       = "b369db7d70af68fa93a4b404841c4ce2ddbf90c0"
 	consumerPinnedBinary = "f43d7a4ac43046a5fe3aac36259edec1f1361a3e076fa75d6aef76b61fc1227b"
@@ -33,7 +34,7 @@ const (
 	labPublicKey   = "-----BEGIN PUBLIC KEY-----\nAAAA\n-----END PUBLIC KEY-----\n"
 )
 
-// consumerWorkflow reads a real consumer's workflow, copied as it was.
+// consumerWorkflow reads a whole consumer workflow from testdata/consumer.
 func consumerWorkflow(t *testing.T, name string) string {
 	t.Helper()
 
@@ -190,7 +191,7 @@ func TestParseTrialSettings_RefusesWhatItCannotMean(t *testing.T) {
 	}
 }
 
-func TestReadConsumerPin_ReadsRealConsumers(t *testing.T) {
+func TestReadConsumerPin_ReadsWholeConsumers(t *testing.T) {
 	t.Parallel()
 
 	const (
@@ -199,18 +200,18 @@ func TestReadConsumerPin_ReadsRealConsumers(t *testing.T) {
 	)
 
 	pin, err := ReadConsumerPin(map[string]string{
-		"pullrequest.yml": consumerWorkflow(t, "go-cli-pullrequest.yml"),
-		"release.yml":     consumerWorkflow(t, "go-cli-release.yml"),
+		"pullrequest.yml": consumerWorkflow(t, "hello-cli-pullrequest.yml"),
+		"release.yml":     consumerWorkflow(t, "hello-cli-release.yml"),
 	})
 	if want := (ConsumerPin{Actions: actions, Workflows: workflows, Commit: consumerPinned}); err != nil || pin != want {
 		t.Errorf("the Go CLI's pin = %+v, %v; want %+v", pin, err, want)
 	}
 
-	// Nanolinter passes the binary's digest as a literal, and calls no
+	// The binary-pinning consumer passes the digest as a literal, and calls no
 	// workflow of the layer from its pull request.
-	pin, err = ReadConsumerPin(map[string]string{"pullrequest.yml": consumerWorkflow(t, "lint-pullrequest.yml")})
+	pin, err = ReadConsumerPin(map[string]string{"pullrequest.yml": consumerWorkflow(t, "binary-pin-pullrequest.yml")})
 	if want := (ConsumerPin{Actions: actions, Commit: consumerPinned, BinarySHA256: consumerPinnedBinary}); err != nil || pin != want {
-		t.Errorf("Nanolinter's pin = %+v, %v; want %+v", pin, err, want)
+		t.Errorf("the binary-pinning consumer's pin = %+v, %v; want %+v", pin, err, want)
 	}
 }
 
@@ -299,16 +300,16 @@ func TestPlanConsumer_BindsOnlyTheSelectedLayerSubject(t *testing.T) {
 	}
 }
 
-// TestPlanConsumer_RendersARealRelease plans the Go CLI's release as the
+// TestPlanConsumer_RendersAWholeRelease plans the Go CLI's release as the
 // trial does, and holds the rendering to what a job would fetch and read.
-func TestPlanConsumer_RendersARealRelease(t *testing.T) {
+func TestPlanConsumer_RendersAWholeRelease(t *testing.T) {
 	t.Parallel()
 
 	layer := sampleLayer()
-	source := consumerWorkflow(t, "go-cli-release.yml")
+	source := consumerWorkflow(t, "hello-cli-release.yml")
 
 	plan, err := layer.PlanConsumer(map[string]string{
-		"pullrequest.yml": consumerWorkflow(t, "go-cli-pullrequest.yml"), "release.yml": source,
+		"pullrequest.yml": consumerWorkflow(t, "hello-cli-pullrequest.yml"), "release.yml": source,
 	}, releaseFacts())
 	if err != nil {
 		t.Fatal(err)
@@ -390,9 +391,9 @@ func TestPlanConsumer_APullRequestLeavesTheReleaseTrustAlone(t *testing.T) {
 	t.Parallel()
 
 	layer := sampleLayer()
-	release := consumerWorkflow(t, "go-cli-release.yml")
+	release := consumerWorkflow(t, "hello-cli-release.yml")
 
-	plan, err := layer.PlanConsumer(map[string]string{"pullrequest.yml": consumerWorkflow(t, "go-cli-pullrequest.yml"), "release.yml": release},
+	plan, err := layer.PlanConsumer(map[string]string{"pullrequest.yml": consumerWorkflow(t, "hello-cli-pullrequest.yml"), "release.yml": release},
 		ConsumerFacts{Inputs: map[string]string{"forge-ci-repository": layer.Repository}})
 	if err != nil {
 		t.Fatal(err)
@@ -405,13 +406,13 @@ func TestPlanConsumer_APullRequestLeavesTheReleaseTrustAlone(t *testing.T) {
 	}
 }
 
-// Nanolinter writes the digest of the layer's binary beside every setup. The
+// A consumer may write the digest of the layer's binary beside every setup. The
 // layer under test has another binary, so each of them must follow.
 func TestPlanConsumer_ReplacesTheBinaryDigestWhereverItStands(t *testing.T) {
 	t.Parallel()
 
 	layer := sampleLayer()
-	source := consumerWorkflow(t, "lint-pullrequest.yml")
+	source := consumerWorkflow(t, "binary-pin-pullrequest.yml")
 
 	plan, err := layer.PlanConsumer(map[string]string{"pullrequest.yml": source}, ConsumerFacts{})
 	if err != nil {

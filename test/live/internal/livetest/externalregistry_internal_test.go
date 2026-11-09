@@ -50,15 +50,15 @@ func TestReadExternalRegistry(t *testing.T) {
 func TestParseTrialSettings_Image(t *testing.T) {
 	t.Parallel()
 
-	settings, err := ParseTrialSettings(TrialRelease, []string{"image=ghcr.io/example-org/nanolinter", "IMAGE_REPOSITORY=ghcr.io/example-org"})
-	if err != nil || !slices.Equal(settings.Images, []string{"ghcr.io/example-org/nanolinter"}) || settings.Variables["IMAGE_REPOSITORY"] != "ghcr.io/example-org" {
+	settings, err := ParseTrialSettings(TrialRelease, []string{"image=ghcr.io/example-org/hello-cli", "IMAGE_REPOSITORY=ghcr.io/example-org"})
+	if err != nil || !slices.Equal(settings.Images, []string{"ghcr.io/example-org/hello-cli"}) || settings.Variables["IMAGE_REPOSITORY"] != "ghcr.io/example-org" {
 		t.Fatalf("settings = %+v, %v", settings, err)
 	}
 
 	for image, want := range map[string]string{
-		"ghcr.io/example-org/nanolinter":           "ghcr.io/example-org/nanolinter:v0.0.1",
-		"ghcr.io/example-org/nanolinter:v0.0.1-go": "ghcr.io/example-org/nanolinter:v0.0.1-go",
-		"registry.lab:5000/owner/app":              "registry.lab:5000/owner/app:v0.0.1",
+		"ghcr.io/example-org/hello-cli":           "ghcr.io/example-org/hello-cli:v0.0.1",
+		"ghcr.io/example-org/hello-cli:v0.0.1-go": "ghcr.io/example-org/hello-cli:v0.0.1-go",
+		"registry.lab:5000/owner/app":             "registry.lab:5000/owner/app:v0.0.1",
 	} {
 		if _, err := ParseTrialSettings(TrialRelease, []string{"image=" + image}); err != nil {
 			t.Errorf("image=%s refused: %v", image, err)
@@ -70,16 +70,16 @@ func TestParseTrialSettings_Image(t *testing.T) {
 	}
 
 	for _, words := range [][]string{
-		{"image=ghcr.io/example-org/nanolinter@sha256:abc"},
-		{"image=ghcr.io/example-org/nanolinter", "image=ghcr.io/example-org/nanolinter"},
-		{"image=nanolinter"},
+		{"image=ghcr.io/example-org/hello-cli@sha256:abc"},
+		{"image=ghcr.io/example-org/hello-cli", "image=ghcr.io/example-org/hello-cli"},
+		{"image=hello-cli"},
 	} {
 		if _, err := ParseTrialSettings(TrialRelease, words); err == nil {
 			t.Errorf("%q accepted", words)
 		}
 	}
 
-	if _, err := ParseTrialSettings(TrialPullRequest, []string{"image=ghcr.io/example-org/nanolinter"}); err == nil {
+	if _, err := ParseTrialSettings(TrialPullRequest, []string{"image=ghcr.io/example-org/hello-cli"}); err == nil {
 		t.Error("image= accepted for a pull request")
 	}
 }

@@ -174,7 +174,7 @@ func TestGitHubConsumerPreservesTrackedIgnoredSource(t *testing.T) {
 	}
 }
 
-// These are the native release wrapper and policy coordinates from Gommitlint's
+// These are the native release wrapper and policy coordinates of a consumer's
 // migration draft. The hosted fixture must not leave their immutable-pin guard
 // checking a different identity than the native workflows it reads.
 func TestGitHubConsumerBindsNativeDraftPolicyInputs(t *testing.T) {

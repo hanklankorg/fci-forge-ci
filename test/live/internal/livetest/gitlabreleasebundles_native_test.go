@@ -206,7 +206,7 @@ func newNativeReleaseJourney(t *testing.T, binary, cosignPath string, goMetadata
 
 	checksum := "checksums.txt"
 	if goMetadata {
-		checksum = "gommitlint_0.94.0_checksums.txt"
+		checksum = "hello-cli_0.94.0_checksums.txt"
 		write(filepath.Join(producer, "dist/"+checksum), []byte(fmt.Sprintf("%x  app.tar.gz\n%x  app.tar.gz.sbom.json\n", sha256.Sum256(archive.Bytes()), sha256.Sum256(sbom))))
 		write(filepath.Join(producer, "dist/artifacts.json"), []byte(`[{"path":"dist/app.tar.gz","type":"Archive"},{"path":"dist/app.tar.gz.sbom.json","type":"SBOM"},{"path":"dist/`+checksum+`","type":"Checksum"}]`))
 		runNativeEvidenceCLI(t, binary, producer, "import-goreleaser", "--manifest", "dist/release-files.json", "--evidence-file", "dist/release-notes.md")
