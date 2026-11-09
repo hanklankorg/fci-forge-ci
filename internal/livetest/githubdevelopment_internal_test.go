@@ -11,12 +11,64 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
 
 	githubapi "github.com/google/go-github/v91/github"
 )
+
+func TestSnapshotArtifactRequiresOneExactMember(t *testing.T) {
+	t.Parallel()
+
+	for _, count := range []int{0, 1, 2} {
+		t.Run(string(rune('0'+count)), func(t *testing.T) {
+			t.Parallel()
+
+			var data bytes.Buffer
+
+			archive := zip.NewWriter(&data)
+			for range count {
+				member, err := archive.Create("snapshot-plan.json")
+				if err != nil {
+					t.Fatal(err)
+				}
+
+				if _, err := member.Write([]byte("{}")); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			if err := archive.Close(); err != nil {
+				t.Fatal(err)
+			}
+
+			path := filepath.Join(t.TempDir(), "artifact.zip")
+			if err := os.WriteFile(path, data.Bytes(), 0600); err != nil {
+				t.Fatal(err)
+			}
+
+			trial := &GitHubTrial{tb: stopOnFatalTB{TB: t}}
+
+			defer func() {
+				failure := recover()
+				if count == 1 {
+					if failure != nil {
+						t.Errorf("valid snapshot artifact refused: %v", failure)
+					}
+				} else if message, ok := failure.(acceptanceFailure); !ok || !strings.Contains(string(message), "exactly one") {
+					t.Errorf("ambiguous or missing snapshot member accepted: %v", failure)
+				}
+			}()
+
+			if got := trial.archiveMember(path, 1, "snapshot-plan.json"); string(got) != "{}" {
+				t.Fatalf("wrong snapshot member: %q", got)
+			}
+		})
+	}
+}
 
 func developmentArchive(t *testing.T) []byte {
 	t.Helper()

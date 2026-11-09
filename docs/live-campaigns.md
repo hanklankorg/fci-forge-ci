@@ -442,10 +442,10 @@ plan the planner makes of the staged declaration for the selected source,
 every build native amd64, and one receipt per planned image as the product's
 own collection requires (`snapshotimage.Collect`), each digest the registry
 serves under its receipt's tag, with no tag but the planned images' and
-their `-amd64` architecture tags. The readiness goes to the plan's one
-service, where the plan has one image (`livetest.ServiceReadiness`); a plan
-of several images declares no primary service among them, so none is
-probed. The branches stay where the trial pushed them, and the repository
+their `-amd64` architecture tags. This snapshot-only event probes no
+readiness, even for a single image: the image count does not declare a
+runnable service. The lifecycle event retains its service readiness check.
+The branches stay where the trial pushed them, and the repository
 holds no tag and no release.
 
 On Forgejo (`TestForgejoLayer_ServiceSnapshot`) the consumer's main and a

@@ -23,9 +23,8 @@ const developmentWorkflow = "development.yml"
 // left: the frozen snapshot plan bound to the selected source head and
 // branch, the receipts of every planned amd64 image as the snapshot
 // workflow's collect job exports them, the registry's digest and tag of each
-// with no stable alias, and, where the plan has a service to probe
-// (livetest.ServiceReadiness), the readiness evidence binding its published
-// digest to that source. It returns the receipts, in plan order, and the
+// with no stable alias, and, for the lifecycle event alone, the readiness
+// evidence binding its published digest to that source. It returns the receipts, in plan order, and the
 // count of the producers the plan built, none for a container-first
 // service.
 func requireServiceDevelopment(t *testing.T, target livetest.Target, repo string, run livetest.WorkflowRun, consumer livetest.Consumer, config livetest.ServiceDevelopmentConfig, head, image string) ([]snapshotimage.Receipt, int) {
@@ -60,8 +59,8 @@ func requireServiceDevelopment(t *testing.T, target livetest.Target, repo string
 		artifacts[snapshotArtifact+"-plan"]["snapshot-plan.json"], artifacts[snapshotArtifact]["container-images.json"])
 
 	evidence, probed := artifacts["service-evidence-"+head]
-	if probed != livetest.ServiceReadiness(expected) {
-		t.Fatalf("readiness evidence present %t, want %t for a plan of %d images", probed, !probed, len(expected.Images))
+	if probed == config.Images {
+		t.Fatalf("readiness evidence present %t, want %t for snapshot-only event %t", probed, !config.Images, config.Images)
 	}
 
 	if probed && (string(evidence["image-ref.txt"]) != receipts[0].Ref+"\n" || string(evidence["source-sha.txt"]) != head+"\n" ||

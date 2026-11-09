@@ -408,14 +408,6 @@ func snapshotImagesAdmitted(cfg *config.Config) bool {
 	})
 }
 
-// ServiceReadiness is whether a snapshot of the plan checks a service's
-// readiness: where the plan's one image is the service. A plan of several
-// images declares no primary service among them, so none is probed, and the
-// snapshot is judged by its receipts alone.
-func ServiceReadiness(plan snapshotimage.Plan) bool {
-	return len(plan.Images) == 1
-}
-
 // serviceSnapshotFamilies lists the toolchain families of a plan's producers,
 // each once, sorted.
 func serviceSnapshotFamilies(plan snapshotimage.Plan) []string {
