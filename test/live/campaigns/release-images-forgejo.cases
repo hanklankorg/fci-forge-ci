@@ -1,0 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Digg - Agency for Digital Government
+# SPDX-License-Identifier: CC0-1.0
+# Native release with standard engine release-images output; no replacement build.
+# The declaration is an expectation read from the verified prepared Git commit.
+setting visibility=private
+setting image-builder=buildah
+scenario TestForgejoLayer_ConsumerTrial checkout=@NATIVE_CONSUMER event=release version=0.3.0 release-images-config=.forge-ci/artifacts.yml RELEASE_PLATFORMS=linux/amd64

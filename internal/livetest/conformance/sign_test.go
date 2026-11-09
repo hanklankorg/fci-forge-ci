@@ -32,6 +32,7 @@ import (
 	"time"
 
 	"github.com/diggsweden/forge-ci/internal/domain/errs"
+	"github.com/diggsweden/forge-ci/internal/domain/provenance"
 	"github.com/diggsweden/forge-ci/internal/livetest"
 )
 
@@ -130,9 +131,10 @@ func writePredicate(t *testing.T, dir string) string {
 	t.Helper()
 
 	name := "slsa-provenance.predicate.json"
+	source := provenance.SourceDependency(signReleaseSource, "v0.0.1", signReleaseCommit)
 	body := `{"buildDefinition":{"buildType":"https://example.invalid/livetest","externalParameters":{"workflow":` +
 		`{"ref":"v0.0.1","repository":"` + signReleaseSource + `","path":"` + signReleaseWorkflow + `"}},` +
-		`"resolvedDependencies":[{"uri":"` + signReleaseSource + `","digest":{"gitCommit":"` + signReleaseCommit + `"}}]},` +
+		`"resolvedDependencies":[{"uri":"` + source.URI + `","digest":{"gitCommit":"` + source.Digest + `"}}]},` +
 		`"runDetails":{"builder":{"id":"https://example.invalid/livetest"}}}`
 
 	if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o600); err != nil {
@@ -140,6 +142,38 @@ func writePredicate(t *testing.T, dir string) string {
 	}
 
 	return name
+}
+
+// This fixture must follow the producer contract rather than require the
+// shared verifier to accept a legacy bare repository URI.
+func TestSignPredicateFixtureUsesProducerSourceDependency(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+
+	body, err := os.ReadFile(filepath.Join(dir, writePredicate(t, dir)))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var predicate struct {
+		BuildDefinition struct {
+			ResolvedDependencies []struct {
+				URI    string            `json:"uri"`
+				Digest map[string]string `json:"digest"`
+			} `json:"resolvedDependencies"`
+		} `json:"buildDefinition"`
+	}
+	if err := json.Unmarshal(body, &predicate); err != nil {
+		t.Fatal(err)
+	}
+
+	want := provenance.SourceDependency(signReleaseSource, "v0.0.1", signReleaseCommit)
+
+	dependencies := predicate.BuildDefinition.ResolvedDependencies
+	if len(dependencies) != 1 || dependencies[0].URI != want.URI || dependencies[0].Digest[want.DigestType] != want.Digest {
+		t.Fatalf("fixture lost the producer source URI/ref/commit binding: %+v", dependencies)
+	}
 }
 
 func requireReleaseImageIdentityRejection(t *testing.T, target livetest.Target, repo string, opts livetest.RunOptions, ref, publicKey, authFile string) {

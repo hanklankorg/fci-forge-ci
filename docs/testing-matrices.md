@@ -143,6 +143,8 @@ Kept scenario lines, by lane:
 | Lane | Scenario | State |
 |---|---|---|
 | build-capability-gitlab | `TestGitLabRelease_BuildImageCapability` | 📝 |
+| harness-inputs-forgejo | `TestForgejoLayer_ConsumerTrial` | 📝 |
+| harness-inputs-forgejo | `TestForgejoLayer_ConsumerTrial` | 📝 |
 | harness-inputs-gitlab | `TestGitLabRelease_ConsumerBranchProtection` | 📝 |
 | harness-inputs-gitlab | `TestGitLabRelease_ConsumerTrial` | 📝 |
 | harness-inputs-gitlab | `TestGitLabRelease_RejectsPreseededProvenance` | 📝 |
@@ -157,6 +159,7 @@ Kept scenario lines, by lane:
 | k3s-private-gitlab | `TestGitLabRelease_ResourceGroupSpansTheChild` | ✅ (2026-11-02, V 20261102T130753Z) |
 | k3s-private-gitlab | `TestGitLabRelease_PromotionRetryAfterRegistryWrite` | ✅ (2026-11-02, V 20261102T130918Z) |
 | k3s-private-gitlab | `TestGitLabBootstrap_PublishesAndDownloadsTheRecordedBinary` | 📝 |
+| release-images-forgejo | `TestForgejoLayer_ConsumerTrial` | 📝 |
 
 <!-- /generated:e2e-variants -->
 

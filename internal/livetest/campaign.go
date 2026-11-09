@@ -479,6 +479,10 @@ func campaignAdmitConsumer(checkout, provider, event string, words, settings []s
 }
 
 func campaignScenarioRecipe(provider string, env map[string]string, words []string) ([]string, error) {
+	if special, handled, err := campaignForgejoScenarioArgs(provider, env, words); handled {
+		return special, err
+	}
+
 	if special, handled, err := campaignGitLabScenarioArgs(provider, env, words); handled {
 		return special, err
 	}

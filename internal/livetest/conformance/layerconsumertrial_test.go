@@ -7,7 +7,6 @@
 package conformance_test
 
 import (
-	"fmt"
 	"maps"
 	"os"
 	"path/filepath"
@@ -15,7 +14,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/diggsweden/forge-ci/internal/domain/errs"
 	"github.com/diggsweden/forge-ci/internal/domain/provider"
 	"github.com/diggsweden/forge-ci/internal/livetest"
 )
@@ -165,6 +163,9 @@ func runForgejoConsumerTrial(t *testing.T, root string, private bool) {
 	)
 
 	external := externalRegistry(t, settings)
+	if settings.ReleaseImagesConfig != "" && external != nil {
+		t.Fatal("release-images-config readback requires the accepted local registry, not an external registry")
+	}
 
 	if release {
 		keys = trialReleaseFacts(t, target, repoName, &facts)
@@ -327,6 +328,11 @@ func requestRelease(t *testing.T, scenario layerScenario, requester livetest.Req
 
 	released := requireReleaseGit(t, target, repo, keys, request, requestTag, finalTag)
 	requireSignedRelease(t, target, repo, keys, finalTag, request)
+
+	if settings.ReleaseImagesConfig != "" {
+		requireLocalReleaseImageOutputs(t, target, repo, run.ID, released, keys, settings)
+	}
+
 	requireExternalImages(t, external, keys, settings)
 
 	return run, released
@@ -653,37 +659,13 @@ func requireSignedRelease(t *testing.T, target livetest.Target, repo string, key
 		t.Fatal("retain release inventory: ", err)
 	}
 
-	retained := map[string]bool{}
-	read := func(name string) []byte {
-		body := livetest.Download(t, target, assets[name], maxReleaseFile)
-		if err := evidence.Retain(name, body); err != nil {
-			t.Fatal("retain release payload: ", err)
-		}
-
-		retained[name] = true
-
-		return body
-	}
-
-	verified, err := livetest.VerifyReleaseBundles(slices.Collect(maps.Keys(assets)), func(subject, bundle string) error {
-		if assets[subject] == "" {
-			return fmt.Errorf("the release offers %s and not the file it signs: %w", bundle, errs.ErrValidation)
-		}
-
-		blob := read(subject)
-
-		return livetest.VerifyBlob(t, target, keys.cosignPublicPath, blob, read(bundle))
+	verified, err := livetest.VerifyReleaseReadback(evidence, names, func(name string) ([]byte, error) {
+		return livetest.Download(t, target, assets[name], maxReleaseFile), nil
+	}, func(blob, bundle []byte) error {
+		return livetest.VerifyBlob(t, target, keys.cosignPublicPath, blob, bundle)
 	})
 	if err != nil {
 		t.Error(err)
-	}
-
-	if evidence.Enabled() {
-		for _, name := range names {
-			if !retained[name] {
-				read(name)
-			}
-		}
 	}
 
 	if len(verified) == 0 {
