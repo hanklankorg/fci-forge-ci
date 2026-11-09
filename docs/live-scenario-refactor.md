@@ -44,6 +44,25 @@ here, has no final tree identity in this handoff, and is not signed qualificatio
 input.
 These documentation updates likewise do not change the frozen native source.
 
+### Superseding receipt: c1cc pilot only (2026-11-09)
+
+The status list below and Phase 6 baseline accounting remain historical to af9.
+The repaired Phase 2 pilot is independently accepted **only** for signed
+`c1cc452011f8f267bc723f62b2fa9175aeb79133`, tree
+`21aa5cc9910b7fdb860fbd8f0d101f2140a803ac`: Forgejo/Compose/public/Buildah/amd64.
+PR **547**, native merge, development snapshot/readiness **548** and signed
+release **549** passed in **658.76 seconds**; seven files and three Cosign bundles
+were verified. Optional independent final release-image readbacks were not enabled;
+cleanup had no reported error, but independent per-resource absence is unproven.
+Retained local review: `/tmp/opencode/live-refactor-maven-repaired-native-review.md`.
+Signed structural `f0d2a5efab8b02a92f327e16c77cece2b27cb157`, tree
+`51836ca508f20a57cad58db160394737026317d1`, passed all source gates with reviews GO;
+it is not natively qualified by c1cc's result. At this receipt, the combined
+runtime/reactor successor's source gates and native qualification are **NOT RUN**;
+later source-gate results must name that successor. Reactor acceptance stays OPEN.
+The original af9 PR **545** and merge PASS, development **546 FAILED**, and blocked
+downstream/release remain unchanged. Broader provider/enforcement gaps stay held.
+
 - **Phase 1: COMPLETE for mapping/disposition, independently reviewed.** The
   recursive inventory, exact first-slice/Maven coverage baseline,
   every original matrix row and all audited requirement IDs have a current

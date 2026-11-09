@@ -147,6 +147,12 @@ func artifactBuildRequest(plan snapshotimage.Plan, planned pipeline.PlannedArtif
 	// CLI policy overrides. Only explicitly requested read-only dependency auth
 	// crosses this boundary; the child also applies its existing auth isolation.
 	allowed := []string{"PATH", "TMPDIR", "TEMP", "TMP", "GOROOT", "GOTOOLCHAIN", "GOPATH", "GOPROXY", "GOSUMDB", "GOPRIVATE", "GONOSUMDB", "GONOPROXY", "GOCACHE", "GOMODCACHE", "RUSTUP_HOME", "CARGO_HOME", "CC", "CXX", "CGO_ENABLED", "SSL_CERT_FILE", "SSL_CERT_DIR", "NODE_EXTRA_CA_CERTS", "JAVA_HOME"}
+	// Image-provisioned Mise shims need the installed-tool location and the
+	// image's config selection together. Losing these when HOME is replaced
+	// selects consumer config (and can attempt acquisition) instead of the
+	// preprovisioned tools. Do not admit trust overrides, credentials, arbitrary
+	// MISE_* or XDG config: only these nonsecret image runtime selectors.
+	allowed = append(allowed, "MISE_DATA_DIR", "MISE_CONFIG_DIR", "MISE_OVERRIDE_CONFIG_FILENAMES")
 	if private {
 		allowed = append(allowed, "DEPENDENCY_TOKEN", "DEPENDENCY_USERNAME")
 	}

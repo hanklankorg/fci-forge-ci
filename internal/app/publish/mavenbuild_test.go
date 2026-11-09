@@ -5,8 +5,11 @@ package publish_test
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -39,42 +42,86 @@ func TestStageMavenBuildPreservesReactorPOMAndClassifierBytes(t *testing.T) {
 				version += "-SNAPSHOT"
 			}
 
-			parent := `<project><modelVersion>4.0.0</modelVersion><groupId>org.example</groupId><artifactId>parent</artifactId><version>` + version + `</version><packaging>pom</packaging><modules><module>library</module></modules></project>`
+			parent := `<project><modelVersion>4.0.0</modelVersion><groupId>org.example</groupId><artifactId>parent</artifactId><version>` + version + `</version><packaging>pom</packaging><modules><module>library</module><module>application</module></modules></project>`
 			child := `<project><modelVersion>4.0.0</modelVersion><parent><groupId>org.example</groupId><artifactId>parent</artifactId><version>` + version + `</version></parent><artifactId>library</artifactId><build><finalName>custom-${project.version}</finalName></build></project>`
+			// The downstream module inherits its version and depends on its sibling,
+			// not on an unrelated external artifact. Export must retain this model
+			// byte-for-byte; this offline handoff test does not execute Maven.
+			application := `<project><modelVersion>4.0.0</modelVersion><parent><groupId>org.example</groupId><artifactId>parent</artifactId><version>` + version + `</version></parent><artifactId>application</artifactId><dependencies><dependency><groupId>org.example</groupId><artifactId>library</artifactId><version>${project.version}</version></dependency></dependencies></project>`
 
 			writeMavenBuildFile(t, source, "pom.xml", []byte(parent))
 			writeMavenBuildFile(t, source, "library/pom.xml", []byte(child))
+			writeMavenBuildFile(t, source, "application/pom.xml", []byte(application))
 
 			for _, suffix := range []string{".jar", "-sources.jar", "-javadoc.jar", "-tests.jar"} {
-				writeMavenBuildFile(t, source, "library/target/custom-"+version+suffix, []byte("original build bytes: "+suffix))
+				writeMavenBuildFile(t, source, "library/target/custom-"+version+suffix, []byte("original build bytes: library"+suffix))
+				writeMavenBuildFile(t, source, "application/target/application-"+version+suffix, []byte("original build bytes: application"+suffix))
 			}
 
 			if err := apppublish.StageMavenBuild(t.Context(), source, destination, version, snapshot); err != nil {
 				t.Fatal(err)
 			}
 
-			for file, expected := range map[string][]byte{
-				"org/example/parent/" + version + "/parent-" + version + ".pom":   []byte(parent),
-				"org/example/library/" + version + "/library-" + version + ".pom": []byte(child),
-			} {
-				actual, err := os.ReadFile(filepath.Join(destination, filepath.FromSlash(file)))
-				if err != nil || !bytes.Equal(actual, expected) {
-					t.Fatalf("export changed POM bytes %s: %v", file, err)
+			payloads := map[string][]byte{
+				"org/example/parent/" + version + "/parent-" + version + ".pom":           []byte(parent),
+				"org/example/library/" + version + "/library-" + version + ".pom":         []byte(child),
+				"org/example/application/" + version + "/application-" + version + ".pom": []byte(application),
+			}
+
+			for _, artifact := range []string{"library", "application"} {
+				for _, suffix := range []string{".jar", "-sources.jar", "-javadoc.jar", "-tests.jar"} {
+					file := "org/example/" + artifact + "/" + version + "/" + artifact + "-" + version + suffix
+					payloads[file] = []byte("original build bytes: " + artifact + suffix)
 				}
 			}
 
-			for _, suffix := range []string{".jar", "-sources.jar", "-javadoc.jar", "-tests.jar"} {
-				file := filepath.Join(destination, "org/example/library", version, "library-"+version+suffix)
+			expectedPayloads := make([]string, 0, len(payloads))
+			for file, expected := range payloads {
+				expectedPayloads = append(expectedPayloads, file)
 
-				actual, err := os.ReadFile(file)
-				if err != nil || string(actual) != "original build bytes: "+suffix {
-					t.Fatalf("export changed %s: %v", suffix, err)
+				actual, err := os.ReadFile(filepath.Join(destination, filepath.FromSlash(file)))
+				if err != nil || !bytes.Equal(actual, expected) {
+					t.Fatalf("export changed %s: %v", file, err)
 				}
 
-				checksum, err := os.ReadFile(file + ".sha256")
-				if err != nil || len(checksum) != 64 {
-					t.Fatalf("publication checksum missing for %s: %v", suffix, err)
+				checksum, err := os.ReadFile(filepath.Join(destination, filepath.FromSlash(file+".sha256")))
+				if err != nil || string(checksum) != fmt.Sprintf("%x", sha256.Sum256(expected)) {
+					t.Fatalf("publication checksum does not bind %s: %v", file, err)
 				}
+			}
+
+			var set apppublish.MavenPublicationSet
+
+			var err error
+
+			if snapshot {
+				set, err = apppublish.InspectMavenSnapshot(destination, version)
+			} else {
+				set, err = apppublish.InspectMavenPublication(destination, version, false)
+			}
+
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			slices.Sort(expectedPayloads)
+
+			if len(set.Publications) != 3 || !slices.Equal(set.Payloads, expectedPayloads) {
+				t.Fatalf("reactor publication inventory: %+v", set)
+			}
+
+			// A complete first child must not mask an incomplete downstream child.
+			for _, suffix := range []string{".jar", "-sources.jar", "-javadoc.jar"} {
+				file := filepath.Join(source, "application/target/application-"+version+suffix)
+				if err := os.Remove(file); err != nil {
+					t.Fatal(err)
+				}
+
+				if err := apppublish.StageMavenBuild(t.Context(), source, t.TempDir(), version, snapshot); err == nil {
+					t.Fatalf("accepted downstream module missing %s", suffix)
+				}
+
+				writeMavenBuildFile(t, source, "application/target/application-"+version+suffix, []byte("original build bytes: application"+suffix))
 			}
 		})
 	}

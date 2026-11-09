@@ -60,6 +60,26 @@ oracle, an independent dev lane, PR acceptance and provisional Nano findings
 remain separate work. `Mac0Smoke.java` is supplied as a consumer-specific oracle
 but this stable case does not execute it.
 
+## Reactor boundary (native acceptance OPEN)
+
+Maven reactor support is offered by the production library build (including
+sibling bootstrap install), version bump (`versions:set -DprocessAllModules=true`)
+and explicit jar/pom prebuilt export. It is not established by this single-library
+native witness. `TestStageMavenBuildPreservesReactorPOMAndClassifierBytes` exercises
+an aggregator and two children with a sibling dependency, stable/SNAPSHOT inherited
+coordinates, exact POM/classifier bytes and publication inventory/checksums offline.
+It executes no Maven and proves neither compilation nor version synchronization.
+
+The current stable and development adapters refuse an aggregator before changing
+their private index (`TestMavenLibraryFixturesRefuseReactorWithoutChangingSource`).
+Their root `target/` handoff, one-artifact release inventory, development identity,
+fresh registry readback and package cleanup are deliberately single-library owners.
+A native reactor fixture needs a separately reviewed multi-publication oracle and
+complete module handoff/cleanup at those existing owners; merely allowing extra
+release assets or treating the parent POM as the library would weaken acceptance.
+There is no maintained native reactor selector yet. The stable selector above and
+the development selector in `mavenlibrarydevelopment.md` retain their scope.
+
 ## Native checkpoint — 2026-10-30
 
 Public Forgejo run **314** passed with the original `cose-lib` source at

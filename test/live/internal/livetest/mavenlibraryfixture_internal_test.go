@@ -4,6 +4,7 @@
 package livetest
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -204,4 +205,59 @@ func TestMavenLibraryFixtureAdmittedPOM(t *testing.T) {
 			t.Fatal("admitted a symlink POM")
 		}
 	})
+}
+
+// The product can build/export reactors, but these native fixture adapters own
+// one library's inventory and cleanup. Do not silently count a parent POM as a
+// successful one-JAR witness or normalize the admitted source into one.
+func TestMavenLibraryFixturesRefuseReactorWithoutChangingSource(t *testing.T) {
+	for _, format := range []string{"sha1", "sha256"} {
+		t.Run(format, func(t *testing.T) {
+			root, git := stageTestRepo(t, format)
+			parent := `<project><modelVersion>4.0.0</modelVersion><groupId>org.example</groupId><artifactId>parent</artifactId><version>1.2.3-SNAPSHOT</version><packaging>pom</packaging><modules><module>library</module><module>application</module></modules></project>`
+			stageTestWrite(t, root, "pom.xml", parent, 0644)
+
+			for _, module := range []string{"library", "application"} {
+				dependency := ""
+				if module == "application" {
+					dependency = `<dependencies><dependency><groupId>org.example</groupId><artifactId>library</artifactId><version>${project.version}</version></dependency></dependencies>`
+				}
+
+				stageTestWrite(t, root, module+"/pom.xml", `<project><modelVersion>4.0.0</modelVersion><parent><groupId>org.example</groupId><artifactId>parent</artifactId><version>1.2.3-SNAPSHOT</version></parent><artifactId>`+module+`</artifactId>`+dependency+`</project>`, 0644)
+			}
+
+			stageTestCommit(t, git, root)
+
+			source, err := openConsumer(t.Context(), git, root, t.TempDir())
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			before, err := git.run(t.Context(), source.stage, "write-tree")
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			config := MavenLibraryFixtureConfig{RecipeDirectory: t.TempDir(), JavaImage: "registry.invalid/maven:21@sha256:" + strings.Repeat("a", 64), Profile: "central-release"}
+
+			_, err = newMavenLibraryConsumerFixture(t.Context(), source, config)
+			if !errors.Is(err, errSingleModuleJarLibrary) {
+				t.Fatalf("stable fixture must refuse at identity before recipe access: %v", err)
+			}
+
+			_, _, err = mavenLibraryDevelopmentFixture(t.Context(), source, config, "/not-read/Oracle.java")
+			if !errors.Is(err, errSingleModuleJarLibrary) {
+				t.Fatalf("development fixture must refuse before oracle/recipe access: %v", err)
+			}
+
+			after, err := git.run(t.Context(), source.stage, "write-tree")
+			if err != nil || after != before {
+				t.Fatalf("refused reactor changed private index: %q -> %q: %v", before, after, err)
+			}
+
+			if err := git.requireClean(t.Context(), root, "."); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
 }

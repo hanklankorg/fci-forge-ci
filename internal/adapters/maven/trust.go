@@ -251,7 +251,7 @@ func probeMavenJavaHome(ctx context.Context, java, dir string, environment []str
 		}
 
 		if ctx.Err() != nil {
-			return "", fmt.Errorf("java runtime discovery interrupted: %w: %w", wrapped, ctx.Err())
+			return "", fmt.Errorf("java runtime discovery interrupted: %w: %w\n%s", wrapped, ctx.Err(), mavenDiscoveryDiagnostic(settings, environment))
 		}
 
 		return "", fmt.Errorf("%w\n%s", wrapped, mavenDiscoveryDiagnostic(settings, environment))
@@ -262,7 +262,7 @@ func probeMavenJavaHome(ctx context.Context, java, dir string, environment []str
 	}
 
 	if ctx.Err() != nil {
-		return "", fmt.Errorf("java runtime discovery interrupted: %w", ctx.Err())
+		return "", fmt.Errorf("java runtime discovery interrupted: %w\n%s", ctx.Err(), mavenDiscoveryDiagnostic(settings, environment))
 	}
 
 	return parseMavenJavaHome(string(settings))
