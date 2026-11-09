@@ -3167,6 +3167,9 @@ EXAMPLE:
    config_plan="$(printf '%s\n' "$config_output" | jq -er '."config-plan-json"')" &&
    CONFIG_PLAN_JSON="$config_plan" forge-ci --runner local --json plan snapshot-release \
      --project-type go --branch main
+
+Pass --runner-input name=value for each runner input of the calling layer.
+The plan refuses a planned image or Xcode platform without its own runner.
 ```
 
 | Flag | Description | Type | Default | Env vars |
@@ -3181,7 +3184,7 @@ EXAMPLE:
 | `--java-version` | JDK version installed by the publish job (Maven/Gradle paths) | string | `""` | `$JAVA_VERSION` |
 | `--node-version` | Node.js version installed by the publish job (npm path) | string | `""` | `$NODE_VERSION` |
 | `--rust-toolchain` | Rust toolchain installed by the publish job (cargo path) | string | `"stable"` | `$RUST_TOOLCHAIN` |
-| `--registry` | registry forwarded to the snapshot plan context (snapshot flow builds no containers) | string | `""` | `$REGISTRY` |
+| `--registry` | registry forwarded to the snapshot plan context | string | `""` | `$REGISTRY` |
 | `--forge-ci-binary-ref` | git ref of the forge-ci binary used in the plan | string | `""` | `$FORGE_CI_BINARY_REF` |
 | `--npm-registry` | npm registry URL the dev tarball is published to | string | `""` | `$NPM_REGISTRY` |
 | `--scope` | npm package scope (e.g. @examplescope) routed to the registry | string | `""` | `$SCOPE`, `$PACKAGE_SCOPE` |
@@ -3189,6 +3192,7 @@ EXAMPLE:
 | `--publish-npm` | include the npm dev-publish step in the plan | bool | `true` | `$PUBLISH_NPM` |
 | `--publish-maven-snapshots` | opt into Maven-format snapshot publication for Maven, Gradle JVM and Android libraries | bool | `false` | `$PUBLISH_MAVEN_SNAPSHOTS` |
 | `--use-ci-token` | use the CI platform token in place of an explicit registry password | bool | `true` | `$USE_CI_TOKEN` |
+| `--runner-input` | runner input of the calling layer as it passed it, name=value, such as build-runs-on-linux-arm64=["arm64"] (repeatable); a planned platform whose input has no value is refused; none passed checks nothing | string | `""` | n/a |
 
 ### `forge-ci plan validate-classified-files`
 

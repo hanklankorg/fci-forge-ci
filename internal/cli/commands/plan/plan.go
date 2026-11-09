@@ -151,7 +151,7 @@ EXAMPLE:
    config_output="$(forge-ci --runner local --json config parse-artifacts --file .forge-ci/artifacts.yml)" &&
    config_plan="$(printf '%s\n' "$config_output" | jq -er '."config-plan-json"')" &&
    CONFIG_PLAN_JSON="$config_plan" forge-ci --runner local --json plan snapshot-release \
-      --project-type go --branch main
+     --project-type go --branch main
 
 Pass --runner-input name=value for each runner input of the calling layer.
 The plan refuses a planned image or Xcode platform without its own runner.`,
@@ -167,7 +167,7 @@ The plan refuses a planned image or Xcode platform without its own runner.`,
 			&cli.StringFlag{Name: "java-version", Sources: cli.EnvVars("JAVA_VERSION"), Usage: "JDK version installed by the publish job (Maven/Gradle paths)"},
 			&cli.StringFlag{Name: "node-version", Sources: cli.EnvVars("NODE_VERSION"), Usage: "Node.js version installed by the publish job (npm path)"},
 			&cli.StringFlag{Name: "rust-toolchain", Value: "stable", Sources: cli.EnvVars("RUST_TOOLCHAIN"), Usage: "Rust toolchain installed by the publish job (cargo path)"},
-			&cli.StringFlag{Name: "registry", Sources: cli.EnvVars("REGISTRY"), Usage: "registry forwarded to the snapshot plan context (snapshot flow builds no containers)"},
+			&cli.StringFlag{Name: "registry", Sources: cli.EnvVars("REGISTRY"), Usage: "registry forwarded to the snapshot plan context"},
 			&cli.StringFlag{Name: "forge-ci-binary-ref", Sources: cli.EnvVars("FORGE_CI_BINARY_REF"), Usage: "git ref of the forge-ci binary used in the plan"},
 			&cli.StringFlag{Name: "npm-registry", Sources: cli.EnvVars("NPM_REGISTRY"), Usage: "npm registry URL the dev tarball is published to"},
 			&cli.StringFlag{Name: "scope", Sources: cli.EnvVars("SCOPE", "PACKAGE_SCOPE"), Usage: "npm package scope (e.g. @examplescope) routed to the registry"},
