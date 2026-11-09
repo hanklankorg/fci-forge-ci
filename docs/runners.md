@@ -70,7 +70,9 @@ Every runner input is named `[role-]<keyword>[-<os>-<arch>]`:
 So `build-runner-tags-linux-arm64` chooses GitLab's arm64 image build runner
 and `runs-on-darwin-arm64` the Forgejo or GitHub macOS runner. The engine owns
 this table (`internal/domain/runners`); the layers and their guards take the
-names from it.
+names from it, and `runners.Names` lists every valid name per forge. GitHub
+has no `signer-` input: its signer jobs run on a hosted literal that no
+caller input changes.
 
 `forge-ci plan release` and `forge-ci container release-images plan` take
 each runner input of the calling layer with `--runner-input name=value`, as
@@ -84,13 +86,19 @@ its jobs has no runner:
 The refusal names the input, the platform and the forge. There is no
 fallback across platforms or roles: an arm64 build never runs on the amd64
 runner, and an image build never on the ordinary one. A default counts as a
-value. GitLab's empty list `[]` means untagged, which is a choice; on Forgejo
-and GitHub an empty label list selects no runner, so it is refused. The
-refusal therefore fires where the forge has no default and none was given,
-and for macOS jobs where the forge has no macOS runner, as on Forgejo.
+value. An empty value or an empty list `[]` counts as missing, with one
+exception: GitLab's unsuffixed `runner-tags` and `signer-runner-tags`, where
+`[]` means untagged. In a platform-bound input an untagged job could land on
+a runner of any platform, an image build needs a runner that permits it, and
+on Forgejo and GitHub an empty label list selects no runner. The refusal
+says to set the input to a JSON list that selects a runner of that
+platform. The refusal therefore fires where the forge has no default and
+none was given, and for macOS jobs where the forge has no macOS runner, as
+on Forgejo.
 
 A layer that passes no `--runner-input` is not checked; the layers pass
-their runner inputs as they move to these names.
+their runner inputs as they move to these names. The flag becomes required
+once the GitLab, Forgejo and GitHub layers all pass it.
 
 ## Runner lending
 

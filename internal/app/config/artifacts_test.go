@@ -857,7 +857,7 @@ func TestEmitReleaseImagesPlan_RefusesABuildWithoutARunner(t *testing.T) {
 
 	sink, err := plan(t, `build-runs-on-linux-amd64=["pool"]`)
 	require.ErrorIs(t, err, errs.ErrUsage)
-	require.ErrorContains(t, err, "Forgejo runner input build-runs-on-linux-arm64 has no value")
+	require.ErrorContains(t, err, "forgejo runner input build-runs-on-linux-arm64 has no value")
 	require.Empty(t, sink.Keys())
 
 	_, err = plan(t, `build-runs-on-linux-amd64=["pool"]`, `build-runs-on-linux-arm64=["arm64"]`)

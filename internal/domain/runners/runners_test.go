@@ -5,6 +5,7 @@ package runners_test
 
 import (
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 
@@ -28,6 +29,7 @@ func TestInputNamesFollowTheRolePattern(t *testing.T) {
 		{provider.ForgeGitLab, runners.Ordinary, "darwin/arm64", "runner-tags-darwin-arm64"},
 		{provider.ForgeForgejo, runners.Build, "linux/amd64", "build-runs-on-linux-amd64"},
 		{provider.ForgeForgejo, runners.Signer, "", "signer-runs-on"},
+		{provider.ForgeForgejo, runners.Signer, "linux/amd64", "signer-runs-on-linux-amd64"},
 		{provider.ForgeGitHub, runners.Ordinary, "darwin/arm64", "runs-on-darwin-arm64"},
 		{provider.ForgeGitHub, runners.Ordinary, "", "runs-on"},
 	} {
@@ -46,6 +48,7 @@ func TestInputNamesFollowTheRolePattern(t *testing.T) {
 		{provider.ForgeGitLab, "checks", ""},
 		{provider.ForgeGitLab, runners.Build, "linux/s390x"},
 		{provider.ForgeGitLab, runners.Build, "linux-arm64"},
+		{provider.ForgeGitHub, runners.Signer, ""}, // a hosted literal
 	} {
 		if _, err := runners.Input(refused.forge, refused.role, refused.platform); !errors.Is(err, errs.ErrUsage) {
 			t.Errorf("Input(%s, %s, %q): err = %v, want usage refusal", refused.forge, refused.role, refused.platform, err)
@@ -71,12 +74,53 @@ func TestParseInputsRefusesWhatNoLayerPasses(t *testing.T) {
 	if _, err := runners.ParseInputs(provider.ForgeLocal, []string{"runs-on=[\"a\"]"}); !errors.Is(err, errs.ErrUsage) {
 		t.Errorf("a local run took runner inputs: %v", err)
 	}
+
+	// GitHub's signer jobs run on a hosted literal; no input chooses theirs.
+	for _, name := range []string{"signer-runs-on", "signer-runs-on-linux-amd64"} {
+		if _, err := runners.ParseInputs(provider.ForgeGitHub, []string{name + `=["ubuntu-26.04"]`}); !errors.Is(err, errs.ErrUsage) {
+			t.Errorf("GitHub took %s: %v", name, err)
+		}
+	}
+}
+
+// Names is every name Input makes for a forge, and only those: what a guard
+// holds each layer's runner inputs to.
+func TestNames(t *testing.T) {
+	t.Parallel()
+
+	gitlab, err := runners.Names(provider.ForgeGitLab)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	want := []string{
+		"runner-tags", "runner-tags-linux-amd64", "runner-tags-linux-arm64", "runner-tags-darwin-arm64",
+		"build-runner-tags", "build-runner-tags-linux-amd64", "build-runner-tags-linux-arm64", "build-runner-tags-darwin-arm64",
+		"signer-runner-tags", "signer-runner-tags-linux-amd64", "signer-runner-tags-linux-arm64", "signer-runner-tags-darwin-arm64",
+	}
+	if !slices.Equal(gitlab, want) {
+		t.Errorf("Names(gitlab) = %v, want %v", gitlab, want)
+	}
+
+	github, err := runners.Names(provider.ForgeGitHub)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(github) != 8 || slices.ContainsFunc(github, func(name string) bool { return strings.HasPrefix(name, "signer-") }) {
+		t.Errorf("Names(github) = %v, want the ordinary and build names only", github)
+	}
+
+	if _, err := runners.Names(provider.ForgeLocal); !errors.Is(err, errs.ErrUsage) {
+		t.Errorf("Names(local): err = %v, want usage refusal", err)
+	}
 }
 
 var (
 	arm64Builds = runners.Need{Role: runners.Build, Platform: "linux/arm64", Jobs: "image builds"}
 	amd64Builds = runners.Need{Role: runners.Build, Platform: "linux/amd64", Jobs: "image builds"}
 	xcodeJobs   = runners.Need{Role: runners.Ordinary, Platform: "darwin/arm64", Jobs: "Xcode and App Store jobs"}
+	signerJobs  = runners.Need{Role: runners.Signer, Jobs: "signing jobs"}
 )
 
 func TestAdmit(t *testing.T) {
@@ -90,13 +134,22 @@ func TestAdmit(t *testing.T) {
 		refused string // the input the refusal names; empty admits
 	}{
 		// Refused where no value reached the engine, on each forge.
-		{"gitlab input not passed", provider.ForgeGitLab, []string{"build-runner-tags-linux-amd64=[]"}, []runners.Need{arm64Builds}, "build-runner-tags-linux-arm64"},
+		{"gitlab input not passed", provider.ForgeGitLab, []string{"build-runner-tags-linux-amd64=[\"amd64\"]"}, []runners.Need{arm64Builds}, "build-runner-tags-linux-arm64"},
 		{"gitlab input empty", provider.ForgeGitLab, []string{"build-runner-tags-linux-arm64="}, []runners.Need{arm64Builds}, "build-runner-tags-linux-arm64"},
 		{"forgejo required input empty", provider.ForgeForgejo, []string{"build-runs-on-linux-amd64="}, []runners.Need{amd64Builds}, "build-runs-on-linux-amd64"},
 		{"forgejo empty label list", provider.ForgeForgejo, []string{"build-runs-on-linux-arm64=[]"}, []runners.Need{arm64Builds}, "build-runs-on-linux-arm64"},
 		{"github input not passed", provider.ForgeGitHub, []string{"runs-on=[\"ubuntu-26.04\"]"}, []runners.Need{xcodeJobs}, "runs-on-darwin-arm64"},
 		// Defaults are values: GitLab's [] is untagged, GitHub's are hosted.
-		{"gitlab default untagged", provider.ForgeGitLab, []string{"build-runner-tags-linux-arm64=[]"}, []runners.Need{arm64Builds}, ""},
+		{"gitlab untagged default", provider.ForgeGitLab, []string{"signer-runner-tags=[]"}, []runners.Need{signerJobs}, ""},
+		{"github hosted unbound default", provider.ForgeGitHub, []string{"build-runs-on=[\"ubuntu-26.04\"]"}, []runners.Need{{Role: runners.Build, Jobs: "image builds"}}, ""},
+		// An empty list binds no runner on Forgejo, nor any platform-bound
+		// input on GitLab: an untagged job could land on any platform.
+		{"forgejo unbound empty list", provider.ForgeForgejo, []string{"signer-runs-on=[]"}, []runners.Need{signerJobs}, "signer-runs-on"},
+		{"gitlab platform-bound untagged", provider.ForgeGitLab, []string{"build-runner-tags-linux-arm64=[]"}, []runners.Need{arm64Builds}, "build-runner-tags-linux-arm64"},
+		{"gitlab ordinary untagged", provider.ForgeGitLab, []string{"runner-tags=[]"}, []runners.Need{{Role: runners.Ordinary, Jobs: "ordinary jobs"}}, ""},
+		{"gitlab unbound build untagged", provider.ForgeGitLab, []string{"build-runner-tags=[]"}, []runners.Need{{Role: runners.Build, Jobs: "image builds"}}, "build-runner-tags"},
+		{"gitlab untagged darwin", provider.ForgeGitLab, []string{"runner-tags-darwin-arm64=[]"}, []runners.Need{xcodeJobs}, "runner-tags-darwin-arm64"},
+		{"gitlab explicit arm64", provider.ForgeGitLab, []string{"build-runner-tags-linux-arm64=[\"arm64\"]"}, []runners.Need{arm64Builds}, ""},
 		{"github hosted defaults", provider.ForgeGitHub, []string{"build-runs-on-linux-arm64=[\"ubuntu-26.04-arm\"]", "runs-on-darwin-arm64=[\"macos-26\"]"}, []runners.Need{arm64Builds, xcodeJobs}, ""},
 		// Explicit values.
 		{"forgejo explicit", provider.ForgeForgejo, []string{"build-runs-on-linux-amd64=[\"pool\"]", "build-runs-on-linux-arm64=[\"arm64\"]"}, []runners.Need{amd64Builds, arm64Builds}, ""},
@@ -130,7 +183,7 @@ func TestAdmit(t *testing.T) {
 
 			// The refusal names the missing input, the platform and the forge.
 			need := tc.needs[len(tc.needs)-1]
-			for _, want := range []string{" " + tc.refused + " ", need.Platform, displayNames[tc.forge]} {
+			for _, want := range []string{" " + tc.refused + " ", "set " + tc.refused + " to a JSON list", need.Platform, " " + string(tc.forge) + " "} {
 				if !strings.Contains(err.Error(), want) {
 					t.Errorf("refusal %q does not name %q", err, want)
 				}
@@ -138,8 +191,6 @@ func TestAdmit(t *testing.T) {
 		})
 	}
 }
-
-var displayNames = map[provider.ForgeAPI]string{provider.ForgeGitLab: "GitLab", provider.ForgeForgejo: "Forgejo", provider.ForgeGitHub: "GitHub"}
 
 // A layer that passes no runner inputs yet is not checked.
 func TestAdmitWithoutInputsChecksNothing(t *testing.T) {

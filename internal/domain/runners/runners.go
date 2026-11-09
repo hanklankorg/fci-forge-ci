@@ -49,7 +49,8 @@ func Platforms() []string {
 
 // Input is the name of the forge layer's input that chooses the runner for
 // role, bound to platform, or to no one platform when platform is empty:
-// Input(gitlab, Build, "linux/arm64") is build-runner-tags-linux-arm64.
+// Input(gitlab, Build, "linux/arm64") is build-runner-tags-linux-arm64. A
+// forge whose layer fixes the signer runner has no signer input.
 func Input(forge provider.ForgeAPI, role Role, platform string) (string, error) {
 	keyword, err := forgeKeyword(forge)
 	if err != nil {
@@ -58,6 +59,10 @@ func Input(forge provider.ForgeAPI, role Role, platform string) (string, error) 
 
 	if !slices.Contains(Roles(), role) {
 		return "", fmt.Errorf("unknown runner role %q, want one of %v: %w", role, Roles(), errs.ErrUsage)
+	}
+
+	if role == Signer && forge.FixesSignerRunner() {
+		return "", fmt.Errorf("%s fixes the signer runner and has no signer runner input: %w", forge, errs.ErrUsage)
 	}
 
 	name := keyword
@@ -78,12 +83,8 @@ func Input(forge provider.ForgeAPI, role Role, platform string) (string, error) 
 
 // forgeKeyword is the forge's own word for the runner field of a job.
 func forgeKeyword(forge provider.ForgeAPI) (string, error) {
-	switch forge {
-	case provider.ForgeGitLab:
-		return "runner-tags", nil
-	case provider.ForgeForgejo, provider.ForgeGitHub:
-		return "runs-on", nil
-	case provider.ForgeLocal:
+	if keyword := forge.RunnerKeyword(); keyword != "" {
+		return keyword, nil
 	}
 
 	return "", fmt.Errorf("forge %q has no runner inputs: %w", forge, errs.ErrUsage)
@@ -112,7 +113,7 @@ func ParseInputs(forge provider.ForgeAPI, pairs []string) (*Inputs, error) {
 		return nil, nil //nolint:nilnil // nil Inputs is the documented "layer passes none".
 	}
 
-	known, err := inputNames(forge)
+	known, err := Names(forge)
 	if err != nil {
 		return nil, err
 	}
@@ -126,7 +127,7 @@ func ParseInputs(forge provider.ForgeAPI, pairs []string) (*Inputs, error) {
 		}
 
 		if !slices.Contains(known, name) {
-			return nil, fmt.Errorf("%s has no runner input %q: %w", displayName(forge), name, errs.ErrUsage)
+			return nil, fmt.Errorf("%s has no runner input %q: %w", forge, name, errs.ErrUsage)
 		}
 
 		if _, seen := values[name]; seen {
@@ -139,11 +140,20 @@ func ParseInputs(forge provider.ForgeAPI, pairs []string) (*Inputs, error) {
 	return &Inputs{forge: forge, values: values}, nil
 }
 
-// inputNames is every runner input name of forge.
-func inputNames(forge provider.ForgeAPI) ([]string, error) {
+// Names is every runner input name a layer of forge can have, each role
+// unbound and bound to each platform, in table order.
+func Names(forge provider.ForgeAPI) ([]string, error) {
+	if _, err := forgeKeyword(forge); err != nil {
+		return nil, err
+	}
+
 	var names []string
 
 	for _, role := range Roles() {
+		if role == Signer && forge.FixesSignerRunner() {
+			continue
+		}
+
 		for _, platform := range append([]string{""}, Platforms()...) {
 			name, err := Input(forge, role, platform)
 			if err != nil {
@@ -159,9 +169,8 @@ func inputNames(forge provider.ForgeAPI) ([]string, error) {
 
 // Admit refuses the needs whose input has no value. There is no fallback
 // across platforms or roles: an arm64 build is not run on the amd64 runner.
-// A default the layer applied is a value, and so is GitLab's empty tag list,
-// which means untagged; on Forgejo and GitHub an empty label list selects
-// no runner. A nil Inputs admits every need.
+// A default the layer applied is a value; an empty runner list is one only
+// where emptyListChoosesRunner says so. A nil Inputs admits every need.
 func (in *Inputs) Admit(needs []Need) error {
 	if in == nil {
 		return nil
@@ -177,48 +186,49 @@ func (in *Inputs) Admit(needs []Need) error {
 			return err
 		}
 
-		if seen[name] || in.hasValue(name) {
+		if seen[name] || in.hasValue(name, need) {
 			continue
 		}
 
 		seen[name] = true
 
-		refusals = append(refusals, fmt.Errorf(
-			"the plan has %s on %s, but the %s runner input %s has no value: pass a runner for %s, or leave %s out of the plan: %w",
-			need.Jobs, need.Platform, displayName(in.forge), name, need.Platform, need.Platform, errs.ErrUsage))
+		refusals = append(refusals, in.refusal(name, need))
 	}
 
 	return errors.Join(refusals...)
 }
 
-func (in *Inputs) hasValue(name string) bool {
+func (in *Inputs) hasValue(name string, need Need) bool {
 	value, ok := in.values[name]
 	if !ok || strings.TrimSpace(value) == "" {
 		return false
 	}
 
-	if in.forge == provider.ForgeGitLab {
-		return true
-	}
-
 	var labels []string
 	if json.Unmarshal([]byte(value), &labels) == nil && len(labels) == 0 {
-		return false
+		return emptyListChoosesRunner(in.forge, need)
 	}
 
 	return true
 }
 
-func displayName(forge provider.ForgeAPI) string {
-	switch forge {
-	case provider.ForgeGitLab:
-		return "GitLab"
-	case provider.ForgeForgejo:
-		return "Forgejo"
-	case provider.ForgeGitHub:
-		return "GitHub"
-	case provider.ForgeLocal:
+// emptyListChoosesRunner reports whether an empty runner list is a choice for
+// need's input. It is only for GitLab's unsuffixed runner-tags and
+// signer-runner-tags, where it means untagged. A platform-bound input binds
+// its jobs to that platform, which an untagged job could leave; image builds
+// need a runner that permits them; and on Forgejo and GitHub an empty label
+// list selects no runner.
+func emptyListChoosesRunner(forge provider.ForgeAPI, need Need) bool {
+	return forge.EmptyRunnerListIsUntagged() && need.Platform == "" && need.Role != Build
+}
+
+// refusal names the input with no value and how to set it.
+func (in *Inputs) refusal(name string, need Need) error {
+	if need.Platform == "" {
+		return fmt.Errorf("the plan has %s, but the %s runner input %s has no value: set %s to a JSON list that selects their runner: %w",
+			need.Jobs, in.forge, name, name, errs.ErrUsage)
 	}
 
-	return string(forge)
+	return fmt.Errorf("the plan has %s on %s, but the %s runner input %s has no value: set %s to a JSON list that selects a %s runner, or leave %s out of the plan: %w",
+		need.Jobs, need.Platform, in.forge, name, name, need.Platform, need.Platform, errs.ErrUsage)
 }

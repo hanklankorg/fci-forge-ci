@@ -480,7 +480,7 @@ func TestPlanRelease_RefusesAPlatformWithoutARunnerInput(t *testing.T) {
 	}
 
 	err := run(`build-runs-on-linux-amd64=["self-hosted","amd64"]`)
-	if !errors.Is(err, errs.ErrUsage) || !strings.Contains(err.Error(), "Forgejo runner input build-runs-on-linux-arm64 has no value") {
+	if !errors.Is(err, errs.ErrUsage) || !strings.Contains(err.Error(), "forgejo runner input build-runs-on-linux-arm64 has no value") {
 		t.Fatalf("err = %v, want the arm64 refusal", err)
 	}
 
