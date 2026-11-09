@@ -85,7 +85,7 @@ go_env() {
   local name
   # Scratch placement and compiler parallelism do not change build inputs.
   # Preserve caller resource limits even in this otherwise closed environment.
-  for name in GOPATH GOMODCACHE GOCACHE TMPDIR GOMAXPROCS; do
+  for name in GOPATH GOMODCACHE GOCACHE TMPDIR GOMAXPROCS GOMEMLIMIT; do
     [[ -z "${!name:-}" ]] || environment+=("${name}=${!name}")
   done
   env -i "${environment[@]}" "$@"
@@ -102,7 +102,12 @@ require_pinned_toolchain() {
 
 # build ARCH OUTPUT
 build() {
+  # -p is compiler package concurrency, unlike the runtime scheduler/GC knobs.
+  # Go validates this numeric argument; no ambient GOFLAGS enters the build.
+  local -a concurrency=()
+  [[ -z "${GOMAXPROCS:-}" ]] || concurrency=(-p "$GOMAXPROCS")
   go_env "$1" "$go_bin" -C "$repo_root" build \
+    "${concurrency[@]}" \
     -trimpath \
     -buildvcs=false \
     -ldflags="-s -w -X main.version=${version}" \

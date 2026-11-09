@@ -23,6 +23,8 @@ import (
 	"github.com/diggsweden/forge-ci/internal/livetest"
 )
 
+const imageBuildSettingsOptionsMode = "image-build-settings-options"
+
 func main() {
 	if len(os.Args) == 4 && os.Args[1] == "classify-run" {
 		status, err := strconv.Atoi(os.Args[2])
@@ -41,7 +43,8 @@ func main() {
 		return
 	}
 
-	if len(os.Args) >= 3 {
+	// This options mode also resolves an empty list from inherited settings.
+	if len(os.Args) >= 3 || (len(os.Args) == 2 && os.Args[1] == imageBuildSettingsOptionsMode) {
 		if err := withArguments(os.Args[1], os.Args[2:]); err != nil {
 			fmt.Fprintf(os.Stderr, "%s: %v\n", os.Args[1], err)
 			os.Exit(2)
@@ -209,6 +212,34 @@ func campaign(mode string, args []string) error {
 // withArguments runs the modes that take arguments: a testing document is
 // printed, every other mode is a campaign mode.
 func withArguments(mode string, args []string) error {
+	if mode == imageBuildSettingsOptionsMode || (mode == "image-build-settings" && len(args) == 4) {
+		var (
+			settings []string
+			err      error
+		)
+		if mode == imageBuildSettingsOptionsMode {
+			settings, err = livetest.ResolveImageBuildOptions(args, os.Getenv)
+		} else {
+			settings, err = livetest.ResolveImageBuildInvocation(args[0], args[1], args[2], args[3], os.Getenv)
+		}
+
+		if err != nil {
+			return err
+		}
+
+		_, err = fmt.Println(strings.Join(settings, "\n"))
+
+		return err
+	}
+
+	if mode == "image-build-options" {
+		return livetest.AdmitImageBuildOptions(args, os.Getenv)
+	}
+
+	if mode == "image-build-resources" && len(args) == 4 {
+		return livetest.AdmitImageBuildInvocation(args[0], args[1], args[2], args[3], os.Getenv)
+	}
+
 	if strings.HasPrefix(mode, "testing-") && len(args) <= 2 {
 		document, err := testingDocument(mode, args)
 		if err != nil {
@@ -278,6 +309,7 @@ func preflightFact(mode string) (string, error) {
 }
 
 func usage() {
+	fmt.Fprintln(os.Stderr, "       preflight image-build-resources <default|required> <cpus-or-empty> <memory-MiB-or-empty> <compiler-jobs-or-empty> (validate requested limits; enforcement unmeasured)")
 	fmt.Fprintln(os.Stderr, "       preflight classify-run <exit-code> <retained-log>")
 	fmt.Fprintln(os.Stderr, "       preflight campaign-env-check <campaign.env>")
 	fmt.Fprintln(os.Stderr, "       preflight gitlab-consumer-scenario | gitlab-lifecycle-settings (validates FORGE_CI_LIVE_CONSUMER_SETTINGS)")

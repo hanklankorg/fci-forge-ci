@@ -898,9 +898,11 @@ test-live-signing-inputs:
 [arg('forge_lab', help='Absolute path to the Forge Lab checkout used to publish the image')]
 [doc('Live; publish a lab signer or kaniko-job image')]
 [group('live')]
-test-live-image kind forge_lab:
+test-live-image kind forge_lab budget="" cpus="" memory_mib="" compiler_jobs="":
     #!/usr/bin/env bash
     set -euo pipefail
+    source scripts/ci/image-build-settings.sh
+    image_build_settings '' image-build-settings "$3" "$4" "$5" "$6" || exit 2
     case "$1" in
     signer | kaniko-job) exec bash scripts/ci/publish-live-image.sh "$1" "$2" ;;
     *) printf 'kind must be signer or kaniko-job, got %q\n' "$1" >&2 && exit 2 ;;
@@ -1219,10 +1221,13 @@ demo forge name *settings:
 [arg('directory', help='Absolute directory to write the archive to')]
 [doc('Build a candidate runtime image archive; network')]
 [group('build')]
-runtime-image-archive target directory:
+runtime-image-archive target directory budget="" cpus="" memory_mib="" compiler_jobs="":
     #!/usr/bin/env bash
     set -euo pipefail
     target=$1 directory=$2
+    source scripts/ci/image-build-settings.sh
+    declare -a image_build_args
+    image_build_settings image_build_args image-build-settings "$3" "$4" "$5" "$6" || exit 2
     arch=$("{{ just_executable() }}" --justfile "{{ justfile() }}" _host-goarch)
     if ! jq -e --arg target "$target" --arg arch "$arch" \
         'any(.[]; .target == $target and (.archs | index($arch)))' containers/runtime/images.json >/dev/null; then
@@ -1241,7 +1246,7 @@ runtime-image-archive target directory:
     cp -R -- scripts/bootstrap "$context/scripts/bootstrap"
     cp -R -- templates "$context/templates"
     image="localhost/forge-ci-runtime-$target:candidate"
-    podman build --file containers/runtime/Containerfile --target "$target" --tag "$image" "$context" >&2
+    podman build "${image_build_args[@]}" --file containers/runtime/Containerfile --target "$target" --tag "$image" "$context" >&2
     mkdir -p -- "$directory"
     archive="$directory/forge-ci-runtime-$target.tar"
     rm -f -- "$archive"
@@ -1256,16 +1261,19 @@ runtime-image-archive target directory:
 [arg('directory', help='Absolute directory to write the archive to')]
 [doc('Build the Buildah job image archive; network')]
 [group('build')]
-buildah-job-image-archive directory:
+buildah-job-image-archive directory budget="" cpus="" memory_mib="" compiler_jobs="":
     #!/usr/bin/env bash
     set -euo pipefail
     directory=$1
+    source scripts/ci/image-build-settings.sh
+    declare -a image_build_args
+    image_build_settings image_build_args image-build-settings "$2" "$3" "$4" "$5" || exit 2
     if [[ "$directory" != /* ]]; then
         printf 'the archive directory must be an absolute path, got %q\n' "$directory" >&2
         exit 2
     fi
     image=localhost/forge-ci-buildah-job:candidate
-    podman build --file containers/buildah-job/Containerfile \
+    podman build "${image_build_args[@]}" --file containers/buildah-job/Containerfile \
         --label "org.opencontainers.image.revision=$(git rev-parse --verify HEAD)" \
         --tag "$image" containers/buildah-job >&2
     mkdir -p -- "$directory"

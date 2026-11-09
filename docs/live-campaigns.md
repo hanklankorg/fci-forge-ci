@@ -119,6 +119,49 @@ can select the other forge with `FORGE_CI_LIVE_PROVIDER`.
 
 ## Run a campaign
 
+### Required preparation resources (source-only admission milestone)
+
+Existing no-budget callers retain their engine behavior. To request a mandatory
+budget use `campaign-prepare ... build-budget=required [build-cpus=N]
+[build-memory-mib=N] [compiler-jobs=N]`. Duplicate/unknown resource words refuse.
+Direct positional recipes are `test-live-image KIND LAB [default|required]
+[CPUS] [MEMORY_MIB] [JOBS]`, `buildah-job-image-archive DIR [MODE] [CPUS]
+[MEMORY_MIB] [JOBS]`, and `runtime-image-archive TARGET DIR [MODE] [CPUS]
+[MEMORY_MIB] [JOBS]`. Do not pass `cpus=2` as a positional value.
+
+The required tuple defaults to 2 CPUs / 4096 MiB / jobs equal to CPUs. Empty
+positional fields keep defaults; explicit campaign values cannot be empty.
+Only canonical positive decimals without leading zeros/signs/whitespace are
+accepted. Memory is at least 4 MiB and at most 8796093022207 MiB; CPUs at most
+92233720368547 (signed 64-bit quota with period 100000); compiler jobs at most
+2147483647 and not greater than CPUs. Values with `default` refuse.
+
+**Required means native limits must be requested, not enforcement verified.**
+After validation, the campaign exports the resolved tuple to its child build
+owners. Publishers and archive builders apply Podman CPU period/quota, memory,
+memory-plus-swap total equal to memory (no additional swap), and stage jobs=1.
+Native command failure stops that operation; there is no unbounded fallback or
+caller `enforced=true` input. No engine query/probe is implicit here. Rootless,
+remote and VM enforcement remain unmeasured. A cache hit cannot claim a RUN was
+newly executed under a budget.
+
+Required host builds receive compiler jobs as GOMAXPROCS/explicit `-p` and memory
+as GOMEMLIMIT. Canonical builds continue to exclude ambient GOFLAGS.
+GOMEMLIMIT is a per-process soft GC target, not a hard aggregate memory cap.
+Reserve a separate bounded host-tool slot before preflight compilation, plus
+current host/non-RUN/disk headroom; native RUN flags do not contain all helpers.
+Run one native build at a time. Explicit legacy default calls remain unbudgeted,
+not silently qualified. Never retry without the budget.
+
+Omitted direct recipe fields inherit the publisher's corresponding
+`FORGE_CI_IMAGE_BUILD_{BUDGET,CPUS,MEMORY_MIB,COMPILER_JOBS}` environment inputs.
+If both sources specify a nonempty field they must agree, otherwise Go admission
+refuses a conflict. In particular an explicit `default` cannot silently clear
+inherited `required`, and omission cannot clear inherited numeric requirements.
+The same Go resolver applies to campaign option words and direct recipes; shell
+does not merge or rewrite resource policy. To deliberately choose the legacy
+unbudgeted route, remove inherited requirements explicitly before invocation.
+
 Prepare once, from a clean checkout whose engine checksum is fresh, naming
 each lane the campaign will run as `<provider>=<cases file>`. It publishes the
 kaniko job, signer and named nanolinter job images with Forge Lab, saves the

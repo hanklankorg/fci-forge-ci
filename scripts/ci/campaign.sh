@@ -64,10 +64,14 @@ prepare() {
   # The flavor and image reach command lines, so they are checked first. The
   # preflight runs in the repository; a relative cases file is the caller's.
   local argument flavor image key
-  local -a flavors=() lanes=()
+  local -a flavors=() lanes=() resources=()
   local -A job_images=()
   for argument in "$@"; do
     case "$argument" in
+    build-*=* | compiler-jobs=*)
+      resources+=("$argument")
+      continue
+      ;;
     forgejo=?* | gitlab=?*)
       [[ "${argument#*=}" == /* ]] || argument=${argument%%=*}=$PWD/${argument#*=}
       lanes+=("$argument")
@@ -84,6 +88,11 @@ prepare() {
     job_images[$flavor]=$image
   done
   ((${#lanes[@]} > 0)) || fail 'name the lanes the campaign runs, <forgejo|gitlab>=<cases file>'
+
+  # Go resolves once before effects; every child inherits the same request.
+  # shellcheck source=scripts/ci/image-build-settings.sh
+  source "$script_dir/image-build-settings.sh"
+  image_build_settings '' image-build-settings-options "${resources[@]}" || return 2
 
   # What is prepared is HEAD's, so a difference from it would be published
   # under HEAD's name and tested by nobody.

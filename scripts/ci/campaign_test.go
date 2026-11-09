@@ -145,6 +145,187 @@ func readLines(t *testing.T, path string) []string {
 	return strings.Split(strings.TrimSuffix(string(body), "\n"), "\n")
 }
 
+func TestImagePreparationResourceRefusalPreservesDestinations(t *testing.T) {
+	for _, script := range []string{"campaign.sh", "publish-live-image.sh"} {
+		t.Run(script, func(t *testing.T) {
+			lane := newCampaignLane(t)
+
+			sentinel := filepath.Join(lane.dir, "campaign.env")
+			if err := os.WriteFile(sentinel, []byte("preserve\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+
+			lab := filepath.Join(t.TempDir(), "lab with spaces")
+			if err := os.Mkdir(lab, 0o700); err != nil {
+				t.Fatal(err)
+			}
+
+			if err := os.WriteFile(filepath.Join(lab, "justfile"), nil, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			// NUL argv receipt, no real compiler, engine or publisher.
+			fake := filepath.Join(t.TempDir(), "go")
+			writeExecutable(t, fake, "#!/usr/bin/env bash\nprintf '%s\\0' \"$@\" >\"$FAKE_GO_ARGV\"\nexit 2\n")
+			env := append(slices.Clone(lane.env), "GO="+fake, "FORGE_CI_IMAGE_BUILD_BUDGET=required")
+
+			args := []string{"prepare", lab, lane.dir, "forgejo=lane.cases", "build-budget=required", "build-cpus=2; literal"}
+			if script == "publish-live-image.sh" {
+				args = []string{"signer", lab, sentinel}
+			}
+
+			_, status := runScript(t, lane.workDir, env, script, args...)
+			if status != 2 {
+				t.Fatalf("status %d", status)
+			}
+
+			body, err := os.ReadFile(sentinel)
+			if err != nil || string(body) != "preserve\n" {
+				t.Fatal("refusal changed destination")
+			}
+
+			if calls := readLines(t, lane.argvFile); len(calls) != 0 {
+				t.Fatalf("publisher calls %q", calls)
+			}
+
+			argv, err := os.ReadFile(lane.goArgvFile)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if script == "campaign.sh" && !strings.Contains(string(argv), "build-cpus=2; literal\x00") {
+				t.Fatalf("lost token boundary %q", argv)
+			}
+		})
+	}
+}
+
+func TestImageArchiveRequiredResourcesRefuseBeforeEffects(t *testing.T) {
+	just, err := exec.LookPath("just")
+	if err != nil {
+		t.Skip("requires Just")
+	}
+
+	root := reporoot.Path(t)
+	for _, recipe := range []string{"buildah-job-image-archive", "runtime-image-archive"} {
+		t.Run(recipe, func(t *testing.T) {
+			lane := newCampaignLane(t)
+
+			sentinel := filepath.Join(lane.dir, "archive.tar")
+			if err := os.WriteFile(sentinel, []byte("keep"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+
+			fake := filepath.Join(t.TempDir(), "go with spaces")
+			writeExecutable(t, fake, "#!/usr/bin/env bash\nprintf '%s\\0' \"$@\" >\"$FAKE_GO_ARGV\"\nexit 2\n")
+
+			args := []string{"--justfile", filepath.Join(root, "justfile"), recipe}
+			if recipe == "runtime-image-archive" {
+				args = append(args, "node")
+			}
+
+			args = append(args, lane.dir, "required", "2", "4096", "2")
+			command := exec.CommandContext(t.Context(), just, args...)
+
+			command.Env = append(slices.Clone(lane.env), "GO="+fake)
+
+			output, err := command.CombinedOutput()
+			if err == nil {
+				t.Fatalf("unexpected admission: %s", output)
+			}
+
+			body, err := os.ReadFile(sentinel)
+			if err != nil || string(body) != "keep" {
+				t.Fatal("archive changed before admission")
+			}
+
+			argv, err := os.ReadFile(lane.goArgvFile)
+			if err != nil || !strings.HasSuffix(string(argv), "image-build-settings\x00required\x002\x004096\x002\x00") {
+				t.Fatalf("resource argv %q: %v\n%s", argv, err, output)
+			}
+		})
+	}
+}
+
+func TestImagePreparationInheritedRequiredOnly(t *testing.T) {
+	just, err := exec.LookPath("just")
+	if err != nil {
+		t.Skip("requires Just")
+	}
+
+	for _, route := range []string{"campaign", "test-live-image", "buildah-job-image-archive", "runtime-image-archive"} {
+		t.Run(route, func(t *testing.T) {
+			lane := newCampaignLane(t)
+			fake := filepath.Join(t.TempDir(), "go")
+			writeExecutable(t, fake, "#!/usr/bin/env bash\nprintf '%s\\0' \"$@\" >\"$FAKE_GO_ARGV\"\nprintf '%s' \"${FORGE_CI_IMAGE_BUILD_BUDGET-unset}\" >\"$FAKE_JUST_ENV\"\n[[ ${FORGE_CI_IMAGE_BUILD_BUDGET-} != required ]] || exit 2\nexit 0\n")
+
+			lab := filepath.Join(t.TempDir(), "lab with spaces")
+			if err := os.Mkdir(lab, 0o700); err != nil {
+				t.Fatal(err)
+			}
+
+			if err := os.WriteFile(filepath.Join(lab, "justfile"), nil, 0o600); err != nil {
+				t.Fatal(err)
+			}
+
+			sentinel := filepath.Join(lane.dir, "campaign.env")
+			if err := os.WriteFile(sentinel, []byte("keep"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+
+			env := append(slices.Clone(lane.env), "GO="+fake, "FORGE_CI_IMAGE_BUILD_BUDGET=required")
+			if route == "campaign" {
+				// No explicit resource words: only the inherited-requirement gate can refuse.
+				_, code := runScript(t, lane.workDir, env, "campaign.sh", "prepare", lab, lane.dir, "forgejo=lane.cases")
+				if code != 2 {
+					t.Fatalf("campaign exit %d", code)
+				}
+			} else {
+				args := []string{"--justfile", filepath.Join(reporoot.Path(t), "justfile"), route}
+				switch route {
+				case "test-live-image":
+					args = append(args, "signer", lab)
+				case "runtime-image-archive":
+					args = append(args, "node", lane.dir)
+				default:
+					args = append(args, lane.dir)
+				}
+
+				cmd := exec.CommandContext(t.Context(), just, args...)
+
+				cmd.Env = env
+				if out, err := cmd.CombinedOutput(); err == nil {
+					t.Fatalf("inherited budget lost: %s", out)
+				}
+			}
+
+			seen, err := os.ReadFile(lane.envFile)
+			if err != nil || string(seen) != "required" {
+				t.Fatalf("inherited requirement replaced: %q %v", seen, err)
+			}
+
+			argv, err := os.ReadFile(lane.goArgvFile)
+
+			want := "image-build-settings\x00\x00\x00\x00\x00"
+			if route == "campaign" {
+				want = "image-build-settings-options\x00"
+			}
+
+			if err != nil || !strings.Contains(string(argv), want) {
+				t.Fatalf("wrong gate: %q %v", argv, err)
+			}
+
+			body, err := os.ReadFile(sentinel)
+			if err != nil || string(body) != "keep" {
+				t.Fatal("destination changed")
+			}
+
+			if calls := readLines(t, lane.argvFile); len(calls) != 0 {
+				t.Fatalf("publisher calls: %q", calls)
+			}
+		})
+	}
+}
+
 func TestCampaignLane_RunsThePlanInOrderAndRecordsEachCase(t *testing.T) {
 	t.Parallel()
 

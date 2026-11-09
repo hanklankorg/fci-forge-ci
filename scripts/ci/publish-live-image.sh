@@ -35,6 +35,12 @@ if [[ $# -lt 2 || $# -gt 3 || ! "$kind" =~ ^(signer|kaniko-job|buildah-job)$ || 
   exit 2
 fi
 
+# shellcheck source=scripts/ci/image-build-settings.sh
+source "$script_dir/image-build-settings.sh"
+cd -- "$repo_root"
+declare -a image_build_args
+image_build_settings image_build_args image-build-settings '' '' '' '' || exit 2
+
 missing=()
 for tool in podman git "${GO:-go}" just; do
   command -v "$tool" >/dev/null 2>&1 || missing+=("$tool")
@@ -96,7 +102,7 @@ if podman image exists "$image" && [[ -z "$source_url" ||
   "$(podman image inspect --format '{{index .Labels "org.opencontainers.image.source"}}' "$image")" == "$source_url" ]]; then
   printf 'live: reusing the %s image built for %s\n' "$kind" "$commit" >&2
 else
-  podman build --platform "linux/$runner_arch" \
+  podman build "${image_build_args[@]}" --platform "linux/$runner_arch" \
     --file "$repo_root/containers/$kind/Containerfile" \
     "${labels[@]}" \
     --tag "$image" "$context" >&2
