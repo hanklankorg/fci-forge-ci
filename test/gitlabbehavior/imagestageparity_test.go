@@ -4,7 +4,6 @@
 package gitlabbehavior
 
 import (
-	"context"
 	"maps"
 	"os"
 	"os/exec"
@@ -13,7 +12,6 @@ import (
 	"slices"
 	"strings"
 	"testing"
-	"time"
 
 	"gopkg.in/yaml.v3"
 
@@ -397,8 +395,7 @@ func forgejoBuilderSelection(t *testing.T, builder string) (string, string) {
 		}
 	}
 
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-	defer cancel()
+	ctx := commandContext(t)
 
 	outputs := filepath.Join(t.TempDir(), "outputs")
 	command := exec.CommandContext(ctx, componentBash(t), "--noprofile", "--norc", "-c", script)

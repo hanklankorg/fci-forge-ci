@@ -4,13 +4,11 @@
 package gitlabbehavior
 
 import (
-	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/diggsweden/forge-ci/internal/testutil/testfs"
 )
@@ -48,8 +46,7 @@ func TestComponentWorkingDirectoryIsLiteralData(t *testing.T) {
 				t.Fatal("component has no working-directory selection")
 			}
 
-			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-			defer cancel()
+			ctx := commandContext(t)
 
 			command := exec.CommandContext(ctx, componentBash(t), "--noprofile", "--norc", "-eu", "-c", changeDirectory+"\ntest \"$PWD\" = \"$EXPECTED\"")
 			command.Dir = root

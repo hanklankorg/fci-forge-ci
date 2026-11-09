@@ -4,12 +4,10 @@
 package gitlabbehavior
 
 import (
-	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"testing"
-	"time"
 
 	"github.com/diggsweden/forge-ci/internal/testutil/gitlabrender"
 )
@@ -103,8 +101,7 @@ func runReleaseAfterScript(t *testing.T, workspace, job string) {
 		t.Fatal("release artifact publication hook is missing")
 	}
 
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-	defer cancel()
+	ctx := commandContext(t)
 
 	command := exec.CommandContext(ctx, componentBash(t), "--noprofile", "--norc", "-c", script)
 	command.Dir = workspace

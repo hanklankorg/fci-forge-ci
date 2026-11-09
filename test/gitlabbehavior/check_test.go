@@ -35,6 +35,22 @@ func componentBash(t *testing.T) string {
 	return testenv.GNUExecutable(t, "bash")
 }
 
+// commandHangBound only catches a hung component subprocess, with a clear
+// deadline error before the test binary's -timeout; a loaded host never
+// comes near it.
+const commandHangBound = 2 * time.Minute
+
+// commandContext bounds a test's subprocesses: they end with the test, or
+// after commandHangBound.
+func commandContext(t *testing.T) context.Context {
+	t.Helper()
+
+	ctx, cancel := context.WithTimeout(t.Context(), commandHangBound)
+	t.Cleanup(cancel)
+
+	return ctx
+}
+
 // Execute the actual component's guard. A fake Git records any attempted
 // checkout; all files stay in the test directory and no network tool is called.
 func TestCheckRefusesSigningMaterialAndMutablePinsBeforeCheckout(t *testing.T) {
@@ -72,9 +88,7 @@ func TestCheckRefusesSigningMaterialAndMutablePinsBeforeCheckout(t *testing.T) {
 				"$[[ component.reference ]]", tc.reference,
 				"/tmp/forge-ci-helpers.XXXXXXXX", filepath.Join(dir, "helpers.XXXXXXXX"),
 			).Replace(bootstrap)
-			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-
-			defer cancel()
+			ctx := commandContext(t)
 
 			command := exec.CommandContext(ctx, componentBash(t), "--noprofile", "--norc", "-c", script)
 			command.Dir = dir

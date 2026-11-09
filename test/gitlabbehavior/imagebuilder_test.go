@@ -5,7 +5,6 @@ package gitlabbehavior
 
 import (
 	"bytes"
-	"context"
 	appcontainer "github.com/diggsweden/forge-ci/internal/app/container"
 	"github.com/diggsweden/forge-ci/internal/domain/pipeline"
 	"os"
@@ -15,7 +14,6 @@ import (
 	"regexp"
 	"strings"
 	"testing"
-	"time"
 
 	"gopkg.in/yaml.v3"
 
@@ -192,8 +190,7 @@ func TestReleaseImageBuilderAdmitsOnlyTheKanikoJobImage(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-			defer cancel()
+			ctx := commandContext(t)
 
 			work := t.TempDir()
 			script := filepath.Join(reporoot.Path(t), ".gitlab", "bin", "release.sh")
@@ -452,8 +449,7 @@ func TestReleaseSigningReadsTheHandoffThePolicyNames(t *testing.T) {
 func runReleaseFunction(t *testing.T, dir, body string, env ...string) (string, error) {
 	t.Helper()
 
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-	defer cancel()
+	ctx := commandContext(t)
 
 	script := filepath.Join(reporoot.Path(t), ".gitlab", "bin", "release.sh")
 	command := exec.CommandContext(ctx, componentBash(t), "--noprofile", "--norc", "-euo", "pipefail", "-c",
