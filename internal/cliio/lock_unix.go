@@ -6,8 +6,12 @@
 package cliio
 
 import (
+	"errors"
+	"fmt"
 	"os"
 	"syscall"
+
+	"github.com/diggsweden/forge-ci/internal/domain/errs"
 )
 
 // lockExclusive takes a blocking exclusive advisory lock (flock LOCK_EX)
@@ -30,6 +34,17 @@ func singleLink(info os.FileInfo) bool {
 // Nonblocking open prevents a named-pipe replacement from hanging before Stat.
 func openReadFile(path string) (*os.File, error) {
 	return os.OpenFile(path, os.O_RDONLY|syscall.O_NONBLOCK, 0) //nolint:gosec // operator-selected input; the caller validates this descriptor and bounds the read.
+}
+
+// openReadFileNoFollow opens path as openReadFile does, but refuses a final
+// symbolic link: the open fails with ELOOP instead of following it.
+func openReadFileNoFollow(path string) (*os.File, error) {
+	file, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NONBLOCK|syscall.O_NOFOLLOW, 0) //nolint:gosec // operator-selected input; the caller validates this descriptor and bounds the read.
+	if errors.Is(err, syscall.ELOOP) {
+		return nil, fmt.Errorf("%q is a symbolic link, not a regular input file: %w", path, errs.ErrMissingInput)
+	}
+
+	return file, err
 }
 
 func openRootReadFile(root *os.Root, path string) (*os.File, error) {

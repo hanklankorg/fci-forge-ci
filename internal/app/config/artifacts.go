@@ -277,15 +277,22 @@ func loadConfig(in EmitConfigPlanInput, annot output.Annotator) (*config.Config,
 	return cfg, nil
 }
 
+// readArtifactsFile reads the declaration. A declaration that is a symbolic
+// link is refused: the plan it decides must be the file the repository
+// holds, not one a link names elsewhere.
 func readArtifactsFile(in EmitConfigPlanInput) ([]byte, error) {
 	if in.FS == nil {
-		return cliio.ReadFile(in.Path)
+		return cliio.ReadFileNoFollow(in.Path)
 	}
 	// An in-memory fs.FS doesn't carry stdin semantics; only honour
 	// the "-" sentinel when reading from the real filesystem above.
 	path := filepath.ToSlash(filepath.Clean(in.Path))
 	path = strings.TrimPrefix(path, "./")
 	path = strings.TrimPrefix(path, "/")
+
+	if info, err := fs.Lstat(in.FS, path); err == nil && info.Mode()&fs.ModeSymlink != 0 {
+		return nil, fmt.Errorf("%q is a symbolic link, not a regular input file: %w", in.Path, errs.ErrMissingInput)
+	}
 
 	return fs.ReadFile(in.FS, path)
 }

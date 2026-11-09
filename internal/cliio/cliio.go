@@ -68,6 +68,23 @@ func ReadRegularFile(path string) ([]byte, error) {
 	return readRegularFile(file, path)
 }
 
+// ReadFileNoFollow reads path as ReadFile does, "-" as stdin, but refuses a
+// path whose last element is a symbolic link, for an input whose meaning is
+// the file the repository holds rather than one a link names elsewhere.
+func ReadFileNoFollow(path string) ([]byte, error) {
+	if path == StdSentinel {
+		return readStdin(os.Stdin)
+	}
+
+	file, err := openReadFileNoFollow(path)
+	if err != nil {
+		return nil, classifyReadError(err)
+	}
+	defer func() { _ = file.Close() }()
+
+	return readRegularFile(file, path)
+}
+
 // ReadFileInRoot applies the regular-file and size policy without reopening a
 // caller's confined input by an ambient pathname. It never interprets stdin.
 func ReadFileInRoot(root *os.Root, path string) ([]byte, error) {

@@ -4,6 +4,9 @@
 package config_test
 
 import (
+	"io/fs"
+	"os"
+	"path/filepath"
 	"testing"
 	"testing/fstest"
 
@@ -49,4 +52,33 @@ func TestLoadReleaseStagePlans_PlansTheDeclarationOrNothing(t *testing.T) {
 
 	_, err = appconfig.LoadReleaseStagePlans(absent, output.Annotator{}, false)
 	require.ErrorIs(t, err, errs.ErrMissingInput)
+}
+
+// A declaration that is a symbolic link decides no plan, in a repository
+// checkout or a file system: the plan must come from the file the
+// repository holds, not one a link names elsewhere.
+func TestLoadReleaseStagePlans_RefusesALinkedDeclaration(t *testing.T) {
+	t.Parallel()
+
+	linked := fstest.MapFS{
+		"elsewhere.yml":           {Data: []byte(releaseStageDeclaration)},
+		".forge-ci/artifacts.yml": {Data: []byte("../elsewhere.yml"), Mode: fs.ModeSymlink},
+	}
+
+	_, err := appconfig.LoadReleaseStagePlans(appconfig.EmitConfigPlanInput{Path: ".forge-ci/artifacts.yml", FS: linked}, output.Annotator{}, true)
+	require.ErrorIs(t, err, errs.ErrMissingInput)
+	require.ErrorContains(t, err, "symbolic link")
+
+	dir := t.TempDir()
+	target, link := filepath.Join(dir, "elsewhere.yml"), filepath.Join(dir, "artifacts.yml")
+	require.NoError(t, os.WriteFile(target, []byte(releaseStageDeclaration), 0o600))
+	require.NoError(t, os.Symlink(target, link))
+
+	_, err = appconfig.LoadReleaseStagePlans(appconfig.EmitConfigPlanInput{Path: link}, output.Annotator{}, true)
+	require.ErrorIs(t, err, errs.ErrMissingInput)
+	require.ErrorContains(t, err, "symbolic link")
+
+	plans, err := appconfig.LoadReleaseStagePlans(appconfig.EmitConfigPlanInput{Path: target}, output.Annotator{}, false)
+	require.NoError(t, err)
+	assert.True(t, plans.Prepare.Targets.VersionBump.Runs)
 }
