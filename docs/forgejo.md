@@ -306,7 +306,7 @@ the caller passes them by name. Never use `secrets: inherit`.
 
 | Workflow | Does | Secrets |
 |---|---|---|
-| `prepare-release.yml` | Checks that every secret the release will need is configured, before any checkout; guards the request tag; requires the request at the head of the release branch; renders the changelog; bumps the version files of the projects `artifacts.yml` plans in one key-free job a toolchain family and verifies that bump; makes the signed release commit and the final tag once. Outputs `release-tag` and `release-sha`. | `RELEASE_SSH_SIGNING_KEY`; presence only of the others; none in the version-plan and version jobs |
+| `prepare-release.yml` | Checks that every secret the release will need is configured, before any checkout; guards the request tag; requires the request at the head of the release branch; renders the changelog; bumps the version files of the projects `artifacts.yml` plans in one key-free job a toolchain family and verifies that bump; makes the signed release commit and the final tag once. Outputs `release-tag`, `release-sha` and the `artifacts-config` it planned from. | `RELEASE_SSH_SIGNING_KEY`; presence only of the others; none in the version-plan and version jobs |
 | `sign-and-publish-release.yml` | Four separately privileged jobs after a secret-free preflight: `sign` (checksums, SBOMs, provenance, images, distro packages), `promote` (final image tags), `publish` (the Forgejo release), `cleanup` (candidate tags). | Cosign, GPG, `RELEASE_TOKEN`, `RELEASE_REGISTRY_TOKEN`, each only in the job that needs it |
 | `sign-container-images.yml` | Signs and attests a base-image ledger in one engine call. | Cosign, `RELEASE_REGISTRY_TOKEN` |
 | `verify-base-container-images.yml` | Verifies existing base images against the trusted key; optional explicit registry authentication supports private bases. Only missing images (or anonymous access refusal) are cache misses. | optional `RELEASE_REGISTRY_TOKEN`, `registry-user` for external registries |
@@ -325,7 +325,7 @@ description. The inputs they share:
 | `skip-signer-image-check` | no, in prepare | `'false'` by default. Set explicitly to `'true'` for a private signer image whose anonymous availability cannot be checked. |
 | `cosign-public-key`, `cosign-public-key-sha256` | yes, in the four signer workflows | Your organization's Cosign public key, and its SHA-256 as `sha256sum cosign.pub` prints it. |
 | `release-branch` | no, in prepare | The branch the release lands on, `main` by default. See [The request is the head of the release branch](#the-request-is-the-head-of-the-release-branch). |
-| `artifacts-config` | no, in prepare and sign/publish | The `artifacts.yml` whose release plan decides the version bump, `.forge-ci/artifacts.yml` by default; pass the same value to both workflows. See [The prepare job](#the-prepare-job). |
+| `artifacts-config` | no, in prepare; from prepare in sign/publish | The `artifacts.yml` whose release plan decides the version bump, `.forge-ci/artifacts.yml` by default. Give it to `prepare-release.yml`; pass `sign-and-publish-release.yml` the prepare job's `artifacts-config` output, as `release-tag` and `release-sha`, which `check-l3-isolation` requires. See [The prepare job](#the-prepare-job). |
 | `runtime-image-java`, `-node`, `-rust` | no, in prepare | Digest-pinned images the plan's version job of each family runs in; a planned family without one is refused at `Prepare: version plan`. |
 | `release-policy` | no, in prepare and sign/publish | `stable` (default) or `stable-prerelease`; pass the same value to both workflows. See [release policy](workflows.md#stable-and-prerelease-policy). |
 | `transparency-log` | no, in the four signer workflows | `none` (the default) or `public`: whether signatures are also written to the public Sigstore transparency log. One value for every workflow of an organization; see [The transparency log](#the-transparency-log). |
@@ -344,7 +344,7 @@ alone. Each `action.yml` documents its own inputs and outputs.
 | Action | Does |
 |---|---|
 | `setup-forge-ci` | Downloads the layer's binary, verifies it against the recorded checksum and puts it on the job `PATH`. The first step of a consumer job that calls `forge-ci` itself. |
-| `check-l3-isolation` | The pull-request gate over the consumer's release workflow: no signing secret in the build job, enumerated signer secrets, the digest hand-off, one commit across every reference, and the signer image, the key digest and the transparency-log setting written out as literals. |
+| `check-l3-isolation` | The pull-request gate over the consumer's release workflow: no signing secret in the build job, enumerated signer secrets, the prepare job's `release-tag`, `release-sha` and `artifacts-config` passed to the signer, the digest hand-off, one commit across every reference, and the signer image, the key digest and the transparency-log setting written out as literals. |
 | `checkout-consumer` | Checks the consumer out without Node and without persisted credentials. |
 | `setup-toolchain` | Installs the consumer's pinned tools with mise, verified and cache-aware. |
 | `lint-nanolinter` | The pull-request lint gate: the repository's nanolinter plan with a mandated floor. |
@@ -794,6 +794,7 @@ for them; every `pullrequest.yml` in the examples, such as
   choice on each forge.
 - **`check-l3-isolation`**: the release-isolation gate over the consumer's
   workflows: no signing secret in the build job, enumerated signer secrets,
+  the prepare job's release identity and declaration passed to the signer,
   the digest hand-off, one commit across every reference, and the signer
   image, key digest, transparency-log setting and every `enforce-*` setting
   written out as literals.
@@ -1465,7 +1466,8 @@ commit.
 A consumer that tested the request before preparation can enforce its
 changelog-only policy with `release validate-tag --expected-parent <request
 commit> --changelog-only`, alongside `--release-sha` and `--tag`. It requires
-one child commit changing exactly `CHANGELOG.md` and the local
+one child commit changing exactly `CHANGELOG.md`, a regular file at its
+parent's mode, and the local
 `release-request/<tag>` still naming the tested request. A failed Git read,
 an extra changed path, or a moved request is a refusal.
 
@@ -1585,9 +1587,20 @@ reviewed as one set.
   lineage: the release commit must be the single child of the commit the
   request authorized. It also re-checks what that commit changes, with
   `release validate-tag --changelog-only --prepare-plan-file` and the plan of
-  the `artifacts-config` declaration, which the caller passes as it passed
-  it to `prepare-release.yml`: `CHANGELOG.md` and exactly the planned version
-  bump, nothing else.
+  the declaration the release planned from: `CHANGELOG.md` and exactly the
+  planned version bump, nothing else. A changelog, the root one or a
+  project's copy, is admitted only as a regular file at its parent's mode,
+  never a link; a text version file only with the bytes and the mode the
+  engine's bump writes; and a commit that edits the declaration itself is
+  refused, since the declaration is no version file. A declaration that is a
+  symbolic link plans nothing.
+- **The declaration is the prepare job's.** `prepare-release.yml` outputs
+  the validated `artifacts-config` it planned the bump from, and the signer
+  takes it as `${{ needs.prepare.outputs.artifacts-config }}`, the way it
+  takes `release-tag` and `release-sha`; `check-l3-isolation` refuses a
+  release workflow that passes the signer anything else. The signer
+  re-plans from the release commit, whose declaration the check above
+  admits unchanged from the request prepare planned.
 - **The hand-off is unsigned.** After the signer has verified the `dist/`
   digest, its first look at the files is `release files validate --unsigned`,
   which refuses a signature, a bundle or a provenance statement that arrived
