@@ -536,6 +536,10 @@ jobs:
           CONFIG_PLAN_JSON: ${{ steps.parse.outputs.config-plan-json }}
 
           # Explicit workflow-call inputs.
+          RUNNER_ORDINARY: ${{ inputs['runs-on'] }}
+          RUNNER_BUILD_AMD64: ${{ inputs['build-runs-on-linux-amd64'] }}
+          RUNNER_BUILD_ARM64: ${{ inputs['build-runs-on-linux-arm64'] }}
+          RUNNER_DARWIN_ARM64: ${{ inputs['runs-on-darwin-arm64'] }}
           BRANCH: ${{ inputs.branch }}
           FILE_PATTERN: ${{ inputs['file-pattern'] }}
           RELEASE_POLICY: ${{ inputs['release-policy'] }}
@@ -558,7 +562,12 @@ jobs:
           # which saw release-request/vX.Y.Z and planned a draft that was not
           # the latest release.
           TAG_NAME: ${{ steps.relctx.outputs.release-tag }}
-        run: forge-ci plan release --release-policy "$RELEASE_POLICY"
+        run: |
+          forge-ci plan release --release-policy "$RELEASE_POLICY" \
+            --runner-input "runs-on=$RUNNER_ORDINARY" \
+            --runner-input "build-runs-on-linux-amd64=$RUNNER_BUILD_AMD64" \
+            --runner-input "build-runs-on-linux-arm64=$RUNNER_BUILD_ARM64" \
+            --runner-input "runs-on-darwin-arm64=$RUNNER_DARWIN_ARM64"
   # ===== Stage 1: Validation =====
   validate-prerequisites:
     name: "Check: release request"

@@ -33,16 +33,17 @@ Every forge layer chooses runners for the same roles. Each maps a role to its
 native field: `tags:` on GitLab, an array input interpolated whole; `runs-on`
 on Forgejo and GitHub, a JSON array of labels passed as text and decoded with
 `fromJSON`. A cell without an input says what decides instead. A guard,
-`TestRunnerRolesAreCoherentAcrossForges`, holds this table, the role table in
-its source and the workflows' inputs to each other.
+`TestRunnerRolesAreCoherentAcrossForges`, checks migrated input names against
+`runners.Names` and this page. Forgejo's legacy surface is frozen separately
+by `TestForgejoRunnerMigrationBoundary` until its callers migrate together.
 
 | Role | GitLab | Forgejo | GitHub |
 |---|---|---|---|
-| ordinary | `runner-tags` of `check`, `nanolinter`, `megalinter`, `build-*`, `publish-*`, `release` and `snapshot-images`; default `[]`, untagged | `runner-label` of every reusable workflow; required, no default; callers pass `vars.CI_RUNNER_LABEL` | `runs-on` of `slsa-attestor.yml`, default `["ubuntu-26.04"]`; every other job is the hosted `ubuntu-26.04` literal |
-| image-build | `build-runner-tags-linux-amd64` of `release` and `snapshot-images`, which the release's consumer checks take too; required, never empty | `runner-label` of `release-images.yml` and `snapshot-images.yml`, which callers pass `CI_RUNNER_LABEL_CONTAINER` or the pool; `runner-label-container` of `runtime-images.yml` | none: the hosted `ubuntu-26.04` literal, whose VMs permit the user namespaces Buildah needs |
-| image-build-arm64 | `build-runner-tags-linux-arm64` of `release` and `snapshot-images`; required, `[]` states there is no arm64 runner and plans no arm64 jobs | `runner-label-arm64` of `release-images.yml`, `snapshot-images.yml` and `runtime-images.yml`; `runner-label-container-arm64` of `runtime-images.yml`; default empty | none: the hosted `ubuntu-26.04-arm` literal |
+| ordinary | `runner-tags` of `check`, `nanolinter`, `megalinter`, `build-*`, `publish-*`, `release` and `snapshot-images`; default `[]`, untagged | `runner-label` of every reusable workflow; required, no default; callers pass `vars.CI_RUNNER_LABEL` | `runs-on` of ordinary jobs; default `["ubuntu-26.04"]` |
+| image-build | `build-runner-tags-linux-amd64` of `release` and `snapshot-images`, which the release's consumer checks take too; required, never empty | `runner-label` of `release-images.yml` and `snapshot-images.yml`, which callers pass `CI_RUNNER_LABEL_CONTAINER` or the pool; `runner-label-container` of `runtime-images.yml` | `build-runs-on-linux-amd64`, default `["ubuntu-26.04"]` |
+| image-build-arm64 | `build-runner-tags-linux-arm64` of `release` and `snapshot-images`; required when arm64 is planned, never `[]` then | `runner-label-arm64` of `release-images.yml`, `snapshot-images.yml` and `runtime-images.yml`; `runner-label-container-arm64` of `runtime-images.yml`; default empty | `build-runs-on-linux-arm64`, default `["ubuntu-26.04-arm"]` |
 | signer | `signer-runner-tags` of `release`; default `[]`; a literal of the separately pinned policy project | `runner-label` of `sign-and-publish-release.yml` and `sign-container-images.yml`, set by the caller workflow | none: the hosted `ubuntu-26.04` literal of the layer, which no caller input or variable changes |
-| macos | `runner-tags-darwin-arm64` of `publish-apple-appstore`; default `[saas-macos-medium-m1]` | none: the Forgejo layer has no Apple workflows | `macos-version` of `build-xcode-ios.yml`, `lint-swift.yml` and `publish-apple-appstore.yml`; default `macos-26` |
+| macos | `runner-tags-darwin-arm64` of `publish-apple-appstore`; default `[saas-macos-medium-m1]` | none: the Forgejo layer has no Apple workflows | `runs-on-darwin-arm64` for unsigned Xcode and Swift lint, default `["macos-26"]`; signed Xcode and App Store publication stay on literal `macos-26` |
 
 Every runner input is named `[role-]<keyword>[-<os>-<arch>]`: the role
 when it is not the ordinary one, the forge's keyword, and the platform when
@@ -77,9 +78,10 @@ and the examples pass the repository variable `CI_RUNNER_LABEL`, so whoever
 may set repository variables chooses the runner the signing jobs run on. The
 Forgejo layer has no separate signer runner setting yet.
 
-GitHub offers no runner input beyond the attestor and macOS: the layer runs
-on GitHub-hosted runners, and self-hosted runners would need a `runs-on`
-input threaded through every reusable workflow.
+GitHub threads its role-specific inputs through the orchestrators. Its
+signing, trust-root and publication jobs retain hosted literals; see
+[GitHub runners](#github-runners). The Forgejo names and fallback behavior
+below describe its legacy interface, not the target domain naming table.
 
 ## How a workflow names its runners
 
@@ -128,7 +130,8 @@ names from it, and `runners.Names` lists every valid name per forge. GitHub
 has no `signer-` input: its signer jobs run on a hosted literal that no
 caller input changes.
 
-`forge-ci plan release` and `forge-ci container release-images plan` take
+`forge-ci plan release`, `forge-ci plan snapshot-release` and
+`forge-ci container release-images plan` take
 each runner input of the calling layer with `--runner-input name=value`, as
 the layer passed it after its own defaults. The plan is refused when one of
 its jobs has no runner:
@@ -150,9 +153,13 @@ platform. The refusal therefore fires where the forge has no default and
 none was given, and for macOS jobs where the forge has no macOS runner, as
 on Forgejo.
 
-A layer that passes no `--runner-input` is not checked; the layers pass
-their runner inputs as they move to these names. The flag becomes required
-once the GitLab, Forgejo and GitHub layers all pass it.
+GitHub's release and snapshot orchestrators pass every declared runner input
+through environment variables to `--runner-input`; empty caller values are
+not replaced by another role or architecture's input. This is an admission
+check, not proof that a registered runner has the promised capabilities.
+A layer that passes no `--runner-input` is not checked. The flag remains
+optional for compatibility until GitLab and Forgejo pass their inputs too;
+their existing arm64 checks remain in place until admission replaces them.
 ## GitHub runners
 
 The GitHub layer takes its runners as `workflow_call` inputs, not variables.

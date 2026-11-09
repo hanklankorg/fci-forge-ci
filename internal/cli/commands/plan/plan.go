@@ -151,7 +151,11 @@ EXAMPLE:
    config_output="$(forge-ci --runner local --json config parse-artifacts --file .forge-ci/artifacts.yml)" &&
    config_plan="$(printf '%s\n' "$config_output" | jq -er '."config-plan-json"')" &&
    CONFIG_PLAN_JSON="$config_plan" forge-ci --runner local --json plan snapshot-release \
-     --project-type go --branch main`,
+      --project-type go --branch main
+
+Pass --runner-input name=value for each runner input of the calling layer.
+The plan refuses a planned image or Xcode platform without its own runner.`,
+		DisableSliceFlagSeparator: true,
 		Flags: []cli.Flag{
 			&cli.StringFlag{Name: configPlanJSONFlag, Sources: cli.EnvVars("CONFIG_PLAN_JSON"), Usage: "typed config-plan JSON (output of 'config parse-artifacts')"},
 			&cli.StringFlag{Name: "project-type", Sources: cli.EnvVars("PROJECT_TYPE"), Usage: "primary ecosystem of the project (maven/npm/go/cargo/…)"},
@@ -171,10 +175,17 @@ EXAMPLE:
 			&cli.BoolFlag{Name: "publish-npm", Value: true, Sources: cli.EnvVars("PUBLISH_NPM"), Usage: "include the npm dev-publish step in the plan"},
 			&cli.BoolFlag{Name: "publish-maven-snapshots", Sources: cli.EnvVars("PUBLISH_MAVEN_SNAPSHOTS"), Usage: "opt into Maven-format snapshot publication for Maven, Gradle JVM and Android libraries"},
 			&cli.BoolFlag{Name: "use-ci-token", Value: true, Sources: cli.EnvVars("USE_CI_TOKEN"), Usage: "use the CI platform token in place of an explicit registry password"},
+			commonflags.RunnerInput(),
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			return deps.FromCmd(ctx, cmd, func(d *deps.Deps) error {
-				_, err := appplan.SnapshotRelease(ctx, d.OutputSink, appplan.SnapshotReleaseInput{
+				runnerInputs, err := commonflags.RunnerInputs(cmd, d.Platform)
+				if err != nil {
+					return err
+				}
+
+				_, err = appplan.SnapshotRelease(ctx, d.OutputSink, appplan.SnapshotReleaseInput{
+					Runners:               runnerInputs,
 					ConfigPlanJSON:        cmd.String(configPlanJSONFlag),
 					ProjectType:           cmd.String("project-type"),
 					Branch:                cmd.String("branch"),

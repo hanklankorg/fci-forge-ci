@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- GitHub release and snapshot plans now receive all declared runner inputs
+  after workflow defaults, and refuse image/Xcode platforms without their
+  own runner before emitting plan outputs. `plan snapshot-release` accepts
+  the same repeatable `--runner-input name=value` interface as `plan release`.
+  Direct CLI callers should pass their layer's inputs; omission stays
+  compatible until the GitLab and Forgejo admission migration is complete.
 - **BREAKING**: The GitHub reusable workflows take their runners as JSON-array
   inputs: `runs-on` for ordinary jobs, `build-runs-on-linux-amd64` and
   `build-runs-on-linux-arm64` for image builds, and `runs-on-darwin-arm64`

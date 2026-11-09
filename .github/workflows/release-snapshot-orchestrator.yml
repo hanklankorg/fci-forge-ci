@@ -364,6 +364,10 @@ jobs:
       - name: Plan snapshot release
         id: plan
         env:
+          RUNNER_ORDINARY: ${{ inputs['runs-on'] }}
+          RUNNER_BUILD_AMD64: ${{ inputs['build-runs-on-linux-amd64'] }}
+          RUNNER_BUILD_ARM64: ${{ inputs['build-runs-on-linux-arm64'] }}
+          RUNNER_DARWIN_ARM64: ${{ inputs['runs-on-darwin-arm64'] }}
           CONFIG_PLAN_JSON: ${{ steps.parse.outputs.config-plan-json }}
           PROJECT_TYPE: ${{ inputs['project-type'] }}
           BRANCH: ${{ inputs.branch }}
@@ -382,7 +386,12 @@ jobs:
           PUBLISH_NPM: ${{ inputs['publish-npm'] }}
           PUBLISH_MAVEN_SNAPSHOTS: ${{ inputs['publish-maven-snapshots'] }}
           USE_CI_TOKEN: ${{ inputs['use-ci-token'] }}
-        run: forge-ci plan snapshot-release
+        run: |
+          forge-ci plan snapshot-release \
+            --runner-input "runs-on=$RUNNER_ORDINARY" \
+            --runner-input "build-runs-on-linux-amd64=$RUNNER_BUILD_AMD64" \
+            --runner-input "build-runs-on-linux-arm64=$RUNNER_BUILD_ARM64" \
+            --runner-input "runs-on-darwin-arm64=$RUNNER_DARWIN_ARM64"
 
   # ===== Stage 1: Build =====
   execute-snapshot-build-stage:

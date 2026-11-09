@@ -463,14 +463,19 @@ func TestPlanRelease_RefusesAPlatformWithoutARunnerInput(t *testing.T) {
 
 	env.Setenv("CONFIG_PLAN_JSON", configOutput["config-plan-json"])
 
-	run := func(inputs ...string) error {
+	run := func(command, forge string, inputs ...string) error {
 		stdout.Reset()
 
 		consumer := cli.New(cli.BuildInfo{})
 		consumer.Writer, consumer.ErrWriter = &stdout, &stderr
 
 		args := make([]string, 0, 16+2*len(inputs))
-		args = append(args, "forge-ci", "--provider", "forgejo", "--runner", "local", "--json", "plan", "release", "--tag", "v1.2.3", "--branch", "main", "--repository-visibility", "public", "--release-sboms", "none")
+		args = append(args, "forge-ci", "--provider", forge, "--runner", "local", "--json", "plan", command, "--branch", "main")
+		if command == "release" {
+			args = append(args, "--tag", "v1.2.3", "--repository-visibility", "public", "--release-sboms", "none")
+		} else {
+			args = append(args, "--sboms", "none")
+		}
 
 		for _, input := range inputs {
 			args = append(args, "--runner-input", input)
@@ -479,12 +484,26 @@ func TestPlanRelease_RefusesAPlatformWithoutARunnerInput(t *testing.T) {
 		return consumer.Run(t.Context(), args)
 	}
 
-	err := run(`build-runs-on-linux-amd64=["self-hosted","amd64"]`)
-	if !errors.Is(err, errs.ErrUsage) || !strings.Contains(err.Error(), "forgejo runner input build-runs-on-linux-arm64 has no value") {
-		t.Fatalf("err = %v, want the arm64 refusal", err)
-	}
-
-	if err := run(`build-runs-on-linux-amd64=["self-hosted","amd64"]`, `build-runs-on-linux-arm64=["self-hosted","arm64"]`); err != nil {
-		t.Fatalf("both runners passed: %v", err)
+	for _, command := range []string{"release", "snapshot-release"} {
+		for _, forge := range []string{"forgejo", "github"} {
+			t.Run(command+"/"+forge, func(t *testing.T) {
+				for _, missing := range []string{"", "build-runs-on-linux-arm64=", "build-runs-on-linux-arm64=[]"} {
+					inputs := []string{`build-runs-on-linux-amd64=["self-hosted","amd64"]`, `runs-on=["ordinary","arm64"]`}
+					if missing != "" {
+						inputs = append(inputs, missing)
+					}
+					err := run(command, forge, inputs...)
+					if !errors.Is(err, errs.ErrUsage) || !strings.Contains(err.Error(), forge+" runner input build-runs-on-linux-arm64 has no value") {
+						t.Fatalf("err = %v, want the arm64 refusal", err)
+					}
+					if stdout.Len() != 0 {
+						t.Fatalf("refused plan emitted outputs: %s", stdout.String())
+					}
+				}
+				if err := run(command, forge, `build-runs-on-linux-amd64=["self-hosted","amd64"]`, `build-runs-on-linux-arm64=["self-hosted","arm64"]`); err != nil {
+					t.Fatalf("both runners passed: %v", err)
+				}
+			})
+		}
 	}
 }

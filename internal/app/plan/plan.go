@@ -121,6 +121,7 @@ func warnSBOMConflict(ctx context.Context, summary ci.SummarySink, releaseSBOMs,
 
 // SnapshotReleaseInput drives `plan snapshot-release`.
 type SnapshotReleaseInput struct {
+	Runners               *runners.Inputs
 	ConfigPlanJSON        string
 	ProjectType           string
 	Branch                string
@@ -153,6 +154,7 @@ func SnapshotRelease(ctx context.Context, sink ci.OutputSink, in SnapshotRelease
 	}
 
 	devPlan, err := pipeline.NewSnapshotReleasePlan(pipeline.SnapshotReleasePlanInput{
+		Runners:               in.Runners,
 		ConfigPlan:            configPlan,
 		ProjectType:           projecttype.Type(in.ProjectType),
 		Branch:                in.Branch,
