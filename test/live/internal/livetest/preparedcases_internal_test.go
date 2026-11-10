@@ -342,3 +342,32 @@ func TestPreparedCaseNamesAreUnique(t *testing.T) {
 		}
 	}
 }
+
+// A Forgejo case that builds with kaniko runs only as the account the
+// kaniko job image was published under; a pull request and a Buildah case
+// run as any.
+func TestForgejoKanikoCaseRunsAsThePreparedAccount(t *testing.T) {
+	t.Parallel()
+
+	const image = "forgejo.invalid:8443/forgeci/forge-ci-live-kaniko-job@sha256:1"
+
+	release := PreparedCase{Lane: LanePrivate, Demo: "hello-go-service", Event: TrialRelease, Builder: ImageBuilderKaniko}
+
+	if err := release.kanikoAccountGap(image, "forgeci"); err != nil {
+		t.Errorf("as the prepared account: %v", err)
+	}
+
+	if err := release.kanikoAccountGap(image, "forgeci2"); !errors.Is(err, errs.ErrValidation) || !strings.Contains(err.Error(), "acts as forgeci2") {
+		t.Errorf("as another account: %v", err)
+	}
+
+	// Neither reads the contract: there is nothing to compare.
+	for _, c := range []PreparedCase{
+		{Event: TrialPullRequest, Builder: ImageBuilderKaniko},
+		{Event: TrialRelease, Builder: ImageBuilderBuildah},
+	} {
+		if err := c.RequireForgejoKanikoAccount(nil); err != nil {
+			t.Errorf("%s with %s: %v", c.Event, c.Builder, err)
+		}
+	}
+}

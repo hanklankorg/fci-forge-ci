@@ -8,8 +8,11 @@ import (
 	"fmt"
 	"strings"
 
+	"codefloe.com/itiquette/forge-lab-contract/labcontract"
+
 	"github.com/diggsweden/forge-ci/internal/domain/enforcement"
 	"github.com/diggsweden/forge-ci/internal/domain/errs"
+	"github.com/diggsweden/forge-ci/internal/domain/provider"
 )
 
 // PreparedCase is one consumer trial of a shipped demo that a run takes from
@@ -386,6 +389,41 @@ func (c PreparedCase) RequireGitLabFurtherArchives(checkout string, prepared map
 		if key := GitLabJobImageArchiveEnv + strings.ToUpper(name); prepared[key] == "" {
 			return c.notPrepared(key)
 		}
+	}
+
+	return nil
+}
+
+// RequireForgejoKanikoAccount refuses a Forgejo release, lifecycle or
+// snapshot that builds with kaniko as a lab account other than the one the
+// directory was prepared as. The prepared kaniko job image is labelled for
+// that account's layer repository (ConsumerTrialLayerURL), and the product
+// refuses it for a layer anywhere else, late and in a build job. Every other
+// case runs as any account.
+func (c PreparedCase) RequireForgejoKanikoAccount(prepared map[string]string) error {
+	if c.Builder != ImageBuilderKaniko || c.Event == TrialPullRequest {
+		return nil
+	}
+
+	lab, err := currentLabContract()
+	if err != nil {
+		return err
+	}
+
+	endpoint, err := lab.Endpoint(labcontract.Kind(provider.ForgeForgejo))
+	if err != nil {
+		return err
+	}
+
+	return c.kanikoAccountGap(prepared[preparedKanikoJobImage], endpoint.Owner())
+}
+
+// kanikoAccountGap compares the account in a published kaniko job image's
+// reference, <registry>/<account>/<package>@<digest>, with the run's.
+func (c PreparedCase) kanikoAccountGap(image, account string) error {
+	if parts := strings.Split(image, "/"); len(parts) != 3 || parts[1] != account {
+		return fmt.Errorf("%s: the prepared kaniko job image %s is labelled for its own lab account's layer repository, and this run acts as %s; run this case as that account: %w",
+			c.Name(), image, account, errs.ErrValidation)
 	}
 
 	return nil

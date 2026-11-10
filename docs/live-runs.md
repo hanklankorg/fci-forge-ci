@@ -57,8 +57,12 @@ LAB_TARGETS_FILE=/absolute/forgeci2.json just test-live-prepared <dir> gitlab '<
 ```
 
 Give each run a pattern that selects different cases, so no case runs twice.
-One prepared directory serves every account: its images are public in the lab
-registry or pushed by each run from the saved archives. Unscoped/all-provider
+One prepared directory serves every account, its images being public in the
+lab registry or pushed by each run from the saved archives, with one
+exception: a Forgejo release, lifecycle or snapshot that builds with kaniko
+runs as the account the directory was prepared as, because the product admits
+the kaniko job image only for that account's layer repository. Such a case is
+refused before it starts under any other account. Unscoped/all-provider
 launchers take `live.lock` exclusively, and older launchers their provider
 lock, so mixed old/new runs still conflict safely. Locks remain held through
 test cleanup and are not inherited by suites or loggers. Never unlink a lock

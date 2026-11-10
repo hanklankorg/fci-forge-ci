@@ -64,6 +64,10 @@ func forEachConsumerCheckout(t *testing.T, forge provider.ForgeAPI, usage string
 				err = c.RequireGitLabFurtherArchives(root, env)
 			}
 
+			if err == nil && forge == provider.ForgeForgejo {
+				err = c.RequireForgejoKanikoAccount(env)
+			}
+
 			if err != nil {
 				t.Fatal(err)
 			}
