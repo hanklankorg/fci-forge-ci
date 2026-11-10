@@ -74,6 +74,17 @@ func openHostedConsumer(t *testing.T, events string) (string, int64, livetest.Gi
 		t.Fatal(err)
 	}
 
+	if name := settings.PullRequestWorkflow(); name != "" {
+		text, err := os.ReadFile(filepath.Join(root, fixtures, "workflows", name))
+		if err != nil {
+			t.Fatalf("read the fixture's pull-request workflow: %v", err)
+		}
+
+		if err := livetest.RequireGitHubLintImage(name, string(text), settings.Overrides); err != nil {
+			t.Fatal(err)
+		}
+	}
+
 	return root, organizationID, settings, fixtures
 }
 

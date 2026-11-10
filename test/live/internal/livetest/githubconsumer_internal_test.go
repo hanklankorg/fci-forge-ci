@@ -503,6 +503,36 @@ func TestReleaseRequestTag(t *testing.T) {
 	}
 }
 
+// A pull-request workflow that would run its lint engine in the examples'
+// placeholder image is refused, naming the setting; the setting admits it,
+// and a release, which runs no pull-request workflow, is not asked.
+func TestRequireGitHubLintImage(t *testing.T) {
+	t.Parallel()
+
+	workflow := "      lint-engine: nanolinter\n      nanolinter-image: codefloe.com/itiquette/nanolinter:go@sha256:" + strings.Repeat("0", 64) + "\n"
+
+	err := RequireGitHubLintImage("pullrequest.yml", workflow, nil)
+	if !errors.Is(err, errs.ErrValidation) || !strings.Contains(err.Error(), "pass nanolinter-image=") {
+		t.Fatalf("a placeholder lint image: %v", err)
+	}
+
+	pinned := map[string]string{"nanolinter-image": "ghcr.io/o/nanolinter@sha256:" + strings.Repeat("d", 64)}
+	if err := RequireGitHubLintImage("pullrequest.yml", workflow, pinned); err != nil {
+		t.Fatalf("an overridden lint image: %v", err)
+	}
+
+	for event, want := range map[string]string{TrialPullRequest: "pullrequest.yml", TrialLifecycle: "pullrequest.yml", TrialRelease: "", TrialDevRelease: ""} {
+		settings, err := ParseGitHubTrialSettings(event, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if got := settings.PullRequestWorkflow(); got != want {
+			t.Errorf("%s runs %q on a pull request, want %q", event, got, want)
+		}
+	}
+}
+
 func TestParseGitHubTrialSettings(t *testing.T) {
 	t.Parallel()
 

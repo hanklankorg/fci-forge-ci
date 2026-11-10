@@ -1625,7 +1625,9 @@ What it does, in order:
    a call without `runtime-image` is refused before anything is pushed. `nanolinter-image=` and `megalinter-image=` replace a value
    wherever a fixture workflow passes it, for a mirror. The value must be
    pinned by a full `@sha256:` digest, and a setting no workflow passes is
-   refused.
+   refused. A pull-request workflow that still pins its lint image by the
+   examples' all-zero placeholder digest is refused before anything is
+   created: pass `nanolinter-image=` with an image GitHub's runners can pull.
 3. **The verdict.** A pull request: a change branch and a pull request, and the
    `pullrequest.yml` run (or `workflow=`) must succeed. The change is the one
    the local trials make: one added file, a Conventional subject, a sign-off

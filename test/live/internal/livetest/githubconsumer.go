@@ -348,6 +348,39 @@ var pinnedImage = regexp.MustCompile(`^[a-z0-9][a-z0-9._/:-]*@sha256:[0-9a-f]{64
 // mirrors of images a published fixture names.
 var githubOverridable = map[string]bool{"nanolinter-image": true, "megalinter-image": true}
 
+// githubPlaceholderLintImage is a lint image input still pinned by the all-zero
+// digest the examples carry until their consumer pins a real one.
+var githubPlaceholderLintImage = regexp.MustCompile(`(?m)^[ \t]*(nanolinter-image|megalinter-image):[ \t]*\S+@sha256:0{64}\b`)
+
+// PullRequestWorkflow is the fixture workflow the event runs on a pull
+// request: the judged one of a pull request, the fixed one of a lifecycle,
+// and none for a release or a development build.
+func (settings GitHubTrialSettings) PullRequestWorkflow() string {
+	switch settings.Event {
+	case TrialPullRequest:
+		return settings.Workflow
+	case TrialLifecycle:
+		return trialPullRequestWorkflow
+	default:
+		return ""
+	}
+}
+
+// RequireGitHubLintImage refuses a pull-request workflow that, with the
+// caller's overrides, still hands its lint engine the placeholder digest. No
+// runner can pull it, so the lint job would fail after the repository and the
+// run exist; the refusal names the setting before either does.
+func RequireGitHubLintImage(name, text string, overrides map[string]string) error {
+	effective, _ := githubInputOverrides(text, overrides)
+
+	if placeholder := githubPlaceholderLintImage.FindStringSubmatch(effective); placeholder != nil {
+		return fmt.Errorf("%s pins %s by the placeholder digest, which no runner can pull; pass %s=<repository>@sha256:<digest> "+
+			"of an image GitHub's runners can pull: %w", name, placeholder[1], placeholder[1], errs.ErrValidation)
+	}
+
+	return nil
+}
+
 // ParseGitHubTrialSettings reads the caller's key=value words for an event.
 func ParseGitHubTrialSettings(event string, words []string) (GitHubTrialSettings, error) {
 	settings := GitHubTrialSettings{Event: event, Platforms: githubDefaultPlatforms, Overrides: map[string]string{}}
