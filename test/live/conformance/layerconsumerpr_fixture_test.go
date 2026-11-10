@@ -193,18 +193,6 @@ var consumerPRLintBase = map[string]string{
 	"nanolinter.toml": consumerPRLintPlan,
 }
 
-// consumerPRLintTests are the pull-request owner's lint cases: a finding the
-// administrator's enforce-lint decides, and a gate that cannot run, which no
-// setting waives.
-var consumerPRLintTests = []struct {
-	name, source string
-	// unavailable runs the gate where it has no nanolinter.
-	unavailable bool
-}{
-	{name: "lint-findings", source: consumerPRLintFinding},
-	{name: "lint-tool-unavailable", unavailable: true},
-}
-
 // The action's own refusal as the job prints it, to the end of its line: the
 // same words inside an echoed script are followed by its quote.
 var consumerPRLinterMissing = regexp.MustCompile(`(?m)ERROR: nanolinter is not on PATH: run this job in a nanolinter image, or on a runner that provides it\r?$`)

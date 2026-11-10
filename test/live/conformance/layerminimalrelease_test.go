@@ -67,12 +67,6 @@ All notable changes to this acceptance fixture will be documented in this file.
 	releaseNotes      = "release-notes.md"
 	bundleSuffix      = ".bundle"
 
-	releaseBuildJob = "Build minimal binary release"
-
-	// layerDeclarationFile is where the release reads a consumer's
-	// declaration from by default.
-	layerDeclarationFile = ".forge-ci/artifacts.yml"
-
 	// releaseCanaryTest is where an adverse case puts the pull-request
 	// owner's test source: beside the command, in the package the build tests.
 	releaseCanaryTest = "cmd/layer-release-canary/main_test.go"
@@ -212,7 +206,7 @@ func runLayerRelease(t *testing.T, name string, private bool, objectFormat, adve
 		".chglog/config-minimal.yml":              chglogMinimalConfig,
 		".chglog/CHANGELOG-minimal.tpl":           chglogMinimalTemplate,
 		"CHANGELOG.md":                            releaseCanaryChangelog,
-		"cmd/layer-release-canary/main.go":        releaseCanaryMain,
+		releaseGoCanaryMain:                       releaseCanaryMain,
 		".forgejo/workflows/" + workflow + ".yml": rendered,
 	}
 	if adverseTest != "" {
@@ -223,8 +217,14 @@ func runLayerRelease(t *testing.T, name string, private bool, objectFormat, adve
 		shape(files)
 	}
 
-	// A canary that carries a declaration is the meta case.
+	// A canary's declaration says what its release bumps, and so which
+	// version jobs run. One that bumps in no family is the meta case.
 	declaration := files[layerDeclarationFile]
+
+	bumps, families, err := declaredReleaseBumps(declaration)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	request := livetest.CommitFiles(t, target, repo, livetest.FileCommit{
 		Branch: layerMain, Message: "feat: add the minimal signed binary release canary", Files: files,
@@ -246,7 +246,7 @@ func runLayerRelease(t *testing.T, name string, private bool, objectFormat, adve
 	jobs := scenario.requireStatus(t, run, wantRun, secrets)
 
 	if !blocked {
-		requireReleaseJobs(t, jobs, run.ID, scenario.label)
+		requireReleaseJobs(t, jobs, run.ID, scenario.label, families)
 	}
 
 	// The prepare workflow ended before the build began, so the release
@@ -257,7 +257,7 @@ func runLayerRelease(t *testing.T, name string, private bool, objectFormat, adve
 	if blocked {
 		requireReleaseBlocked(t, scenario, jobs, run.ID)
 	} else {
-		signed := requireReleaseHandOff(t, scenario, run.ID)
+		signed := requireReleaseHandOff(t, scenario, run.ID, families)
 		requireReleaseAssets(t, scenario, keys, request, signed)
 	}
 
@@ -293,17 +293,29 @@ func runLayerRelease(t *testing.T, name string, private bool, objectFormat, adve
 
 		changed, err := mirror.Git(t, "diff-tree", "--no-commit-id", "--name-only", "-r", request, main)
 		if err != nil {
-			t.Fatalf("release commit of the meta release: %v", err)
+			t.Fatalf("release commit of the declared release: %v", err)
 		}
 
 		before, _ := mirror.Git(t, "show", request+":"+releaseChangelog)
 
 		after, err := mirror.Git(t, "show", main+":"+releaseChangelog)
 		if err != nil {
-			t.Fatalf("changelog of the meta release: %v", err)
+			t.Fatalf("changelog of the declared release: %v", err)
 		}
 
-		findings := metaReleaseFindings(declaration, names, strings.Fields(changed), commitLog)
+		// A family's bump is held to the plan's version files, each manifest
+		// with the lockfile the request had beside it.
+		var findings []string
+		if len(families) == 0 {
+			findings = metaReleaseFindings(declaration, names, strings.Fields(changed), commitLog)
+		} else {
+			findings = releaseCommitScopeFindings(strings.Fields(changed), bumps, func(file string) bool {
+				_, err := mirror.Git(t, "cat-file", "-e", request+":"+file)
+
+				return err == nil
+			})
+		}
+
 		for _, finding := range append(findings, releaseChangelogFindings(before, after, strings.TrimPrefix(releaseFinalTag, "v"))...) {
 			t.Error(finding)
 		}
@@ -484,39 +496,19 @@ func trialCosignKey(t *testing.T, dir string) (string, string) {
 	return livetest.CosignKeyWithPassword(t, dir, passphrase)
 }
 
-// releaseEmptyBumpJob is the version-bump row of a release whose plan bumps no
-// project with a native version tool.
-const releaseEmptyBumpJob = releaseVersionNoBump
-
 // requireReleaseJobs holds the run to the two called workflows' jobs and the
-// consumer's build, each successful, under the two calling jobs.
-func requireReleaseJobs(t *testing.T, jobs []livetest.RunJob, runID int64, label string) {
+// consumer's build, each successful, under the two calling jobs. families are
+// those the release's plan bumps in, none for the bump's one empty row.
+func requireReleaseJobs(t *testing.T, jobs []livetest.RunJob, runID int64, label string, families []string) {
 	t.Helper()
 
-	want := []string{
-		releaseBuildJob,
-		"Check: release settings",
-		"Check: signing settings",
-		"Prepare: changelog",
-		"Prepare: release commit and tag",
-		// The bump's one empty row, which runs with every step skipped when
-		// the plan names no family: Forgejo skips the dependant of a skipped
-		// job on the server.
-		releaseEmptyBumpJob,
-		"Prepare: version plan",
-		"Publish: images",
-		"Publish: release",
-		"Publish: tidy up",
-		"Sign: files and images",
-	}
+	want, versionJobs := releaseRunJobs(families)
 
 	onRunner, wrappers := requireJobsOnRunner(t, jobs, runID, label)
 
 	// Forgejo appends a matrix row's values to the name the workflow gives it.
 	for i, name := range onRunner {
-		if strings.HasPrefix(name, releaseEmptyBumpJob+" (") {
-			onRunner[i] = releaseEmptyBumpJob
-		}
+		onRunner[i] = releaseVersionJobName(name, versionJobs)
 	}
 
 	if !slices.Equal(onRunner, want) || len(wrappers) != 2 {
@@ -597,8 +589,9 @@ func requireReleaseGit(t *testing.T, target livetest.Target, repo string, keys r
 
 // requireReleaseHandOff reads the rendered changelog, the build's unsigned
 // dist and the signer's signed one, and returns the signed files. Signing may
-// add files and must not change one the build declared.
-func requireReleaseHandOff(t *testing.T, scenario layerScenario, runID int64) map[string][]byte {
+// add files and must not change one the build declared. Each of families, the
+// ones the release's plan bumps in, hands over its version patch besides.
+func requireReleaseHandOff(t *testing.T, scenario layerScenario, runID int64, families []string) map[string][]byte {
 	t.Helper()
 
 	trees := map[string]map[string][]byte{}
@@ -614,8 +607,12 @@ func requireReleaseHandOff(t *testing.T, scenario layerScenario, runID int64) ma
 	}
 
 	unsigned, signed := trees["build-dist"], trees["signed-dist"]
-	if len(artifacts) != 3 || unsigned == nil || signed == nil || trees["release-changelog"] == nil {
-		t.Fatalf("the run left artifacts %+v, want release-changelog, build-dist and signed-dist", artifacts)
+	if len(artifacts) != 3+len(families) || unsigned == nil || signed == nil || trees["release-changelog"] == nil {
+		t.Fatalf("the run left artifacts %+v, want release-changelog, build-dist, signed-dist and a version patch for each of %v", artifacts, families)
+	}
+
+	for _, finding := range versionPatchFindings(families, trees) {
+		t.Error(finding)
 	}
 
 	if got, want := sortedNames(trees["release-changelog"]), sortedNames(namesOf("CHANGELOG.md", "commit-msg.txt")); !slices.Equal(got, want) {

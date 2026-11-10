@@ -309,7 +309,13 @@ the line goes to `<dir>/github.results`:
 ```bash
 just campaign-lane ~/campaigns/hosted github hello-maven-service/lifecycle org=<id>
 just campaign-lane ~/campaigns/hosted github hello-go-cli/release org=<id> fixtures=test/live/github-gpg workflow=release-gpg.yml
+just campaign-lane ~/campaigns/hosted github hello-go-cli/release org=<id> fixtures=test/live/github-no-sboms workflow=release-no-sboms.yml
+just campaign-lane ~/campaigns/hosted github hello-go-cli/release org=<id> fixtures=test/live/github-no-changelog workflow=release-no-changelog.yml
+just campaign-lane ~/campaigns/hosted github hello-npm-package/pull-request org=<id> fixtures=test/live/github-fork head=fork
 ```
+
+The settings after the cell are passed to the trial unchanged, so each
+variant fixture root is its own cell.
 
 Hosted cells do not run the lab launcher/classifier: `github.results` records
 the exit status with `verdict=-`, not a lab `verdict.json` path. Retain each

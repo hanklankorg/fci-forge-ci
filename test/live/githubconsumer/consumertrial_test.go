@@ -301,6 +301,12 @@ func runTrial(t *testing.T, trial *livetest.GitHubTrial, engine livetest.GitHubE
 
 	t.Logf("consumer %s rendered from %s (%s) at %s, engine %s/%s at %s", repo, root, fixtures, tree.Main, engine.Owner, engine.Repository, engine.Commit)
 
+	if settings.Event == livetest.TrialPullRequest && settings.Fork {
+		judgeForkPullRequest(t, trial, repo, tree, settings.Workflow, visibility)
+
+		return
+	}
+
 	if settings.Event == livetest.TrialPullRequest {
 		head := trial.PushChange(repo, tree, trialBranch)
 		trial.OpenPullRequest(repo, trialBranch)
@@ -360,6 +366,29 @@ func runTrial(t *testing.T, trial *livetest.GitHubTrial, engine livetest.GitHubE
 		trial.OpenPullRequest(repo, trialBranch)
 		judge(t, trial, repo, pullRequest.Workflow, "pull_request", head)
 	}
+}
+
+// judgeForkPullRequest is head=fork: the same change, pushed to a fork of the
+// consumer in the organization and opened against the consumer. A fixture
+// whose build enables private dependencies must have the run refused in the
+// build's first step, before its checkout. GitHub hands a fork's pull request
+// no secrets, so none is set, and the run needs none to be refused.
+func judgeForkPullRequest(t *testing.T, trial *livetest.GitHubTrial, repo string, tree livetest.GitHubConsumerTree, workflow string, visibility livetest.ConsumerVisibility) {
+	t.Helper()
+
+	if visibility.Private {
+		livetest.NotCoveredf(t, "fork pull request admission on a private repository: GitHub runs a private fork's pull request workflows "+
+			"only where the organization's policy sends them; run it with FORGE_CI_LIVE_CONSUMER_VISIBILITY=public")
+	}
+
+	fork := trial.ForkConsumer(repo)
+	head := trial.PushChange(fork, tree, trialBranch)
+	number := trial.OpenForkPullRequest(repo, fork, trialBranch)
+
+	run := trial.WaitRun(repo, workflow, "pull_request", head, livetest.GitHubRunTimeout)
+	t.Logf("%s run %d of %s for fork pull request #%d from %s: %s", workflow, run.GetID(), repo, number, fork, run.GetConclusion())
+	trial.ReportRun(repo, run)
+	trial.CheckForkRefusal(repo, run)
 }
 
 func consumerRepositoryName(root, visibility, event, workflow string) string {

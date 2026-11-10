@@ -52,7 +52,7 @@ func TestForgejoLayer_GoModuleReleaseReachesAFreshConsumer(t *testing.T) {
 
 		files[releaseWorkflowFile] = named
 		files["go.mod"] = "module " + path + "\n\ngo 1.27.3\n"
-		files[goModuleLibraryFile] = goModuleLibrary
+		files["greeting/greeting.go"] = goModuleLibrary
 	})
 
 	// A release that fell short has no version to offer a consumer.

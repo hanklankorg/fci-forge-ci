@@ -20,7 +20,6 @@ import (
 // module path, the release fixture's one change and the consumer job are
 // checked in every test run; the live owner is gomoduleconsumer_test.go.
 const (
-	goModuleLibraryFile = "greeting/greeting.go"
 	// goModuleLibrary is the package a downstream module imports. The canary's
 	// command stays as it is: the release still needs a binary to publish.
 	goModuleLibrary = `// Package greeting is the library a downstream module imports.

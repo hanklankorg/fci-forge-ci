@@ -16,9 +16,17 @@ import (
 //go:embed testdata/layer/minimal-binary-release.yml
 var layerMinimalReleaseFixture string
 
-// releaseWorkflowFile is where the rendered fixture is committed. The fixture
-// names the same file as its caller-workflow.
-const releaseWorkflowFile = ".forgejo/workflows/layer-minimal-release.yml"
+const (
+	// releaseWorkflowFile is where the rendered fixture is committed. The
+	// fixture names the same file as its caller-workflow.
+	releaseWorkflowFile = ".forgejo/workflows/layer-minimal-release.yml"
+
+	// layerDeclarationFile is where the release reads a consumer's
+	// declaration from by default.
+	layerDeclarationFile = ".forge-ci/artifacts.yml"
+
+	releaseBuildJob = "Build minimal binary release"
+)
 
 // The adverse release cases rest on the fixture's shape, not on what a run
 // happened to do: the tests run in the build job, before anything is handed

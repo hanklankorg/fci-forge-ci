@@ -146,6 +146,16 @@ The scenario is public and SHA-1 only, and skips on a forge reached on a port:
 a Go module path cannot name one. It says nothing about a private module, which
 needs the consumer's own Git credentials, or about a module proxy.
 
+`TestForgejoLayer_CargoBinaryRelease` runs the same release with a
+dependency-free Cargo crate declared in `.forge-ci/artifacts.yml`, built
+artifact-first with `build-cargo`. Beyond the minimal release's assertions it
+requires the `Prepare: version rust` job and its patch, a release commit that
+changes exactly `CHANGELOG.md`, `Cargo.toml` and `Cargo.lock`, both Cargo files
+at the released version, and that version in the published binary. It needs the
+signer image and `FORGE_CI_LIVE_CARGO_RELEASE_IMAGE`, a digest-pinned Rust job
+image the runner can pull (the campaigns' `JOB_IMAGE_RUST`), and skips without
+it. It builds no image and does not exercise the Build SBOM of `build-cargo`.
+
 ### Isolated npm/Cargo release-version evidence
 
 The existing key-free bump-job/text-and-digest handoff also supports `npm` and
@@ -1405,6 +1415,36 @@ These checks prove provider publication behavior, not runner-driven signing,
 SBOM generation or the full release job graph. Local workflow/handoff tests
 and the full consumer trials cover those separate contracts.
 
+#### SARIF ingestion on GitHub
+
+Only GitHub ingests SARIF, so the lab covers the capability by its absence
+(`PAR-CAP-2`). `TestGitHubSecurity_SARIFUploadAPI` is the positive hosted
+check. In the same kind of session, with no prepared fixtures, it creates a
+tiny scratch repository for each visibility, seeds one commit and uploads one
+fixture report through the product's own upload (the use case and GitHub
+adapter behind `security report upload-sarif`, not an upload action) for that
+exact repository, commit, ref and category. Code Scanning must then list
+exactly that analysis, processed without error, and its one open alert by
+rule, file and commit. A second upload with a random credential GitHub
+rejects must be denied, its diagnostics must not carry the credential, and it
+must leave no analysis. The repositories are deleted by their acknowledged
+IDs. No runner, engine push or scanner is involved, and the CLI's flag and
+provider-detection layer is not exercised.
+
+```text
+# From the forge-ci checkout, inside `just github run ... --fixtures none --`.
+FORGE_CI_LIVE_GITHUB_ORG_ID=<org-id> GOTOOLCHAIN=local GOPROXY=off GOSUMDB=off \
+  go test -tags=live -count=1 -timeout=15m -v \
+  -run='^TestGitHubSecurity_SARIFUploadAPI$' ./test/live/githubconsumer/
+```
+
+Code Scanning is free on a public repository and needs GitHub Advanced
+Security on a private one. Where the plan, the repository or the session
+credential's Code scanning alerts permission prohibits it, the case is
+reported not covered with that reason: it fails a full run and is skipped
+only with `FORGE_CI_LIVE_PROFILE=focused`, never passed.
+`FORGE_CI_LIVE_CONSUMER_VISIBILITY=public` selects the public case alone.
+
 #### Minimal preparation and retention on GitHub
 
 For the standalone and multi-artifact preparation paths without rebuilding the
@@ -1527,6 +1567,33 @@ run on dispatch only, as the demo's does, so pushing `development` starts no
 run. The `hello-maven-service` demo is the consumer it was built
 for; docs/live-campaigns.md, Lifecycle, describes the phases on every forge.
 
+A variant is a fixture root of its own, named with `fixtures=`, so that an
+ordinary trial never installs a second workflow for the same event. The
+`hello-go-cli` and `hello-npm-package` demos carry these:
+
+```text
+just test-live-consumer github /absolute/hello-go-cli release org=<org-id> fixtures=test/live/github-no-sboms workflow=release-no-sboms.yml
+just test-live-consumer github /absolute/hello-go-cli release org=<org-id> fixtures=test/live/github-no-changelog workflow=release-no-changelog.yml
+just test-live-consumer github /absolute/hello-go-cli release org=<org-id> fixtures=test/live/github-gpg workflow=release-gpg.yml
+just test-live-consumer github /absolute/hello-npm-package pull-request org=<org-id> fixtures=test/live/github-fork head=fork
+```
+
+- `release.sboms: none` (`github-no-sboms`): the release must offer no
+  `*-sboms.zip`. Every other release whose policy and artifacts share a Build
+  or analyzed-artifact layer must offer exactly one.
+- An empty `changelog-creator` (`github-no-changelog`), or
+  `changelog.skipversionbump: true`: the release prepares no commit, so `main`
+  must stay at the pushed commit, with no changelog or project file touched,
+  and the final tag must name it.
+- `head=fork` (`github-fork`, pull requests only): the change is pushed to a
+  fork of the consumer in the same organization, deleted by its ID afterwards,
+  and opened against the consumer. The fixture's build enables private
+  dependencies, so the run must fail in the build's first step, `Refuse
+  private dependency access from fork pull requests`, with the checkout and
+  every later workflow step skipped. A private consumer is reported not
+  covered: GitHub runs a private fork's pull request workflows only where the
+  organization's policy sends them.
+
 By default the controller checkout's `HEAD` is also the engine under test.
 `FORGE_CI_LIVE_ENGINE_CHECKOUT=/absolute/committed-engine` selects a separate
 committed engine checkout so controller-only fixes can be tried against an
@@ -1567,6 +1634,11 @@ What it does, in order:
    `release.yml`. After it succeeds, `main` must be one signed commit ahead, the
    final tag and a release with assets must exist, and every `*.bundle` asset
    must verify with `cosign verify-blob` against the engine's keyless identity.
+   The trial fetches the final tag and `main` and verifies them with `git`: the
+   tag must name `main`'s head, and the tag and the release commit must carry
+   a signature of the declared `git-signing` method by the release's own key,
+   the trial's GPG key or a principal of the `.forge-ci/allowed_signers` the
+   trial pushed. A signature of the other method, or by another key, fails.
    An orphan `.bundle` without its offered subject now fails acceptance; the
    hosted trial previously skipped it. This is an intentional strengthening,
    independent of the unchanged requirement that every nonsignature subject

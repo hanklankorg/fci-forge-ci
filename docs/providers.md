@@ -256,7 +256,10 @@ reports `false` there on GitHub Enterprise Server or behind a `$CI_SERVER_URL`,
 and says so up front rather than failing inside cosign. And the live conformance
 tier exercises what the *lab* can host, which is GitLab and Forgejo; the rows
 that only github claims, SARIF upload and the attestation API, are covered
-only by their absence elsewhere (`PAR-CAP-2`).
+there only by their absence elsewhere (`PAR-CAP-2`). SARIF upload has a
+separate hosted GitHub check outside that tier, see
+[SARIF ingestion on GitHub](testing.md#sarif-ingestion-on-github); the
+attestation API has none.
 
 Tag deletion (`container release-images rollback` and `cleanup`) takes its token
 from `--provider-token-file`, then `$FORGE_CI_PACKAGE_API_TOKEN`, then the

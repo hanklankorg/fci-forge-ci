@@ -293,6 +293,7 @@ type GitHubTrialSettings struct {
 	Version   string            // the release version, vX.Y.Z
 	Image     string            // comma-separated released image names to verify, or ""
 	Platforms string            // RELEASE_PLATFORMS of the engine and the consumer
+	Fork      bool              // head=fork: the pull request comes from a fork of the consumer
 	Overrides map[string]string // input: value lines set in the rendered fixtures
 }
 
@@ -383,7 +384,7 @@ func (settings *GitHubTrialSettings) parseWord(word string) error {
 
 	if !found || value == "" || (!settings.setPlatforms(key, value) && !settings.set(key, value)) {
 		return fmt.Errorf("setting %q: want workflow=<file> (not lifecycle), fixtures=<dir>, version=X.Y.Z or image=<name[,name...]> (release or lifecycle), "+
-			"RELEASE_PLATFORMS=linux/amd64[,linux/arm64], or nanolinter-image=/megalinter-image=<reference>: %w", word, errs.ErrValidation)
+			"head=fork (pull-request), RELEASE_PLATFORMS=linux/amd64[,linux/arm64], or nanolinter-image=/megalinter-image=<reference>: %w", word, errs.ErrValidation)
 	}
 
 	return nil
@@ -423,6 +424,11 @@ func (settings *GitHubTrialSettings) set(key, value string) bool {
 		settings.Image = value
 
 		return release && validTrialImageNames(value)
+	case key == "head":
+		// The one head a pull request has besides the consumer's own branch.
+		settings.Fork = true
+
+		return settings.Event == TrialPullRequest && value == "fork"
 	case githubOverridable[key]:
 		settings.Overrides[key] = value
 

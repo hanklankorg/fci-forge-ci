@@ -1154,10 +1154,17 @@ func (trial *GitHubTrial) CheckRelease(repo string, tree GitHubConsumerTree, wor
 		trial.tb.Fatalf("livetest: %v", err)
 	}
 
-	trial.checkReleaseCommit(repo, tree)
+	profile, err := githubReleaseProfileOf(tree.Dir, workflow)
+	if err != nil {
+		trial.tb.Fatalf("livetest: %v", err)
+	}
+
+	head := trial.checkReleaseCommit(repo, tree, profile.Prepares)
 
 	if _, _, err := trial.api.Git.GetRef(ctx, trial.org, repo, "tags/"+final); err != nil {
 		trial.tb.Errorf("the final tag %s is missing: %v", final, err)
+	} else {
+		trial.checkReleaseGitSignatures(repo, tree, final, head, profile, key)
 	}
 
 	release, _, err := trial.api.Repositories.GetReleaseByTag(ctx, trial.org, repo, final)
@@ -1200,8 +1207,12 @@ func (trial *GitHubTrial) CheckRelease(repo string, tree GitHubConsumerTree, wor
 		trial.tb.Errorf("the release %s: %v", final, err)
 	}
 
-	trial.tb.Logf("release %s: sign method %s; %d assets, %d Cosign bundles verified against %s, %d GPG signatures verified against %s",
-		final, method, len(assets), len(bundles), trust, len(signatures), key.Fingerprint)
+	if err := releaseSBOMBundleGap(profile.SBOMBundle, assets); err != nil {
+		trial.tb.Errorf("the release %s: %v", final, err)
+	}
+
+	trial.tb.Logf("release %s: sign method %s, git-signing %s, prepares a commit %t, SBOM bundle expectation %d; %d assets, %d Cosign bundles verified against %s, %d GPG signatures verified against %s",
+		final, method, profile.GitSigning, profile.Prepares, profile.SBOMBundle, len(assets), len(bundles), trust, len(signatures), key.Fingerprint)
 
 	return assets
 }
@@ -1399,8 +1410,11 @@ func githubListsAll(listed *github.Workflows, entries []os.DirEntry) bool {
 	return true
 }
 
-// checkReleaseCommit wants main one signed commit ahead of the trial's main.
-func (trial *GitHubTrial) checkReleaseCommit(repo string, tree GitHubConsumerTree) {
+// checkReleaseCommit wants main one signed commit ahead of the trial's main,
+// or, for a release that prepares no commit (no changelog creator, or the
+// version bump skipped), exactly where the trial left it: no changelog and no
+// project file was touched. It returns main's head.
+func (trial *GitHubTrial) checkReleaseCommit(repo string, tree GitHubConsumerTree, prepares bool) string {
 	trial.tb.Helper()
 
 	branch, _, err := trial.api.Repositories.GetBranch(trial.tb.Context(), trial.org, repo, defaultBranch, 0)
@@ -1409,12 +1423,73 @@ func (trial *GitHubTrial) checkReleaseCommit(repo string, tree GitHubConsumerTre
 	}
 
 	head := branch.GetCommit()
-	if parents := head.Parents; head.GetSHA() == tree.Main || len(parents) != 1 || parents[0].GetSHA() != tree.Main {
-		trial.tb.Errorf("main of %s is %s; want one release commit on top of %s", repo, head.GetSHA(), tree.Main)
+
+	if gap := releaseCommitGap(prepares, tree.Main, head.GetSHA(), parentSHAs(head), head.GetCommit().GetVerification().GetSignature()); gap != "" {
+		trial.tb.Errorf("main of %s: %s", repo, gap)
 	}
 
-	if head.GetCommit().GetVerification().GetSignature() == "" {
-		trial.tb.Errorf("the release commit %s is not signed", head.GetSHA())
+	return head.GetSHA()
+}
+
+func parentSHAs(commit *github.RepositoryCommit) []string {
+	parents := make([]string, 0, len(commit.Parents))
+	for _, parent := range commit.Parents {
+		parents = append(parents, parent.GetSHA())
+	}
+
+	return parents
+}
+
+// releaseCommitGap judges main after a release against the commit the trial
+// pushed.
+func releaseCommitGap(prepares bool, pushed, head string, parents []string, signature string) string {
+	switch {
+	case !prepares && head != pushed:
+		return fmt.Sprintf("is %s; the release prepares no commit, so it must stay at %s", head, pushed)
+	case !prepares:
+		return ""
+	case head == pushed || len(parents) != 1 || parents[0] != pushed:
+		return fmt.Sprintf("is %s; want one release commit on top of %s", head, pushed)
+	case signature == "":
+		return fmt.Sprintf("the release commit %s is not signed", head)
+	}
+
+	return ""
+}
+
+// checkReleaseGitSignatures fetches what the release wrote and verifies it
+// locally: the final tag names main's head, and the tag, and the release
+// commit when the release prepared one, carry a signature of the declared
+// git-signing method by the release's own key: the trial's GPG key, or a
+// principal of the allowed-signers file the trial pushed.
+func (trial *GitHubTrial) checkReleaseGitSignatures(repo string, tree GitHubConsumerTree, final, head string, profile githubReleaseProfile, key TrialGPGKey) {
+	trial.tb.Helper()
+
+	trial.git(tree.Dir, "fetch", gitQuiet, trial.remote(repo), "refs/heads/"+defaultBranch, "+refs/tags/"+final+":refs/tags/"+final)
+
+	if tagged := strings.TrimSpace(trial.git(tree.Dir, "rev-parse", "refs/tags/"+final+"^{commit}")); tagged != head {
+		trial.tb.Errorf("the final tag %s names %s; want main's head %s", final, tagged, head)
+	}
+
+	var allowedSigners string
+
+	if profile.GitSigning == config.GitSignSSH {
+		allowedSigners = filepath.Join(trial.tempDir("allowed-signers"), "allowed_signers")
+		if err := os.WriteFile(allowedSigners, []byte(trial.git(tree.Dir, "show", tree.Main+":.forge-ci/allowed_signers")), 0o600); err != nil {
+			trial.tb.Fatalf("livetest: %v", err)
+		}
+	}
+
+	if err := trial.gitSignatureGap(tree.Dir, "tag", final, profile.GitSigning, key, allowedSigners); err != nil {
+		trial.tb.Errorf("the release %s: %v", final, err)
+	}
+
+	if !profile.Prepares {
+		return
+	}
+
+	if err := trial.gitSignatureGap(tree.Dir, "commit", head, profile.GitSigning, key, allowedSigners); err != nil {
+		trial.tb.Errorf("the release %s: %v", final, err)
 	}
 }
 
@@ -1488,9 +1563,25 @@ func githubReleaseSignMethod(dir, workflow string) (domainrelease.SignMethod, er
 		return "", fmt.Errorf("release workflow: %w", err)
 	}
 
-	configs, err := githubFixtureConfigs(workflow, string(body))
+	parsed, err := githubReleaseConfig(dir, workflow, string(body))
 	if err != nil {
 		return "", err
+	}
+
+	if parsed == nil {
+		return domainrelease.DefaultSignMethod, nil
+	}
+
+	return parsed.Sign.EffectiveMethod(), nil
+}
+
+// githubReleaseConfig is the one artifacts configuration the release workflow
+// selects, parsed, or nil when the file is absent and the release derives its
+// plan.
+func githubReleaseConfig(dir, workflow, body string) (*config.Config, error) {
+	configs, err := githubFixtureConfigs(workflow, body)
+	if err != nil {
+		return nil, err
 	}
 
 	slices.Sort(configs)
@@ -1500,24 +1591,24 @@ func githubReleaseSignMethod(dir, workflow string) (domainrelease.SignMethod, er
 		configs = []string{githubDefaultArtifactsConfig}
 	case 1:
 	default:
-		return "", fmt.Errorf("release workflow %s selects %d artifacts configurations, %v; the oracle needs one: %w", workflow, len(configs), configs, errs.ErrValidation)
+		return nil, fmt.Errorf("release workflow %s selects %d artifacts configurations, %v; the oracle needs one: %w", workflow, len(configs), configs, errs.ErrValidation)
 	}
 
 	declared, err := os.ReadFile(filepath.Join(dir, filepath.FromSlash(configs[0]))) //nolint:gosec // a canonical repo-relative path githubFixtureConfigs admitted.
 	if errors.Is(err, fs.ErrNotExist) {
-		return domainrelease.DefaultSignMethod, nil
+		return nil, nil //nolint:nilnil // no declaration is a state of its own: the release derives its plan.
 	}
 
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
 	parsed, err := config.Parse(declared)
 	if err != nil {
-		return "", fmt.Errorf("%s: %w", configs[0], err)
+		return nil, fmt.Errorf("%s: %w", configs[0], err)
 	}
 
-	return parsed.Sign.EffectiveMethod(), nil
+	return parsed, nil
 }
 
 // githubDefaultArtifactsConfig is the release orchestrator's artifacts-config

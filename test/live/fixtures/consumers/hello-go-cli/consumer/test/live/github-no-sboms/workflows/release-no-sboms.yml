@@ -1,0 +1,41 @@
+# SPDX-FileCopyrightText: 2026 Digg - Agency for Digital Government
+# SPDX-License-Identifier: CC0-1.0
+
+# Release-wide SBOM policy variant of the ordinary release: release.sboms
+# selects no layer, so the release must offer no SBOM bundle. Everything else
+# is release.yml's Sigstore-keyless files and SSH-signed commit and tag.
+name: Release without SBOMs
+on:
+  push:
+    tags:
+      - "release-request/v*"
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+permissions:
+  contents: read
+jobs:
+  release:
+    uses: diggsweden/forge-ci/.github/workflows/release-orchestrator.yml@84180b5ac07af63d33917bec306e7f838aa8e366 # v0.90.0
+    permissions:
+      contents: write
+      packages: write
+      id-token: write
+      actions: read
+    secrets:
+      RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+      RELEASE_SSH_SIGNING_KEY: ${{ secrets.RELEASE_SSH_SIGNING_KEY }}
+    with:
+      branch: main
+      forge-ci-binary-ref: 84180b5ac07af63d33917bec306e7f838aa8e366 # v0.90.0
+      artifacts-config: .forge-ci/artifacts.yml
+      changelog-creator: git-cliff
+      release-publisher: github-cli
+      release.sboms: none
+      runtime-image: ghcr.io/diggsweden/forge-ci-runtime-base@sha256:0000000000000000000000000000000000000000000000000000000000000000 # FIXME v0.90.0 digest
+      canonical-builder-image: ghcr.io/diggsweden/forge-ci-runtime-go-1.27@sha256:0000000000000000000000000000000000000000000000000000000000000000 # FIXME v0.90.0 digest
+      runtime-image-full: ghcr.io/diggsweden/forge-ci-runtime@sha256:0000000000000000000000000000000000000000000000000000000000000000 # FIXME v0.90.0 digest
+      runtime-image-go: ghcr.io/diggsweden/forge-ci-runtime-go-1.27@sha256:0000000000000000000000000000000000000000000000000000000000000000 # FIXME v0.90.0 digest
+      bot-name: Hello Go Release Bot
+      bot-email: hello-release-bot@lab.invalid
+      release.attachartifacts: release-artifacts/*/my-cli-*

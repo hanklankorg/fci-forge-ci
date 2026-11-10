@@ -35,6 +35,18 @@ const (
 	consumerPRLintImageEnv = "FORGE_CI_LIVE_PR_LINT_JOB_IMAGE"
 )
 
+// consumerPRLintTests are the pull-request owner's lint cases: a finding the
+// administrator's enforce-lint decides, and a gate that cannot run, which no
+// setting waives.
+var consumerPRLintTests = []struct {
+	name, source string
+	// unavailable runs the gate where it has no nanolinter.
+	unavailable bool
+}{
+	{name: "lint-findings", source: consumerPRLintFinding},
+	{name: "lint-tool-unavailable", unavailable: true},
+}
+
 // consumerPRCase is what one case of the pull-request owner varies: the
 // workflow the pull request runs and its facts, what main holds in place of
 // or beside the module, what the pull request changes beside the canary, the
