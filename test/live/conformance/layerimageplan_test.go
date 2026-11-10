@@ -102,26 +102,18 @@ func TestForgejoLayer_ResolvedImagePlan(t *testing.T) {
 		for _, name := range []string{"steady", "changing"} {
 			entry := entries[name]
 			hit := phase == "warm" || (phase == "partial" && name == "steady")
-			matchingJobs := 0
 
-			for _, job := range jobs {
-				if !imagePlanBuildJob(job.Name, name) {
-					continue
-				}
-
-				matchingJobs++
-
-				evidence, err := imagePlanCacheEvidence(livetest.JobLog(t, target, repo, job), baseRepository+"@"+slots[name], hit)
-				if err != nil {
-					t.Fatalf("%s run %d job %d %q: %v", phase, run.ID, job.ID, job.Name, err)
-				}
-
-				t.Logf("cache execution verified: phase=%s run=%d job=%d image=%s hit=%t evidence=%s", phase, run.ID, job.ID, name, hit, evidence)
+			pair, err := imagePlanJobs(jobs, name)
+			if err != nil {
+				t.Fatalf("%s run %d: %v: %+v", phase, run.ID, err, jobs)
 			}
 
-			if matchingJobs != 1 {
-				t.Fatalf("%s run %d: expected exactly one build job for %s, got %d: %+v", phase, run.ID, name, matchingJobs, jobs)
+			evidence, err := imagePlanCacheEvidence(livetest.JobLog(t, target, repo, pair.fetch), livetest.JobLog(t, target, repo, pair.build), baseRepository+"@"+slots[name], hit)
+			if err != nil {
+				t.Fatalf("%s run %d fetch job %d build job %d: %v", phase, run.ID, pair.fetch.ID, pair.build.ID, err)
 			}
+
+			t.Logf("cache execution verified: phase=%s run=%d fetch=%d build=%d image=%s hit=%t evidence=%s", phase, run.ID, pair.fetch.ID, pair.build.ID, name, hit, evidence)
 
 			candidate := "staging-" + entry.BaseInputID + "-" + name
 			served, found := livetest.ImageDigest(t, target, repo+"-base", candidate)
@@ -175,22 +167,15 @@ func TestForgejoLayer_ResolvedImagePlan(t *testing.T) {
 			t.Fatalf("%s run %d artifact %s: %v", phase, run.ID, finalArtifact, err)
 		}
 
-		finalBuilds := 0
-
-		for _, job := range jobs {
-			if !imagePlanBuildJob(job.Name, "final") {
-				continue
-			}
-
-			finalBuilds++
-
-			if _, err := imagePlanCacheEvidence(livetest.JobLog(t, target, repo, job), "", false); err != nil {
-				t.Fatalf("final run %d build job %d: %v", run.ID, job.ID, err)
-			}
+		// The final companion never has a cache slot: its fetch job reports
+		// no reuse and its build job executes once.
+		pair, err := imagePlanJobs(jobs, "final")
+		if err != nil {
+			t.Fatalf("run %d: %v: %+v", run.ID, err, jobs)
 		}
 
-		if finalBuilds != 1 {
-			t.Fatalf("run %d: expected exactly one executed final build, got %d", run.ID, finalBuilds)
+		if _, err := imagePlanCacheEvidence(livetest.JobLog(t, target, repo, pair.fetch), livetest.JobLog(t, target, repo, pair.build), "", false); err != nil {
+			t.Fatalf("final run %d fetch job %d build job %d: %v", run.ID, pair.fetch.ID, pair.build.ID, err)
 		}
 
 		served, found := livetest.ImageDigest(t, target, repo+"-base", "staging-v0.0.1")

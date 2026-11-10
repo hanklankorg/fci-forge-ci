@@ -195,7 +195,7 @@ else
   (cd "${base_layouts}" && forge-ci container multiarch-image assemble --from-layouts --archs "${archs}" \
     --source-sha "${RELEASE_SHA:?}" --image-repository "${CI_REGISTRY_IMAGE}/bases" --tag "staging-${base_id}-go" \
     --name base --auth-file "${auth}" --scan-output-template "${RC_WORK}/base-scan-{arch}.json" \
-    --manifest-output "${RC_WORK}/base-index.json" --metadata-dir "${RC_WORK}/base-dist")
+    --manifest-output "${RC_WORK}/base-index.json" --metadata-dir base-dist)
   digest="sha256:$(sha256sum "${RC_WORK}/base-index.json" | cut -d " " -f 1)"
   forge-ci container ledger add --ledger dist/base-images.json --image-kind base --role base --flavor go \
     --base-input-id "${base_id}" --image-name "${CI_REGISTRY_IMAGE}/bases" --digest "${digest}" \

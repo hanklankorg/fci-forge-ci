@@ -24,6 +24,7 @@ import (
 	"github.com/diggsweden/forge-ci/internal/domain/imageledger"
 	"github.com/diggsweden/forge-ci/internal/domain/pipeline"
 	"github.com/diggsweden/forge-ci/internal/testutil/testenv"
+	"github.com/diggsweden/forge-ci/test/live/internal/livetest"
 )
 
 //go:embed testdata/layer/resolved-image-plan.yml
@@ -41,47 +42,136 @@ func imagePlanSHA256(body []byte) string {
 	return hex.EncodeToString(digest[:])
 }
 
-func imagePlanBuildJob(job, name string) bool {
-	suffix, found := strings.CutPrefix(job, "Build "+name+" (amd64)")
+// imagePlanStageJob reports whether job is the stage's job for the image on
+// the lab's amd64 runners. release-images.yml names a matrix job
+// "<stage>: <name> (<arch>)"; Forgejo may append the matrix values in
+// parentheses.
+func imagePlanStageJob(job, stage, name string) bool {
+	suffix, found := strings.CutPrefix(job, stage+": "+name+" (amd64)")
 
 	return found && (suffix == "" || strings.HasPrefix(suffix, " ("))
 }
 
-func TestResolvedImagePlanBuildJobNames(t *testing.T) {
-	for name, want := range map[string]bool{
-		"Build steady (amd64)": true,
-		"Build steady (amd64) (map[arch:amd64 cache-tag:cache-arch-steady-amd64])": true,
-		"Build changing (amd64) (map[arch:amd64])":                                 false,
-		"Build steady (arm64)":              false,
-		"Publish steady (map[archs:amd64])": false,
-		"Build steady (amd64)-other":        false,
-	} {
-		if imagePlanBuildJob(name, "steady") != want {
-			t.Errorf("job %q: want match=%t", name, want)
-		}
-	}
+// imagePlanJobPair is the two jobs that carry an image's cache evidence since
+// release-images.yml fetches registry inputs apart from the build: the fetch
+// job reports a reuse, the build job an execution.
+type imagePlanJobPair struct {
+	fetch, build livetest.RunJob
 }
 
-// Both paths must have positive execution evidence. Digest equality alone
-// cannot distinguish reuse from a reproducible Kaniko build.
-func imagePlanCacheEvidence(log, ref string, hit bool) (string, error) {
+// imagePlanJobs selects the image's one fetch and one build job. Zero or
+// several jobs of either stage is ambiguous and refused.
+func imagePlanJobs(jobs []livetest.RunJob, name string) (imagePlanJobPair, error) {
+	var pair imagePlanJobPair
+
+	for _, stage := range []struct {
+		prefix string
+		job    *livetest.RunJob
+	}{{"Fetch registry inputs", &pair.fetch}, {"Build", &pair.build}} {
+		matches := 0
+
+		for _, job := range jobs {
+			if imagePlanStageJob(job.Name, stage.prefix, name) {
+				*stage.job = job
+				matches++
+			}
+		}
+
+		if matches != 1 {
+			return imagePlanJobPair{}, fmt.Errorf("expected exactly one %q job for %s, got %d: %w", stage.prefix, name, matches, errs.ErrValidation)
+		}
+	}
+
+	return pair, nil
+}
+
+// imagePlanCacheEvidence judges an image's fetch and build logs together. A
+// hit is one reuse line naming ref in the fetch log and a build job that
+// executed nothing; a miss is a fetch log without reuse and one kaniko
+// execution in the build log. Digest equality alone cannot distinguish reuse
+// from a reproducible kaniko build, so both paths need positive evidence, and
+// a marker in the other stage's log is a contradiction.
+func imagePlanCacheEvidence(fetchLog, buildLog, ref string, hit bool) (string, error) {
 	const (
 		reuse   = appcontainer.CacheReusePrefix
 		execute = kaniko.ExecutionNotice
 	)
 
-	reused := strings.Count(log, reuse)
-	built := strings.Count(log, execute)
+	reused := strings.Count(fetchLog, reuse)
+	built := strings.Count(buildLog, execute)
+	misplaced := strings.Count(buildLog, reuse) + strings.Count(fetchLog, execute)
 
-	if hit && reused == 1 && built == 0 && strings.Contains(log, reuse+ref+"\n") {
+	switch {
+	case misplaced != 0:
+	case hit && reused == 1 && built == 0 && strings.Contains(fetchLog, reuse+ref+"\n"):
 		return reuse + ref, nil
-	}
-
-	if !hit && reused == 0 && built == 1 && strings.Contains(log, kaniko.LayoutBuildNoticeSuffix+"\n") {
+	case !hit && reused == 0 && built == 1 && strings.Contains(buildLog, kaniko.LayoutBuildNoticeSuffix+"\n"):
 		return execute, nil
 	}
 
-	return "", fmt.Errorf("cache execution evidence disagrees: want hit=%t, reuse markers=%d, executor markers=%d: %w", hit, reused, built, errs.ErrValidation)
+	return "", fmt.Errorf("cache execution evidence disagrees: want hit=%t, fetch reuse markers=%d, build executor markers=%d, misplaced markers=%d: %w", hit, reused, built, misplaced, errs.ErrValidation)
+}
+
+// Job names as Forgejo 16 served them for runs 524 and 525 of the
+// 2026-11-08 R witness, matrix values appended.
+const (
+	imagePlanFetchSteadyJob = "Fetch registry inputs: steady (amd64) (map[arch:amd64 build-args: builder-material-id:6b7db0658136388289cfe8af4117b53cfe24fa14f21ba028239612e9d22b1c9a cache-tag:cache-arch-steady-amd64 candidate-tag:staging-ecffb014b163e1427ee4d41af2e714f65db78c067ee33f1713534c227e03bfdd-steady])"
+	imagePlanBuildSteadyJob = "Build: steady (amd64) (map[arch:amd64 build-args: builder-material-id:6b7db0658136388289cfe8af4117b53cfe24fa14f21ba028239612e9d22b1c9a cache-tag:cache-arch-steady-amd64 candidate-tag:staging-ecffb014b163e1427ee4d41af2e714f65db78c067ee33f1713534c227e03bfdd-steady])"
+)
+
+func TestResolvedImagePlanStageJobNames(t *testing.T) {
+	for _, tc := range []struct {
+		job, stage string
+		want       bool
+	}{
+		{"Build: steady (amd64)", "Build", true},
+		{imagePlanBuildSteadyJob, "Build", true},
+		{imagePlanFetchSteadyJob, "Fetch registry inputs", true},
+		{imagePlanFetchSteadyJob, "Build", false},
+		{imagePlanBuildSteadyJob, "Fetch registry inputs", false},
+		{"Build: changing (amd64) (map[arch:amd64])", "Build", false},
+		{"Build: steady (arm64)", "Build", false},
+		{"Build steady (amd64)", "Build", false},
+		{"Publish: steady (map[archs:amd64])", "Publish", false},
+		{"Build: steady (amd64)-other", "Build", false},
+	} {
+		if imagePlanStageJob(tc.job, tc.stage, "steady") != tc.want {
+			t.Errorf("job %q stage %q: want match=%t", tc.job, tc.stage, tc.want)
+		}
+	}
+}
+
+func TestResolvedImagePlanJobsRefuseAmbiguity(t *testing.T) {
+	fetch := livetest.RunJob{ID: 7216, Name: imagePlanFetchSteadyJob}
+	build := livetest.RunJob{ID: 7220, Name: imagePlanBuildSteadyJob}
+	others := []livetest.RunJob{
+		{ID: 7197, Name: "Check: plan"},
+		{ID: 7217, Name: "Fetch registry inputs: changing (amd64) (map[arch:amd64])"},
+		{ID: 7222, Name: "Publish: steady (map[archs:amd64 cache-tag-prefix:cache-arch-steady])"},
+	}
+
+	for _, tc := range []struct {
+		name  string
+		jobs  []livetest.RunJob
+		valid bool
+	}{
+		{"run 525 pair", append([]livetest.RunJob{fetch, build}, others...), true},
+		{"missing fetch job", append([]livetest.RunJob{build}, others...), false},
+		{"missing build job", append([]livetest.RunJob{fetch}, others...), false},
+		{"duplicate build job", []livetest.RunJob{fetch, build, {ID: 7221, Name: "Build: steady (amd64)"}}, false},
+		{"pre-stage spelling", []livetest.RunJob{{ID: 1, Name: "Fetch steady (amd64)"}, {ID: 2, Name: "Build steady (amd64)"}}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			pair, err := imagePlanJobs(tc.jobs, "steady")
+			if (err == nil) != tc.valid {
+				t.Fatalf("valid=%t: %v", tc.valid, err)
+			}
+
+			if tc.valid && (pair.fetch.ID != 7216 || pair.build.ID != 7220) {
+				t.Fatalf("selected the wrong pair: %+v", pair)
+			}
+		})
+	}
 }
 
 func imagePlanReview(tree map[string][]byte, repository string) (map[string]imageledger.Entry, error) {
@@ -139,22 +229,47 @@ func imagePlanReview(tree map[string][]byte, repository string) (map[string]imag
 }
 
 func TestResolvedImagePlanCacheEvidence(t *testing.T) {
-	ref := "registry.example/base@sha256:" + strings.Repeat("a", 64)
-	hit := appcontainer.CacheReusePrefix + ref + "\n"
-	build := "kaniko: local" + kaniko.LayoutBuildNoticeSuffix + "\n" + kaniko.ExecutionNotice + "\n"
+	// Log lines as the Forgejo jobs of runs 524 (cold) and 525 (partial)
+	// printed them for steady, timestamps dropped.
+	const (
+		ref         = "registry.invalid:8443/forgeci/fci-consumer-trial-base@sha256:812f2ba2f9fed2544f6201a0e32f783847d68886ef0bf6f5f8fc247c779eaf99"
+		layout      = "kaniko: localhost/steady:ecffb014b163e1427ee4d41af2e714f65db78c067ee33f1713534c227e03bfdd-amd64"
+		fetchCommon = "Logged in to registry.invalid:8443 as forgeci → /tmp/registry-input-auth.f0fodh\n"
+		buildCommon = "Downloaded resolved-base-review-cold-inputs-steady-amd64 (2 files, 187 bytes) → /workspace/forgeci/fci-consumer-trial/registry-inputs\n" +
+			"Restored 0 blobs from blob store resolved-base-review-cold-input-blob → /workspace/forgeci/fci-consumer-trial/registry-inputs\n"
+		buildTail = "Blob store resolved-base-review-cold-blob: 0 blobs, 0 bytes uploaded, 0 bytes already in the run\n" +
+			"Uploaded resolved-base-review-cold-layout-steady-amd64 (8 files, 2985 bytes)\n"
+	)
+
+	reuse := appcontainer.CacheReusePrefix + ref + "\n"
+	execute := layout + kaniko.LayoutBuildNoticeSuffix + "\n" + kaniko.ExecutionNotice + "\n" +
+		"INFO[0000] Taking snapshot of files...\n" +
+		"Image architecture prepared: arch=amd64 digest=sha256:812f2ba2f9fed2544f6201a0e32f783847d68886ef0bf6f5f8fc247c779eaf99\n"
+	coldFetch := fetchCommon + "Blob store resolved-base-review-cold-input-blob: 0 blobs, 0 bytes uploaded, 0 bytes already in the run\n"
+	coldBuild := buildCommon + execute + buildTail
+	partialFetch := fetchCommon + reuse
+	partialBuild := buildCommon + buildTail
 
 	for _, tc := range []struct {
-		name, log  string
-		hit, valid bool
+		name, fetch, build string
+		hit, valid         bool
 	}{
-		{"actual reuse", hit, true, true}, {"actual build", build, false, true},
-		{"digest alone", ref, true, false}, {"empty miss", "", false, false},
-		{"fresh identical build", build, true, false}, {"unexpected reuse", hit, false, false},
-		{"contradictory", hit + build, true, false}, {"wrong digest", strings.ReplaceAll(hit, "aaaa", "bbbb"), true, false},
-		{"duplicate reuse", hit + hit, true, false},
+		{"run 525 steady reused", partialFetch, partialBuild, true, true},
+		{"run 524 steady built", coldFetch, coldBuild, false, true},
+		{"reuse reported by the build job", coldFetch, buildCommon + reuse + buildTail, true, false},
+		{"execution reported by the fetch job", coldFetch + kaniko.ExecutionNotice + "\n", partialBuild, false, false},
+		{"both reuse and execution", partialFetch, coldBuild, true, false},
+		{"both on a miss", partialFetch, coldBuild, false, false},
+		{"fresh identical build on a hit", coldFetch, coldBuild, true, false},
+		{"unexpected reuse on a miss", partialFetch, partialBuild, false, false},
+		{"digest alone", fetchCommon + ref + "\n", partialBuild, true, false},
+		{"wrong digest", fetchCommon + strings.ReplaceAll(reuse, "812f", "0000"), partialBuild, true, false},
+		{"duplicate reuse", partialFetch + reuse, partialBuild, true, false},
+		{"execution without its layout line", coldFetch, buildCommon + kaniko.ExecutionNotice + "\n", false, false},
+		{"empty miss", "", "", false, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if _, err := imagePlanCacheEvidence(tc.log, ref, tc.hit); (err == nil) != tc.valid {
+			if _, err := imagePlanCacheEvidence(tc.fetch, tc.build, ref, tc.hit); (err == nil) != tc.valid {
 				t.Fatalf("valid=%t: %v", tc.valid, err)
 			}
 		})
