@@ -26,8 +26,10 @@ package conformance_test
 
 import (
 	"encoding/json"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -286,6 +288,149 @@ func TestLedger_Cleanup_RemovesTheCandidateAndKeepsTheRelease(t *testing.T) {
 			}
 		})
 	}
+}
+
+// A release is promoted onto another registry with --stage-repo, and what
+// arrives is the signed image: the same digest under the release pointer and
+// the version tag, with a signature the public key alone verifies there.
+//
+// The two lab registries stand for the two a sovereignty promotion crosses:
+// the image is pushed and signed on Forgejo's and promoted to GitLab's. The
+// source path is kept beneath the destination prefix, so a project of the same
+// name receives it. One credential file names both registries, as the release
+// job's two logins leave it.
+func TestLedger_Promote_AcrossRegistries_CarriesTheSignature(t *testing.T) {
+	livetest.RegisterLiveScenario(t)
+
+	const (
+		name         = "ledger-cross-registry"
+		releaseTag   = "v0.0.1"
+		candidateTag = "staging-" + releaseTag
+	)
+
+	forges := forgesClaiming(t, alwaysValidatesTokens, "an OCI registry")
+	if !slices.Contains(forges, provider.ForgeForgejo) || !slices.Contains(forges, provider.ForgeGitLab) {
+		livetest.NotCoveredf(t, "a promotion across registries needs both the Forgejo and the GitLab registry in one run")
+	}
+
+	source, destination := livetest.Accept(t, provider.ForgeForgejo), livetest.Accept(t, provider.ForgeGitLab)
+	if source.Owner != destination.Owner {
+		livetest.NotCoveredf(t, "the promotion keeps the source path, so both forges need the same account: %s and %s", source.Owner, destination.Owner)
+	}
+
+	sourceRegistry, err := livetest.RegistryHost(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	destinationRegistry, err := livetest.RegistryHost(destination)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	repo := livetest.NewScratchRepo(t, source, name)
+	if received := livetest.NewScratchRepo(t, destination, name); received != repo {
+		t.Fatalf("the receiving project is %s, want the source's name %s", received, repo)
+	}
+
+	sourcePath := sourceRegistry + "/" + source.Owner + "/" + repo
+	destinationPath := destinationRegistry + "/" + destination.Owner + "/" + repo
+
+	work := t.TempDir()
+	authDir := registryAuthConfigDir(t, work, source, destination)
+	authFile := filepath.Join(authDir, "config.json")
+	privateKey, publicKey := livetest.CosignKey(t, work)
+	opts := livetest.RunOptions{Dir: work, Env: livetest.CosignEnv(authDir)}
+
+	pushed := livetest.PushImageTags(t, source, repo, candidateTag, releaseTag)
+
+	const ledger = "release-images.json"
+
+	for _, step := range [][]string{
+		{
+			"container", "ledger", "add",
+			"--ledger", ledger, "--auth-file", authFile, "--tag", releaseTag,
+			"--role", "distroless",
+			"--candidate-tag", sourcePath + ":" + candidateTag,
+			"--final-tag", sourcePath + ":" + releaseTag,
+			"--sbom", writeSBOM(t, work, "cross-registry"),
+			"--capture-digest",
+		},
+		{
+			"container", "ledger", "sign",
+			"--ledger", ledger, "--auth-file", authFile, "--tag", releaseTag,
+			"--method", "kms", "--key", privateKey,
+			"--provenance-predicate", writePredicate(t, work),
+		},
+		{
+			"container", "ledger", "promote",
+			"--ledger", ledger, "--auth-file", authFile, "--tag", releaseTag,
+			"--stage", "release", "--stage-repo", destinationRegistry,
+		},
+	} {
+		if run := livetest.CLIIn(t, source, repo, opts, step...); run.ExitCode != 0 {
+			t.Fatalf("ledger %s exited %d\nstderr: %s", step[2], run.ExitCode, run.Stderr)
+		}
+	}
+
+	for _, tag := range []string{"release", releaseTag} {
+		served, found := livetest.ImageDigest(t, destination, repo, tag)
+		if !found {
+			t.Fatalf("%s:%s serves nothing after the promotion", destinationPath, tag)
+		}
+
+		if served != pushed.Digest {
+			t.Errorf("%s:%s serves %s, want the promoted %s", destinationPath, tag, served, pushed.Digest)
+		}
+	}
+
+	// The signature was written on the source registry only; a verifier
+	// finds it beside the copy.
+	verifyCosignSignature(t, destination, destinationPath+"@"+pushed.Digest, publicKey, authDir)
+
+	if livetest.SignaturePublishedToTransparencyLog(t, destination, repo, pushed.Digest) {
+		t.Error("the copied signature carries a transparency-log entry")
+	}
+}
+
+// registryAuthConfigDir is livetest.RegistryAuthConfigDir for several
+// registries: one config.json that names each target's.
+func registryAuthConfigDir(t *testing.T, dir string, targets ...livetest.Target) string {
+	t.Helper()
+
+	auths := map[string]json.RawMessage{}
+
+	for _, target := range targets {
+		content, err := os.ReadFile(livetest.RegistryAuthFile(t, target, t.TempDir()))
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		var config struct {
+			Auths map[string]json.RawMessage `json:"auths"`
+		}
+		if err := json.Unmarshal(content, &config); err != nil {
+			t.Fatal(err)
+		}
+
+		maps.Copy(auths, config.Auths)
+	}
+
+	merged, err := json.Marshal(map[string]any{"auths": auths})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	configDir := filepath.Join(dir, "docker")
+	if err := os.Mkdir(configDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(filepath.Join(configDir, "config.json"), merged, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	return configDir
 }
 
 // ledgerDigest reads back the digest the ledger recorded, so the assertion is
