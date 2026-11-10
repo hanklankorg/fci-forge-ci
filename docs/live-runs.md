@@ -51,9 +51,9 @@ so can runs on one provider that each hold their own account's contract:
 
 ```sh
 # In Forge Lab, once per extra account; the lab's runners serve every account.
-LAB_TARGETS_FILE=/absolute/forgeci-2.json just targets --account forgeci-2 gitlab forgejo
+LAB_TARGETS_FILE=/absolute/forgeci2.json just targets --account forgeci2 gitlab forgejo
 # Here, beside a run that uses the forgeci contract:
-LAB_TARGETS_FILE=/absolute/forgeci-2.json just test-live-prepared <dir> gitlab '<pattern>'
+LAB_TARGETS_FILE=/absolute/forgeci2.json just test-live-prepared <dir> gitlab '<pattern>'
 ```
 
 Give each run a pattern that selects different cases, so no case runs twice.

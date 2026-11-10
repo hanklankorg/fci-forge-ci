@@ -753,7 +753,7 @@ func TestRunLiveTests_ProviderLanesOverlapAndConflictingScopesRefuse(t *testing.
 	for _, lane := range []struct {
 		scope, account string
 		want           int
-	}{{"gitlab", "forgeci", 0}, {"forgejo", "forgeci-2", 0}, {"forgejo", "forgeci", 2}, {"all", "forgeci", 2}} {
+	}{{"gitlab", "forgeci", 0}, {"forgejo", "forgeci2", 0}, {"forgejo", "forgeci", 2}, {"all", "forgeci", 2}} {
 		scope, want := lane.scope, lane.want
 		second := newLiveRun(t, "FORGE_CI_LIVE_PROVIDER="+scope, "FAKE_LAB_ACCOUNT="+lane.account, "FAKE_GO_TEST_OUTPUT="+fakeSuiteOutput,
 			"XDG_STATE_HOME="+first.stateHome)
