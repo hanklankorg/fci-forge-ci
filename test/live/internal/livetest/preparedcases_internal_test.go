@@ -43,6 +43,10 @@ func TestForgejoSettingsOfACase(t *testing.T) {
 			"CI_JOB_IMAGE=" + preparedImages["JOB_IMAGE_JAVA"], "CI_IMAGE_BUILDER=kaniko",
 			"CI_IMAGE_BUILDER_JOB_IMAGE=" + preparedImages["KANIKO_JOB_IMAGE"], "RELEASE_PLATFORMS=linux/amd64",
 		}},
+		"gate with a front end": {PreparedCase{Event: TrialPullRequest, JobImage: flavorJava, Builder: ImageBuilderBuildah, NodeJobImage: flavorJS}, []string{
+			"CI_JOB_IMAGE=" + preparedImages["JOB_IMAGE_JAVA"], "CI_IMAGE_BUILDER=buildah",
+			"CI_JOB_IMAGE_NODE=" + preparedImages["JOB_IMAGE_JAVASCRIPT_TYPESCRIPT"],
+		}},
 		"release with every setting": {PreparedCase{
 			Event: TrialRelease, JobImage: flavorJS, Builder: ImageBuilderBuildah,
 			Version: "0.2.0", NextVersion: "0.2.1", ReleaseImagesConfig: ".forge-ci/images.yml", Platforms: nativePlatform,

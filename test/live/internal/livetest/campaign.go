@@ -183,9 +183,11 @@ func laneRuntimeTargets(root string, lane PreparedLane, flavors []string, target
 
 		// A GitLab snapshot runs no gate, so it lints in nothing.
 		lints := lane.Forge == campaignForgejo || c.Event != TrialSnapshot
-		if lints && !slices.Contains(flavors, c.JobImage) {
-			return fmt.Errorf("%s: %s takes a nanolinter job image the campaign does not publish; add job-image=%s:<local image>: %w",
-				lane.Name, c.Name(), c.JobImage, errs.ErrValidation)
+		for _, flavor := range []string{c.JobImage, c.NodeJobImage} {
+			if lints && flavor != "" && !slices.Contains(flavors, flavor) {
+				return fmt.Errorf("%s: %s takes a nanolinter job image the campaign does not publish; add job-image=%s:<local image>: %w",
+					lane.Name, c.Name(), flavor, errs.ErrValidation)
+			}
 		}
 
 		if lane.Forge != campaignGitLab {

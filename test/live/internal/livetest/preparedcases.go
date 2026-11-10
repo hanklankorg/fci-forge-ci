@@ -33,6 +33,10 @@ type PreparedCase struct {
 	// Runtime is the runtime image target a GitLab case's jobs run in where
 	// it is not its flavor's own (gitLabRuntimeTarget): hello-android's.
 	Runtime string
+	// NodeJobImage is the flavor of the nanolinter image a Forgejo gate
+	// checks a front end in beside its job image, as CI_JOB_IMAGE_NODE:
+	// hello-monorepo's.
+	NodeJobImage string
 }
 
 // The lanes of the tables; PreparedLanes names each as the matrices do.
@@ -103,6 +107,10 @@ var ForgejoPreparedCases = []PreparedCase{
 	{Lane: LanePrivate, Demo: "hello-cargo-workspace", Event: TrialRelease, JobImage: flavorRust, Builder: ImageBuilderKaniko, Version: "0.2.0", Platforms: nativePlatform},
 	{Lane: LanePrivate, Demo: "hello-npm-package", Event: TrialPullRequest, JobImage: flavorJS, Builder: ImageBuilderKaniko},
 	{Lane: LanePrivate, Demo: "hello-npm-package", Event: TrialRelease, JobImage: flavorJS, Builder: ImageBuilderKaniko, Version: "0.2.0", Platforms: nativePlatform},
+	{Lane: LanePrivate, Demo: "hello-gradle", Event: TrialPullRequest, JobImage: flavorJava, Builder: ImageBuilderKaniko},
+	{Lane: LanePrivate, Demo: "hello-gradle", Event: TrialRelease, JobImage: flavorJava, Builder: ImageBuilderKaniko, Platforms: nativePlatform},
+	// The monorepo ships a Forgejo gate and no Forgejo release.
+	{Lane: LanePrivate, Demo: "hello-monorepo", Event: TrialPullRequest, JobImage: flavorJava, Builder: ImageBuilderKaniko, NodeJobImage: flavorJS},
 }
 
 // GitLabPreparedCases are the GitLab consumer trials of the shipped demos.
@@ -145,6 +153,7 @@ var GitLabPreparedCases = []PreparedCase{
 	{Lane: LanePrivate, Demo: "hello-cargo-container", Event: TrialRelease, JobImage: flavorRust, Builder: ImageBuilderKaniko, Version: "0.2.0"},
 	{Lane: LanePrivate, Demo: "hello-cargo-workspace", Event: TrialRelease, JobImage: flavorRust, Builder: ImageBuilderKaniko, Version: "0.2.0"},
 	{Lane: LanePrivate, Demo: "hello-npm-package", Event: TrialRelease, JobImage: flavorJS, Builder: ImageBuilderKaniko, Version: "0.2.0"},
+	{Lane: LanePrivate, Demo: "hello-gradle", Event: TrialRelease, JobImage: flavorJava, Builder: ImageBuilderKaniko, Version: "0.2.0"},
 
 	{Lane: LanePrivateAndroid, Demo: "hello-android", Event: TrialPullRequest, JobImage: flavorKotlin, Builder: ImageBuilderKaniko, Runtime: "android"},
 }
@@ -212,6 +221,15 @@ func (c PreparedCase) Settings(prepared map[string]string) ([]string, error) {
 	}
 
 	settings := []string{"CI_JOB_IMAGE=" + prepared[jobImage], "CI_IMAGE_BUILDER=" + c.Builder}
+
+	if c.NodeJobImage != "" {
+		nodeImage := campaignJobImagePrefix + campaignFlavorKey(c.NodeJobImage)
+		if prepared[nodeImage] == "" {
+			return nil, c.notPrepared(nodeImage)
+		}
+
+		settings = append(settings, "CI_JOB_IMAGE_NODE="+prepared[nodeImage])
+	}
 
 	if c.Builder == ImageBuilderKaniko {
 		if prepared[preparedKanikoJobImage] == "" {
