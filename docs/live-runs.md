@@ -480,8 +480,8 @@ every family (`test/live/internal/livetest/testdata/service-development.yml.tmpl
 snapshot-images workflow builds the producers in the image the repository's
 `SNAPSHOT_ARTIFACT_JOB_IMAGE_<FAMILY>` variable names, the lifecycle's
 `CI_JOB_IMAGE`, then the image; a readiness job runs the published digest.
-A case is refused before anything is created
-(`admitLifecycle`), with the planner's reason. The generated matrix in
+The case tables hold only lifecycles a demo can run: a test admits every
+row (`admitLifecycle`) and fails with the reason. The generated matrix in
 [Testing matrices](testing-matrices.md) lists every demo's state; the reasons
 behind it:
 

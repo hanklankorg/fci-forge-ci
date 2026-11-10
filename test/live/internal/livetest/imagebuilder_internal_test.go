@@ -155,3 +155,30 @@ jobs:
 		t.Fatal(err)
 	}
 }
+
+// A Forgejo trial builds with the builder its settings name, buildah when
+// they name none. A builder that is neither, and a run selector that names
+// the other one, are refused before any resource exists.
+func TestForgejoConsumerImageBuilder(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct{ variable, selector, want string }{
+		{"", "", ImageBuilderBuildah},
+		{ImageBuilderKaniko, "", ImageBuilderKaniko},
+		{ImageBuilderKaniko, ImageBuilderKaniko, ImageBuilderKaniko},
+		{"", ImageBuilderBuildah, ImageBuilderBuildah},
+		{"docker", "", ""},
+		{ImageBuilderKaniko, ImageBuilderBuildah, ""},
+		{"", ImageBuilderKaniko, ""},
+	} {
+		variables := map[string]string{}
+		if tc.variable != "" {
+			variables["CI_IMAGE_BUILDER"] = tc.variable
+		}
+
+		got, err := ForgejoConsumerImageBuilder(variables, tc.selector)
+		if got != tc.want || (tc.want == "") != errors.Is(err, errs.ErrValidation) {
+			t.Errorf("CI_IMAGE_BUILDER=%q with selector %q: %q, %v; want %q", tc.variable, tc.selector, got, err, tc.want)
+		}
+	}
+}

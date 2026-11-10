@@ -422,3 +422,42 @@ func TestComponentAdminInputsAddOnlyWhatTheComponentDeclares(t *testing.T) {
 		t.Fatalf("release inputs %v, want all four settings", release)
 	}
 }
+
+// A run of one provider that turns on an administrator check is refused
+// unless an orchestrator of that provider declares the check's input: the
+// run's record would otherwise claim a check nothing ran. With no check
+// turned on, or no single provider, nothing is read.
+func TestCheckAdminInputsConsumed(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, ".forgejo", "workflows", "release.yml"),
+		"on:\n  workflow_call:\n    inputs:\n      enforce-lint:\n        type: boolean\n")
+
+	lint, builds := adminInputEnvironment(enforcement.Lint), adminInputEnvironment(enforcement.ReproducibleBuilds)
+	env := func(on string) func(string) string {
+		return func(name string) string {
+			if name == on {
+				return "true"
+			}
+
+			return ""
+		}
+	}
+
+	for _, tc := range []struct {
+		scope, root, on string
+		refused         bool
+	}{
+		{"forgejo", root, lint, false},
+		{"forgejo", root, builds, true},
+		{"gitlab", root, lint, true},
+		{"forgejo", filepath.Join(root, "absent"), "", false},
+		{"all", filepath.Join(root, "absent"), builds, false},
+	} {
+		t.Setenv(liveProviderEnv, tc.scope)
+
+		err := CheckAdminInputsConsumed(tc.root, env(tc.on))
+		if errors.Is(err, errs.ErrValidation) != tc.refused || (!tc.refused && err != nil) {
+			t.Errorf("%s with %q on: %v, refused want %t", tc.scope, tc.on, err, tc.refused)
+		}
+	}
+}

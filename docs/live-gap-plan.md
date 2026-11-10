@@ -80,7 +80,7 @@ Ordered by what a consumer is most likely to be.
 | 22 | Signing: Forgejo GPG release files; Cosign key and SSH have examples, no rows | The deferred Forgejo GPG work; one row per mode |
 | 23 | Release options on the lab forges: no SBOMs, no changelog, draft, prerelease, retention | Variant rows; the first two exist on GitHub |
 | 24 | Failure paths outside GitLab: interrupted release, promotion retry | Scenarios for Forgejo and GitHub |
-| 25 | More than `linux/amd64` | An approved native arm64 scope |
+| 25 | More than `linux/amd64` | Cross-built arm64 artifacts and images are in scope now; running on arm64 waits for an arm64 runner, which the lab does not have (hosted GitHub possibly) |
 
 ### Coherence
 

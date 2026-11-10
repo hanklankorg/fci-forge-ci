@@ -9,6 +9,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"slices"
 	"strings"
 	"syscall"
 	"testing"
@@ -57,6 +59,8 @@ run)
     esac
   elif [[ "${3:-}" == runner-arch ]]; then
     printf '%s\n' arm64
+  elif [[ "${3:-}" == prepared-source ]]; then
+    [[ -z "${FAKE_PREPARED_REFUSES:-}" ]] || exit 2
   elif [[ "${3:-}" == provider-account ]]; then
     printf '%s\n' "${FAKE_LAB_ACCOUNT:-forgeci}"
   else
@@ -821,5 +825,31 @@ func TestRunLiveTests_ScopedLaneRespectsLegacyExclusiveLock(t *testing.T) {
 
 			requireNoEvidence(t, run)
 		})
+	}
+}
+
+// A run that takes prepared images hands the prepared directory, its own
+// commit and its working-tree state to the Go preflight, and builds and runs
+// nothing when that refuses: the images are of one commit.
+func TestRunLiveTests_RunsNothingOnAPreparedDirectoryOfAnotherCommit(t *testing.T) {
+	t.Parallel()
+	run := newLiveRun(t, "FORGE_CI_LIVE_PREPARED=/prepared/dir", "FAKE_PREPARED_REFUSES=1", "FAKE_GO_TEST_OUTPUT="+fakeSuiteOutput)
+
+	stdout, stderr, status := run.exec(t, "focused", "TestFake")
+	if status != 2 {
+		t.Fatalf("status %d\nstdout:\n%s\nstderr:\n%s", status, stdout, stderr)
+	}
+
+	calls := run.goCalls(t)
+	prepared := regexp.MustCompile(`^run ./test/live/internal/livetest/preflight prepared-source /prepared/dir [0-9a-f]{40}( |$)`)
+
+	if !slices.ContainsFunc(calls, prepared.MatchString) {
+		t.Errorf("the preflight was not given the directory and the commit:\n%s", strings.Join(calls, "\n"))
+	}
+
+	if slices.ContainsFunc(calls, func(call string) bool {
+		return strings.HasPrefix(call, "build") || strings.HasPrefix(call, "test") || strings.HasPrefix(call, "suite")
+	}) {
+		t.Errorf("the refused run built or ran something:\n%s", strings.Join(calls, "\n"))
 	}
 }

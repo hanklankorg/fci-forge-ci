@@ -284,3 +284,61 @@ func TestPrivateLaneFixesItsVisibilityAndReproducibleBuilds(t *testing.T) {
 		t.Errorf("GitLab's release component no longer takes enforce-reproducible-builds: %v", err)
 	}
 }
+
+// Every GitLab case finds, in a directory prepared for all of them, the
+// archive of each further runtime image its demo runs in; the monorepo's
+// snapshot without its Node producer's archive is refused by name rather
+// than left to report itself not covered.
+func TestGitLabCaseRequiresItsFurtherArchives(t *testing.T) {
+	t.Parallel()
+
+	repo := reporoot.Path(t)
+
+	for _, c := range GitLabPreparedCases {
+		if err := c.RequireGitLabFurtherArchives(demoConsumerDir(repo, c.Demo), gitLabPrepared); err != nil {
+			t.Errorf("%s: %v", c.Name(), err)
+		}
+	}
+
+	const missing = "FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_NODE"
+
+	prepared := maps.Clone(gitLabPrepared)
+	delete(prepared, missing)
+
+	monorepo := PreparedCase{Lane: LaneSnapshot, Demo: "hello-monorepo", Event: TrialSnapshot, JobImage: flavorJava, Builder: ImageBuilderBuildah}
+	if err := monorepo.RequireGitLabFurtherArchives(demoConsumerDir(repo, monorepo.Demo), prepared); !errors.Is(err, errs.ErrValidation) || !strings.Contains(err.Error(), "has no "+missing+";") {
+		t.Errorf("the monorepo snapshot without %s: %v", missing, err)
+	}
+}
+
+// A Forgejo trial takes the signer and the builders' saved job images from
+// the prepared directory alone: one that was not prepared is set empty, so
+// a value left in the caller's environment is never taken for it.
+func TestPreparedForgejoEnvironmentClearsWhatWasNotPrepared(t *testing.T) {
+	t.Parallel()
+
+	buildah := GitLabSnapshotBuilderArchiveEnv(ImageBuilderBuildah)
+	got := PreparedForgejoEnvironment(map[string]string{signerImageEnv: "signer@sha256:1", buildah: "/c/buildah.tar", "LINT_IMAGE_ARCHIVE_GO": "/c/lint.tar"})
+
+	if want := map[string]string{signerImageEnv: "signer@sha256:1", buildah: "/c/buildah.tar", KanikoJobImageArchiveEnv: ""}; !maps.Equal(got, want) {
+		t.Errorf("environment %v, want %v", got, want)
+	}
+}
+
+// A case's name is its subtest and its evidence key, so no two cases of a
+// forge share one.
+func TestPreparedCaseNamesAreUnique(t *testing.T) {
+	t.Parallel()
+
+	for _, forge := range []string{forgeForgejo, forgeGitLab} {
+		seen := map[string]bool{}
+
+		for _, c := range PreparedCases(forge) {
+			if seen[c.Name()] {
+				t.Errorf("%s has two cases named %s", forge, c.Name())
+			}
+
+			seen[c.Name()] = true
+		}
+	}
+}

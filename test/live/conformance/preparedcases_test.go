@@ -57,12 +57,17 @@ func forEachConsumerCheckout(t *testing.T, forge provider.ForgeAPI, usage string
 		}
 
 		t.Run(c.Name(), func(t *testing.T) {
+			root := filepath.Join(prepared, "demos", c.Demo)
+
 			settings, environment, err := preparedCaseInputs(forge, c, env)
+			if err == nil && forge == provider.ForgeGitLab {
+				err = c.RequireGitLabFurtherArchives(root, env)
+			}
+
 			if err != nil {
 				t.Fatal(err)
 			}
 
-			root := filepath.Join(prepared, "demos", c.Demo)
 			t.Setenv(consumerCheckoutEnv, root)
 			t.Setenv(consumerEventEnv, c.Event)
 			t.Setenv(consumerSettingsEnv, strings.Join(settings, "\n"))

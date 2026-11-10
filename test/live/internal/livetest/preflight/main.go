@@ -74,6 +74,11 @@ func main() {
 	}
 
 	summary, err := livetest.CheckLiveInputs(time.Now())
+	if err == nil {
+		// The launcher runs this in the checkout whose orchestrators the run tests.
+		err = livetest.CheckAdminInputsConsumed(".", os.Getenv)
+	}
+
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "live preflight: %v\n", err)
 		os.Exit(2)

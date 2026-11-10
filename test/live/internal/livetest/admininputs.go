@@ -17,6 +17,7 @@ import (
 
 	"github.com/diggsweden/forge-ci/internal/domain/enforcement"
 	"github.com/diggsweden/forge-ci/internal/domain/errs"
+	"github.com/diggsweden/forge-ci/internal/domain/provider"
 )
 
 func adminInputEnvironment(check enforcement.Check) string {
@@ -330,4 +331,70 @@ func encodeYAML(value any) (string, error) {
 	err := encoder.Encode(value)
 
 	return encoded.String(), err
+}
+
+// adminConsumers are the orchestrators of a lab forge whose declared inputs
+// an administrator check reaches, as globs under the checkout: Forgejo's
+// reusable workflows and actions, GitLab's components.
+var adminConsumers = map[provider.ForgeAPI][]string{
+	provider.ForgeForgejo: {".forgejo/workflows/*.yml", ".forgejo/actions/*/action.yml"},
+	provider.ForgeGitLab:  {"templates/*.yml"},
+}
+
+// CheckAdminInputsConsumed refuses a run of one provider that turns on an
+// administrator check (FORGE_CI_LIVE_ADMIN_<CHECK>=true) whose input no
+// orchestrator of that provider under root declares: nothing in the run
+// would read it, and the run's record would claim a check that never ran.
+// The orchestrators are read only when a check is turned on.
+func CheckAdminInputsConsumed(root string, getenv func(string) string) error {
+	forge, err := liveProviderScope()
+	if err != nil || forge == "" {
+		return err
+	}
+
+	values, err := readAdminInputs(getenv)
+	if err != nil {
+		return err
+	}
+
+	read := func(file string) ([]byte, error) {
+		return os.ReadFile(filepath.Join(root, file)) //nolint:gosec // This checkout's orchestrators, read as data.
+	}
+
+	for _, check := range enforcement.Checks {
+		setting := enforcement.Setting(check)
+		if !values[setting] {
+			continue
+		}
+
+		consumed := false
+
+		for _, pattern := range adminConsumers[forge] {
+			matches, err := filepath.Glob(filepath.Join(root, pattern))
+			if err != nil {
+				return err
+			}
+
+			for _, match := range matches {
+				file, err := filepath.Rel(root, match)
+				if err != nil {
+					return err
+				}
+
+				declared, err := declaredInputs(read, file)
+				if err != nil {
+					return err
+				}
+
+				consumed = consumed || gitlabMappingValue(declared, setting) != nil
+			}
+		}
+
+		if !consumed {
+			return fmt.Errorf("%s=true names %s, an input no %s orchestrator under %s declares, so nothing in this run consumes it; unset it: %w",
+				adminInputEnvironment(check), setting, forge, root, errs.ErrValidation)
+		}
+	}
+
+	return nil
 }

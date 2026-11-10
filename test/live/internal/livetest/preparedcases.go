@@ -371,3 +371,22 @@ func (c PreparedCase) GitLabEnvironment(prepared map[string]string) (map[string]
 
 	return environment, nil
 }
+
+// RequireGitLabFurtherArchives refuses a GitLab case whose demo, at
+// checkout, runs in a runtime image the prepared directory holds no archive
+// of: a producer family of its snapshot, or a further job image of its
+// gate. The trial would otherwise report itself not covered and skip.
+func (c PreparedCase) RequireGitLabFurtherArchives(checkout string, prepared map[string]string) error {
+	further, err := gitLabCaseFurtherImages(checkout, c.Event)
+	if err != nil {
+		return fmt.Errorf("%s: %w", c.Name(), err)
+	}
+
+	for _, name := range further {
+		if key := GitLabJobImageArchiveEnv + strings.ToUpper(name); prepared[key] == "" {
+			return c.notPrepared(key)
+		}
+	}
+
+	return nil
+}

@@ -13,8 +13,8 @@ import (
 
 // TestTestingMatricesInSync asserts that the generated sections of
 // docs/testing-matrices.md, the E2E variants and the demos, match what the
-// tree says now: the shipped demos' declarations as the planner admits them,
-// the cases files and the live-evidence overlay. A demo, a cases line or a
+// tree says now: the shipped demos' declarations as the admission reads
+// them, the case tables and the live-evidence overlay. A demo, a case or a
 // mark changed without the page is a matrix that lies about coverage.
 //
 // On failure, run `just gen-testing-matrices` to refresh the page.
