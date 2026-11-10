@@ -7,8 +7,8 @@ demo gap, an owner decision or a deliberate exclusion) rather than stay blank.
 
 | Matrix | Rows | Columns | Source of truth | Fills a cell |
 |---|---|---|---|---|
-| 1 Capabilities | project kind × flow (Maven app, Maven library, npm app/package, Go service/CLI, Cargo app/workspace, Gradle, Android, iOS, monorepo × PR gate, artifact-first snapshot, container-first snapshot, release, full lifecycle); 1b platform capabilities (bundle helper, cache witnesses, classified release, protected-job isolation, Nano chain, lint parity, host delivery) | Forgejo lab · GitLab lab · GitHub hosted | 1: cases files × demo declarations × planner admission with a live-evidence overlay (generated, slice 4); 1b: evidence directories in `testing-parity.md` | one live run on a real consumer whose verdict is read from product-exported contracts |
-| 2 E2E scenarios × variants | the whole-flow `lifecycle` event, one row per variant axis value (ecosystem, route, build type, signing, image builder, visibility, architecture, enforcement gates), plus the kept non-lifecycle scenarios | the three forges | cases files × planner admission (generated, slice 4) + evidence | a lifecycle line that ran live, or a refusal whose reason the planner states |
+| 1 Capabilities | project kind × flow (Maven app, Maven library, npm app/package, Go service/CLI, Cargo app/workspace, Gradle, Android, iOS, monorepo × PR gate, artifact-first snapshot, container-first snapshot, release, full lifecycle); 1b platform capabilities (bundle helper, cache witnesses, classified release, protected-job isolation, Nano chain, lint parity, host delivery) | Forgejo lab · GitLab lab · GitHub hosted | 1: the Go case tables × demo declarations × demo admission with a live-evidence overlay (generated, slice 4); 1b: evidence directories in `testing-parity.md` | one live run on a real consumer whose verdict is read from product-exported contracts |
+| 2 E2E scenarios × variants | the whole-flow `lifecycle` event, one row per variant axis value (ecosystem, route, build type, signing, image builder, visibility, architecture, enforcement gates), plus the kept non-lifecycle scenarios | the three forges | the Go case tables × demo admission (generated, slice 4) + evidence | a lifecycle case that ran live, or a refusal whose reason the admission states |
 | 3 Demos | folded into matrix 1 (a demo embodies a project kind) | — | — | — |
 
 Principles (owner direction 2026-11-08):
@@ -27,8 +27,8 @@ Principles (owner direction 2026-11-08):
 - Single-phase witnesses retire when a lifecycle phase proves the same thing;
   negative/refusal cases, cross-run cache witnesses, the classified route and
   the Lab protected-job qualification stay as their own rows.
-- Matrices 1 and 2 are generated from cases files, demo declarations and
-  planner admission, with a test that fails when the committed table is stale;
+- Matrices 1 and 2 are generated from the Go case tables, demo declarations and
+  demo admission, with a test that fails when the committed table is stale;
   the live marks are a hand-kept overlay and matrix 1b stays hand-kept, because
   those cells are evidence judgements.
 
