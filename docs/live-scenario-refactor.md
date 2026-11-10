@@ -335,7 +335,7 @@ under `~/.local/state/forge-ci/live-runs/` by start time.
 | Release-image builds, shapes and promotion | **Covered:** a release's images are read back from the registry with signature, SBOM and provenance, and an image that copies a released file holds its bytes (`release-variants-forgejo.cases`, runs 588 and 589). **Product-unsupported** on Forgejo: build secrets, a custom image name and extraction. **Product finding, fixed:** a release promoted to a second registry with `--stage-repo` arrived under its digest and without its signature, because `cosign copy` leaves behind a signature stored as an OCI referrer. The registry adapter now copies the image, its referrers and the cosign evidence tags itself; the promoted image verifies with the public key alone on the GitLab registry (`TestLedger_Promote_AcrossRegistries_CarriesTheSignature`, 2026-11-10). |
 | Signing methods and trust | **Covered:** the release commit and tag are verified against the expected key and must fail against another (`releaseSignerFindings`); a request signed by an untrusted or another key is refused before any effect (`TestForgejoLayer_PrepareReleaseRefusesAnUntrustedRequest`, runs 561 to 564); every GitHub release trial verifies the Git signatures of commit and tag by kind. **Needs external approval:** cloud KMS and any write to a public transparency log. The two new GitHub variants use the GPG profile for that reason. |
 | Version, changelog and consecutive releases | **Covered:** both changelog renderers and each version-file family, two releases in a row, each held to its commit's scope (runs 580 to 587); a release without a changelog prepares no commit and tags the request commit (hosted run 42735239830); the changelog release from the CLI (runs 550 and 551). **Product finding, fixed:** a dry run of `version commit-changelog-release` asked the release URL over the caller's unpinned SSH; with the signing key it now reads over the pinned route and signs or pushes nothing (runs 649 and 650). |
-| Package destinations and fresh use | **Covered:** npm and Maven on Forgejo and GitLab and a Gradle library on Forgejo reach a fresh consumer; a second publish of changed bytes is refused for npm on both and for Maven on Forgejo, each held to the registry's conflict answer. GitLab's Maven registry accepts a duplicate by its own policy. **Needs external approval:** Maven Central, the app stores and npmjs. |
+| Package destinations and fresh use | **Covered:** npm and Maven on Forgejo and GitLab and a Gradle library on Forgejo reach a fresh consumer, npm and Maven also one without a credential (2026-11-10); a second publish of changed bytes is refused for npm on both and for Maven on Forgejo, each held to the registry's conflict answer. GitLab's Maven registry accepts a duplicate by its own policy. **Needs external approval:** Maven Central, the app stores and npmjs. |
 | Cargo artifact-first, artifacts in images, auto-derived root, meta | **Covered:** `TestForgejoLayer_CargoBinaryRelease`, public and private, held to the bumped manifest, lockfile and compiled-in version; the Go service image carries the released binaries; the auto-derived root manifest and the ambiguous-root refusal; the meta release case. |
 | Library producers and consumers | **Covered:** the Gradle library and the Maven reactor, whose development build publishes its modules (run 648). **Not possible on the Compose road:** the Go module consumer needs a forge host without a port and runs on k3s only; it is written and skips with that reason. **Product-unsupported:** Rust library publishing and npm workspaces. |
 | Mobile, full graph, protected and classified | **Held** as before, with their own prerequisites; nothing here changes them. |
@@ -363,6 +363,16 @@ assertion on what `enforce-reproducible-builds` does on GitHub and GitLab.
 `TestForgejoLayer_ConsumerSnapshotTrial` runs a consumer's own push-triggered
 `snapshot.yml`, which no shipped fixture has: it is an operator's scenario for
 a checkout of their own.
+
+Scenarios that pass when named and that no campaign row or recipe selects:
+`TestForgejoLayer_ConsumerDevelopment`, `TestForgejoLayer_ContainerDevelopment`,
+`TestForgejoMavenLibraryConsumer_Development` and `_Stable`,
+`TestForgejoMavenReactorConsumer_Development` and
+`TestForgejoLayer_CargoBinaryRelease`. Each proves something no selected
+scenario does; they get their selectors when the campaign rows become Go
+test parameters. `TestForgejoLayer_NPMApplicationDevelopment` builds an image
+through the snapshot workflow and judges the installed package only, not the
+image; it needs an operator's npm service checkout to run.
 
 What the native runs corrected, each at its owner in the tests or fixtures:
 the GitLab snapshot scenario still passed the runner input the product had
