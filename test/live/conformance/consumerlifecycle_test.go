@@ -45,20 +45,17 @@ const lifecycleBranch = "development"
 func TestForgejoLayer_ConsumerLifecycle(t *testing.T) {
 	livetest.RegisterLiveScenario(t)
 
-	root := os.Getenv(consumerCheckoutEnv)
-	if root == "" {
-		t.Skip("no consumer checkout is named; run `just test-live-consumer forgejo <checkout> lifecycle`")
-	}
+	forEachConsumerCheckout(t, "just test-live-consumer forgejo <checkout> lifecycle", func(t *testing.T, root string) {
+		if livetest.DemoName() != "" {
+			t.Fatal("a lifecycle runs in disposable scratch repositories, not in a kept demo")
+		}
 
-	if livetest.DemoName() != "" {
-		t.Fatal("a lifecycle runs in disposable scratch repositories, not in a kept demo")
-	}
-
-	for _, visibility := range livetest.ConsumerVisibilities(t) {
-		t.Run(visibility.Name, func(t *testing.T) {
-			runForgejoConsumerLifecycle(t, root, visibility.Private)
-		})
-	}
+		for _, visibility := range livetest.ConsumerVisibilities(t) {
+			t.Run(visibility.Name, func(t *testing.T) {
+				runForgejoConsumerLifecycle(t, root, visibility.Private)
+			})
+		}
+	}, livetest.TrialLifecycle)
 }
 
 func runForgejoConsumerLifecycle(t *testing.T, root string, private bool) {
@@ -101,7 +98,7 @@ func runForgejoConsumerLifecycle(t *testing.T, root string, private bool) {
 
 	config := livetest.ServiceDevelopmentConfig{
 		RecipeDirectory: root, Declaration: declaration, JobImage: settings.Variables["CI_JOB_IMAGE"], Branch: lifecycleBranch,
-		ReadinessURL: os.Getenv("FORGE_CI_LIVE_SERVICE_READINESS_URL"), Fixture: os.Getenv("FORGE_CI_LIVE_SERVICE_FIXTURE"),
+		ReadinessURL: os.Getenv(serviceReadinessURLEnv), Fixture: os.Getenv(serviceFixtureEnv),
 	}
 
 	const name = livetest.ConsumerLifecycle

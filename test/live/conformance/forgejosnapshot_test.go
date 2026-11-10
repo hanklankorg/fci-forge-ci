@@ -29,20 +29,17 @@ import (
 func TestForgejoLayer_Snapshot(t *testing.T) {
 	livetest.RegisterLiveScenario(t)
 
-	root := os.Getenv(consumerCheckoutEnv)
-	if root == "" {
-		t.Skip("no consumer checkout is named; run `just test-live-consumer forgejo <checkout> snapshot CI_JOB_IMAGE=<digest reference>`")
-	}
+	forEachConsumerCheckout(t, "just test-live-consumer forgejo <checkout> snapshot CI_JOB_IMAGE=<digest reference>", func(t *testing.T, root string) {
+		if livetest.DemoName() != "" {
+			t.Fatal("a snapshot runs in disposable scratch repositories, not in a kept demo")
+		}
 
-	if livetest.DemoName() != "" {
-		t.Fatal("a snapshot runs in disposable scratch repositories, not in a kept demo")
-	}
-
-	for _, visibility := range livetest.ConsumerVisibilities(t) {
-		t.Run(visibility.Name, func(t *testing.T) {
-			runForgejoSnapshot(t, root, visibility.Private)
-		})
-	}
+		for _, visibility := range livetest.ConsumerVisibilities(t) {
+			t.Run(visibility.Name, func(t *testing.T) {
+				runForgejoSnapshot(t, root, visibility.Private)
+			})
+		}
+	}, livetest.TrialSnapshot)
 }
 
 func runForgejoSnapshot(t *testing.T, root string, private bool) {

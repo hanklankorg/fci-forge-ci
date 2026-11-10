@@ -55,23 +55,20 @@ const (
 func TestForgejoLayer_ConsumerTrial(t *testing.T) {
 	livetest.RegisterLiveScenario(t)
 
-	root := os.Getenv(consumerCheckoutEnv)
-	if root == "" {
-		t.Skip("no consumer checkout is named; run `just test-live-consumer forgejo <checkout> <pull-request|release>`")
-	}
+	forEachConsumerCheckout(t, "just test-live-consumer forgejo <checkout> <pull-request|release>", func(t *testing.T, root string) {
+		visibilities := livetest.ConsumerVisibilities(t)
+		// The npm registry belongs to the owner, not to the scratch repository, so
+		// a second case would publish the same name@version again and be refused.
+		if os.Getenv("FORGE_CI_LIVE_NPM_APPLICATION_IMAGE") != "" && len(visibilities) != 1 {
+			t.Fatal("npm application acceptance publishes one package version to the owner's registry; set FORGE_CI_LIVE_CONSUMER_VISIBILITY to public or private")
+		}
 
-	visibilities := livetest.ConsumerVisibilities(t)
-	// The npm registry belongs to the owner, not to the scratch repository, so
-	// a second case would publish the same name@version again and be refused.
-	if os.Getenv("FORGE_CI_LIVE_NPM_APPLICATION_IMAGE") != "" && len(visibilities) != 1 {
-		t.Fatal("npm application acceptance publishes one package version to the owner's registry; set FORGE_CI_LIVE_CONSUMER_VISIBILITY to public or private")
-	}
-
-	for _, visibility := range visibilities {
-		t.Run(visibility.Name, func(t *testing.T) {
-			runForgejoConsumerTrial(t, root, visibility.Private)
-		})
-	}
+		for _, visibility := range visibilities {
+			t.Run(visibility.Name, func(t *testing.T) {
+				runForgejoConsumerTrial(t, root, visibility.Private)
+			})
+		}
+	}, livetest.TrialPullRequest, livetest.TrialRelease)
 }
 
 // consumerSettingsWords reads the caller's settings, one per line so a
