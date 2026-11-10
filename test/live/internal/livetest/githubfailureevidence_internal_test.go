@@ -55,7 +55,9 @@ func TestGitHubFailureEvidenceBeforeCleanup(t *testing.T) {
 			response.WriteHeader(http.StatusCreated)
 		case "/repos/fixture/fc-app/actions/runs/99/jobs":
 			_, _ = io.WriteString(response, `{"jobs":[{"id":42,"name":"test","conclusion":"failure"},{"id":43,"conclusion":"success"},{"id":44,"conclusion":"skipped"}]}`)
-		case "/repos/fixture/fc-app/actions/jobs/42/logs":
+		case "/repos/fixture/fc-app/actions/jobs/42/logs", "/repos/fixture/fc-app/actions/jobs/43/logs":
+			// The passing job's log is retained too: cleanup deletes the
+			// repository that holds it.
 			http.Redirect(response, request, "http://"+request.Host+"/redirect?signature=inert-private-signature", http.StatusFound)
 		case "/redirect":
 			http.Redirect(response, request, "http://"+request.Host+"/download?signature=inert-private-signature", http.StatusFound)
@@ -83,29 +85,32 @@ func TestGitHubFailureEvidenceBeforeCleanup(t *testing.T) {
 		// Model the already-registered repository cleanup: evidence must exist
 		// when it runs, not in a later cleanup registered by the caller.
 		t.Cleanup(func() {
-			files, err := filepath.Glob(filepath.Join(root, "*-run-99-job-42-attempt-2.log"))
-			if err != nil || len(files) != 1 {
-				t.Fatalf("evidence missing before disposable cleanup: %v %v", files, err)
-			}
-
-			body, err := os.ReadFile(files[0])
-			if err != nil {
-				t.Fatal(err)
-			}
-
-			if !strings.HasPrefix(string(body), "FAIL earlier/package: actual diagnostic\n") || !strings.HasSuffix(string(body), "##[error]go test exit 1\n") {
-				t.Fatal("retention lost the earlier diagnostic or terminal verdict")
-			}
-
-			for _, secret := range []string{management, release, base64.StdEncoding.EncodeToString([]byte(release)), "inert-private-signature"} {
-				if strings.Contains(string(body), secret) {
-					t.Fatal("private value reached evidence")
+			// The failing job's log and the passing job's, by the same path.
+			for _, job := range []string{"42", "43"} {
+				files, err := filepath.Glob(filepath.Join(root, "*-run-99-job-"+job+"-attempt-2.log"))
+				if err != nil || len(files) != 1 {
+					t.Fatalf("evidence of job %s missing before disposable cleanup: %v %v", job, files, err)
 				}
-			}
 
-			info, err := os.Stat(files[0])
-			if err != nil || info.Mode().Perm() != 0600 {
-				t.Fatal("evidence permissions are not private")
+				body, err := os.ReadFile(files[0])
+				if err != nil {
+					t.Fatal(err)
+				}
+
+				if !strings.HasPrefix(string(body), "FAIL earlier/package: actual diagnostic\n") || !strings.HasSuffix(string(body), "##[error]go test exit 1\n") {
+					t.Fatal("retention lost the earlier diagnostic or terminal verdict")
+				}
+
+				for _, secret := range []string{management, release, base64.StdEncoding.EncodeToString([]byte(release)), "inert-private-signature"} {
+					if strings.Contains(string(body), secret) {
+						t.Fatal("private value reached evidence")
+					}
+				}
+
+				info, err := os.Stat(files[0])
+				if err != nil || info.Mode().Perm() != 0600 {
+					t.Fatal("evidence permissions are not private")
+				}
 			}
 		})
 
@@ -114,7 +119,7 @@ func TestGitHubFailureEvidenceBeforeCleanup(t *testing.T) {
 		trial.SetSecret("fc-app", "RELEASE_TOKEN", release)
 		trial.ReportRun("fc-app", &github.WorkflowRun{ID: new(int64(99)), RunAttempt: new(2)})
 
-		if logReads != 1 || len(tb.errors) != 0 || tb.fatal != "" {
+		if logReads != 2 || len(tb.errors) != 0 || tb.fatal != "" {
 			t.Fatalf("unexpected retention result: reads=%d errors=%v fatal=%s", logReads, tb.errors, tb.fatal)
 		}
 

@@ -80,6 +80,8 @@ type GitHubTrial struct {
 	files map[string]string
 	// secrets keeps scenario-owned values available for native log redaction.
 	secrets map[string]map[string]string
+	// registry is the image registry's base URL; empty is https://ghcr.io.
+	registry string
 }
 
 // OpenGitHubTrial loads Forge Lab's hosted context and authorizes exactly the
@@ -781,7 +783,16 @@ func (trial *GitHubTrial) ReportRun(repo string, run *github.WorkflowRun) {
 		trial.tb.Logf("  %-9s %s", status, job.GetName())
 
 		switch job.GetConclusion() {
-		case runSuccess, runSkipped, "neutral":
+		case runSuccess:
+			// A passing job is evidence too, and cleanup deletes the
+			// repository that holds its log, so it is retained whenever an
+			// evidence directory is set.
+			if snapshotEvidenceRoot() != "" {
+				trial.retainPassingJobLog(ctx, repo, run, job)
+			}
+
+			continue
+		case runSkipped, "neutral":
 			continue
 		}
 
@@ -1216,6 +1227,10 @@ func (trial *GitHubTrial) CheckRelease(repo string, tree GitHubConsumerTree, wor
 		trial.tb.Fatalf("livetest: the GitHub release %s: %v", final, err)
 	}
 
+	if gap := releaseNotesGap(profile.Changelog, release.GetBody()); gap != "" {
+		trial.tb.Errorf("the release %s %s", final, gap)
+	}
+
 	assets := map[string]int64{}
 
 	names := make([]string, 0, len(release.Assets))
@@ -1255,8 +1270,8 @@ func (trial *GitHubTrial) CheckRelease(repo string, tree GitHubConsumerTree, wor
 		trial.tb.Errorf("the release %s: %v", final, err)
 	}
 
-	trial.tb.Logf("release %s: sign method %s, git-signing %s, prepares a commit %t, SBOM bundle expectation %d; %d assets, %d Cosign bundles verified against %s, %d GPG signatures verified against %s",
-		final, method, profile.GitSigning, profile.Prepares, profile.SBOMBundle, len(assets), len(bundles), trust, len(signatures), key.Fingerprint)
+	trial.tb.Logf("release %s: sign method %s, git-signing %s, renders a changelog %t, prepares a commit %t, SBOM bundle expectation %d; %d assets, %d Cosign bundles verified against %s, %d GPG signatures verified against %s",
+		final, method, profile.GitSigning, profile.Changelog, profile.Prepares, profile.SBOMBundle, len(assets), len(bundles), trust, len(signatures), key.Fingerprint)
 
 	return assets
 }
@@ -1286,8 +1301,8 @@ func (trial *GitHubTrial) CheckImage(repo, image, final string, engine GitHubEng
 	return ""
 }
 
-// resolveEngineDigests asks the organization's packages what each runtime
-// image serves for the commit's tag, so fixtures render the digests every
+// resolveEngineDigests asks the registry what each runtime image serves for
+// the commit's tag, so fixtures render the digests every
 // workflow admits. The base and Go builder images must exist; a fixture that
 // names another image the engine did not publish is refused when it renders.
 func (trial *GitHubTrial) resolveEngineDigests(engine GitHubEngine) map[string]string {
@@ -1306,7 +1321,7 @@ func (trial *GitHubTrial) resolveEngineDigests(engine GitHubEngine) map[string]s
 			continue
 		}
 
-		if digest, ok := trial.packageDigest(name, engine.ImageTag()); ok {
+		if digest, ok := trial.registryDigest(strings.ToLower(trial.org)+"/"+name, engine.ImageTag()); ok {
 			digests[image] = digest
 		}
 	}
@@ -1320,40 +1335,98 @@ func (trial *GitHubTrial) resolveEngineDigests(engine GitHubEngine) map[string]s
 	return digests
 }
 
-// packageDigest finds the version of a container package that carries tag
-// and returns its digest.
-func (trial *GitHubTrial) packageDigest(name, tag string) (string, bool) {
+// registryDigest asks the registry which manifest tag names in repository,
+// anonymously, as a runner pulls a public engine image. The Packages API is
+// not used: a fine-grained token, as the hosted session holds, cannot read
+// it. A tag the registry does not serve anonymously has no digest.
+func (trial *GitHubTrial) registryDigest(repository, tag string) (string, bool) {
 	trial.tb.Helper()
 
-	options := &github.PackageListOptions{State: new("active"), PerPage: 100}
-
-	for {
-		versions, response, err := trial.api.Organizations.PackageGetAllVersions(trial.tb.Context(), trial.org, "container", name, options)
-		if response != nil && response.StatusCode == http.StatusNotFound {
-			return "", false
-		}
-
-		if err != nil {
-			trial.tb.Fatalf("livetest: list versions of package %s: %v", name, err)
-		}
-
-		for _, version := range versions {
-			var metadata github.PackageMetadata
-			if json.Unmarshal(version.Metadata, &metadata) != nil || metadata.Container == nil {
-				continue
-			}
-
-			if slices.Contains(metadata.Container.Tags, tag) && pinnedImage.MatchString("x@"+version.GetName()) {
-				return version.GetName(), true
-			}
-		}
-
-		if response.NextPage == 0 {
-			return "", false
-		}
-
-		options.Page = response.NextPage
+	registry := trial.registry
+	if registry == "" {
+		registry = "https://ghcr.io"
 	}
+
+	ctx := trial.tb.Context()
+
+	tokenRequest, err := http.NewRequestWithContext(ctx, http.MethodGet, registry+"/token?scope=repository:"+repository+":pull", nil)
+	if err != nil {
+		trial.tb.Fatalf("livetest: registry token request for %s: %v", repository, err)
+	}
+
+	var grant struct {
+		Token string `json:"token"`
+	}
+
+	if status := trial.registryCall(tokenRequest, &grant); status != http.StatusOK || grant.Token == "" {
+		return "", false
+	}
+
+	manifestRequest, err := http.NewRequestWithContext(ctx, http.MethodHead, registry+"/v2/"+repository+"/manifests/"+tag, nil)
+	if err != nil {
+		trial.tb.Fatalf("livetest: registry manifest request for %s: %v", repository, err)
+	}
+
+	manifestRequest.Header.Set("Authorization", "Bearer "+grant.Token)
+	manifestRequest.Header.Set("Accept", strings.Join([]string{
+		"application/vnd.oci.image.index.v1+json", "application/vnd.docker.distribution.manifest.list.v2+json",
+		"application/vnd.oci.image.manifest.v1+json", "application/vnd.docker.distribution.manifest.v2+json",
+	}, ", "))
+
+	response, err := http.DefaultClient.Do(manifestRequest)
+	if err != nil {
+		trial.tb.Fatalf("livetest: read the manifest of %s:%s: %v", repository, tag, err)
+	}
+
+	_ = response.Body.Close()
+
+	digest := response.Header.Get("Docker-Content-Digest")
+
+	switch {
+	case response.StatusCode == http.StatusOK && pinnedImage.MatchString("x@"+digest):
+		return digest, true
+	case response.StatusCode == http.StatusOK:
+		trial.tb.Fatalf("livetest: %s:%s has no admissible digest: %q", repository, tag, digest)
+	case response.StatusCode >= http.StatusInternalServerError:
+		trial.tb.Fatalf("livetest: read the manifest of %s:%s: HTTP %d", repository, tag, response.StatusCode)
+	}
+
+	return "", false
+}
+
+// registryCall sends request, decodes a successful JSON answer into the
+// value given, and returns the status.
+func (trial *GitHubTrial) registryCall(request *http.Request, into any) int {
+	trial.tb.Helper()
+
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		trial.tb.Fatalf("livetest: registry %s: %v", request.URL.Path, err)
+	}
+
+	defer func() { _ = response.Body.Close() }()
+
+	if response.StatusCode == http.StatusOK {
+		if err := json.NewDecoder(io.LimitReader(response.Body, 1<<20)).Decode(into); err != nil {
+			trial.tb.Fatalf("livetest: registry %s: %v", request.URL.Path, err)
+		}
+	}
+
+	return response.StatusCode
+}
+
+// retainPassingJobLog saves a successful job's full redacted log in the
+// evidence directory, by the same bounded, redacting path as a failing job's.
+func (trial *GitHubTrial) retainPassingJobLog(ctx context.Context, repo string, run *github.WorkflowRun, job *github.WorkflowJob) {
+	location, _, err := trial.api.Actions.GetWorkflowJobLogs(ctx, trial.org, repo, job.GetID(), 0)
+	if err != nil {
+		// The SDK's error may hold the signed URL; name its class only.
+		trial.tb.Errorf("livetest: job %d log URL unavailable; no full evidence retained (class=%s observed_bytes=0)", job.GetID(), githubJobLogErrorClass(err))
+
+		return
+	}
+
+	_ = trial.failureEvidence(ctx, repo, run, job, location.String())
 }
 
 // Retain before ReportRun returns to the verdict and disposable cleanup. Reuse
@@ -1501,6 +1574,29 @@ func releaseCommitGap(prepares bool, pushed, head string, parents []string, sign
 	return ""
 }
 
+// releaseTagGap judges the commit the final tag names: main's head, and for a
+// release that prepares no commit the very commit the trial pushed.
+func releaseTagGap(prepares bool, pushed, head, tagged string) string {
+	switch {
+	case tagged != head:
+		return fmt.Sprintf("names %s; want main's head %s", tagged, head)
+	case !prepares && tagged != pushed:
+		return fmt.Sprintf("names %s; the release prepares no commit, so it must name %s", tagged, pushed)
+	}
+
+	return ""
+}
+
+// releaseNotesGap judges the release's notes: a release that renders a
+// changelog publishes one, also when it skips the version bump.
+func releaseNotesGap(changelog bool, notes string) string {
+	if changelog && strings.TrimSpace(notes) == "" {
+		return "has no notes, and its workflow renders a changelog"
+	}
+
+	return ""
+}
+
 // checkReleaseGitSignatures fetches what the release wrote and verifies it
 // locally: the final tag names main's head, and the tag, and the release
 // commit when the release prepared one, carry a signature of the declared
@@ -1511,8 +1607,8 @@ func (trial *GitHubTrial) checkReleaseGitSignatures(repo string, tree GitHubCons
 
 	trial.git(tree.Dir, "fetch", gitQuiet, trial.remote(repo), "refs/heads/"+defaultBranch, "+refs/tags/"+final+":refs/tags/"+final)
 
-	if tagged := strings.TrimSpace(trial.git(tree.Dir, "rev-parse", "refs/tags/"+final+"^{commit}")); tagged != head {
-		trial.tb.Errorf("the final tag %s names %s; want main's head %s", final, tagged, head)
+	if gap := releaseTagGap(profile.Prepares, tree.Main, head, strings.TrimSpace(trial.git(tree.Dir, "rev-parse", "refs/tags/"+final+"^{commit}"))); gap != "" {
+		trial.tb.Errorf("the final tag %s %s", final, gap)
 	}
 
 	var allowedSigners string
