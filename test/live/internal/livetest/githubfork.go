@@ -35,13 +35,18 @@ func (trial *GitHubTrial) ForkConsumer(repo string) string {
 
 	// GitHub answers 202 while it copies the repository; the body names it.
 	fork, response, err := trial.api.Repositories.CreateFork(ctx, trial.org, repo, &github.RepositoryCreateForkOptions{Organization: trial.org, Name: name, DefaultBranchOnly: true})
-	if fork != nil && fork.GetID() > 0 && fork.GetName() == name && strings.EqualFold(fork.GetOwner().GetLogin(), trial.org) && fork.GetFork() {
-		id := fork.GetID()
+	if fork == nil || fork.GetID() <= 0 || !fork.GetFork() || !strings.EqualFold(fork.GetOwner().GetLogin(), trial.org) {
+		trial.tb.Fatalf("livetest: fork %s as %s: no fork in %s was acknowledged: %v", repo, name, trial.org, err)
+	}
 
-		trial.tb.Logf("disposable fork: %s/%s id=%d", trial.org, name, id)
-		trial.tb.Cleanup(func() { trial.removeConsumer(name, id) })
-	} else {
-		trial.tb.Fatalf("livetest: fork %s as %s: no fork of that name in %s was acknowledged: %v", repo, name, trial.org, err)
+	// Whatever name GitHub gave it, the fork is this test's to delete.
+	made, id := fork.GetName(), fork.GetID()
+
+	trial.tb.Logf("disposable fork: %s/%s id=%d", trial.org, made, id)
+	trial.tb.Cleanup(func() { trial.removeConsumer(made, id) })
+
+	if made != name {
+		trial.tb.Fatalf("livetest: fork %s was made as %s, want %s", repo, made, name)
 	}
 
 	if err != nil && (response == nil || response.StatusCode != http.StatusAccepted) {

@@ -40,11 +40,6 @@ func consumerNameRoots() []string {
 func consumerNameExceptions() map[string]string {
 	return map[string]string{
 		"test/lexiconguard/consumername_guard_test.go": "this guard declares the names",
-		// The acceptance job image installs the engine's own development
-		// tools, and this file mirrors the tool pins of the repository's
-		// .mise.toml. One of those tools is a real program fetched by its real
-		// coordinate; another name would install nothing.
-		"test/live/fixtures/adapters/generic-cli/go-job.mise.toml": "a real tool pin mirrored from .mise.toml",
 		// The runtime settings of the external issuer service an operator may
 		// trial. The variable names are that program's configuration keys; it
 		// reads no others.

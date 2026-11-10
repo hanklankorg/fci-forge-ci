@@ -570,6 +570,11 @@ if run_product publish forge-packages deploy --project-type maven --from-build -
   echo 'the registry accepted a second publication of ` + artifactID + ` ` + version + `' >&2
   exit 1
 fi
+# The registry's own answer, so no other failure reads as the refusal.
+if ! grep -Eq 'status( code)?: 409|409 Conflict' product-out.txt; then
+  echo 'the second publication failed, and not on the version existing' >&2
+  exit 1
+fi
 `
 	}
 
