@@ -211,6 +211,14 @@ func (s layerScenario) logJobs(t *testing.T, jobs []livetest.RunJob, secrets ...
 			continue
 		}
 
+		// A job no runner took has no log, whatever status the forge gives
+		// it: asking for one is answered 404 (lab job 8082, 2026-11-10).
+		if job.TaskID != nil && *job.TaskID == 0 {
+			t.Logf("job %q: %s", job.Name, job.NoLogReason())
+
+			continue
+		}
+
 		if log := livetest.RetainJobLog(t, s.target, s.repo, job, secrets...); log != "" {
 			if job.Status == jobSuccess {
 				continue
