@@ -70,6 +70,7 @@ reasons follow the table.
 | hello-go-service | PR, release | PR, release | MR | The go-service example as shipped; binaries and runtime image |
 | hello-gradle | PR, release | - | MR | The gradle-app example as shipped; reproducible Java library jars |
 | hello-monorepo | - | - | MR | The monorepo example as shipped; Maven and npm services checked together |
+| hello-meta | PR, release | - | - | Scripts and configuration only: no build, no version bump, the final tag on the requested commit |
 
 Why a flow is missing:
 
@@ -88,6 +89,8 @@ Why a flow is missing:
 - **The example demos' GitLab releases**: the GitLab examples are the
   merge-request gate; the release policy's commands are the adopter's, and no
   example ships them.
+- **hello-meta on Forgejo and GitLab**: it declares the GitHub flows alone;
+  no metadata-only release has been written for the other two forges.
 - **hello-gradle and hello-monorepo on Forgejo**: their examples have no
   Forgejo workflows; the Forgejo layer has no Gradle or npm build action.
 

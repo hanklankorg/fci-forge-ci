@@ -74,6 +74,7 @@ the planned artifacts; "container-first" builds from the declared container.
 | hello-ios (xcode-ios · no container · no image) | ⬚ / ⬚ / 📝 | — | — | — / — / — | ⛔ / — / ⛔ |
 | hello-maven (java · no container · no image) | ✅ (2026-11-02) / ✅ (2026-11-02) / ✅ (2026-11-04) | — | — | ✅ (2026-11-02) / ✅ (2026-11-02) / ✅ (2026-11-04) | ⛔ / ⛔ / ⛔ |
 | hello-maven-service (java · artifact-first · one image) | ✅ (2026-11-02) / ✅ (2026-11-02) / ✅ (2026-11-04) | ✅ (A run 517, the retired published snapshot) / ✅ (lifecycle phase 3, E gitlab-lifecycle-campaign-22ddcfd9) / 📝 lifecycle | — | ✅ (2026-11-02) / ✅ (2026-11-02) / 📝 | ✅ (E forgejo-lifecycle-campaign-3c178f94) / ◐ (phases 1–4 run 4, E gitlab-lifecycle-campaign-ec2380ef; phase 5 oracle fixed 4651b638, run 5 failed phase 1 (E gitlab-lifecycle-campaign-4651b638)) / 📝 |
+| hello-meta (meta · no container · no image) | ⬚ / ⬚ / 📝 | — | — | — / — / 📝 | ⛔ / — / ⛔ |
 | hello-monorepo (java, node · artifact-first · nested artifacts (monorepo)) | ⬚ / ✅ (2026-11-02) / ⬚ | ⛔ / 📝 snapshot / ⛔ | — | — / — / — | ⛔ / — / ⛔ |
 | hello-npm-package (node · no container · no image) | ✅ (2026-11-02) / ✅ (2026-11-02) / ✅ (2026-11-04) | — | — | ✅ (2026-11-02) / ✅ (2026-11-02) / ✅ (2026-11-04) | ⛔ / ⛔ / ⛔ |
 | hello-npm-service (node · artifact-first · one image) | ✅ (2026-11-02) / ✅ (2026-11-02) / ✅ (2026-11-04) | 📝 lifecycle / 📝 lifecycle / 📝 lifecycle | — | ✅ (2026-11-02) / ✅ (2026-11-02) / 📝 | 📝 / 📝 / 📝 |
@@ -114,6 +115,7 @@ marks are the owner's judgements of the evidence roots in `testing-parity.md`.
 | ecosystem | go | 📝 hello-go-service | — hello-go-cli | 📝 hello-go-service |
 |  | gradle-android | ⛔ hello-android | — hello-android | ⛔ hello-android |
 |  | java | ✅ hello-maven-service (E forgejo-lifecycle-campaign-3c178f94) | ◐ hello-maven-service (phases 1–4 run 4, E gitlab-lifecycle-campaign-ec2380ef; phase 5 oracle fixed 4651b638, run 5 failed phase 1 (E gitlab-lifecycle-campaign-4651b638)) | 📝 hello-maven-service |
+|  | meta | ⛔ hello-meta | — hello-meta | ⛔ hello-meta |
 |  | node | 📝 hello-npm-service | 📝 hello-npm-service | 📝 hello-npm-service |
 |  | rust | 📝 hello-cargo-container | 📝 hello-cargo-container | 📝 hello-cargo-container |
 |  | xcode-ios | ⛔ hello-ios | — hello-ios | ⛔ hello-ios |

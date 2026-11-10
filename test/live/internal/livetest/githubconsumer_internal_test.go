@@ -8,9 +8,12 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strings"
@@ -123,6 +126,71 @@ func TestReportRunIncludesNonSuccessJobDiagnostics(t *testing.T) {
 
 			if logReads != 1 || !strings.Contains(strings.Join(tb.logs, "\n"), "fixture terminal reason") {
 				t.Fatalf("conclusion %q lost its diagnostics: reads=%d logs=%v errors=%v", conclusion, logReads, tb.logs, tb.errors)
+			}
+		})
+	}
+}
+
+// Cleanup deletes the consumer repository, so a passing job's log is retained
+// when an evidence directory is set, and not even read when none is.
+func TestReportRunRetainsPassingJobLogsOnlyWithEvidence(t *testing.T) {
+	for _, evidence := range []bool{false, true} {
+		t.Run(fmt.Sprintf("evidence=%t", evidence), func(t *testing.T) {
+			dir := t.TempDir()
+
+			t.Setenv("FORGE_CI_LIVE_SNAPSHOT_EVIDENCE_DIR", "")
+			t.Setenv("FORGE_CI_LIVE_SNAPSHOT_EVIDENCE", "")
+
+			if evidence {
+				t.Setenv("FORGE_CI_LIVE_SNAPSHOT_EVIDENCE_DIR", dir)
+			}
+
+			logReads := 0
+
+			server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+				switch request.URL.Path {
+				case "/repos/fixture/fc-app/actions/runs/99/jobs":
+					_ = json.NewEncoder(response).Encode(map[string]any{"jobs": []map[string]any{{"id": 42, "name": "verify", "status": "completed", "conclusion": "success"}}})
+				case "/repos/fixture/fc-app/actions/jobs/42/logs":
+					http.Redirect(response, request, "http://"+request.Host+"/download", http.StatusFound)
+				case "/download":
+					logReads++
+					_, _ = io.WriteString(response, "verified linux/amd64 and linux/arm64\n")
+				default:
+					t.Errorf("unexpected request: %s", request.URL)
+					response.WriteHeader(http.StatusNotFound)
+				}
+			}))
+			defer server.Close()
+
+			api, err := github.NewClient(github.WithHTTPClient(server.Client()), github.WithURLs(new(server.URL+"/"), nil))
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			tb := &recordingTB{}
+			trial := GitHubTrial{tb: tb, api: api, org: "fixture"}
+			trial.ReportRun("fc-app", &github.WorkflowRun{ID: new(int64(99))})
+
+			retained, err := filepath.Glob(filepath.Join(dir, "*run-99-job-42*"))
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			want := 0
+			if evidence {
+				want = 1
+			}
+
+			if logReads != want || len(retained) != want || len(tb.errors) != 0 {
+				t.Fatalf("reads=%d retained=%v errors=%v logs=%v", logReads, retained, tb.errors, tb.logs)
+			}
+
+			if evidence {
+				body, err := os.ReadFile(retained[0])
+				if err != nil || !strings.Contains(string(body), "linux/arm64") {
+					t.Fatalf("retained log %q: %v", body, err)
+				}
 			}
 		})
 	}

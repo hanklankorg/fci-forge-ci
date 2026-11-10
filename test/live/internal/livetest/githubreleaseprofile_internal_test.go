@@ -26,9 +26,9 @@ func TestGitHubReleaseProfile_ShippedGoCLIVariants(t *testing.T) {
 		fixtures, workflow string
 		want               githubReleaseProfile
 	}{
-		{"test/live/github", "release.yml", githubReleaseProfile{GitSigning: config.GitSignSSH, Prepares: true, SBOMBundle: sbomBundleOffered}},
-		{"test/live/github-gpg", "release-gpg.yml", githubReleaseProfile{GitSigning: config.GitSignGPG, Prepares: true, SBOMBundle: sbomBundleOffered}},
-		{"test/live/github-no-sboms", "release-no-sboms.yml", githubReleaseProfile{GitSigning: config.GitSignGPG, Prepares: true, SBOMBundle: sbomBundleWithheld}},
+		{"test/live/github", "release.yml", githubReleaseProfile{GitSigning: config.GitSignSSH, Changelog: true, Prepares: true, SBOMBundle: sbomBundleOffered}},
+		{"test/live/github-gpg", "release-gpg.yml", githubReleaseProfile{GitSigning: config.GitSignGPG, Changelog: true, Prepares: true, SBOMBundle: sbomBundleOffered}},
+		{"test/live/github-no-sboms", "release-no-sboms.yml", githubReleaseProfile{GitSigning: config.GitSignGPG, Changelog: true, Prepares: true, SBOMBundle: sbomBundleWithheld}},
 		{"test/live/github-no-changelog", "release-no-changelog.yml", githubReleaseProfile{GitSigning: config.GitSignGPG, Prepares: false, SBOMBundle: sbomBundleOffered}},
 	} {
 		t.Run(tc.workflow, func(t *testing.T) {
@@ -66,19 +66,20 @@ func TestGitHubReleaseProfile_Inputs(t *testing.T) {
 		workflow, config string
 		want             githubReleaseProfile
 	}{
-		"orchestrator defaults":   {workflow(""), declared, githubReleaseProfile{GitSigning: config.GitSignGPG, Prepares: true, SBOMBundle: sbomBundleOffered}},
+		"orchestrator defaults":   {workflow(""), declared, githubReleaseProfile{GitSigning: config.GitSignGPG, Changelog: true, Prepares: true, SBOMBundle: sbomBundleOffered}},
 		"no changelog creator":    {workflow("      changelog-creator: \"\"\n"), declared, githubReleaseProfile{GitSigning: config.GitSignGPG, SBOMBundle: sbomBundleOffered}},
 		"null changelog creator":  {workflow("      changelog-creator:\n"), declared, githubReleaseProfile{GitSigning: config.GitSignGPG, SBOMBundle: sbomBundleOffered}},
-		"version bump skipped":    {workflow("      changelog.skipversionbump: true\n"), declared, githubReleaseProfile{GitSigning: config.GitSignGPG, SBOMBundle: sbomBundleOffered}},
-		"release sboms none":      {workflow("      release.sboms: none\n"), declared, githubReleaseProfile{GitSigning: config.GitSignGPG, Prepares: true, SBOMBundle: sbomBundleWithheld}},
-		"artifact sboms none":     {workflow(""), declared + "    sboms: none\n", githubReleaseProfile{GitSigning: config.GitSignGPG, Prepares: true, SBOMBundle: sbomBundleWithheld}},
-		"disjoint layers":         {workflow("      release.sboms: analyzed-artifact\n"), declared + "    sboms: build\n", githubReleaseProfile{GitSigning: config.GitSignGPG, Prepares: true, SBOMBundle: sbomBundleWithheld}},
-		"shared build layer":      {workflow("      release.sboms: build\n"), declared, githubReleaseProfile{GitSigning: config.GitSignGPG, Prepares: true, SBOMBundle: sbomBundleOffered}},
-		"container layer only":    {workflow("      release.sboms: analyzed-container\n"), declared, githubReleaseProfile{GitSigning: config.GitSignGPG, Prepares: true, SBOMBundle: sbomBundleUnjudged}},
-		"ssh git signing":         {workflow(""), declared + "git-signing:\n  method: ssh\n", githubReleaseProfile{GitSigning: config.GitSignSSH, Prepares: true, SBOMBundle: sbomBundleOffered}},
-		"derived, no declaration": {workflow(""), "", githubReleaseProfile{GitSigning: config.GitSignGPG, Prepares: true, SBOMBundle: sbomBundleUnjudged}},
-		"derived, sboms none":     {workflow("      release.sboms: none\n"), "", githubReleaseProfile{GitSigning: config.GitSignGPG, Prepares: true, SBOMBundle: sbomBundleWithheld}},
-		"no orchestrator call":    {"jobs:\n  release:\n    runs-on: ubuntu-26.04\n    steps:\n      - run: true\n", declared, githubReleaseProfile{GitSigning: config.GitSignGPG, Prepares: true, SBOMBundle: sbomBundleOffered}},
+		"version bump skipped":    {workflow("      changelog.skipversionbump: true\n"), declared, githubReleaseProfile{GitSigning: config.GitSignGPG, Changelog: true, SBOMBundle: sbomBundleOffered}},
+		"version bump kept":       {workflow("      changelog.skipversionbump: 'false'\n"), declared, githubReleaseProfile{GitSigning: config.GitSignGPG, Changelog: true, Prepares: true, SBOMBundle: sbomBundleOffered}},
+		"release sboms none":      {workflow("      release.sboms: none\n"), declared, githubReleaseProfile{GitSigning: config.GitSignGPG, Changelog: true, Prepares: true, SBOMBundle: sbomBundleWithheld}},
+		"artifact sboms none":     {workflow(""), declared + "    sboms: none\n", githubReleaseProfile{GitSigning: config.GitSignGPG, Changelog: true, Prepares: true, SBOMBundle: sbomBundleWithheld}},
+		"disjoint layers":         {workflow("      release.sboms: analyzed-artifact\n"), declared + "    sboms: build\n", githubReleaseProfile{GitSigning: config.GitSignGPG, Changelog: true, Prepares: true, SBOMBundle: sbomBundleWithheld}},
+		"shared build layer":      {workflow("      release.sboms: build\n"), declared, githubReleaseProfile{GitSigning: config.GitSignGPG, Changelog: true, Prepares: true, SBOMBundle: sbomBundleOffered}},
+		"container layer only":    {workflow("      release.sboms: analyzed-container\n"), declared, githubReleaseProfile{GitSigning: config.GitSignGPG, Changelog: true, Prepares: true, SBOMBundle: sbomBundleUnjudged}},
+		"ssh git signing":         {workflow(""), declared + "git-signing:\n  method: ssh\n", githubReleaseProfile{GitSigning: config.GitSignSSH, Changelog: true, Prepares: true, SBOMBundle: sbomBundleOffered}},
+		"derived, no declaration": {workflow(""), "", githubReleaseProfile{GitSigning: config.GitSignGPG, Changelog: true, Prepares: true, SBOMBundle: sbomBundleUnjudged}},
+		"derived, sboms none":     {workflow("      release.sboms: none\n"), "", githubReleaseProfile{GitSigning: config.GitSignGPG, Changelog: true, Prepares: true, SBOMBundle: sbomBundleWithheld}},
+		"no orchestrator call":    {"jobs:\n  release:\n    runs-on: ubuntu-26.04\n    steps:\n      - run: true\n", declared, githubReleaseProfile{GitSigning: config.GitSignGPG, Changelog: true, Prepares: true, SBOMBundle: sbomBundleOffered}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			dir := t.TempDir()
@@ -97,6 +98,13 @@ func TestGitHubReleaseProfile_Inputs(t *testing.T) {
 
 	for name, body := range map[string]string{
 		"expression":      workflow("      release.sboms: ${{ vars.SBOMS }}\n"),
+		"skip expression": workflow("      changelog.skipversionbump: ${{ inputs.skip }}\n"),
+		"skip typo":       workflow("      changelog.skipversionbump: yes\n"),
+		"skip empty":      workflow("      changelog.skipversionbump: ''\n"),
+		"skip null":       workflow("      changelog.skipversionbump:\n"),
+		"creator typo":    workflow("      changelog-creator: git-clif\n"),
+		"creator other":   workflow("      changelog-creator: git-chglog\n"),
+		"creator blank":   workflow("      changelog-creator: ' '\n"),
 		"unknown layer":   workflow("      release.sboms: everything\n"),
 		"two orchestrate": workflow("") + "  again:\n    uses: example/forge-ci/.github/workflows/release-orchestrator.yml@0000000000000000000000000000000000000000\n",
 	} {
@@ -155,6 +163,46 @@ func TestReleaseCommitGap(t *testing.T) {
 		"no changelog, other commit": {false, "cccc", nil, "", true},
 	} {
 		if gap := releaseCommitGap(tc.prepares, pushed, tc.head, tc.parents, tc.signature); (gap != "") != tc.gap {
+			t.Errorf("%s: gap = %q, want one: %t", name, gap, tc.gap)
+		}
+	}
+}
+
+// The final tag names main's head; a release that prepares no commit, the
+// skipped version bump among them, tags the very commit the trial pushed.
+func TestReleaseTagGap(t *testing.T) {
+	const pushed, release = "aaaa", "bbbb"
+
+	for name, tc := range map[string]struct {
+		prepares     bool
+		head, tagged string
+		gap          bool
+	}{
+		"prepared, tag at the release commit": {true, release, release, false},
+		"prepared, tag left at the request":   {true, release, pushed, true},
+		"skipped, tag at the pushed commit":   {false, pushed, pushed, false},
+		"skipped, tag elsewhere":              {false, pushed, release, true},
+		"skipped, main and tag both moved":    {false, release, release, true},
+	} {
+		if gap := releaseTagGap(tc.prepares, pushed, tc.head, tc.tagged); (gap != "") != tc.gap {
+			t.Errorf("%s: gap = %q, want one: %t", name, gap, tc.gap)
+		}
+	}
+}
+
+func TestReleaseNotesGap(t *testing.T) {
+	for name, tc := range map[string]struct {
+		changelog bool
+		notes     string
+		gap       bool
+	}{
+		"changelog rendered":  {true, "## 0.2.0\n\n- Add the script library\n", false},
+		"changelog missing":   {true, "", true},
+		"changelog blank":     {true, " \n", true},
+		"no creator, empty":   {false, "", false},
+		"no creator, written": {false, "Release notes", false},
+	} {
+		if gap := releaseNotesGap(tc.changelog, tc.notes); (gap != "") != tc.gap {
 			t.Errorf("%s: gap = %q, want one: %t", name, gap, tc.gap)
 		}
 	}

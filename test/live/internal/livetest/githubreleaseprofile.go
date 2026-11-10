@@ -47,10 +47,13 @@ const (
 // githubReleaseProfile is what a fixture's release workflow and its artifacts
 // configuration promise of a GitHub release, read from the rendered consumer
 // the trial pushed, beyond the artifact sign method githubReleaseSignMethod
-// reads: how its Git objects are signed, whether it prepares a commit, and
-// whether it offers the SBOM bundle.
+// reads: how its Git objects are signed, whether it renders a changelog,
+// whether it prepares a commit, and whether it offers the SBOM bundle.
 type githubReleaseProfile struct {
 	GitSigning config.GitSignMethod
+	// Changelog is whether the release renders its notes with git-cliff. A
+	// skipped version bump does not skip them.
+	Changelog bool
 	// Prepares is whether the release commits the changelog and the version.
 	// Without a changelog creator, or with the version bump skipped, it
 	// tags the requested commit and main stays where it was.
@@ -82,7 +85,8 @@ func githubReleaseProfileOf(dir, workflow string) (githubReleaseProfile, error) 
 		profile.GitSigning = declared.GitSigning.EffectiveMethod()
 	}
 
-	profile.Prepares = pipeline.VersionBumpRuns(inputs.changelogCreator == inputGitCliff, inputs.skipVersionBump)
+	profile.Changelog = inputs.changelogCreator == inputGitCliff
+	profile.Prepares = pipeline.VersionBumpRuns(profile.Changelog, inputs.skipVersionBump)
 
 	profile.SBOMBundle, err = releaseSBOMBundle(inputs.sboms, declared)
 	if err != nil {
@@ -171,7 +175,9 @@ type orchestratorInputs struct {
 
 // githubOrchestratorInputs reads them from the one job that calls the release
 // orchestrator. A workflow that calls none keeps the defaults; a value that is
-// not a literal cannot be judged and is refused.
+// not a literal cannot be judged and is refused, and so is a changelog creator
+// or a version-bump switch the orchestrator does not take: a typo is not an
+// opt-out.
 func githubOrchestratorInputs(name, body string) (orchestratorInputs, error) {
 	var workflow struct {
 		Jobs map[string]struct {
@@ -194,9 +200,9 @@ func githubOrchestratorInputs(name, body string) (orchestratorInputs, error) {
 		calls++
 
 		for input, value := range job.With {
-			text := strings.TrimSpace(fmt.Sprint(value))
-			if value == nil {
-				text = ""
+			text := ""
+			if value != nil {
+				text = fmt.Sprint(value)
 			}
 
 			if input != inputSBOMs && input != inputChangelogCreator && input != inputSkipVersionBump {
@@ -209,11 +215,20 @@ func githubOrchestratorInputs(name, body string) (orchestratorInputs, error) {
 
 			switch input {
 			case inputSBOMs:
-				inputs.sboms = text
+				inputs.sboms = strings.TrimSpace(text)
 			case inputChangelogCreator:
+				if text != "" && text != inputGitCliff {
+					return orchestratorInputs{}, fmt.Errorf("release workflow %s passes %s %q; the oracle needs %s or empty: %w", name, input, text, inputGitCliff, errs.ErrValidation)
+				}
+
 				inputs.changelogCreator = text
 			case inputSkipVersionBump:
-				inputs.skipVersionBump = text == strconv.FormatBool(true)
+				skip, err := strconv.ParseBool(text)
+				if err != nil || strconv.FormatBool(skip) != text {
+					return orchestratorInputs{}, fmt.Errorf("release workflow %s passes %s %q; the oracle needs true or false: %w", name, input, text, errs.ErrValidation)
+				}
+
+				inputs.skipVersionBump = skip
 			}
 		}
 	}
