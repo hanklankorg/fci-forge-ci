@@ -79,37 +79,7 @@ func TestSignBlob_KeylessArgvShape(t *testing.T) {
 	}
 }
 
-func TestCopyImage_ArgvShape(t *testing.T) {
-	t.Parallel()
-
-	const digest = "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
-
-	for _, source := range []string{
-		"forge.example/o/r:staging-v1.2.3",
-		"forge.example/o/r:staging-v1.2.3@" + digest,
-		"forge.example/o/r@" + digest,
-	} {
-		t.Run(source, func(t *testing.T) {
-			t.Parallel()
-
-			bins := mockbinary.New(t)
-			bins.Add("cosign", ":")
-			adapter := &cosign.Adapter{Bin: bins.Path("cosign")}
-
-			err := adapter.CopyImage(t.Context(), cosign.CopyImageInput{Source: source, Dest: "ghcr.io/o/r:release"}, nil)
-			if err != nil {
-				t.Fatalf("CopyImage: %v", err)
-			}
-
-			want := []string{"copy", "--force", source, "ghcr.io/o/r:release"}
-			if got := bins.Invocations("cosign")[0].Args; !slices.Equal(got, want) {
-				t.Errorf("argv:\n got=%v\nwant=%v", got, want)
-			}
-		})
-	}
-}
-
-func TestCopyImage_AuthConfigIsPrivateAndRemovedAfterTheChildExits(t *testing.T) {
+func TestPublicKey_AuthConfigIsPrivateAndRemovedAfterTheChildExits(t *testing.T) {
 	t.Parallel()
 
 	for _, exit := range []int{0, 7} {
@@ -138,7 +108,7 @@ exit %d
 			environment := []string{"PATH=" + os.Getenv("PATH"), "MARKER=kept", "DOCKER_CONFIG=" + dir}
 			adapter := &cosign.Adapter{Bin: bins.Path("cosign"), AuthFile: authFile, Env: slices.Clone(environment)}
 
-			err := adapter.CopyImage(t.Context(), cosign.CopyImageInput{Source: "127.0.0.1:1/source:tag", Dest: "127.0.0.1:1/dest:tag"}, nil)
+			err := adapter.PublicKey(t.Context(), "./release.key", new(strings.Builder), nil)
 			if (err == nil) != (exit == 0) {
 				t.Fatalf("child exit %d: %v", exit, err)
 			}
@@ -153,23 +123,9 @@ exit %d
 			}
 
 			if !slices.Equal(adapter.Env, environment) {
-				t.Fatal("copy changed the adapter's captured environment")
+				t.Fatal("the run changed the adapter's captured environment")
 			}
 		})
-	}
-}
-
-func TestCopyImage_RejectsEmptyRefs(t *testing.T) {
-	t.Parallel()
-
-	adapter := refusingAdapter(t)
-
-	if err := adapter.CopyImage(context.Background(), cosign.CopyImageInput{Dest: "ghcr.io/o/r:release"}, nil); err == nil {
-		t.Error("empty source must be rejected")
-	}
-
-	if err := adapter.CopyImage(context.Background(), cosign.CopyImageInput{Source: "forge.example/o/r:v1"}, nil); err == nil {
-		t.Error("empty dest must be rejected")
 	}
 }
 

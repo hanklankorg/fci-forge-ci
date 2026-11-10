@@ -290,7 +290,8 @@ publication; ordinary beta/RC Maven versions are supported.
 
 Every rung verifies the candidate digest before and destination digest after the
 copy. Same-repository copies use the in-process OCI client. Cross-repository or
-cross-registry copies use `cosign copy`, carry signatures, preserve the source
+cross-registry copies use the same client, carry the signatures and attestations
+attached to the digest (OCI referrers and cosign tags), preserve the source
 repository path under the destination prefix, and require destination registry
 credentials. A failed rung leaves verified pointers for a forward retry rather
 than guessing at rollback ownership. See [Artifact and Image

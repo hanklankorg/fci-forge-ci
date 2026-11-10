@@ -155,7 +155,8 @@ destination digest afterward; promotion never rebuilds or re-signs the image.
   host, so `ghcr.io/owner/api` becomes `<prefix>/owner/api` and cannot collide with
   a sibling image.
 - A destination in another repository or registry must use the configured
-  `SignatureCopier` (`cosign copy`) so the image and registry-attached signature
+  `SignatureCopier` (the registry adapter, which copies the digest's OCI
+  referrers and cosign tags) so the image and registry-attached signature
   travel together. The command refuses a cross-repository copy when no signature
   copier is available.
 - Release-stage cross-registry promotion also copies the immutable version tag;

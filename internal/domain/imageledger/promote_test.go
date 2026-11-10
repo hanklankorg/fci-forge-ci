@@ -63,7 +63,7 @@ func (r *fakeRegistry) CopyTag(ctx context.Context, source, dest string) error {
 }
 
 // fakeSigCopier models a signature-preserving cross-registry copy: dest
-// lands source's digest (like a correct `cosign copy`), recording the call.
+// lands source's digest (like a correct copy), recording the call.
 type fakeSigCopier struct {
 	reg    *fakeRegistry
 	copies []string

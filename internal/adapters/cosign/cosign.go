@@ -394,43 +394,6 @@ func (a *Adapter) VerifyAttestationOutput(ctx context.Context, in VerifyAttestat
 	return a.runWithStdout(ctx, out, errOut, args...)
 }
 
-// CopyImageInput drives `cosign copy`, which copies an image together
-// with its registry-attached signatures and attestations from Source to
-// Dest, preserving the digest. This is the cross-registry promotion
-// primitive: a same-repo moving tag shares the digest-addressed signature,
-// but a different repo/registry does not, so the signature must travel
-// with the image.
-type CopyImageInput struct {
-	// Source is the image to copy from (a tag or digest ref).
-	Source string
-
-	// Dest is the destination ref (registry/path:tag). The destination
-	// registry/repo differs from Source for a genuine cross-registry copy.
-	Dest string
-}
-
-// CopyImage runs `cosign copy --force <source> <dest>`. --force makes the
-// promotion idempotent: re-promoting the same digest (the build-once
-// invariant) overwrites the destination tag rather than failing. Both the
-// source and destination registries must be authenticated in the
-// environment (e.g. a docker login / token for each).
-//
-// No --only is passed ON PURPOSE: `cosign copy` then carries the FULL evidence
-// set — the image, its signatures, attestations (incl. SLSA provenance), and
-// SBOMs — so the cross-registry/sovereign destination receives complete
-// evidence, not just the image. Do not add --only without re-checking that the
-// promoted image still verifies downstream.
-//
-// Returns errs.ErrUsage on inconsistent input; cosign's exit error
-// otherwise. errOut receives a redacted view of cosign's stderr.
-func (a *Adapter) CopyImage(ctx context.Context, in CopyImageInput, errOut io.Writer) error {
-	if err := in.validate(); err != nil {
-		return err
-	}
-
-	return a.run(ctx, errOut, "copy", "--force", in.Source, in.Dest)
-}
-
 // publishesToLog reports whether this adapter writes transparency-log entries.
 // The zero-value Adapter publishes, matching cosign's own default.
 func (a *Adapter) publishesToLog() bool { return a.Transparency.PublishesToLog() }
@@ -661,17 +624,4 @@ func (a *Adapter) bin() string {
 	}
 
 	return a.Bin
-}
-
-// validate enforces CopyImageInput consistency before the subprocess runs.
-func (in CopyImageInput) validate() error {
-	if in.Source == "" {
-		return fmt.Errorf("cosign copy: source image reference is empty: %w", errs.ErrUsage)
-	}
-
-	if in.Dest == "" {
-		return fmt.Errorf("cosign copy: destination image reference is empty: %w", errs.ErrUsage)
-	}
-
-	return nil
 }

@@ -23,16 +23,13 @@ import (
 	"github.com/google/go-containerregistry/pkg/v1/random"
 	"github.com/stretchr/testify/require"
 
-	"github.com/diggsweden/forge-ci/internal/adapters/cosign"
 	"github.com/diggsweden/forge-ci/internal/domain/imageledger"
-	"github.com/diggsweden/forge-ci/internal/testutil/evidence"
 	"github.com/diggsweden/forge-ci/internal/testutil/testenv"
 )
 
 func TestLedgerPromote_AuthFileOverridesAmbientCredentials(t *testing.T) {
 	testenv.New(t)
 
-	cosignBinary := evidence.RequireTool(t, "cosign")
 	store := registry.New(registry.Logger(log.New(io.Discard, "", 0)))
 
 	var rejected atomic.Int32
@@ -76,13 +73,6 @@ func TestLedgerPromote_AuthFileOverridesAmbientCredentials(t *testing.T) {
 	require.NoError(t, os.WriteFile(authFile, config("selected"), 0o600))
 	t.Setenv("REGISTRY_AUTH_FILE", authFile)
 
-	// Positive precedence check against the real tool: the ambient Docker
-	// config wins over REGISTRY_AUTH_FILE, so forwarding that variable is not enough.
-	adapter := &cosign.Adapter{Bin: cosignBinary}
-	require.Error(t, adapter.CopyImage(t.Context(), cosign.CopyImageInput{Source: source + "@" + digest.String(), Dest: host + "/control:dev"}, io.Discard))
-	require.Positive(t, rejected.Load())
-	rejected.Store(0)
-
 	ledger, err := imageledger.Marshal([]imageledger.Entry{{
 		Ref: source + "@" + digest.String(), Digest: digest.String(),
 		FinalTag: source + ":v1.2.3",
@@ -98,6 +88,6 @@ func TestLedgerPromote_AuthFileOverridesAmbientCredentials(t *testing.T) {
 	got, err := crane.Digest(host+"/target/source/app:dev", opts...)
 	require.NoError(t, err)
 	require.Equal(t, digest.String(), got)
-	require.Zero(t, rejected.Load(), "explicit auth must reach the signature copier too")
+	require.Zero(t, rejected.Load(), "the copy across repositories must use the explicit auth file, not the ambient one")
 	require.Equal(t, ambient, os.Getenv("DOCKER_CONFIG"), "the command must not alter the caller's auth configuration")
 }
