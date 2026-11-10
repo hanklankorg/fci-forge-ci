@@ -2148,7 +2148,9 @@ Not supported yet, and known:
 Not in the layer:
 
 - A MegaLinter action and SARIF ingestion.
-- Builds other than Go, Cargo and Maven: no Gradle, npm or Xcode action.
+- Builds other than Go, Cargo and Maven: no Gradle, npm or Xcode action. A
+  Gradle consumer's build job runs `forge-ci build gradle run` itself, as
+  [examples/gradle-app/forgejo/](../examples/gradle-app/forgejo/) does.
 - Publication to the forge's package registry.
 - Plan-driven fan-out from `artifacts.yml`: the consumer's workflow is the plan.
 - Keyless or KMS signing in the workflows.

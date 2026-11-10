@@ -314,7 +314,7 @@ lacks.
 | Release-isolation gate | none | none: the signing policy is a separate pinned project | `check-l3-isolation` |
 | Build, Go and Cargo | `build-go.yml`, `build-cargo.yml` | `build-go`, `build-cargo` components | `build-go`, `build-cargo` |
 | Build, Maven | `build-maven.yml` | `build-maven` component | `build-maven` |
-| Build, Gradle, npm, Xcode | workflows | components, without Xcode | none; no consumer yet |
+| Build, Gradle, npm, Xcode | workflows | components, without Xcode | no action; a Gradle consumer's build job runs `forge-ci build gradle run` itself |
 | Job image | runtime images | runtime images; digest-pinned images you supply for `check` and `release` | the consumer's image or `setup-toolchain` |
 | Engine binary | runtime image or verified release archive | runtime image, or the checksum-bound build for `check` and `release` | the checksum-bound build |
 | Plan-driven fan-out from `artifacts.yml` | `release-build-stage.yml` | generated child pipeline | none: the consumer's workflow is the plan |
