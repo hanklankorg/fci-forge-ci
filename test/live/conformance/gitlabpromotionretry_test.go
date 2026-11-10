@@ -12,7 +12,6 @@ import (
 	"fmt"
 	"io"
 	"net/url"
-	"os"
 	"strings"
 	"testing"
 	"time"
@@ -32,7 +31,7 @@ import (
 func TestGitLabRelease_ConsumerInterruptedRecovery(t *testing.T) {
 	livetest.RegisterLiveScenario(t)
 
-	root := os.Getenv(consumerCheckoutEnv)
+	root := livetest.Input(t, consumerCheckoutEnv)
 	if root == "" {
 		livetest.NotCoveredf(t, "consumer recovery requires a reviewed single-image policy-owned release consumer")
 	}

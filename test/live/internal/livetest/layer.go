@@ -138,7 +138,7 @@ func PushLayer(tb TB, target Target, repo string) Layer {
 		tb.Fatalf("livetest: snapshot the layer: %v", err)
 	}
 
-	admin, err := newWorkflowAdmin(Context(tb), root, commit, os.Getenv)
+	admin, err := newWorkflowAdmin(Context(tb), root, commit, func(name string) string { return Input(tb, name) })
 	if err != nil {
 		tb.Fatalf("livetest: administrator inputs: %v", err)
 	}

@@ -6,7 +6,6 @@ package livetest
 import (
 	"context"
 	"fmt"
-	"os"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -33,7 +32,7 @@ func NewCargoDevelopmentFixture(tb TB, source Consumer) Consumer {
 	ctx, cancel := context.WithTimeout(Context(tb), timeoutLayerPush)
 	defer cancel()
 
-	fixture, err := cargoDevelopmentFixture(ctx, runner, os.Getenv)
+	fixture, err := cargoDevelopmentFixture(ctx, runner, func(name string) string { return Input(tb, name) })
 	if err != nil {
 		tb.Fatalf("Cargo development publication fixture: %v", err)
 	}

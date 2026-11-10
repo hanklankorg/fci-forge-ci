@@ -13,7 +13,6 @@ import (
 	"encoding/xml"
 	"fmt"
 	"io"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -28,7 +27,7 @@ import (
 func TestForgejoMavenLibraryConsumer_Stable(t *testing.T) {
 	livetest.RegisterLiveScenario(t)
 
-	root := os.Getenv(consumerCheckoutEnv)
+	root := livetest.Input(t, consumerCheckoutEnv)
 	if root == "" {
 		t.Skip("FORGE_CI_LIVE_CONSUMER is not set")
 	}
@@ -39,7 +38,7 @@ func TestForgejoMavenLibraryConsumer_Stable(t *testing.T) {
 
 	var words []string
 
-	for word := range strings.SplitSeq(os.Getenv(consumerSettingsEnv), "\n") {
+	for word := range strings.SplitSeq(livetest.Input(t, consumerSettingsEnv), "\n") {
 		if word != "" {
 			words = append(words, word)
 		}

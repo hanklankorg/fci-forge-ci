@@ -8,7 +8,6 @@ package conformance_test
 import (
 	"context"
 	"net/http"
-	"os"
 	"strings"
 	"testing"
 	"time"
@@ -60,11 +59,11 @@ func TestGitLabLayer_Snapshot(t *testing.T) {
 func runGitLabSnapshot(t *testing.T, root string, private bool) {
 	t.Helper()
 
-	if event := os.Getenv(consumerEventEnv); event != livetest.TrialSnapshot {
+	if event := livetest.Input(t, consumerEventEnv); event != livetest.TrialSnapshot {
 		t.Fatalf("the event is %s; this trial runs %s", event, livetest.TrialSnapshot)
 	}
 
-	if settings := strings.TrimSpace(os.Getenv(consumerSettingsEnv)); settings != "" {
+	if settings := strings.TrimSpace(livetest.Input(t, consumerSettingsEnv)); settings != "" {
 		t.Fatalf("a GitLab %s takes job-archive= alone, not %q", livetest.TrialSnapshot, settings)
 	}
 
@@ -73,14 +72,14 @@ func runGitLabSnapshot(t *testing.T, root string, private bool) {
 		t.Fatal(err)
 	}
 
-	jobArchive := os.Getenv("FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE")
+	jobArchive := livetest.Input(t, "FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE")
 	if jobArchive == "" {
 		livetest.NotCoveredf(t, "a GitLab snapshot requires the reviewed job image archive of job-archive=")
 	}
 
 	archiveEnv := livetest.GitLabSnapshotBuilderArchiveEnv(livetest.SelectedImageBuilder(t, provider.ForgeGitLab))
 
-	builderArchive := os.Getenv(archiveEnv)
+	builderArchive := livetest.Input(t, archiveEnv)
 	if builderArchive == "" {
 		livetest.NotCoveredf(t, "GitLab snapshot images require %s, a saved builder job image", archiveEnv)
 	}
@@ -113,7 +112,7 @@ func runGitLabSnapshot(t *testing.T, root string, private bool) {
 	producerImages := map[string]string{}
 
 	for _, family := range families {
-		archive := os.Getenv(livetest.GitLabSnapshotProducerArchiveEnv(family))
+		archive := livetest.Input(t, livetest.GitLabSnapshotProducerArchiveEnv(family))
 		if archive == "" {
 			livetest.NotCoveredf(t, "the snapshot builds a %s producer; set %s to the %s runtime image archive", family, livetest.GitLabSnapshotProducerArchiveEnv(family), family)
 		}

@@ -8,7 +8,6 @@ import (
 	"context"
 	"fmt"
 	"maps"
-	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -52,7 +51,7 @@ func readAdminInputs(getenv func(string) string) (map[string]bool, error) {
 func AdminInputs(tb TB, inputs map[string]any) map[string]any {
 	tb.Helper()
 
-	values, err := readAdminInputs(os.Getenv)
+	values, err := readAdminInputs(func(name string) string { return Input(tb, name) })
 	if err != nil {
 		tb.Fatalf("livetest: %v", err)
 	}

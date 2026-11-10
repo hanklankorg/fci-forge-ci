@@ -8,7 +8,6 @@ package conformance_test
 import (
 	"fmt"
 	"net/url"
-	"os"
 	"regexp"
 	"strings"
 	"testing"
@@ -29,7 +28,7 @@ func TestForgejoLayer_ConsumerDevelopment(t *testing.T) {
 func runForgejoConsumerDevelopment(t *testing.T, acceptance developmentAcceptance) {
 	t.Helper()
 
-	root := os.Getenv(consumerCheckoutEnv)
+	root := livetest.Input(t, consumerCheckoutEnv)
 	if root == "" {
 		t.Skip("name a clean development consumer with FORGE_CI_LIVE_CONSUMER and provide its selected development job image")
 	}
@@ -38,7 +37,7 @@ func runForgejoConsumerDevelopment(t *testing.T, acceptance developmentAcceptanc
 		t.Fatal("the development trial requires disposable scratch repositories")
 	}
 
-	image := os.Getenv(acceptance.imageVariable)
+	image := livetest.Input(t, acceptance.imageVariable)
 	kaniko := acceptance.buildsImages && livetest.SelectedImageBuilder(t, provider.ForgeForgejo) == livetest.ImageBuilderKaniko
 
 	if !kaniko && !regexp.MustCompile(`^\S+@sha256:[0-9a-f]{64}$`).MatchString(image) {

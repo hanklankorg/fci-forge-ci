@@ -95,7 +95,7 @@ func PushGitLabGateExtraJobImages(tb TB, target Target, consumer Consumer, repoF
 	images := map[string]string{}
 
 	for _, name := range consumer.GitLabGateExtraJobImages(tb) {
-		archive := os.Getenv(GitLabJobImageArchiveEnv + name)
+		archive := Input(tb, GitLabJobImageArchiveEnv+name)
 		if archive == "" {
 			NotCoveredf(tb, "the gate checks in $CI_JOB_IMAGE_%s; set %s%s to its image archive (job-archive-%s= for a demo)",
 				name, GitLabJobImageArchiveEnv, name, strings.ToLower(name))

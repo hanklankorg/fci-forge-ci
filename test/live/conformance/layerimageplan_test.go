@@ -7,7 +7,6 @@ package conformance_test
 
 import (
 	"fmt"
-	"os"
 	"strings"
 	"testing"
 
@@ -23,7 +22,7 @@ import (
 func TestForgejoLayer_ResolvedImagePlan(t *testing.T) {
 	livetest.RegisterLiveScenario(t)
 
-	jobImage := os.Getenv("FORGE_CI_LIVE_IMAGE_PLAN_JOB_IMAGE")
+	jobImage := livetest.Input(t, "FORGE_CI_LIVE_IMAGE_PLAN_JOB_IMAGE")
 	if jobImage == "" {
 		t.Skip("set FORGE_CI_LIVE_IMAGE_PLAN_JOB_IMAGE to the lab kaniko job image for this focused scenario")
 	}

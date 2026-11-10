@@ -5,7 +5,6 @@ package livetest
 
 import (
 	"fmt"
-	"os"
 	"slices"
 
 	"github.com/diggsweden/forge-ci/internal/domain/errs"
@@ -31,7 +30,7 @@ type ConsumerVisibility struct {
 func ConsumerVisibilities(tb TB) []ConsumerVisibility {
 	tb.Helper()
 
-	selected, err := parseConsumerVisibilities(os.Getenv(consumerVisibilityEnv))
+	selected, err := parseConsumerVisibilities(Input(tb, consumerVisibilityEnv))
 	if err != nil {
 		tb.Fatalf("livetest: %v", err)
 	}

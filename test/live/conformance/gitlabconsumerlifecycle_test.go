@@ -9,7 +9,6 @@ import (
 	"context"
 	"fmt"
 	"net/url"
-	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -101,11 +100,11 @@ func TestGitLabLayer_ConsumerLifecycle(t *testing.T) {
 func runGitLabConsumerLifecycle(t *testing.T, root string, private bool) {
 	t.Helper()
 
-	if event := os.Getenv(consumerEventEnv); event != livetest.TrialLifecycle {
+	if event := livetest.Input(t, consumerEventEnv); event != livetest.TrialLifecycle {
 		t.Fatalf("the event is %s; a lifecycle starts with %s", event, livetest.TrialLifecycle)
 	}
 
-	parsed, err := livetest.ParseGitLabLifecycleSettings(os.Getenv(consumerSettingsEnv))
+	parsed, err := livetest.ParseGitLabLifecycleSettings(livetest.Input(t, consumerSettingsEnv))
 	if err != nil {
 		t.Fatal(err)
 	}

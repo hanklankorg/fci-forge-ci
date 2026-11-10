@@ -6,7 +6,6 @@ package livetest
 import (
 	"fmt"
 	"maps"
-	"os"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -71,7 +70,7 @@ func SelectedImageBuilder(tb TB, forge provider.ForgeAPI) string {
 		return ""
 	}
 
-	value := os.Getenv(env)
+	value := Input(tb, env)
 	if selected, valid := imageBuilderValue(value); valid {
 		return selected
 	}
@@ -146,7 +145,7 @@ func ChooseImageBuilder(tb TB, target Target) ImageBuilderChoice {
 	env := ImageBuilderEnv(target.Forge)
 
 	if SelectedImageBuilder(tb, target.Forge) == ImageBuilderKaniko {
-		archive := os.Getenv(KanikoJobImageArchiveEnv)
+		archive := Input(tb, KanikoJobImageArchiveEnv)
 		if archive == "" {
 			NotCoveredf(tb, "the run selects kaniko (%s=kaniko), whose image builds need %s, a saved kaniko job image", env, KanikoJobImageArchiveEnv)
 		}

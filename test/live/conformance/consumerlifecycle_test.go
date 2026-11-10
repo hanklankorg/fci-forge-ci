@@ -7,7 +7,6 @@ package conformance_test
 
 import (
 	"maps"
-	"os"
 	"strings"
 	"testing"
 
@@ -61,7 +60,7 @@ func TestForgejoLayer_ConsumerLifecycle(t *testing.T) {
 func runForgejoConsumerLifecycle(t *testing.T, root string, private bool) {
 	t.Helper()
 
-	settings, err := livetest.ParseTrialSettings(os.Getenv(consumerEventEnv), consumerSettingsWords())
+	settings, err := livetest.ParseTrialSettings(livetest.Input(t, consumerEventEnv), consumerSettingsWords(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -70,7 +69,7 @@ func runForgejoConsumerLifecycle(t *testing.T, root string, private bool) {
 		t.Fatalf("the event is %s; a lifecycle starts with %s", settings.Event, livetest.TrialLifecycle)
 	}
 
-	builder, err := livetest.ForgejoConsumerImageBuilder(settings.Variables, os.Getenv(livetest.ForgejoImageBuilderEnv))
+	builder, err := livetest.ForgejoConsumerImageBuilder(settings.Variables, livetest.Input(t, livetest.ForgejoImageBuilderEnv))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -98,7 +97,7 @@ func runForgejoConsumerLifecycle(t *testing.T, root string, private bool) {
 
 	config := livetest.ServiceDevelopmentConfig{
 		RecipeDirectory: root, Declaration: declaration, JobImage: settings.Variables["CI_JOB_IMAGE"], Branch: lifecycleBranch,
-		ReadinessURL: os.Getenv(serviceReadinessURLEnv), Fixture: os.Getenv(serviceFixtureEnv),
+		ReadinessURL: livetest.Input(t, serviceReadinessURLEnv), Fixture: livetest.Input(t, serviceFixtureEnv),
 	}
 
 	const name = livetest.ConsumerLifecycle

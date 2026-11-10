@@ -59,7 +59,7 @@ func TestForgejoLayer_ConsumerTrial(t *testing.T) {
 		visibilities := livetest.ConsumerVisibilities(t)
 		// The npm registry belongs to the owner, not to the scratch repository, so
 		// a second case would publish the same name@version again and be refused.
-		if os.Getenv("FORGE_CI_LIVE_NPM_APPLICATION_IMAGE") != "" && len(visibilities) != 1 {
+		if livetest.Input(t, "FORGE_CI_LIVE_NPM_APPLICATION_IMAGE") != "" && len(visibilities) != 1 {
 			t.Fatal("npm application acceptance publishes one package version to the owner's registry; set FORGE_CI_LIVE_CONSUMER_VISIBILITY to public or private")
 		}
 
@@ -73,10 +73,10 @@ func TestForgejoLayer_ConsumerTrial(t *testing.T) {
 
 // consumerSettingsWords reads the caller's settings, one per line so a
 // variable's value may hold a space.
-func consumerSettingsWords() []string {
+func consumerSettingsWords(t *testing.T) []string {
 	var words []string
 
-	for word := range strings.SplitSeq(os.Getenv(consumerSettingsEnv), "\n") {
+	for word := range strings.SplitSeq(livetest.Input(t, consumerSettingsEnv), "\n") {
 		if word != "" {
 			words = append(words, word)
 		}
@@ -88,12 +88,12 @@ func consumerSettingsWords() []string {
 func runForgejoConsumerTrial(t *testing.T, root string, private bool) {
 	t.Helper()
 
-	settings, err := livetest.ParseTrialSettings(os.Getenv(consumerEventEnv), consumerSettingsWords())
+	settings, err := livetest.ParseTrialSettings(livetest.Input(t, consumerEventEnv), consumerSettingsWords(t))
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	trialBuilder, err := livetest.ForgejoConsumerImageBuilder(settings.Variables, os.Getenv(livetest.ForgejoImageBuilderEnv))
+	trialBuilder, err := livetest.ForgejoConsumerImageBuilder(settings.Variables, livetest.Input(t, livetest.ForgejoImageBuilderEnv))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -104,7 +104,7 @@ func runForgejoConsumerTrial(t *testing.T, root string, private bool) {
 	}
 
 	consumer := livetest.OpenConsumer(t, target, root)
-	if image := os.Getenv("FORGE_CI_LIVE_NPM_APPLICATION_IMAGE"); image != "" {
+	if image := livetest.Input(t, "FORGE_CI_LIVE_NPM_APPLICATION_IMAGE"); image != "" {
 		if livetest.RunnerArch(t, target) != "amd64" || livetest.DemoName() != "" {
 			t.Fatal("npm application acceptance requires disposable native amd64 repositories")
 		}
@@ -114,10 +114,10 @@ func runForgejoConsumerTrial(t *testing.T, root string, private bool) {
 			t.Fatal(err)
 		}
 
-		consumer = livetest.NewNPMApplicationFixture(t, consumer, livetest.NPMApplicationFixtureConfig{RecipeDirectory: recipe, NodeImage: image, Oracle: os.Getenv("FORGE_CI_LIVE_NPM_APPLICATION_ORACLE"), Library: os.Getenv("FORGE_CI_LIVE_NPM_LIBRARY") == "true"}, false)
+		consumer = livetest.NewNPMApplicationFixture(t, consumer, livetest.NPMApplicationFixtureConfig{RecipeDirectory: recipe, NodeImage: image, Oracle: livetest.Input(t, "FORGE_CI_LIVE_NPM_APPLICATION_ORACLE"), Library: livetest.Input(t, "FORGE_CI_LIVE_NPM_LIBRARY") == "true"}, false)
 	}
 
-	if image := os.Getenv("FORGE_CI_LIVE_MAVEN_APPLICATION_IMAGE"); image != "" {
+	if image := livetest.Input(t, "FORGE_CI_LIVE_MAVEN_APPLICATION_IMAGE"); image != "" {
 		recipe, err := filepath.Abs("../../../test/live/fixtures/consumers/hello-maven/consumer")
 		if err != nil {
 			t.Fatal(err)
@@ -126,8 +126,8 @@ func runForgejoConsumerTrial(t *testing.T, root string, private bool) {
 		consumer = livetest.NewMavenApplicationConsumerFixture(t, consumer, recipe, image)
 	}
 
-	if image := os.Getenv("FORGE_CI_LIVE_MAVEN_TESTCONTAINERS_IMAGE"); image != "" {
-		if settings.Event != livetest.TrialRelease || livetest.RunnerArch(t, target) != "amd64" || livetest.DemoName() != "" || livetest.PrivilegedRunnerLabel(t, target) == "" || os.Getenv("FORGE_CI_LIVE_MAVEN_APPLICATION_IMAGE") == "" {
+	if image := livetest.Input(t, "FORGE_CI_LIVE_MAVEN_TESTCONTAINERS_IMAGE"); image != "" {
+		if settings.Event != livetest.TrialRelease || livetest.RunnerArch(t, target) != "amd64" || livetest.DemoName() != "" || livetest.PrivilegedRunnerLabel(t, target) == "" || livetest.Input(t, "FORGE_CI_LIVE_MAVEN_APPLICATION_IMAGE") == "" {
 			t.Fatal("Maven Testcontainers acceptance requires a disposable native amd64 Maven application fixture and acknowledged privileged runner capacity")
 		}
 
@@ -208,7 +208,7 @@ func runForgejoConsumerTrial(t *testing.T, root string, private bool) {
 	// The layer's own variables, then the consumer's names for the lab's
 	// facts, then the caller's. One name has one source.
 	variables := map[string]string{layerRunnerVariable: runnerLabelsJSON(t, scenario.label), "FORGE_CI_REPOSITORY": scenario.layer.Repository}
-	if os.Getenv("FORGE_CI_LIVE_NPM_APPLICATION_IMAGE") != "" {
+	if livetest.Input(t, "FORGE_CI_LIVE_NPM_APPLICATION_IMAGE") != "" {
 		variables["NPM_APPLICATION_REGISTRY"] = strings.TrimRight(target.BaseURL(), "/") + "/api/packages/" + target.Owner + "/npm/"
 	}
 
@@ -346,7 +346,7 @@ func requestRelease(t *testing.T, scenario layerScenario, requester livetest.Req
 func requireReleaseCommitScope(t *testing.T, target livetest.Target, repo, request, released string, settings livetest.TrialSettings) {
 	t.Helper()
 
-	planned, err := livetest.ForgejoPlannedVersionBumps(os.Getenv(consumerCheckoutEnv), settings.Workflow)
+	planned, err := livetest.ForgejoPlannedVersionBumps(livetest.Input(t, consumerCheckoutEnv), settings.Workflow)
 	if err != nil {
 		t.Fatalf("release commit scope: %v", err)
 	}

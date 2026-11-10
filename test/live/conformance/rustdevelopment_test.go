@@ -14,7 +14,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"os"
 	"path"
 	"strings"
 	"testing"
@@ -31,7 +30,7 @@ import (
 func TestGitLabLayer_RustDevelopment(t *testing.T) {
 	livetest.RegisterLiveScenario(t)
 
-	root := os.Getenv(consumerCheckoutEnv)
+	root := livetest.Input(t, consumerCheckoutEnv)
 	if root == "" {
 		t.Skip("set FORGE_CI_LIVE_CONSUMER to the Rust development fixture and FORGE_CI_LIVE_CONSUMER_IMAGE_ARCHIVE to its build image archive")
 	}
@@ -54,7 +53,7 @@ func TestGitLabLayer_RustDevelopment(t *testing.T) {
 func TestForgejoLayer_RustDevelopment(t *testing.T) {
 	livetest.RegisterLiveScenario(t)
 
-	root := os.Getenv(consumerCheckoutEnv)
+	root := livetest.Input(t, consumerCheckoutEnv)
 	if root == "" {
 		t.Skip("set FORGE_CI_LIVE_CONSUMER to the Rust development fixture; Buildah uses CI_RUST_BUILD_IMAGE, Kaniko uses FORGE_CI_LIVE_KANIKO_JOB_IMAGE_ARCHIVE with the Rust toolchain")
 	}

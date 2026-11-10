@@ -11,7 +11,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"os"
 	"strings"
 	"testing"
 	"time"
@@ -27,7 +26,7 @@ import (
 func TestGitLabLayer_ConsumerDevelopment(t *testing.T) {
 	livetest.RegisterLiveScenario(t)
 
-	root := os.Getenv(consumerCheckoutEnv)
+	root := livetest.Input(t, consumerCheckoutEnv)
 	if root == "" {
 		t.Skip("name a clean development consumer with FORGE_CI_LIVE_CONSUMER and its FORGE_CI_LIVE_CONSUMER_IMAGE_ARCHIVE")
 	}
@@ -87,7 +86,7 @@ func runGitLabDevelopment(t *testing.T, root string, private bool, acceptance de
 	engine := livetest.NewPublicScratchRepo(t, target, "gitlab-development-layer", livetest.ReadLayerAnonymously)
 	layer := livetest.PushLayer(t, target, engine)
 
-	archive := os.Getenv("FORGE_CI_LIVE_CONSUMER_IMAGE_ARCHIVE")
+	archive := livetest.Input(t, "FORGE_CI_LIVE_CONSUMER_IMAGE_ARCHIVE")
 
 	var images livetest.GitLabGateImages
 
@@ -112,7 +111,7 @@ func runGitLabDevelopment(t *testing.T, root string, private bool, acceptance de
 		images.Job = livetest.PushJobImage(t, target, engine, archive)
 	}
 
-	if lint := os.Getenv("FORGE_CI_LIVE_LINT_IMAGE_ARCHIVE"); lint != "" {
+	if lint := livetest.Input(t, "FORGE_CI_LIVE_LINT_IMAGE_ARCHIVE"); lint != "" {
 		images.Lint = livetest.PushJobImage(t, target, livetest.NewPublicScratchRepo(t, target, "gitlab-development-lint", livetest.ReadJobImageAnonymously), lint)
 	}
 

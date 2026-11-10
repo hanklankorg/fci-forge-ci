@@ -49,7 +49,7 @@ var digestPinnedImage = regexp.MustCompile(`^[a-z0-9]+([.-][a-z0-9]+)*(:[0-9]+)?
 func SignerImage(tb TB) (string, bool) {
 	tb.Helper()
 
-	image := os.Getenv(signerImageEnv)
+	image := Input(tb, signerImageEnv)
 	if image == "" {
 		tb.Logf("SKIP: %s is not set; run `just test-live-image signer <forge-lab checkout>` and pass the reference it prints", signerImageEnv)
 
