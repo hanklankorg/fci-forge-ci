@@ -101,6 +101,15 @@ esac
 preflight_report=$(cd -- "$repo_root" && "$go_bin" run ./test/live/internal/livetest/preflight)
 printf '%s\n' "$preflight_report"
 
+# Prepared images are of one commit. A run that takes them tests that commit
+# and nothing on top of it: the binaries below are built from this tree.
+if [[ -n "${FORGE_CI_LIVE_PREPARED:-}" ]]; then
+  (cd -- "$repo_root" && "$go_bin" run ./test/live/internal/livetest/preflight prepared-source \
+    "$FORGE_CI_LIVE_PREPARED" \
+    "$(git -C "$repo_root" rev-parse --verify HEAD)" \
+    "$(git -C "$repo_root" status --porcelain --untracked-files=all)")
+fi
+
 # The pinned host tools the scenarios run must resolve to real executables,
 # not to a mise shim with nothing installed behind it; Go owns the list and
 # the resolution the scenarios use.

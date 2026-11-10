@@ -240,6 +240,12 @@ func withArguments(mode string, args []string) error {
 		return livetest.AdmitImageBuildInvocation(args[0], args[1], args[2], args[3], os.Getenv)
 	}
 
+	// `preflight prepared-source <dir> <head> <git status --porcelain>`
+	// refuses a run of prepared images over other source than their commit.
+	if mode == "prepared-source" && len(args) == 3 {
+		return livetest.CheckPreparedSource(args[0], args[1], args[2])
+	}
+
 	if strings.HasPrefix(mode, "testing-") && len(args) <= 2 {
 		document, err := testingDocument(mode, args)
 		if err != nil {
