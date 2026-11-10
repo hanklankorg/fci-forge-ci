@@ -70,7 +70,7 @@ func TestMetaGitHubFixtureStagesItsSourceAndReadsAsAChangelogOnlyRelease(t *test
 		}
 	}
 
-	want := githubReleaseProfile{GitSigning: config.GitSignGPG, Changelog: true, Prepares: false, SBOMBundle: sbomBundleWithheld}
+	want := githubReleaseProfile{GitSigning: config.GitSignGPG, Changelog: true, Prepares: false, SBOMBundle: sbomBundleWithheld, NoFiles: true}
 	if got, err := githubReleaseProfileOf(dir, "release.yml"); err != nil || got != want {
 		t.Fatalf("profile = %+v, %v; want %+v", got, err, want)
 	}

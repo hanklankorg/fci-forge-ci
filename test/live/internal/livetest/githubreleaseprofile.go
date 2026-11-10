@@ -16,6 +16,7 @@ import (
 	"github.com/diggsweden/forge-ci/internal/domain/config"
 	"github.com/diggsweden/forge-ci/internal/domain/errs"
 	"github.com/diggsweden/forge-ci/internal/domain/pipeline"
+	"github.com/diggsweden/forge-ci/internal/domain/projecttype"
 )
 
 // sbomBundle is whether a release must offer its SBOM bundle,
@@ -40,6 +41,7 @@ const (
 	inputSBOMs            = "release.sboms"
 	inputChangelogCreator = "changelog-creator"
 	inputSkipVersionBump  = "changelog.skipversionbump"
+	inputAttach           = "release.attachartifacts"
 	inputSBOMsDefault     = "all"
 	inputGitCliff         = "git-cliff"
 )
@@ -59,6 +61,11 @@ type githubReleaseProfile struct {
 	// tags the requested commit and main stays where it was.
 	Prepares   bool
 	SBOMBundle sbomBundle
+	// NoFiles is whether the release has nothing to offer as a file: every
+	// artifact it declares is meta, it declares no container and the
+	// workflow attaches nothing. The engine then publishes the tag and the
+	// notes alone, since an empty checksum list has nothing to sign.
+	NoFiles bool
 }
 
 // githubReleaseProfileOf reads the profile of the release workflow in the
@@ -87,6 +94,9 @@ func githubReleaseProfileOf(dir, workflow string) (githubReleaseProfile, error) 
 
 	profile.Changelog = inputs.changelogCreator == inputGitCliff
 	profile.Prepares = pipeline.VersionBumpRuns(profile.Changelog, inputs.skipVersionBump)
+
+	profile.NoFiles = declared != nil && len(declared.Artifacts) > 0 && len(declared.Containers) == 0 && inputs.attach == "" &&
+		!slices.ContainsFunc(declared.Artifacts, func(artifact config.Artifact) bool { return artifact.ProjectType != projecttype.Meta })
 
 	profile.SBOMBundle, err = releaseSBOMBundle(inputs.sboms, declared)
 	if err != nil {
@@ -171,6 +181,7 @@ type orchestratorInputs struct {
 	sboms            string
 	changelogCreator string
 	skipVersionBump  bool
+	attach           string
 }
 
 // githubOrchestratorInputs reads them from the one job that calls the release
@@ -205,7 +216,7 @@ func githubOrchestratorInputs(name, body string) (orchestratorInputs, error) {
 				text = fmt.Sprint(value)
 			}
 
-			if input != inputSBOMs && input != inputChangelogCreator && input != inputSkipVersionBump {
+			if input != inputSBOMs && input != inputChangelogCreator && input != inputSkipVersionBump && input != inputAttach {
 				continue
 			}
 
@@ -214,6 +225,8 @@ func githubOrchestratorInputs(name, body string) (orchestratorInputs, error) {
 			}
 
 			switch input {
+			case inputAttach:
+				inputs.attach = strings.TrimSpace(text)
 			case inputSBOMs:
 				inputs.sboms = strings.TrimSpace(text)
 			case inputChangelogCreator:

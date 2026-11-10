@@ -1195,7 +1195,8 @@ func (trial *GitHubTrial) PushReleaseRequest(repo string, tree GitHubConsumerTre
 
 // CheckRelease checks what the engine promises of a GitHub release beyond a
 // green run: main advanced by one signed commit, the final tag exists, the
-// release offers assets, and its signatures verify: each Cosign bundle
+// release offers assets (none when it declares no file, as a meta release),
+// and its signatures verify: each Cosign bundle
 // against trust and each GPG signature (.asc) against the trial's GPG key.
 // Every subject carries a verified signature of the method the release
 // workflow's artifacts configuration declares (gpg when it declares none).
@@ -1237,6 +1238,17 @@ func (trial *GitHubTrial) CheckRelease(repo string, tree GitHubConsumerTree, wor
 	for _, asset := range release.Assets {
 		assets[asset.GetName()] = asset.GetID()
 		names = append(names, asset.GetName())
+	}
+
+	if profile.NoFiles {
+		if len(assets) != 0 {
+			trial.tb.Errorf("the release %s declares no file and offers %v", final, names)
+		}
+
+		trial.tb.Logf("release %s: git-signing %s, renders a changelog %t, prepares a commit %t; no file declared and none offered",
+			final, profile.GitSigning, profile.Changelog, profile.Prepares)
+
+		return assets
 	}
 
 	if len(assets) == 0 {

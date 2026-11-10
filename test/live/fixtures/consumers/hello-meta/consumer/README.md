@@ -10,7 +10,8 @@ the live tier puts the Forge CI under test in its place.
 The release declares `project-type: meta`, renders its notes with `git-cliff`
 and sets `changelog.skipversionbump: true`. It runs no build and no version
 bump, so main and the signed final tag stay at the requested commit, with
-every file as it was. Nothing of the checkout is attached to the release: its
-only files are the checksum list and that list's signature.
+every file as it was. Nothing of the checkout is attached to the release, so
+it offers no file: with nothing to checksum there is nothing to sign, and the
+release is the signed tag and its notes.
 
 The pull-request gate lints, and the consumer's own job runs the installer.

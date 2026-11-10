@@ -55,6 +55,32 @@ func TestGitHubReleaseProfile_ShippedGoCLIVariants(t *testing.T) {
 	}
 }
 
+// A meta release offers no file only while it attaches none: the meta demo
+// with one attachment is judged as any release that offers files.
+func TestGitHubReleaseProfile_AMetaReleaseThatAttachesOffersFiles(t *testing.T) {
+	consumer := filepath.Join(reporoot.Path(t), "test/live/fixtures/consumers/hello-meta/consumer")
+	dir := t.TempDir()
+
+	workflow, err := os.ReadFile(filepath.Join(consumer, "test/live/github/workflows/release.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	declaration, err := os.ReadFile(filepath.Join(consumer, ".forge-ci/artifacts.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	writeProfileFile(t, dir, ".forge-ci/artifacts.yml", string(declaration))
+
+	attached := strings.Replace(string(workflow), "      release.draft: false\n", "      release.draft: false\n      release.attachartifacts: install.sh\n", 1)
+	writeProfileFile(t, dir, ".github/workflows/release.yml", attached)
+
+	if got, err := githubReleaseProfileOf(dir, "release.yml"); err != nil || got.NoFiles {
+		t.Fatalf("a meta release that attaches a file: %+v, %v", got, err)
+	}
+}
+
 func TestGitHubReleaseProfile_Inputs(t *testing.T) {
 	const declared = "artifacts:\n  - name: app\n    project-type: go\n    working-directory: .\n"
 
