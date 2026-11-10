@@ -5,15 +5,10 @@ package livetest
 
 import (
 	"cmp"
-	"encoding/xml"
-	"errors"
-	"io/fs"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
-	"github.com/diggsweden/forge-ci/internal/domain/sbom"
 	"github.com/diggsweden/forge-ci/internal/testutil/reporoot"
 )
 
@@ -141,36 +136,4 @@ func forgejoArtifactsConfig(t *testing.T, path, called string) string {
 	}
 
 	return artifactsConfig
-}
-
-// declaredDemoVersion returns the version the demo's package.json, Cargo.toml
-// or pom.xml (the project's own <version>) declares, or "" for none.
-func declaredDemoVersion(t *testing.T, consumer string) string {
-	t.Helper()
-
-	read := func(name string) []byte {
-		body, err := os.ReadFile(filepath.Join(consumer, name))
-		if err != nil && !errors.Is(err, fs.ErrNotExist) {
-			t.Fatal(err)
-		}
-
-		return body
-	}
-
-	cargo, err := sbom.CargoTOMLVersion(read("Cargo.toml"), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	var pom struct {
-		Version string `xml:"version"`
-	}
-
-	if body := read("pom.xml"); body != nil {
-		if err := xml.Unmarshal(body, &pom); err != nil {
-			t.Fatal(err)
-		}
-	}
-
-	return cmp.Or(sbom.PackageJSONVersion(read("package.json")), cargo, pom.Version)
 }

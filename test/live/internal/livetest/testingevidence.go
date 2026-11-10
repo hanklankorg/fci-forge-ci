@@ -126,29 +126,38 @@ func seedLiveRuns(liveRuns string, latest map[string]seededRun) error {
 	return nil
 }
 
-// preparedCaseEvidence reads a run of ForgejoPreparedCases from its tests
-// rather than its header: one process runs many cases, and each names itself
-// in its subtests, <scenario>/<case name>/<visibility>. It gives the overlay
-// row of each case and visibility that ran and what became of it: failed
-// when a test under it failed, passed when all passed, and otherwise
-// unfinished. A lifecycle is qualified as evidenceAxes qualifies one, with
-// the case's own builder and visibility.
+// preparedCaseEvidence reads a run of the prepared cases (PreparedCases) from
+// its tests rather than its header: one process runs many cases, and each
+// names itself in its subtests, <test>/<case name>/<visibility>, under the
+// test that runs its forge's cases of its event (PreparedCaseTest). It gives
+// the overlay row of each case and visibility that ran and what became of
+// it: failed when a test under it failed, passed when all passed, and
+// otherwise unfinished. A lifecycle is qualified as evidenceAxes qualifies
+// one, with the case's own builder and visibility.
 func preparedCaseEvidence(verdict LiveRunVerdict) map[string]string {
-	cases := map[string]PreparedCase{}
-	for _, c := range ForgejoPreparedCases {
-		cases[c.Name()] = c
+	type forgeCase struct {
+		forge string
+		PreparedCase
+	}
+
+	cases := map[string]forgeCase{}
+
+	for _, forge := range []string{campaignForgejo, campaignGitLab} {
+		for _, c := range PreparedCases(forge) {
+			cases[PreparedCaseTest(forge, c.Event)+"/"+c.Name()] = forgeCase{forge, c}
+		}
 	}
 
 	evidence := map[string]string{}
 
 	for _, test := range verdict.Tests {
-		// The scenario, the four elements of the case name, the visibility.
+		// The test, the four elements of the case name, the visibility.
 		elements := strings.Split(test.Name, "/")
 		if len(elements) < 6 {
 			continue
 		}
 
-		c, isCase := cases[strings.Join(elements[1:5], "/")]
+		c, isCase := cases[strings.Join(elements[:5], "/")]
 		if !isCase {
 			continue
 		}
@@ -158,7 +167,7 @@ func preparedCaseEvidence(verdict LiveRunVerdict) map[string]string {
 			flow = matrixDevelopment
 		}
 
-		key := campaignForgejo + " " + c.Demo + " " + flow
+		key := c.forge + " " + c.Demo + " " + flow
 		if flow == TrialLifecycle {
 			key = strings.Join(slices.Concat(
 				[]string{key, settingVisibility + "=" + elements[5], settingImageBuilder + "=" + c.Builder}, adminAxes(verdict.Run)), " ")

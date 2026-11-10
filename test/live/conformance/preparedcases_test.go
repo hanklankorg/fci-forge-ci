@@ -26,12 +26,12 @@ const (
 // forEachConsumerCheckout runs trial on the consumer checkouts the run names.
 // A checkout named by FORGE_CI_LIVE_CONSUMER is the only one, with the event
 // and settings of the caller's environment. Otherwise the prepared directory
-// (livetest.PreparedEnv) gives one per case of the forge's table,
-// livetest.ForgejoPreparedCases or livetest.GitLabPreparedCases, with one of
-// events, each the subtest the case names, on the demo's checkout there. The
-// subtest's environment is what `just test-live-consumer <forge>` hands a
-// trial: the checkout, the event and the case's settings, with the prepared
-// images and the case's builder. With neither, the test is skipped with usage.
+// (livetest.PreparedEnv) gives one per case of the forge's table
+// (livetest.PreparedCases) with one of events, each the subtest the case
+// names, on the demo's checkout there. The subtest's environment is what
+// `just test-live-consumer <forge>` hands a trial: the checkout, the event
+// and the case's settings, with the prepared images and the case's builder.
+// With neither, the test is skipped with usage.
 func forEachConsumerCheckout(t *testing.T, forge provider.ForgeAPI, usage string, trial func(t *testing.T, root string), events ...string) {
 	t.Helper()
 
@@ -51,12 +51,7 @@ func forEachConsumerCheckout(t *testing.T, forge provider.ForgeAPI, usage string
 		t.Fatal(err)
 	}
 
-	cases := livetest.ForgejoPreparedCases
-	if forge == provider.ForgeGitLab {
-		cases = livetest.GitLabPreparedCases
-	}
-
-	for _, c := range cases {
+	for _, c := range livetest.PreparedCases(string(forge)) {
 		if !slices.Contains(events, c.Event) {
 			continue
 		}
@@ -74,6 +69,10 @@ func forEachConsumerCheckout(t *testing.T, forge provider.ForgeAPI, usage string
 			t.Setenv(livetest.ImageBuilderEnv(forge), c.Builder)
 
 			for name, value := range environment {
+				t.Setenv(name, value)
+			}
+
+			for name, value := range c.LaneEnvironment(string(forge)) {
 				t.Setenv(name, value)
 			}
 

@@ -50,16 +50,18 @@ func TestGitLabRelease_MinimalSignedArtifacts(t *testing.T) {
 func TestGitLabRelease_ConsumerTrial(t *testing.T) {
 	livetest.RegisterLiveScenario(t)
 
-	root := os.Getenv(consumerCheckoutEnv)
-	if root == "" {
+	// A full run keeps its coverage requirement: only a focused one may skip.
+	if os.Getenv(consumerCheckoutEnv) == "" && os.Getenv(livetest.PreparedEnv) == "" {
 		livetest.NotCoveredf(t, "use the GitLab consumer-release recipe with a clean reviewed checkout")
 	}
 
-	for _, visibility := range livetest.ConsumerVisibilities(t) {
-		t.Run(visibility.Name, func(t *testing.T) {
-			runGitLabRelease(t, root, visibility.Private)
-		})
-	}
+	forEachConsumerCheckout(t, provider.ForgeGitLab, "just test-live-consumer gitlab <checkout> release job-archive=<path> build-archive=<path> signer-archive=<path>", func(t *testing.T, root string) {
+		for _, visibility := range livetest.ConsumerVisibilities(t) {
+			t.Run(visibility.Name, func(t *testing.T) {
+				runGitLabRelease(t, root, visibility.Private)
+			})
+		}
+	}, livetest.TrialRelease)
 }
 
 // Exercise first-push protection without publishing tool images or running a

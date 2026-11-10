@@ -1444,6 +1444,25 @@ campaign-prepare forge_lab dir +lanes:
 campaign-lane dir provider cases *select:
     @cd {{ quote(invocation_directory()) }} && exec bash {{ quote(justfile_directory() / "scripts" / "ci" / "campaign.sh") }} lane "$@"
 
+# Run cases of the Go tables (livetest.ForgejoPreparedCases,
+# GitLabPreparedCases) on the demos and images of a prepared directory. A
+# case is the subtest <test>/<lane>/<demo>/<event>/<builder>/<visibility>, so
+# the `go test -run` pattern selects a whole lane or one cell;
+# livetest.PreparedLanes lists the lanes and the scenarios each runs beside
+# its cases. Visibility and administrator inputs are the caller's
+# (FORGE_CI_LIVE_CONSUMER_VISIBILITY, FORGE_CI_LIVE_ADMIN_<CHECK>). Refused
+# unless HEAD is the prepared commit with nothing on top.
+#
+#   FORGE_CI_LIVE_CONSUMER_VISIBILITY=private just test-live-prepared ~/campaigns/k3s forgejo '^TestForgejoLayer_ConsumerTrial$/^private$'
+#   just test-live-prepared ~/campaigns/k3s forgejo '^TestForgejoLayer_ConsumerLifecycle$/^lifecycle$/^hello-maven-service$/^lifecycle$/^kaniko$/^public$'
+[arg('dir', help='Absolute prepared directory from just campaign-prepare')]
+[arg('forge', help='forgejo or gitlab')]
+[arg('run', help='go test -run pattern: <test>/<lane>[/<demo>/<event>/<builder>/<visibility>]')]
+[doc('Live; run prepared demo cases from the Go tables; network, destructive')]
+[group('campaign')]
+test-live-prepared dir forge run:
+    @FORGE_CI_LIVE_PREPARED="$1" FORGE_CI_LIVE_PROVIDER="$2" exec bash scripts/ci/run-live-tests.sh focused "$3"
+
 # ==================================================================================== #
 # INTERNAL
 # ==================================================================================== #

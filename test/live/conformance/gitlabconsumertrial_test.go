@@ -29,16 +29,13 @@ import (
 func TestGitLabLayer_ConsumerTrial(t *testing.T) {
 	livetest.RegisterAdmittedScenario(t)
 
-	root := os.Getenv(consumerCheckoutEnv)
-	if root == "" {
-		t.Skip("use just test-live-consumer gitlab <checkout> pull-request job-archive=<prepared-job-image.tar>")
-	}
-
-	for _, visibility := range livetest.ConsumerVisibilities(t) {
-		t.Run(visibility.Name, func(t *testing.T) {
-			runGitLabConsumerTrial(t, root, visibility.Private)
-		})
-	}
+	forEachConsumerCheckout(t, provider.ForgeGitLab, "just test-live-consumer gitlab <checkout> pull-request job-archive=<prepared-job-image.tar>", func(t *testing.T, root string) {
+		for _, visibility := range livetest.ConsumerVisibilities(t) {
+			t.Run(visibility.Name, func(t *testing.T) {
+				runGitLabConsumerTrial(t, root, visibility.Private)
+			})
+		}
+	}, livetest.TrialPullRequest)
 }
 
 func runGitLabConsumerTrial(t *testing.T, root string, private bool) {

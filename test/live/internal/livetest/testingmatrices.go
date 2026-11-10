@@ -25,7 +25,7 @@ import (
 // kind × flow, and matrix 2, the lifecycle's variant axes, are generated here
 // between the page's markers from one source, what the tree says: the shipped
 // demos' declarations as the planner and the campaign admission read them,
-// the cases files' lines and settings, and the live marks of
+// the lanes with their cases and settings (PreparedLanes), and the live marks of
 // TestingMatricesEvidence, a hand-kept overlay keyed by provider, demo and
 // flow, each mark qualified with the axis values its run had, since whether a
 // run proved something is a judgement; SeedTestingEvidence drafts it from
@@ -41,7 +41,6 @@ const (
 )
 
 const (
-	matrixCampaignsDir  = "test/live/campaigns"
 	matrixGitHub        = "github"
 	matrixDevelopment   = "development"
 	matrixScenario      = "scenario"
@@ -89,12 +88,11 @@ type matrixDemo struct {
 	snapshotRefusal error
 }
 
-// matrixLane is one cases file: its settings, each demo's consumer case
-// lines as words, and its scenarios.
+// matrixLane is one lane (PreparedLanes): its cases of the forge's table and
+// its scenarios.
 type matrixLane struct {
-	file, provider string
-	settings       map[string]string
-	consumers      map[string][][]string
+	name, provider string
+	cases          []PreparedCase
 	scenarios      []string
 }
 
@@ -109,9 +107,9 @@ type matrixMark struct {
 // a line, each for the axis values its run had.
 type matrixEvidence map[string][]matrixMark
 
-// The cases-file settings an overlay line may qualify a mark with: the run's
-// visibility (public, private or both), image builder and administrator
-// inputs, named as a cases file declares them.
+// The settings an overlay line may qualify a mark with: the run's visibility
+// (public, private or both), image builder and administrator inputs
+// (admin-<check>).
 const (
 	settingVisibility   = "visibility"
 	settingImageBuilder = "image-builder"
@@ -181,17 +179,12 @@ func readMatrices(root string) (matrices, error) {
 		return matrices{}, err
 	}
 
-	lanes, err := readMatrixLanes(root)
-	if err != nil {
-		return matrices{}, err
-	}
-
 	evidence, err := readMatrixEvidence(filepath.Join(root, TestingMatricesEvidence))
 	if err != nil {
 		return matrices{}, err
 	}
 
-	data := matrices{demos: demos, lanes: lanes, evidence: evidence}
+	data := matrices{demos: demos, lanes: matrixLanes(), evidence: evidence}
 
 	return data, data.knownSubjects()
 }
@@ -426,56 +419,24 @@ func matrixImages(typed pipeline.ConfigPlan) string {
 	}
 }
 
-func readMatrixLanes(root string) ([]matrixLane, error) {
-	files, err := filepath.Glob(filepath.Join(root, matrixCampaignsDir, "*.cases"))
-	if err != nil {
-		return nil, err
-	}
+// matrixLanes are the lanes as the matrices read them, in PreparedLanes'
+// order.
+func matrixLanes() []matrixLane {
+	lanes := make([]matrixLane, 0, len(PreparedLanes))
 
-	lanes := []matrixLane{}
+	for _, prepared := range PreparedLanes {
+		lane := matrixLane{name: prepared.Name, provider: prepared.Forge, scenarios: prepared.Scenarios}
 
-	for _, file := range files {
-		lane, err := readMatrixLane(file)
-		if err != nil {
-			return nil, err
+		for _, c := range PreparedCases(prepared.Forge) {
+			if prepared.Lane != "" && c.Lane == prepared.Lane {
+				lane.cases = append(lane.cases, c)
+			}
 		}
 
 		lanes = append(lanes, lane)
 	}
 
-	return lanes, nil
-}
-
-func readMatrixLane(file string) (matrixLane, error) {
-	name := strings.TrimSuffix(filepath.Base(file), ".cases")
-	lane := matrixLane{file: name, provider: name[strings.LastIndex(name, "-")+1:], settings: map[string]string{}, consumers: map[string][][]string{}}
-
-	if !isCampaignProvider(lane.provider) {
-		return lane, fmt.Errorf("%w: %s: a cases file is <lane>-<forgejo|gitlab>.cases", errTestingMatrices, file)
-	}
-
-	err := eachLine(file, func(_ int, line string) error {
-		words := strings.Fields(line)
-		if len(words) == 0 || strings.HasPrefix(words[0], "#") {
-			return nil
-		}
-
-		switch {
-		case words[0] == "setting" && len(words) == 2:
-			key, value, _ := strings.Cut(words[1], "=")
-			lane.settings[key] = value
-		case words[0] == caseConsumer && len(words) >= 3:
-			lane.consumers[words[1]] = append(lane.consumers[words[1]], words)
-		case words[0] == settingScenario && len(words) >= 2:
-			lane.scenarios = append(lane.scenarios, words[1])
-		default:
-			return fmt.Errorf("%w: %s: unreadable case %q", errTestingMatrices, file, line)
-		}
-
-		return nil
-	})
-
-	return lane, err
+	return lanes
 }
 
 // readMatrixEvidence reads the overlay: `<provider> <demo|scenario> <event>
@@ -576,41 +537,24 @@ func (data matrices) hasLine(provider string, demo matrixDemo, event string) boo
 	return false
 }
 
-// lines are the lane's case lines of the demo's event, as words.
-func (lane matrixLane) lines(demo, event string) [][]string {
-	var lines [][]string
+// lines are the lane's cases of the demo's event.
+func (lane matrixLane) lines(demo, event string) []PreparedCase {
+	var lines []PreparedCase
 
-	for _, words := range lane.consumers[demo] {
-		if words[2] == event {
-			lines = append(lines, words)
+	for _, c := range lane.cases {
+		if c.Demo == demo && c.Event == event {
+			lines = append(lines, c)
 		}
 	}
 
 	return lines
 }
 
-// runs reports whether a case line of the lane runs with the setting at
-// value: a declared setting is the lane's, an undeclared one the run's
-// selector, which takes every value, and a Forgejo line's builder is its own
-// CI_IMAGE_BUILDER, as the campaign plans it.
-func (lane matrixLane) runs(setting, value string, words []string) bool {
-	declared, found := lane.settings[setting]
-
-	if setting == settingImageBuilder && lane.provider == campaignForgejo {
-		variables := map[string]string{}
-
-		for _, word := range words[3:] {
-			if key, val, isVariable := strings.Cut(word, "="); isVariable {
-				variables[key] = val
-			}
-		}
-
-		builder, err := ForgejoConsumerImageBuilder(variables, declared)
-
-		return err == nil && builder == value
-	}
-
-	return !found || declared == value
+// caseRuns reports whether a case runs with the setting at value: the
+// builder is the case's own, and the visibility and the administrator inputs
+// are the caller's, which take every value.
+func caseRuns(setting, value string, c PreparedCase) bool {
+	return setting != settingImageBuilder || c.Builder == value
 }
 
 // lifecycleApplies is whether the demo has a lifecycle on the provider: on
@@ -757,7 +701,7 @@ func (data matrices) axisState(provider string, demo matrixDemo, setting, value 
 }
 
 // laneValueCell is the best lifecycle state among the provider's lifecycle
-// lines that run with the setting at value (matrixLane.runs): the overlay's
+// lines that run with the setting at value (caseRuns): the overlay's
 // mark of a run that had that value, or else the line. On hosted GitHub the
 // lifecycle's visibility is the run's selector, as on the lab forges; it has
 // no lane for the other settings.
@@ -776,8 +720,8 @@ func (data matrices) laneValueCell(provider, setting, value string) string {
 		}
 
 		for _, lane := range data.lanes {
-			if lane.provider == provider && slices.ContainsFunc(lane.lines(demo.name, TrialLifecycle), func(words []string) bool { return lane.runs(setting, value, words) }) {
-				consider(demo, lane.file)
+			if lane.provider == provider && slices.ContainsFunc(lane.lines(demo.name, TrialLifecycle), func(c PreparedCase) bool { return caseRuns(setting, value, c) }) {
+				consider(demo, lane.name)
 			}
 		}
 	}
@@ -902,7 +846,7 @@ func (data matrices) variantsSection() string {
 				mark = matrixMark{mark: markLine}
 			}
 
-			fmt.Fprintf(&page, "| %s | `%s` | %s |\n", lane.file, scenario, mark.cell(""))
+			fmt.Fprintf(&page, "| %s | `%s` | %s |\n", lane.name, scenario, mark.cell(""))
 		}
 	}
 

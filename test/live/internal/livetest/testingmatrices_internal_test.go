@@ -175,14 +175,14 @@ func TestReadMatricesRefusesAnUnknownSubject(t *testing.T) {
 
 // A mark qualified with its run's axis values shows on those values alone;
 // an unqualified mark leaves a run-selected axis at the line, since nothing
-// says which value proved it. A Forgejo line's builder is its own, and an
-// undeclared visibility covers both.
+// says which value proved it. A case's builder is its own, and the caller's
+// visibility covers both.
 func TestLaneValueCellShowsAMarkOnTheValuesItsRunHad(t *testing.T) {
 	t.Parallel()
 
-	lane := matrixLane{file: "lc-forgejo", provider: campaignForgejo, settings: map[string]string{}, consumers: map[string][][]string{
-		"qualified":   {strings.Fields("consumer qualified lifecycle CI_IMAGE_BUILDER=buildah"), strings.Fields("consumer qualified lifecycle CI_IMAGE_BUILDER=kaniko")},
-		"unqualified": {strings.Fields("consumer unqualified lifecycle")},
+	lane := matrixLane{name: "lc-forgejo", provider: campaignForgejo, cases: []PreparedCase{
+		{Demo: "qualified", Event: TrialLifecycle, Builder: ImageBuilderBuildah}, {Demo: "qualified", Event: TrialLifecycle, Builder: ImageBuilderKaniko},
+		{Demo: "unqualified", Event: TrialLifecycle, Builder: ImageBuilderBuildah},
 	}}
 	evidence := matrixEvidence{
 		"forgejo/qualified/lifecycle":   {{mark: "✅", note: "root", axes: map[string]string{settingVisibility: visibilityPublic, settingImageBuilder: ImageBuilderBuildah}}},
@@ -268,7 +268,8 @@ forgejo hello-maven-service lifecycle ✅ visibility=private image-builder=kanik
 // A run of the prepared cases names no consumer in its header: each case is
 // read from its own subtests. A case with a failed test is failed whatever
 // its other tests did, one still running is unfinished, a lifecycle carries
-// its builder and visibility, and a test of no case is left out.
+// its builder and visibility, and a test of no case is left out, as is a case
+// under another test than the one that runs its forge's cases of its event.
 func TestSeedTestingEvidenceReadsPreparedCasesFromTheirTests(t *testing.T) {
 	t.Parallel()
 
@@ -282,6 +283,9 @@ func TestSeedTestingEvidenceReadsPreparedCasesFromTheirTests(t *testing.T) {
 		`{"name":"TestForgejoLayer_ConsumerTrial/release-variants/hello-go-cli/release/buildah/private","result":"fail"},`+
 		`{"name":"TestForgejoLayer_Snapshot/snapshot/hello-cargo-workspace/snapshot/buildah/public","result":"pass"},`+
 		`{"name":"TestForgejoLayer_ConsumerTrial/release-variants/no-such-demo/release/buildah/public","result":"pass"},`+
+		`{"name":"TestGitLabLayer_ConsumerLifecycle/lifecycle/hello-maven-service/lifecycle/kaniko/private","result":"pass"},`+
+		`{"name":"TestGitLabRelease_ConsumerTrial/private/hello-maven/release/kaniko/private","result":"pass"},`+
+		`{"name":"TestGitLabLayer_ConsumerTrial/private/hello-maven/release/kaniko/private","result":"pass"},`+
 		`{"name":"TestForgejoLayer_ConsumerTrial/public","result":"pass"}]}`)
 
 	seed, err := SeedTestingEvidence(live, "")
@@ -293,6 +297,8 @@ func TestSeedTestingEvidenceReadsPreparedCasesFromTheirTests(t *testing.T) {
 forgejo hello-go-cli release ❌ 2026-11-10
 forgejo hello-go-service lifecycle ⏳ visibility=private image-builder=buildah admin-lint=false 2026-11-10
 forgejo hello-maven-service lifecycle ✅ visibility=public image-builder=kaniko admin-lint=false 2026-11-10
+gitlab hello-maven release ✅ 2026-11-10
+gitlab hello-maven-service lifecycle ✅ visibility=private image-builder=kaniko admin-lint=false 2026-11-10
 `; seed != want {
 		t.Fatalf("seed:\n%s\nwant:\n%s", seed, want)
 	}
