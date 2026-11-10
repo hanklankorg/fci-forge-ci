@@ -295,6 +295,16 @@ func runTrial(t *testing.T, trial *livetest.GitHubTrial, engine livetest.GitHubE
 		trial = trial.WithFile(livetest.ServiceSnapshotDeclarationFile, livetest.ServiceSnapshotOverlay(t, root))
 	}
 
+	// A release signs its files at the release commit's time, and one that
+	// prepares no commit signs at the pushed commit's: the key must exist
+	// before that commit does. Made after the push, the key was not yet valid
+	// at that time and the no-changelog release refused to sign (hosted run
+	// 42733793511, 2026-11-10).
+	var key livetest.TrialGPGKey
+	if settings.Event == livetest.TrialRelease {
+		key = trial.NewTrialGPGKey()
+	}
+
 	tree := trial.PushConsumer(repo, root, fixtures, engine, signing.overrides)
 	trial.SetVariable(repo, "FORGE_CI_REPOSITORY", engine.Owner+"/"+engine.Repository)
 	trial.SetVariable(repo, "RELEASE_PLATFORMS", settings.Platforms)
@@ -336,7 +346,6 @@ func runTrial(t *testing.T, trial *livetest.GitHubTrial, engine livetest.GitHubE
 		return
 	}
 
-	key := trial.NewTrialGPGKey()
 	setReleaseSecrets(t, trial, repo, signing, key, releaseToken, demo != "")
 
 	request, final, err := livetest.ReleaseRequestTag(settings.Version)
