@@ -352,14 +352,26 @@ buildah (633 to 635) and with kaniko (636 to 638), the Cargo container (639
 to 641), the npm service (642 to 644) and the Go service (645 to 647), and
 the Maven reactor's development build (648).
 
-Offered inputs that still have no native scenario and no disposition, from
-the audit of 2026-11-10: `release.requireallowlistedsigner` on GitHub; a
-`release-branch` other than main; the base-image promotion workflow (its CLI
-verb is covered); `release-asset-retention`, draft releases and package
-retention through a workflow (each covered through the CLI); the
-`stable-prerelease` policy through the Forgejo and GitLab workflows;
-`lint-engine: megalinter` and `none`; `skip-signer-image-check`; and an
-assertion on what `enforce-reproducible-builds` does on GitHub and GitLab.
+Offered inputs without a native scenario, from the audit of 2026-11-10.
+**Offline disposition**, where an offline test proves that the workflow
+hands the input to the engine and a native CLI scenario proves what the
+engine then does:
+
+| Input | Offline owner under `test/` |
+|---|---|
+| `skip-signer-image-check` | `forgejobehavior/signeravailability_test.go` |
+| `release.requireallowlistedsigner` on GitHub | `workflowguard/late_request_signature_policy_test.go`; `internal/app/validate/tags_allowlist_test.go`, `tags_enforcement_test.go` (outside `test/`) |
+| `release-branch` | `forgejobehavior/preparerelease_test.go`; `gitlabbehavior/release_test.go` (not from the environment, must be a branch name) |
+| `stable-prerelease` | `forgejobehavior/preparereleasecontext_test.go`; `gitlabbehavior/releasepolicy_test.go` |
+| draft releases | `forgejobehavior/publishrelease_test.go` |
+| package retention | `forgejobehavior/retention_test.go` |
+| base-image promotion workflow | `forgejobehavior/baserepository_test.go`, `cosigntrustroot_test.go` |
+| `enforce-reproducible-builds` | `gitlabbehavior/adminpath_test.go`; `workflowguard/adminsettings_guard_test.go` |
+
+**Still open**, with neither: `release-asset-retention` through a workflow
+(the CLI verb is covered natively); a native run with `lint-engine:
+megalinter` or `none` (the wiring is guarded offline); and a whole release
+cut from a branch other than main.
 `TestForgejoLayer_ConsumerSnapshotTrial` runs a consumer's own push-triggered
 `snapshot.yml`, which no shipped fixture has: it is an operator's scenario for
 a checkout of their own.
