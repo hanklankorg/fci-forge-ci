@@ -252,6 +252,8 @@ func runLayerConsumerPR(t *testing.T, private bool, objectFormat string, pr cons
 		wantJobs[name] = jobSuccess
 	}
 
+	wantStatus := maps.Clone(wantJobs)
+
 	if len(jobs) != len(wantJobs) {
 		t.Fatalf("got %d jobs, want %d", len(jobs), len(wantJobs))
 	}
@@ -291,6 +293,14 @@ func runLayerConsumerPR(t *testing.T, private bool, objectFormat string, pr cons
 
 	if artifacts := livetest.RunArtifacts(t, target, repo, run.ID); len(artifacts) != 0 {
 		t.Errorf("the pull request's run left artifacts: %+v", artifacts)
+	}
+
+	// Read last, after everything above: a job the forge still lists as
+	// blocked is one it could yet hand to a runner.
+	for _, job := range livetest.RunJobs(t, target, repo, run.ID) {
+		if want, ok := wantStatus[job.Name]; ok && want == "" && (job.TaskID == nil || *job.TaskID != 0) {
+			t.Errorf("a runner took job %q (%s) after the run ended, want it never started", job.Name, job.Status)
+		}
 	}
 }
 

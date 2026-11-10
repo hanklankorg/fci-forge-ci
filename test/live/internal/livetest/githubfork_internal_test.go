@@ -86,7 +86,9 @@ func TestForkRefusalGap(t *testing.T) {
 		"checkout ran":          {"failure", []*github.WorkflowJob{build(step(forkRefusalStep, "failure"), step(forkCheckoutStep, "success"), step("Build NPM project", "skipped"))}},
 		"build ran":             {"failure", []*github.WorkflowJob{build(step(forkRefusalStep, "failure"), step(forkCheckoutStep, "skipped"), step("Build NPM project", "failure"))}},
 		"checkout first":        {"failure", []*github.WorkflowJob{build(step(forkCheckoutStep, "success"), step(forkRefusalStep, "failure"))}},
-		"refused twice":         {"failure", []*github.WorkflowJob{refused, refused}},
+		"a step first": {"failure", []*github.WorkflowJob{build(step("Set up job", "success"), step("Log in to the registry", "success"),
+			step(forkRefusalStep, "failure"), step(forkCheckoutStep, "skipped"))}},
+		"refused twice": {"failure", []*github.WorkflowJob{refused, refused}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()

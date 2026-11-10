@@ -103,8 +103,9 @@ func (trial *GitHubTrial) CheckForkRefusal(repo string, run *github.WorkflowRun)
 
 // forkRefusalGap judges the jobs of a fork pull request's run: the run
 // failed, exactly one job ran the refusal step and it failed there, and in
-// that job the checkout and every later step of the workflow were skipped.
-// The runner's own closing steps are not the workflow's and may run.
+// that job it is the workflow's first step and the checkout and every later
+// step of the workflow were skipped. The runner's own opening and closing
+// steps are not the workflow's and may run.
 func forkRefusalGap(conclusion string, jobs []*github.WorkflowJob) error {
 	if conclusion != runFailure {
 		return fmt.Errorf("ended %s, want failure: %w", conclusion, errReleaseEvidence)
@@ -132,6 +133,12 @@ func forkRefusalGap(conclusion string, jobs []*github.WorkflowJob) error {
 
 		if got := job.Steps[refusal].GetConclusion(); got != runFailure {
 			return fmt.Errorf("job %q: the refusal step ended %s, want failure: %w", job.GetName(), got, errReleaseEvidence)
+		}
+
+		for _, step := range job.Steps[:refusal] {
+			if name := step.GetName(); name != "Set up job" && name != "Initialize containers" {
+				return fmt.Errorf("job %q: step %q precedes the refusal, want the refusal first: %w", job.GetName(), name, errReleaseEvidence)
+			}
 		}
 
 		if checkout < refusal {

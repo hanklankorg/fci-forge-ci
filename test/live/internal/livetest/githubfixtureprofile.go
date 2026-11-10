@@ -71,6 +71,15 @@ const (
 	githubGPGWorkflow = "release-gpg.yml"
 )
 
+// githubGPGProfiles are the fixture roots admitted to the GPG config, each
+// with the one workflow it installs: the GPG release and its variants, which
+// sign with the trial's disposable key and write to no public log.
+var githubGPGProfiles = map[string]string{
+	githubGPGFixtures:               githubGPGWorkflow,
+	"test/live/github-no-sboms":     "release-no-sboms.yml",
+	"test/live/github-no-changelog": "release-no-changelog.yml",
+}
+
 // Profile inputs are frozen paths, not GitHub programs. This admission-local
 // allowlist excludes all interpolation delimiters, shell syntax and whitespace,
 // not just one expression spelling. Like validate's literalInput.refusal, quoted
@@ -138,9 +147,9 @@ func validateGitHubGPGFixtureWorkflows(fixtures string, workflows map[string]str
 		return nil, fmt.Errorf("fixture directory must be canonical repo-relative: %w", errs.ErrValidation)
 	}
 
-	gpg := fixtures == githubGPGFixtures
-	if gpg && (len(workflows) != 1 || workflows[githubGPGWorkflow] == "") {
-		return nil, fmt.Errorf("native Go GPG fixture must install exactly %s: %w", githubGPGWorkflow, errs.ErrValidation)
+	gpgWorkflow, gpg := githubGPGProfiles[fixtures]
+	if gpg && (len(workflows) != 1 || workflows[gpgWorkflow] == "") {
+		return nil, fmt.Errorf("native Go GPG fixture must install exactly %s: %w", gpgWorkflow, errs.ErrValidation)
 	}
 
 	var configs []string

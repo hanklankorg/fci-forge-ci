@@ -28,8 +28,8 @@ func TestGitHubReleaseProfile_ShippedGoCLIVariants(t *testing.T) {
 	}{
 		{"test/live/github", "release.yml", githubReleaseProfile{GitSigning: config.GitSignSSH, Prepares: true, SBOMBundle: sbomBundleOffered}},
 		{"test/live/github-gpg", "release-gpg.yml", githubReleaseProfile{GitSigning: config.GitSignGPG, Prepares: true, SBOMBundle: sbomBundleOffered}},
-		{"test/live/github-no-sboms", "release-no-sboms.yml", githubReleaseProfile{GitSigning: config.GitSignSSH, Prepares: true, SBOMBundle: sbomBundleWithheld}},
-		{"test/live/github-no-changelog", "release-no-changelog.yml", githubReleaseProfile{GitSigning: config.GitSignSSH, Prepares: false, SBOMBundle: sbomBundleOffered}},
+		{"test/live/github-no-sboms", "release-no-sboms.yml", githubReleaseProfile{GitSigning: config.GitSignGPG, Prepares: true, SBOMBundle: sbomBundleWithheld}},
+		{"test/live/github-no-changelog", "release-no-changelog.yml", githubReleaseProfile{GitSigning: config.GitSignGPG, Prepares: false, SBOMBundle: sbomBundleOffered}},
 	} {
 		t.Run(tc.workflow, func(t *testing.T) {
 			dir := t.TempDir()

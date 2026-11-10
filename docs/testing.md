@@ -1578,6 +1578,10 @@ just test-live-consumer github /absolute/hello-go-cli release org=<org-id> fixtu
 just test-live-consumer github /absolute/hello-npm-package pull-request org=<org-id> fixtures=test/live/github-fork head=fork
 ```
 
+Both release variants are the GPG release with one input changed: files,
+commit and tag are signed with the trial's disposable GPG key, so neither
+writes to a public transparency log.
+
 - `release.sboms: none` (`github-no-sboms`): the release must offer no
   `*-sboms.zip`. Every other release whose policy and artifacts share a Build
   or analyzed-artifact layer must offer exactly one.
