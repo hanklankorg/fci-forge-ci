@@ -10,12 +10,11 @@ package conformance_test
 
 import (
 	"errors"
-	"fmt"
 	"maps"
-	"net/url"
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -48,29 +47,11 @@ const (
 )
 
 // versionRelease is what the version workflows ask the product to release,
-// and the SSH endpoint of the URL they push to.
+// and the SSH URL they push to with the host key pin of its host.
 type versionRelease struct {
 	Repository  string
 	GitURL      string
 	Fingerprint string
-	sshHost     string
-	sshPort     string
-}
-
-// newVersionRelease reads the SSH endpoint out of the release URL, which is
-// the one place it is written.
-func newVersionRelease(repository, gitURL, fingerprint string) (versionRelease, error) {
-	parsed, err := url.Parse(gitURL)
-	if err != nil || parsed.Scheme != "ssh" || parsed.Hostname() == "" {
-		return versionRelease{}, fmt.Errorf("release URL %q is not an ssh URL: %w", gitURL, errors.ErrUnsupported)
-	}
-
-	port := parsed.Port()
-	if port == "" {
-		port = "22"
-	}
-
-	return versionRelease{Repository: repository, GitURL: gitURL, Fingerprint: fingerprint, sshHost: parsed.Hostname(), sshPort: port}, nil
 }
 
 // versionTrigger is the tag whose push starts one of the version workflows.
@@ -111,8 +92,6 @@ jobs:
           PROBE_REPOSITORY: ` + strconv.Quote(release.Repository) + `
           PROBE_GIT_URL: ` + strconv.Quote(release.GitURL) + `
           PROBE_HOST_KEY_FINGERPRINT: ` + strconv.Quote(release.Fingerprint) + `
-          PROBE_SSH_HOST: ` + strconv.Quote(release.sshHost) + `
-          PROBE_SSH_PORT: ` + strconv.Quote(release.sshPort) + `
           PROBE_AUTHOR_NAME: ` + strconv.Quote(versionAuthorName) + `
           PROBE_AUTHOR_EMAIL: ` + strconv.Quote(versionAuthorEmail) + `
         run: |
@@ -152,25 +131,10 @@ printf '%s\n' __COMMIT_MESSAGE__ > commit-msg.txt
 printf '%s\n' 'not part of the release' > unrelated.txt
 `
 
-// versionDryRunScript previews the release from an operator's shell: one that
-// already has an SSH route to the release host.
-//
-// A dry run sets up no SSH of its own and ignores --host-key-fingerprint, and
-// still asks the release URL over SSH whether the tag exists. Without a route
-// of the caller's it fails; docs/live-scenario-refactor.md records that as a
-// product finding, which this scenario does not judge. So the job brings the
-// route: the deploy key as an SSH identity and a known_hosts entry held to the
-// contract's fingerprint. The key leaves the signing variable, because a
-// preview signs nothing; it still authenticates the read.
+// versionDryRunScript previews the release as the release job would make it:
+// with the signing key and the pinned host key, over which the preview asks
+// the release URL whether the tag exists. It signs and pushes nothing.
 const versionDryRunScript = `
-ssh_dir=$(mktemp -d)
-printf '%s\n' "$SSH_SIGNING_KEY" > "$ssh_dir/key"
-chmod 600 "$ssh_dir/key"
-unset SSH_SIGNING_KEY
-ssh-keyscan -t ed25519 -p "$PROBE_SSH_PORT" "$PROBE_SSH_HOST" > "$ssh_dir/known_hosts"
-ssh-keygen -l -f "$ssh_dir/known_hosts" | grep -qF " $PROBE_HOST_KEY_FINGERPRINT "
-export GIT_SSH_COMMAND="ssh -i $ssh_dir/key -o IdentitiesOnly=yes -o UserKnownHostsFile=$ssh_dir/known_hosts -o StrictHostKeyChecking=yes"
-
 run_product __COMMAND__ --dry-run \
   --tag "$PROBE_TAG" --branch main --repository "$PROBE_REPOSITORY" \
   --git-url "$PROBE_GIT_URL" --host-key-fingerprint "$PROBE_HOST_KEY_FINGERPRINT" \
@@ -211,8 +175,8 @@ const versionFixtureFingerprint = "SHA256:fixtureHostKeyPin+/0123456789abcdefghi
 
 // versionStandIn replaces the prelude offline. Its run_product records each
 // invocation, one line of <argument> cells, and does to the working directory
-// only what the script goes on to check; git and the OpenSSH tools answer as
-// a fresh checkout and the pinned host would.
+// only what the script goes on to check; git answers as a fresh checkout
+// would, and the OpenSSH tools are only looked for.
 const versionStandIn = `run_product() {
   printf '<%s>' "$@" >> "$FIXTURE_DIR/calls"
   printf '\n' >> "$FIXTURE_DIR/calls"
@@ -237,17 +201,14 @@ git() {
   esac
 }
 ssh() { :; }
-ssh-keyscan() { echo "[$5]:$4 ssh-ed25519 AAAAfixture"; }
-ssh-keygen() { echo "256 $FIXTURE_SCANNED [forge.invalid]:2222 (ED25519)"; }`
+ssh-keyscan() { :; }
+ssh-keygen() { :; }`
 
 // versionFixture decodes one version workflow and returns its only step.
 func versionFixture(t *testing.T, dryRun bool) (probeStep, []string) {
 	t.Helper()
 
-	release, err := newVersionRelease("owner/fci-version", "ssh://git@forge.invalid:2222/owner/fci-version.git", versionFixtureFingerprint)
-	if err != nil {
-		t.Fatal(err)
-	}
+	release := versionRelease{Repository: "owner/fci-version", GitURL: "ssh://git@forge.invalid:2222/owner/fci-version.git", Fingerprint: versionFixtureFingerprint}
 
 	var workflow struct {
 		On struct {
@@ -278,9 +239,8 @@ func versionFixture(t *testing.T, dryRun bool) (probeStep, []string) {
 // with the two expressions resolved and the stand-in's answers added.
 func versionFixtureEnv(step probeStep, dir string, overrides map[string]string) []string {
 	values := map[string]string{
-		"FIXTURE_DIR":     dir,
-		"FIXTURE_SCANNED": versionFixtureFingerprint,
-		"FIXTURE_BUMPED":  strings.TrimPrefix(versionReleaseTag, "v"),
+		"FIXTURE_DIR":    dir,
+		"FIXTURE_BUMPED": strings.TrimPrefix(versionReleaseTag, "v"),
 		"FIXTURE_NARRATION": "[dry-run] would push main to origin (no force)\n" +
 			"[dry-run] would push tag " + versionReleaseTag + " to origin (no force)",
 	}
@@ -310,8 +270,6 @@ func TestVersionWorkflows_BindTheReleaseInputs(t *testing.T) {
 		"PROBE_REPOSITORY":           "owner/fci-version",
 		"PROBE_GIT_URL":              "ssh://git@forge.invalid:2222/owner/fci-version.git",
 		"PROBE_HOST_KEY_FINGERPRINT": versionFixtureFingerprint,
-		"PROBE_SSH_HOST":             "forge.invalid",
-		"PROBE_SSH_PORT":             "2222",
 		"PROBE_AUTHOR_NAME":          "Version Probe",
 		"PROBE_AUTHOR_EMAIL":         "version-probe@invalid.example",
 	}
@@ -402,14 +360,10 @@ func TestVersionWorkflows_RefuseAProductThatDidNotDoIt(t *testing.T) {
 		name     string
 		dryRun   bool
 		override map[string]string
-		product  bool
 	}{
-		// A host key that is not the pinned one ends the job before the
-		// product is given a route to it.
-		{"dry-run/host-key-not-pinned", true, map[string]string{"FIXTURE_SCANNED": "SHA256:another"}, false},
-		{"dry-run/no-tag-push-narrated", true, map[string]string{"FIXTURE_NARRATION": "[dry-run] would push main to origin (no force)"}, true},
-		{"dry-run/no-branch-push-narrated", true, map[string]string{"FIXTURE_NARRATION": "[dry-run] would push tag v1.4.2 to origin (no force)"}, true},
-		{"release/manifest-not-bumped", false, map[string]string{"FIXTURE_BUMPED": "0.0.1"}, true},
+		{"dry-run/no-tag-push-narrated", true, map[string]string{"FIXTURE_NARRATION": "[dry-run] would push main to origin (no force)"}},
+		{"dry-run/no-branch-push-narrated", true, map[string]string{"FIXTURE_NARRATION": "[dry-run] would push tag v1.4.2 to origin (no force)"}},
+		{"release/manifest-not-bumped", false, map[string]string{"FIXTURE_BUMPED": "0.0.1"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -421,28 +375,13 @@ func TestVersionWorkflows_RefuseAProductThatDidNotDoIt(t *testing.T) {
 				t.Fatal("the job passed")
 			}
 
-			released := false
-			for _, call := range versionFixtureCalls(t, dir) {
-				released = released || strings.HasPrefix(call, "<version><commit-changelog-release>")
-			}
-
-			if released != tc.product {
-				t.Errorf("the product was asked to release: %t, want %t", released, tc.product)
+			// The job failed on what the product left, not before asking it.
+			if !slices.ContainsFunc(versionFixtureCalls(t, dir), func(call string) bool {
+				return strings.HasPrefix(call, "<version><commit-changelog-release>")
+			}) {
+				t.Error("the product was never asked to release")
 			}
 		})
-	}
-}
-
-func TestNewVersionRelease_ReadsTheSSHEndpoint(t *testing.T) {
-	t.Parallel()
-
-	release, err := newVersionRelease("owner/repo", "ssh://git@forge.invalid/owner/repo.git", "SHA256:pin")
-	if err != nil || release.sshHost != "forge.invalid" || release.sshPort != "22" {
-		t.Errorf("default port: %+v, %v", release, err)
-	}
-
-	if _, err := newVersionRelease("owner/repo", "https://forge.invalid/owner/repo.git", "SHA256:pin"); err == nil {
-		t.Error("an https URL was taken for an SSH route")
 	}
 }
 

@@ -67,10 +67,7 @@ func TestInRunner_VersionCommitsTheChangelogRelease(t *testing.T) {
 	livetest.AddDeployKey(t, target, repo, "livetest version probe", public)
 	livetest.SetRepoSecret(t, target, repo, versionSigningKeySecret, private)
 
-	release, err := newVersionRelease(livetest.RepoSlug(target, repo), gitURL, fingerprint)
-	if err != nil {
-		t.Fatal(err)
-	}
+	release := versionRelease{Repository: livetest.RepoSlug(target, repo), GitURL: gitURL, Fingerprint: fingerprint}
 
 	// Both workflows in one commit, which is the head every release below
 	// starts from. Neither runs yet: each waits for its own tag.

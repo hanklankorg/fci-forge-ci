@@ -66,28 +66,27 @@ func commitChangelogReleaseCmd() *cli.Command {
 					return err
 				}
 
-				if in.DryRun {
-					// The SSH signing key, pinned host key, and GIT_SSH_COMMAND
-					// only serve the commit/push that dry-run skips — set none
-					// of it up (and leave the commit-message files in place for
-					// the real run).
-					_, _ = fmt.Fprintln(os.Stderr, "[dry-run] skipping SSH signing key and host-key setup (commit and push are skipped)")
-
-					_, releaseErr := appversion.ChangelogRelease(ctx, repo, dependencies.OutputSink, os.Stderr, in)
-
-					return releaseErr
-				}
-
 				privateKey, err := secret.Resolve(cmd.String("private-key-file"), "SSH_SIGNING_KEY")
 				if err != nil {
 					return err
 				}
 
-				if privateKey == "" {
-					return errs.CredentialRequired(errs.Credential{What: "SSH signing key", Flag: "private-key-file", Env: "SSH_SIGNING_KEY"})
-				}
-
 				_ = os.Unsetenv("SSH_SIGNING_KEY")
+
+				if privateKey == "" {
+					if !in.DryRun {
+						return errs.CredentialRequired(errs.Credential{What: "SSH signing key", Flag: "private-key-file", Env: "SSH_SIGNING_KEY"})
+					}
+
+					// A preview without the key signs and pushes nothing, but
+					// it still asks the release URL whether the tag exists.
+					// That read then goes over the caller's own SSH setup.
+					_, _ = fmt.Fprintln(os.Stderr, "[dry-run] no SSH signing key given: the remote tag check uses your own SSH configuration, not the pinned host key")
+
+					_, releaseErr := appversion.ChangelogRelease(ctx, repo, dependencies.OutputSink, os.Stderr, in)
+
+					return releaseErr
+				}
 
 				// The host key fingerprint is a trust anchor: the engine ships
 				// no default, so require it explicitly before pinning the host.
@@ -108,7 +107,14 @@ func commitChangelogReleaseCmd() *cli.Command {
 					return err
 				}
 				defer cleanup()
-				defer cleanupCommitMessageFiles(cmd.String("commit-body-path"), cmd.String("commit-message-file"))
+
+				// A preview reads the remote over the same pinned route as the
+				// release, and leaves the message files for the real run.
+				if !in.DryRun {
+					defer cleanupCommitMessageFiles(cmd.String("commit-body-path"), cmd.String("commit-message-file"))
+
+					in.SigningKeyPath = ssh.SigningKeyPath
+				}
 
 				restoreSSHCommand, err := cienv.SetTemporarily("GIT_SSH_COMMAND", ssh.Command)
 				if err != nil {
@@ -116,7 +122,6 @@ func commitChangelogReleaseCmd() *cli.Command {
 				}
 				defer restoreSSHCommand()
 
-				in.SigningKeyPath = ssh.SigningKeyPath
 				_, err = appversion.ChangelogRelease(ctx, repo, dependencies.OutputSink, os.Stderr, in)
 
 				return err
