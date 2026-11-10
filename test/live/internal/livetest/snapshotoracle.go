@@ -197,7 +197,7 @@ func (registry SnapshotRegistry) requireReceipt(ctx context.Context, tb TB, run 
 // plan and the receipts: what the plan's SBOM policy requires must be there,
 // and what it forbids must not. A planned image retains one artifact, whose
 // publication record (<image>-dist/<image>.json) names its receipt's tag,
-// digest and reference; that record is what binds the directory's documents
+// in its repository as the registry was given it, digest and reference; that record is what binds the directory's documents
 // to the published image, the product writing no image identity of its own
 // into them. Each planned platform holds its Trivy report, scanned whatever
 // the policy, and sbom.cyclonedx.json exactly when the plan generates one, a
@@ -225,9 +225,13 @@ func SnapshotEvidenceFindings(plan snapshotimage.Plan, receipts []snapshotimage.
 
 		var published appcontainer.SignerImageMetadata
 
+		// A receipt keeps the repository and the tag apart; the record holds
+		// the pushed reference (lab runs 610 and 621 to 629, 2026-11-10).
 		receipt := slices.IndexFunc(receipts, func(receipt snapshotimage.Receipt) bool { return receipt.Name == image.Name })
 		if err := json.Unmarshal(tree[record], &published); err != nil || receipt < 0 ||
-			published != (appcontainer.SignerImageMetadata{Tag: receipts[receipt].Tag, Digest: receipts[receipt].Digest, Ref: receipts[receipt].Ref}) {
+			published != (appcontainer.SignerImageMetadata{
+				Tag: receipts[receipt].ImageRepository + ":" + receipts[receipt].Tag, Digest: receipts[receipt].Digest, Ref: receipts[receipt].Ref,
+			}) {
 			findings = append(findings, fmt.Sprintf("the evidence of image %s is not bound to its receipt: %s records %+v", image.Name, record, published))
 		}
 

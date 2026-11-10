@@ -31,11 +31,13 @@ func TestSnapshotEvidenceFindings(t *testing.T) {
 	receipts := make([]snapshotimage.Receipt, 0, len(plan.Images))
 	for i, image := range plan.Images {
 		digest := "sha256:" + strings.Repeat(string(rune('a'+i)), 64)
-		receipts = append(receipts, snapshotimage.Receipt{Name: image.Name, Tag: "1-" + image.Name, Digest: digest, Ref: "registry.invalid/service/snapshot@" + digest})
+		receipts = append(receipts, snapshotimage.Receipt{
+			Name: image.Name, ImageRepository: "registry.invalid/service/snapshot", Tag: "1-" + image.Name, Digest: digest, Ref: "registry.invalid/service/snapshot@" + digest,
+		})
 	}
 
 	record := func(receipt snapshotimage.Receipt) []byte {
-		return fmt.Appendf(nil, `{"tag":%q,"digest":%q,"ref":%q}`, receipt.Tag, receipt.Digest, receipt.Ref)
+		return fmt.Appendf(nil, `{"tag":%q,"digest":%q,"ref":%q}`, receipt.ImageRepository+":"+receipt.Tag, receipt.Digest, receipt.Ref)
 	}
 
 	// kept is what a run that kept the plan's policy retains: the SBOM of
@@ -88,7 +90,10 @@ func TestSnapshotEvidenceFindings(t *testing.T) {
 		}, want: []string{"image service retained unplanned evidence service/linux-arm64/sbom.cyclonedx.json"}},
 		{name: "bound to another digest", mutate: func(evidence map[string]map[string][]byte) {
 			evidence["service"]["service-dist/service.json"] = record(receipts[1])
-		}, want: []string{"the evidence of image service is not bound to its receipt: service-dist/service.json records {Tag:1-worker Digest:" + receipts[1].Digest + " Ref:" + receipts[1].Ref + "}"}},
+		}, want: []string{"the evidence of image service is not bound to its receipt: service-dist/service.json records {Tag:registry.invalid/service/snapshot:1-worker Digest:" + receipts[1].Digest + " Ref:" + receipts[1].Ref + "}"}},
+		{name: "bound to a bare tag", mutate: func(evidence map[string]map[string][]byte) {
+			evidence["service"]["service-dist/service.json"] = fmt.Appendf(nil, `{"tag":%q,"digest":%q,"ref":%q}`, receipts[0].Tag, receipts[0].Digest, receipts[0].Ref)
+		}, want: []string{"the evidence of image service is not bound to its receipt: service-dist/service.json records {Tag:1-service Digest:" + receipts[0].Digest + " Ref:" + receipts[0].Ref + "}"}},
 		{name: "unbound", mutate: func(evidence map[string]map[string][]byte) {
 			delete(evidence["service"], "service-dist/service.json")
 		}, want: []string{"the evidence of image service is not bound to its receipt: service-dist/service.json records {Tag: Digest: Ref:}"}},
@@ -161,11 +166,11 @@ func TestSnapshotEvidenceFindingsOfTheDemoPolicies(t *testing.T) {
 			}
 
 			image := plan.Images[0]
-			receipts := []snapshotimage.Receipt{{Name: image.Name, Tag: image.Tag, Digest: digest, Ref: image.ImageRepository + "@" + digest}}
+			receipts := []snapshotimage.Receipt{{Name: image.Name, ImageRepository: image.ImageRepository, Tag: image.Tag, Digest: digest, Ref: image.ImageRepository + "@" + digest}}
 			sbom := image.Name + "/linux-amd64/sbom.cyclonedx.json"
 
 			evidence := map[string]map[string][]byte{image.Name: {
-				image.Name + "-dist/" + image.Name + ".json": fmt.Appendf(nil, `{"tag":%q,"digest":%q,"ref":%q}`, receipts[0].Tag, receipts[0].Digest, receipts[0].Ref),
+				image.Name + "-dist/" + image.Name + ".json": fmt.Appendf(nil, `{"tag":%q,"digest":%q,"ref":%q}`, image.ImageRepository+":"+image.Tag, receipts[0].Digest, receipts[0].Ref),
 				image.Name + "/linux-amd64/trivy.json":       []byte(scan),
 			}}
 			if cell.sbom {
