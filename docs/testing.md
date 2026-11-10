@@ -1825,7 +1825,7 @@ engine as an application pass. The Forgejo Maven trial, public or private, can
 instead opt into a job-local test-engine sidecar with
 `FORGE_CI_LIVE_MAVEN_TESTCONTAINERS_IMAGE`, an operator-reviewed immutable
 digest. The controller requires the disposable native amd64 Maven application
-fixture and the acknowledged privileged runner label from the v5 contract
+fixture and the tag of the build runner pool from the lab contract
 before it publishes the workflow. The sidecar and the images it starts come
 from their own registries, so a private consumer needs no extra credential.
 

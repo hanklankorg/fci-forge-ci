@@ -18,7 +18,7 @@ Supply the existing release trial inputs plus:
   The default remains CLI/application mode. Private packages are refused.
 
 Run `just test-live '^TestForgejoLayer_ConsumerTrial$/private$'` (or `/public$`)
-with the usual v5 contract, clean consumer, release event, version and reviewed
+with the usual lab contract, clean consumer, release event, version and reviewed
 signer image. Set `FORGE_CI_LIVE_CONSUMER_VISIBILITY` to `private` or `public`:
 the package goes to the owner's npm registry, not the scratch repository's, so a
 second visibility case in the same run would publish the same version again and
