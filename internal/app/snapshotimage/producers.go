@@ -258,6 +258,18 @@ func prepareProducer(plan snapshotimage.Plan, planned pipeline.PlannedArtifact, 
 	return exportTree(tmp, output, plan)
 }
 
+// downloadSource is where the build stage's uploaded artifact, downloaded to
+// dir, holds what the build left in producerSource. The Maven build uploads
+// its POMs beside target/, so its jars keep that directory; every other build
+// uploads the content of its output directory alone.
+func downloadSource(planned pipeline.PlannedArtifact, dir string) string {
+	if planned.ProjectType == projecttype.Maven {
+		return filepath.Join(dir, "target")
+	}
+
+	return dir
+}
+
 // producerSource is the existing build CLI's output directory for a project type.
 func producerSource(planned pipeline.PlannedArtifact) string {
 	switch planned.ProjectType {
@@ -457,7 +469,7 @@ func PrepareInputs(ctx context.Context, ops appversion.GenerateSnapshotOps, plan
 	defer func() { _ = os.RemoveAll(stage) }()
 
 	for _, planned := range plan.Artifacts {
-		if err := prepareProducer(plan, planned, filepath.Join(input, planned.Name), filepath.Join(stage, planned.Name)); err != nil {
+		if err := prepareProducer(plan, planned, downloadSource(planned, filepath.Join(input, planned.Name)), filepath.Join(stage, planned.Name)); err != nil {
 			return err
 		}
 	}

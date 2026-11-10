@@ -497,6 +497,32 @@ func TestAutomaticGoAndMavenMatrixAndCompleteProducerBarrier(t *testing.T) {
 	require.Len(t, runner.requests, 2, "gather must never rebuild")
 }
 
+// The hosted Maven build uploads its POM beside target/, as build-maven.yml
+// lists them. The import takes the jar from there to where the Containerfile
+// copies it from, and leaves the POM out of the image inputs.
+func TestPrepareInputsReadsAMavenDownloadAsTheBuildUploadsIt(t *testing.T) {
+	t.Chdir(t.TempDir())
+	require.NoError(t, os.Mkdir("java", 0o700))
+	in := input(t, "artifacts:\n  - name: java\n    project-type: maven\n    working-directory: java\n    sboms: none\ncontainers:\n  - name: java\n    context: java\n    from: [java]\n")
+	plan, err := appsnapshot.Plan(t.Context(), &git{head: in.SourceSHA}, in)
+	require.NoError(t, err)
+	require.Equal(t, "java/target", plan.Builds[0].RequiredArtifacts[0].Destination)
+	require.NoError(t, appsnapshot.WriteJSON("snapshot-plan.json", plan))
+
+	download := filepath.Join(snapshotimage.DefaultDownloadDir, "java")
+	require.NoError(t, os.MkdirAll(filepath.Join(download, "target"), 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(download, "pom.xml"), []byte("<project/>"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(download, "target", "app.jar"), []byte("built JAR"), 0o600))
+
+	require.NoError(t, appsnapshot.PrepareInputs(t.Context(), &git{head: plan.SourceSHA}, plan, snapshotimage.DefaultDownloadDir, snapshotimage.DefaultProducerDir))
+	require.NoError(t, appsnapshot.GatherContext(t.Context(), &git{head: plan.SourceSHA}, plan, "snapshot-plan.json", snapshotimage.DefaultProducerDir, "bundle"))
+
+	body, err := os.ReadFile("java/target/app.jar")
+	require.NoError(t, err)
+	require.Equal(t, "built JAR", string(body))
+	require.NoFileExists(t, "java/target/pom.xml")
+}
+
 func TestProducerDataCannotOmitOrRebindDependencies(t *testing.T) {
 	for _, defect := range []string{"missing matrix", "duplicate producer", "wrong upload", "foreign config", "missing platform", "bad epoch", "wrong destination", "extra producer", "inconsistent SBOM policy"} {
 		t.Run(defect, func(t *testing.T) {
