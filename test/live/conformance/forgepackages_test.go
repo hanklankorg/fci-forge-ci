@@ -214,6 +214,23 @@ const assert = require('node:assert/strict');
 assert.equal(require('./dist-tags.json')['` + tagPrefix + version + `'], '` + version + `');
 VERIFY
 )
+# A stranger's npm: no token in its environment, an empty configuration and a
+# cache of its own, so what it installs came from the public registry.
+(
+  stranger="$consumer/stranger"
+  mkdir "$stranger"
+  cd "$stranger"
+  printf '%s\n' '{"name":"registry-stranger","version":"1.0.0","private":true}' > package.json
+  : > anonymous.npmrc
+  env -u NODE_AUTH_TOKEN -u NPM_TOKEN -u FORGEJO_TOKEN -u CI_JOB_TOKEN -u GITHUB_TOKEN -u RELEASE_TOKEN \
+    npm_config_userconfig="$stranger/anonymous.npmrc" npm_config_cache="$stranger/cache" \
+    npm install --registry "$registry" --ignore-scripts --no-audit --no-fund --package-lock=false --save-exact '` + name + `@` + version + `'
+  node <<'VERIFY'
+const assert = require('node:assert/strict');
+assert.equal(require('` + name + `'), 1);
+assert.equal(require('` + name + `/package.json').version, '` + version + `');
+VERIFY
+)
 # A published version is immutable. The second publication carries other
 # bytes under the same version: it must be refused because the version exists,
 # not for a reason that would refuse any upload, and a fresh install must still
