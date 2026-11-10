@@ -151,13 +151,20 @@ func runGitLabSnapshot(t *testing.T, root string, private bool) {
 
 	image := registry + "/" + strings.ToLower(project)
 
+	// build-runner-tags-linux-amd64 is never empty, as in the lifecycle: the
+	// selected builder's runner, else the lab's own runner label.
+	buildTags := builder.RunnerLabels
+	if len(buildTags) == 0 {
+		buildTags = []string{livetest.RunnerLabel(t, target)}
+	}
+
 	inputs := map[string]any{
 		"branch": lifecycleBranch, "artifacts-config": livetest.ServiceSnapshotDeclarationFile,
 		"image-repository": image, "forge-ci-repository": layer.Repository,
 		"server-url": target.BaseURL(), "registry": registry,
 		"job-image": jobImage, "build-image": builderJobImage,
 		"image-builder": builder.Builder, "builder-job-image": builderJobImage,
-		"runner-tags": []string{}, "build-runner-tags": builder.RunnerLabels,
+		"runner-tags": []string{}, "build-runner-tags-linux-amd64": buildTags, "build-runner-tags-linux-arm64": []string{},
 	}
 
 	for family, producerImage := range producerImages {
