@@ -224,6 +224,19 @@ func TestGitLabReleaseRunnerRoutingOracle(t *testing.T) {
 	}
 }
 
+// The oracle admits its own plan with and without images and exports.
+func TestGitLabReleaseRunnerRoutingOracleAdmitsEveryPlan(t *testing.T) {
+	t.Parallel()
+
+	for _, images := range []bool{false, true} {
+		for _, exports := range []bool{false, true} {
+			expected, err := gitLabReleaseRunnerRoles([]string{"build"}, []string{"ordinary"}, images, exports, gitLabRoutingPlans(t))
+			require.NoError(t, err)
+			require.NoError(t, validateGitLabReleaseRunnerRouting(gitLabRoutingJobs(expected), expected), "images=%t exports=%t", images, exports)
+		}
+	}
+}
+
 func TestGitLabReleaseRunnerRoutingUntaggedBuildStillHasACapabilityBoundary(t *testing.T) {
 	t.Parallel()
 

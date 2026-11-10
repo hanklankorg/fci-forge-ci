@@ -49,6 +49,15 @@ func TestSetupImageBuilderAdmitsKanikoWithoutBuildahEffects(t *testing.T) {
 func TestSetupImageBuilderRefusesInvalidInputsBeforeEffects(t *testing.T) {
 	t.Parallel()
 
+	// What the refusal says, where a policy author reads it to fix the input.
+	messages := map[string]string{
+		"unknown builder":                      `image-builder must be buildah or kaniko, got "docker"`,
+		"missing image":                        "kaniko needs CI_IMAGE_BUILDER_JOB_IMAGE pinned by digest",
+		"mutable tag":                          "kaniko needs CI_IMAGE_BUILDER_JOB_IMAGE pinned by digest",
+		"GitLab Buildah requires image":        `buildah needs builder-job-image pinned by digest, got ""`,
+		"GitLab Buildah refuses mutable image": `buildah needs builder-job-image pinned by digest, got "registry.example/buildah:latest"`,
+	}
+
 	for name, change := range map[string]func(*appcontainer.SetupImageBuilderInput){
 		"unknown builder": func(in *appcontainer.SetupImageBuilderInput) { in.Builder = "docker" },
 		"missing image":   func(in *appcontainer.SetupImageBuilderInput) { in.JobImage = "" },
@@ -82,6 +91,10 @@ func TestSetupImageBuilderRefusesInvalidInputsBeforeEffects(t *testing.T) {
 			if !errors.Is(err, errs.ErrUsage) || len(registry.refs) != 0 {
 				t.Fatalf("invalid selection reached effects: err=%v refs=%v", err, registry.refs)
 			}
+
+			if !strings.Contains(err.Error(), messages[name]) {
+				t.Fatalf("err = %v, want it to say %q", err, messages[name])
+			}
 		})
 	}
 }
@@ -98,23 +111,33 @@ func TestSetupImageBuilderKeepsExistingImageAdmissionRefusals(t *testing.T) {
 				"org.opencontainers.image.title":  "forge-ci kaniko job image",
 			}}
 
+			jobImage := "registry.example/owner/kaniko@" + registry.digest
+			want := ""
+
 			switch scenario {
 			case "wrong arch":
 				registry.arch = "arm64"
+				want = "existing image is not reusable: " + jobImage + `: architecture "arm64" does not match required "amd64"`
 			case "wrong source":
 				registry.labels["org.opencontainers.image.source"] = "https://forge.example/other/engine"
+				want = "existing image is not reusable: " + jobImage + ": label org.opencontainers.image.source does not match required value"
 			case "wrong title":
 				registry.labels["org.opencontainers.image.title"] = "other image"
+				want = "existing image is not reusable: " + jobImage + ": label org.opencontainers.image.title does not match required value"
 			case "registry unavailable":
 				registry.err = io.ErrUnexpectedEOF
 			}
 
 			err := appcontainer.SetupImageBuilder(t.Context(), nil, nil, registry, nil, nil, io.Discard, appcontainer.SetupImageBuilderInput{
-				Builder: "kaniko", JobImage: "registry.example/owner/kaniko@" + registry.digest,
+				Builder: "kaniko", JobImage: jobImage,
 				EngineRepository: "https://forge.example/owner/engine", Arch: "amd64",
 			})
 			if err == nil || (scenario == "registry unavailable" && !errors.Is(err, io.ErrUnexpectedEOF)) {
 				t.Fatalf("admission refusal was lost: %v", err)
+			}
+
+			if !strings.Contains(err.Error(), want) {
+				t.Fatalf("err = %v, want it to say %q", err, want)
 			}
 		})
 	}

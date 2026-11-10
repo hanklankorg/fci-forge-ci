@@ -23,6 +23,7 @@ func TestRunnerRolesAreCoherentAcrossForges(t *testing.T) {
 	t.Parallel()
 
 	doc := string(reporoot.ReadFile(t, "docs/runners.md"))
+	declared := map[provider.ForgeAPI][]string{}
 
 	for dir, forge := range map[string]provider.ForgeAPI{
 		"templates": provider.ForgeGitLab, ".github/workflows": provider.ForgeGitHub,
@@ -38,6 +39,8 @@ func TestRunnerRolesAreCoherentAcrossForges(t *testing.T) {
 					continue
 				}
 
+				declared[forge] = append(declared[forge], name)
+
 				if !slices.Contains(known, name) {
 					t.Errorf("%s: runner input %s is not owned by runners.Names(%s)", path, name, forge)
 				}
@@ -45,8 +48,134 @@ func TestRunnerRolesAreCoherentAcrossForges(t *testing.T) {
 				if !strings.Contains(doc, "`"+name+"`") {
 					t.Errorf("docs/runners.md does not name %s's %s", path, name)
 				}
+
+				// An image build's runner is always bound to a platform.
+				if forge == provider.ForgeGitLab && name == "build-runner-tags" {
+					t.Errorf("%s: %s binds image builds to no platform", path, name)
+				}
 			}
 		}
+	}
+
+	for _, path := range workflowInputFiles(t, ".forgejo/workflows") {
+		for _, name := range declaredInputs(t, path) {
+			if isRunnerInput(name) {
+				declared[provider.ForgeForgejo] = append(declared[provider.ForgeForgejo], name)
+			}
+		}
+	}
+
+	// Each role's row of the shared table names the role's input in each
+	// forge's cell, and every declared runner input is some role's. Forgejo's
+	// are its legacy names until it migrates.
+	claimed := map[provider.ForgeAPI][]string{}
+
+	for _, role := range []struct {
+		row      string
+		role     runners.Role
+		platform string
+		forgejo  []string
+	}{
+		{"ordinary", runners.Ordinary, "", []string{"runner-label"}},
+		{"image-build", runners.Build, "linux/amd64", []string{"runner-label", "runner-label-container"}},
+		{"image-build-arm64", runners.Build, "linux/arm64", []string{"runner-label-arm64", "runner-label-container-arm64"}},
+		{"signer", runners.Signer, "", []string{"runner-label"}},
+		{"macos", runners.Ordinary, "darwin/arm64", nil},
+	} {
+		var cells []string
+
+		for line := range strings.SplitSeq(doc, "\n") {
+			if strings.HasPrefix(line, "| "+role.row+" |") {
+				cells = strings.Split(line, "|")
+			}
+		}
+
+		if len(cells) != 6 {
+			t.Errorf("docs/runners.md has no row for the runner role %s", role.row)
+
+			continue
+		}
+
+		inputs := map[provider.ForgeAPI][]string{provider.ForgeForgejo: role.forgejo}
+
+		// GitHub fixes the signer runner: no input, and the cell says so.
+		for _, forge := range []provider.ForgeAPI{provider.ForgeGitLab, provider.ForgeGitHub} {
+			if name, err := runners.Input(forge, role.role, role.platform); err == nil {
+				inputs[forge] = []string{name}
+			}
+		}
+
+		for column, forge := range []provider.ForgeAPI{provider.ForgeGitLab, provider.ForgeForgejo, provider.ForgeGitHub} {
+			for _, name := range inputs[forge] {
+				claimed[forge] = append(claimed[forge], name)
+
+				if !slices.Contains(declared[forge], name) {
+					t.Errorf("role %s: %s declares no input %s", role.row, forge, name)
+				}
+
+				if !strings.Contains(cells[column+2], "`"+name+"`") {
+					t.Errorf("docs/runners.md, role %s, does not name %s's %s", role.row, forge, name)
+				}
+			}
+		}
+	}
+
+	for forge, names := range declared {
+		slices.Sort(names)
+
+		for _, name := range slices.Compact(names) {
+			if !slices.Contains(claimed[forge], name) {
+				t.Errorf("%s runner input %s belongs to no role row of docs/runners.md", forge, name)
+			}
+		}
+	}
+}
+
+// Each GitLab component declares exactly its roles' runner inputs: one that
+// gains or loses an input fails here until its jobs and docs/runners.md agree.
+func TestGitLabRunnerInputsPerTemplate(t *testing.T) {
+	t.Parallel()
+
+	ordinary := []string{"runner-tags"}
+	release := []string{"build-runner-tags-linux-amd64", "build-runner-tags-linux-arm64", "runner-tags", "signer-runner-tags"}
+	expected := map[string][]string{
+		"build-cargo.yml":            ordinary,
+		"build-go.yml":               ordinary,
+		"build-gradle-android.yml":   ordinary,
+		"build-gradle.yml":           ordinary,
+		"build-maven.yml":            ordinary,
+		"build-npm.yml":              ordinary,
+		"check.yml":                  ordinary,
+		"megalinter.yml":             ordinary,
+		"nanolinter.yml":             ordinary,
+		"publish-apple-appstore.yml": {"runner-tags-darwin-arm64"},
+		"publish-forge-packages.yml": ordinary,
+		"publish-maven-central.yml":  ordinary,
+		"release-jobs.yml":           release,
+		"release.yml":                release,
+		"snapshot-image-jobs.yml":    ordinary,
+		"snapshot-images.yml":        {"build-runner-tags-linux-amd64", "build-runner-tags-linux-arm64", "runner-tags"},
+	}
+
+	for _, path := range workflowInputFiles(t, "templates") {
+		var got []string
+
+		for _, name := range declaredInputs(t, path) {
+			if isRunnerInput(name) {
+				got = append(got, name)
+			}
+		}
+
+		name := filepath.Base(path)
+		if !slices.Equal(got, expected[name]) {
+			t.Errorf("%s: runner inputs = %v, want %v", path, got, expected[name])
+		}
+
+		delete(expected, name)
+	}
+
+	if len(expected) != 0 {
+		t.Errorf("GitLab components disappeared: %v", expected)
 	}
 }
 
