@@ -35,7 +35,8 @@ scoped npm package without a container. `hello-cargo-workspace` adds two
 workspace binaries, each with its own runtime image and binary export target.
 `hello-go-cli`, `hello-go-service`, `hello-gradle` and `hello-monorepo` show
 the `go-cli`, `go-service`, `gradle-app` and `monorepo` examples: their source
-is their own, and every CI file is the example's,
+is their own, and every CI file is the example's (bar `hello-gradle`'s GitLab
+release scripts, which no example ships),
 filled in by `test/live/internal/livetest/exampledemos_internal_test.go`, which fails when
 one drifts. After changing an example, rewrite them with
 `go test ./test/live/internal/livetest -run TestExampleDemosAreTheirExamples -args -update-demos`.
@@ -68,8 +69,8 @@ reasons follow the table.
 | hello-ios | PR/build | - | - | macOS ARM64 simulator tests, XcodeGen app, unsigned archive |
 | hello-go-cli | PR, release | PR, release | MR | The go-cli example as shipped; `cmd/my-cli` layout |
 | hello-go-service | PR, release | PR, release | MR | The go-service example as shipped; binaries and runtime image |
-| hello-gradle | PR, release | - | MR | The gradle-app example as shipped; reproducible Java library jars |
-| hello-monorepo | - | - | MR | The monorepo example as shipped; Maven and npm services checked together |
+| hello-gradle | PR, release | PR, release | MR, release | The gradle-app example as shipped; reproducible Java library jars |
+| hello-monorepo | PR, release | PR | MR | The monorepo example as shipped; Maven and npm services checked together |
 | hello-meta | PR, release | - | - | Scripts and configuration only: no build, no version bump, the final tag on the requested commit |
 
 Why a flow is missing:
@@ -83,16 +84,16 @@ Why a flow is missing:
 - **Android on Forgejo**: the Forgejo lane's job image is a nanolinter
   flavour, which has no Android SDK, and the lane publishes no runtime image
   to run the build in.
-- **hello-monorepo on GitHub**: its example has no GitHub pull-request
-  workflow, and its release workflow passes no `runtime-image`, which the
-  GitHub renderer requires to point a trial at the engine under test.
 - **The example demos' GitLab releases**: the GitLab examples are the
   merge-request gate; the release policy's commands are the adopter's, and no
-  example ships them.
+  example ships them. `hello-gradle` carries its own, `.gitlab/check-release.sh`
+  and `.gitlab/build-release.sh`, which run in the plan's java build job and
+  the release files job.
+- **hello-monorepo's Forgejo and GitLab releases**: the Forgejo layer has no
+  plan-driven fan-out or multi-project release, and the demo carries no
+  GitLab release build yet.
 - **hello-meta on Forgejo and GitLab**: it declares the GitHub flows alone;
   no metadata-only release has been written for the other two forges.
-- **hello-gradle and hello-monorepo on Forgejo**: their examples have no
-  Forgejo workflows; the Forgejo layer has no Gradle or npm build action.
 
 A GitLab release renders the changelog the way the demo's files call for:
 with the component's default, git-cliff, when the demo carries the

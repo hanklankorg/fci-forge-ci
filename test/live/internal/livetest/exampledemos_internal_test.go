@@ -50,6 +50,9 @@ var exampleDemoValues = strings.NewReplacer(
 	// The GitHub gate's lint image, a mirror the trial replaces with its own.
 	"ghcr.io/itiquette/nanolinter:go@sha256:PIN_DIGEST", "codefloe.com/itiquette/nanolinter:go@sha256:"+unrunDigest,
 	"ghcr.io/itiquette/nanolinter:kotlin@sha256:PIN_DIGEST", "codefloe.com/itiquette/nanolinter:kotlin@sha256:"+unrunDigest,
+	"ghcr.io/itiquette/nanolinter:core@sha256:PIN_DIGEST", "codefloe.com/itiquette/nanolinter:core@sha256:"+unrunDigest,
+	// The Gradle release builds in the JDK image the Maven demos pin.
+	"docker.io/library/maven:3.9-eclipse-temurin-25@sha256:PIN_JDK_IMAGE_DIGEST", "docker.io/library/maven:3.9-eclipse-temurin-25@sha256:96f175708f766ea049ab6c794a85335d238894c75f8eb364bddd98086a5b7cfd",
 	"registry.example.com/team/check-tools@sha256:PIN_IMAGE_DIGEST", gitlabJobPlaceholder,
 	// The monorepo checks and builds each part in its runtime image: Java in
 	// the trial's job image, Node in a further one.
@@ -75,18 +78,15 @@ func exampleDemoFiles(example string) map[string]string {
 		"nanolinter.toml":                        path.Join(dir, "nanolinter.toml"),
 	}
 
-	// Only the Go examples have Forgejo workflows.
-	if example == "go-cli" || example == "go-service" {
-		files[".forgejo/workflows/pullrequest.yml"] = path.Join(dir, "forgejo/pullrequest.yml")
+	// Every example has Forgejo pull-request checks; the monorepo has no
+	// Forgejo release, since the layer has no multi-project release.
+	files[".forgejo/workflows/pullrequest.yml"] = path.Join(dir, "forgejo/pullrequest.yml")
+	if example != "monorepo" {
 		files[".forgejo/workflows/release.yml"] = path.Join(dir, "forgejo/release.yml")
 	}
 
-	// The monorepo example has no GitHub pull-request workflow, so its demo
-	// has no GitHub variant.
-	if example != "monorepo" {
-		files[githubDemoWorkflows+"/pullrequest.yml"] = path.Join(dir, "github/pullrequest-workflow.yml")
-		files[githubDemoWorkflows+"/release.yml"] = path.Join(dir, "github/release-workflow.yml")
-	}
+	files[githubDemoWorkflows+"/pullrequest.yml"] = path.Join(dir, "github/pullrequest-workflow.yml")
+	files[githubDemoWorkflows+"/release.yml"] = path.Join(dir, "github/release-workflow.yml")
 
 	if example == "go-service" {
 		files[".forge-ci/images.yml"] = path.Join(dir, "artifacts-forgejo.yml")

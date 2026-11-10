@@ -25,6 +25,8 @@ func consumerReleaseTemplates() []string {
 		"examples/go-cli/forgejo/release.yml",
 		"examples/go-service/forgejo/release.yml",
 		"examples/cargo-app/forgejo/release.yml",
+		"examples/maven-app/forgejo/release.yml",
+		"examples/gradle-app/forgejo/release.yml",
 	}
 }
 

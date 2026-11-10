@@ -4,15 +4,18 @@ Multiple artifacts built from a single repository with container support.
 
 ## Per forge
 
-- **GitHub**: [`github/release-workflow.yml`](github/release-workflow.yml),
-  with `artifacts.yml` or `multi-artifact-container.yml`. See the
+- **GitHub**: [`github/pullrequest-workflow.yml`](github/pullrequest-workflow.yml)
+  and [`github/release-workflow.yml`](github/release-workflow.yml), with
+  `artifacts.yml` or `multi-artifact-container.yml`. See the
   [GitHub guide](../../docs/github.md#getting-started).
 - **GitLab**: [`gitlab/.gitlab-ci.yml`](gitlab/.gitlab-ci.yml), the lint gate,
   `check`, and on tags the plan-driven fan-out: a child pipeline with one
   `build-<ecosystem>` component per artifact of `artifacts.yml`. See the
   [GitLab guide](../../docs/gitlab.md#builds).
-- **Forgejo**: not available; the Forgejo layer builds Go and Cargo only and
-  has no plan-driven fan-out. See [Delivery layers side by side](../../docs/providers.md#delivery-layers-side-by-side).
+- **Forgejo**: [`forgejo/pullrequest.yml`](forgejo/pullrequest.yml), the lint
+  gate and each project's checks in the image of its toolchain. No release:
+  the Forgejo layer has no plan-driven fan-out. See
+  [Delivery layers side by side](../../docs/providers.md#delivery-layers-side-by-side).
 
 The rest of this page describes the GitHub configuration.
 

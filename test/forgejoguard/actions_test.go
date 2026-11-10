@@ -5,6 +5,7 @@
 package forgejoguard
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -120,7 +121,8 @@ func TestBuildAndCheckActionsReceiveNoCredential(t *testing.T) {
 // The pull-request examples are what a consumer copies for the event that
 // runs unreviewed code: each reads no secret anywhere, names no image of its
 // own (the job image is the consumer's variable), and its jobs are the lint
-// action, the isolation gate, its ecosystem's build action and the summary.
+// action, the isolation gate, its ecosystem's build (its build action, or
+// the build tool where the layer has none) and the summary.
 func TestConsumerPRTemplateIsTheLintGateAndBuild(t *testing.T) {
 	t.Parallel()
 
@@ -131,6 +133,10 @@ func TestConsumerPRTemplateIsTheLintGateAndBuild(t *testing.T) {
 
 func checkConsumerPRTemplate(t *testing.T, kit consumerKit) {
 	t.Helper()
+
+	if err := kit.validate(); err != nil {
+		t.Fatal(err)
+	}
 
 	path := kit.pullRequest()
 
@@ -145,11 +151,27 @@ func checkConsumerPRTemplate(t *testing.T, kit consumerKit) {
 
 	parsed := loadWorkflow(t, path)
 
-	for name, want := range map[string]struct{ action, image string }{
-		"lint":           {"/.forgejo/actions/lint-nanolinter@", jobImage},
-		"trust-boundary": {"/.forgejo/actions/check-l3-isolation@", ""},
-		"build":          {"/.forgejo/actions/" + kit.buildAction + "@", jobImage},
-		"summary":        {"/.forgejo/actions/setup-forge-ci@", ""},
+	usesAction := func(action string) func(ast.Node) bool {
+		return func(step ast.Node) bool {
+			return strings.Contains(scalarString(mappingValue(step, "uses")), "/.forgejo/actions/"+action+"@")
+		}
+	}
+
+	build, buildName := usesAction(kit.buildAction), kit.buildAction
+	if kit.buildAction == "" {
+		build = func(step ast.Node) bool { return runsOnly(runScript(step), kit.prBuild) }
+		buildName = kit.prBuild
+	}
+
+	for name, want := range map[string]struct {
+		calls   string
+		image   string
+		matches func(ast.Node) bool
+	}{
+		"lint":           {"lint-nanolinter", jobImage, usesAction("lint-nanolinter")},
+		"trust-boundary": {"check-l3-isolation", "", usesAction("check-l3-isolation")},
+		"build":          {buildName, jobImage, build},
+		"summary":        {"setup-forge-ci", "", usesAction("setup-forge-ci")},
 	} {
 		entry, ok := parsed.jobs[name]
 		if !ok {
@@ -162,13 +184,8 @@ func checkConsumerPRTemplate(t *testing.T, kit consumerKit) {
 			t.Errorf("%s job %s runs in image %q, want %q", path, name, got, want.image)
 		}
 
-		called := false
-		for _, step := range entry.steps() {
-			called = called || strings.Contains(scalarString(mappingValue(step, "uses")), want.action)
-		}
-
-		if !called {
-			t.Errorf("%s job %s does not call %s", path, name, want.action)
+		if !slices.ContainsFunc(entry.steps(), want.matches) {
+			t.Errorf("%s job %s does not call %s", path, name, want.calls)
 		}
 	}
 
@@ -179,7 +196,8 @@ func checkConsumerPRTemplate(t *testing.T, kit consumerKit) {
 
 // Each release example's build job is a complete build, not a stub: it builds
 // with its ecosystem's build action from the prepared release's tag and
-// commit, declares its files, and hands dist/ off with the digest the signer
+// commit (or with the engine's build where the layer has no action),
+// declares its files, and hands dist/ off with the digest the signer
 // checks.
 func TestConsumerReleaseTemplateBuildsWithTheBuildAction(t *testing.T) {
 	t.Parallel()
@@ -277,6 +295,10 @@ func TestServiceReleaseFanInUsesTheExistingAssembler(t *testing.T) {
 func checkConsumerReleaseBuild(t *testing.T, kit consumerKit) {
 	t.Helper()
 
+	if err := kit.validate(); err != nil {
+		t.Fatal(err)
+	}
+
 	path := kit.release()
 
 	build, ok := loadWorkflow(t, path).jobs["build"]
@@ -292,7 +314,11 @@ func checkConsumerReleaseBuild(t *testing.T, kit consumerKit) {
 		uses, run := scalarString(mappingValue(step, "uses")), scalarString(mappingValue(step, "run"))
 
 		switch {
-		case strings.Contains(uses, "/.forgejo/actions/"+kit.buildAction+"@"):
+		case kit.buildAction == "" && runsOnly(runScript(step), kit.releaseBuild):
+			// The engine's build reads the version the checked-out release
+			// commit declares, so it takes no version or commit to stamp.
+			order = append(order, "build")
+		case kit.buildAction != "" && strings.Contains(uses, "/.forgejo/actions/"+kit.buildAction+"@"):
 			with := mappingValue(step, "with")
 			if got := scalarString(mappingValue(with, "version")); got != "${{ needs.prepare.outputs.release-tag }}" {
 				t.Errorf("%s: the build is stamped with version %q, not the prepared release tag", path, got)
