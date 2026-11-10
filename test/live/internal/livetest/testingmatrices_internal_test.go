@@ -265,6 +265,43 @@ forgejo hello-maven-service lifecycle ✅ visibility=private image-builder=kanik
 	}
 }
 
+// A run of the prepared cases names no consumer in its header: each case is
+// read from its own subtests. A case with a failed test is failed whatever
+// its other tests did, one still running is unfinished, a lifecycle carries
+// its builder and visibility, and a test of no case is left out.
+func TestSeedTestingEvidenceReadsPreparedCasesFromTheirTests(t *testing.T) {
+	t.Parallel()
+
+	live := t.TempDir()
+	writeFile(t, filepath.Join(live, "table", "verdict.json"), `{"verdict":"failed","run":{"provider":"forgejo","started_at":"2026-11-10T10:00:00Z",`+
+		`"inputs":{"forge_ci_live_admin_lint":"false"}},"tests":[`+
+		`{"name":"TestForgejoLayer_ConsumerLifecycle/lifecycle/hello-maven-service/lifecycle/kaniko/public/merge","result":"pass"},`+
+		`{"name":"TestForgejoLayer_ConsumerLifecycle/lifecycle/hello-maven-service/lifecycle/kaniko/public/release","result":"pass"},`+
+		`{"name":"TestForgejoLayer_ConsumerLifecycle/lifecycle/hello-go-service/lifecycle/buildah/private","result":"unfinished"},`+
+		`{"name":"TestForgejoLayer_ConsumerTrial/release-variants/hello-go-cli/release/buildah/public","result":"pass"},`+
+		`{"name":"TestForgejoLayer_ConsumerTrial/release-variants/hello-go-cli/release/buildah/private","result":"fail"},`+
+		`{"name":"TestForgejoLayer_Snapshot/snapshot/hello-cargo-workspace/snapshot/buildah/public","result":"pass"},`+
+		`{"name":"TestForgejoLayer_ConsumerTrial/release-variants/no-such-demo/release/buildah/public","result":"pass"},`+
+		`{"name":"TestForgejoLayer_ConsumerTrial/public","result":"pass"}]}`)
+
+	seed, err := SeedTestingEvidence(live, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if want := `forgejo hello-cargo-workspace development ✅ 2026-11-10
+forgejo hello-go-cli release ❌ 2026-11-10
+forgejo hello-go-service lifecycle ⏳ visibility=private image-builder=buildah admin-lint=false 2026-11-10
+forgejo hello-maven-service lifecycle ✅ visibility=public image-builder=kaniko admin-lint=false 2026-11-10
+`; seed != want {
+		t.Fatalf("seed:\n%s\nwant:\n%s", seed, want)
+	}
+
+	if _, err := readMatrixEvidence(writeFile(t, filepath.Join(t.TempDir(), "evidence.txt"), seed)); err != nil {
+		t.Fatalf("the overlay does not read its own seed: %v", err)
+	}
+}
+
 // A snapshot run is evidence for the matrices' snapshot flow, development,
 // on either lab forge, whatever event name it was started with.
 func TestSeedTestingEvidenceReadsSnapshotRunsAsDevelopment(t *testing.T) {

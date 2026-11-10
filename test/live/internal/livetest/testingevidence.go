@@ -102,12 +102,13 @@ func seedLiveRuns(liveRuns string, latest map[string]seededRun) error {
 		}
 
 		key := evidenceKey(verdict.Run)
-		if key == "" {
-			continue
-		}
-
 		if strings.HasSuffix(key, " "+TrialLifecycle) {
 			key = strings.TrimSpace(key + " " + evidenceAxes(verdict.Run))
+		}
+
+		cases := preparedCaseEvidence(verdict)
+		if key == "" && len(cases) == 0 {
+			continue
 		}
 
 		run, err := newSeededRun(verdict.Run.StartedAt, verdict.Verdict, file)
@@ -116,9 +117,81 @@ func seedLiveRuns(liveRuns string, latest map[string]seededRun) error {
 		}
 
 		keepLatest(latest, key, run)
+
+		for key, result := range cases {
+			keepLatest(latest, key, seededRun{at: run.at, verdict: result})
+		}
 	}
 
 	return nil
+}
+
+// preparedCaseEvidence reads a run of ForgejoPreparedCases from its tests
+// rather than its header: one process runs many cases, and each names itself
+// in its subtests, <scenario>/<case name>/<visibility>. It gives the overlay
+// row of each case and visibility that ran and what became of it: failed
+// when a test under it failed, passed when all passed, and otherwise
+// unfinished. A lifecycle is qualified as evidenceAxes qualifies one, with
+// the case's own builder and visibility.
+func preparedCaseEvidence(verdict LiveRunVerdict) map[string]string {
+	cases := map[string]PreparedCase{}
+	for _, c := range ForgejoPreparedCases {
+		cases[c.Name()] = c
+	}
+
+	evidence := map[string]string{}
+
+	for _, test := range verdict.Tests {
+		// The scenario, the four elements of the case name, the visibility.
+		elements := strings.Split(test.Name, "/")
+		if len(elements) < 6 {
+			continue
+		}
+
+		c, isCase := cases[strings.Join(elements[1:5], "/")]
+		if !isCase {
+			continue
+		}
+
+		flow := c.Event
+		if flow == TrialSnapshot {
+			flow = matrixDevelopment
+		}
+
+		key := campaignForgejo + " " + c.Demo + " " + flow
+		if flow == TrialLifecycle {
+			key = strings.Join(slices.Concat(
+				[]string{key, settingVisibility + "=" + elements[5], settingImageBuilder + "=" + c.Builder}, adminAxes(verdict.Run)), " ")
+		}
+
+		result := ""
+
+		switch test.Result {
+		case "pass":
+			result = verdictPassed
+		case "fail":
+			result = liveVerdictFailed
+		}
+
+		if had, seen := evidence[key]; !seen || had == verdictPassed || result == liveVerdictFailed {
+			evidence[key] = result
+		}
+	}
+
+	return evidence
+}
+
+// adminAxes are the administrator inputs a run's header records.
+func adminAxes(run LiveRunHeader) []string {
+	var axes []string
+
+	for _, check := range enforcement.Checks {
+		if value := run.Inputs[strings.ToLower(adminInputEnvironment(check))]; value != "" {
+			axes = append(axes, campaignAdminSetting(check)+"="+value)
+		}
+	}
+
+	return axes
 }
 
 // hostedTrial is a hosted consumer trial in a controller or batch script:
@@ -299,13 +372,7 @@ func evidenceAxes(run LiveRunHeader) string {
 		axes = append(axes, settingImageBuilder+"="+builder)
 	}
 
-	for _, check := range enforcement.Checks {
-		if value := input(adminInputEnvironment(check)); value != "" {
-			axes = append(axes, campaignAdminSetting(check)+"="+value)
-		}
-	}
-
-	return strings.Join(axes, " ")
+	return strings.Join(append(axes, adminAxes(run)...), " ")
 }
 
 func evidenceMark(verdict string) string {
