@@ -91,6 +91,42 @@ func TestExampleCallersGrantWhatTheCalledWorkflowsAsk(t *testing.T) {
 		strings.Join(violations, "\n  "))
 }
 
+// The same rule holds inside the engine: a job that calls another workflow of
+// this repository caps what that workflow's jobs may ask, whatever the
+// consumer granted above it. GitHub checks every such call before any job
+// starts, a skipped one too.
+func TestInternalCallersGrantWhatTheCalledWorkflowsAsk(t *testing.T) {
+	t.Parallel()
+
+	workflows := loadPermissionWorkflows(t, filepath.Join(reporoot.Path(t), ".github", "workflows"))
+
+	var violations []string
+
+	count := 0
+
+	for name, workflow := range workflows {
+		for jobName, job := range workflow.Jobs {
+			target := internalWorkflowTarget(job.Uses)
+			if target == "" {
+				continue
+			}
+
+			count++
+
+			granted := permissionScopes(job.Permissions, workflow.Permissions)
+			for _, missing := range missingPermissions(requiredPermissions(target, workflows, nil), granted) {
+				violations = append(violations, fmt.Sprintf("%s: job %s calls %s without %s", name, jobName, target, missing))
+			}
+		}
+	}
+
+	require.NotZero(t, count, "no workflow calls another")
+
+	slices.Sort(violations)
+	require.Emptyf(t, violations, "a calling job grants less than the called workflow asks; GitHub refuses such a run at startup:\n  %s",
+		strings.Join(violations, "\n  "))
+}
+
 func TestRequiredPermissionsFollowsInternalCallsAndKeepsTheHigherLevel(t *testing.T) {
 	t.Parallel()
 

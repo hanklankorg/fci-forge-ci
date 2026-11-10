@@ -81,6 +81,7 @@ jobs:
     if: ${{ fromJson(inputs['quality-stage-plan-json']).targets.nanolinter.runs }}
     permissions:
       contents: read
+      actions: read # The lint job downloads the canonical CLI.
     secrets:
       CODE_SCANNING_TOKEN: ${{ secrets.CODE_SCANNING_TOKEN }}
     uses: ./.github/workflows/lint-nanolinter.yml
@@ -107,6 +108,7 @@ jobs:
     if: ${{ fromJson(inputs['quality-stage-plan-json']).targets.megalinter.runs }}
     permissions:
       contents: read
+      actions: read # The lint job downloads the canonical CLI.
     secrets:
       CODE_SCANNING_TOKEN: ${{ secrets.CODE_SCANNING_TOKEN }}
     uses: ./.github/workflows/lint-megalinter.yml
