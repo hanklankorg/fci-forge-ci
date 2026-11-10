@@ -6,6 +6,7 @@ package conformance_test
 
 import (
 	"encoding/xml"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -31,7 +32,7 @@ func mavenLibraryDevelopment(t *testing.T, scratch string, reactor bool) {
 	t.Helper()
 	livetest.RegisterLiveScenario(t)
 
-	root := livetest.Input(t, consumerCheckoutEnv)
+	root := os.Getenv(consumerCheckoutEnv)
 	if root == "" {
 		t.Skip("set FORGE_CI_LIVE_CONSUMER")
 	}
@@ -52,7 +53,7 @@ func mavenLibraryDevelopment(t *testing.T, scratch string, reactor bool) {
 
 	source := livetest.OpenConsumer(t, target, root)
 	admitted := source.Commit
-	consumer, model := livetest.NewMavenLibraryDevelopmentFixture(t, source, livetest.MavenLibraryFixtureConfig{RecipeDirectory: recipe, JavaImage: livetest.Input(t, "FORGE_CI_LIVE_MAVEN_LIBRARY_IMAGE"), Profile: livetest.Input(t, "FORGE_CI_LIVE_MAVEN_LIBRARY_PROFILE"), Reactor: reactor}, livetest.Input(t, "FORGE_CI_LIVE_MAVEN_LIBRARY_ORACLE"))
+	consumer, model := livetest.NewMavenLibraryDevelopmentFixture(t, source, livetest.MavenLibraryFixtureConfig{RecipeDirectory: recipe, JavaImage: os.Getenv("FORGE_CI_LIVE_MAVEN_LIBRARY_IMAGE"), Profile: os.Getenv("FORGE_CI_LIVE_MAVEN_LIBRARY_PROFILE"), Reactor: reactor}, os.Getenv("FORGE_CI_LIVE_MAVEN_LIBRARY_ORACLE"))
 	layer, repo := newConsumerRepos(t, target, consumer, scratch, false)
 
 	// Refuse every coordinate before owning the cleanup of any of them, so a

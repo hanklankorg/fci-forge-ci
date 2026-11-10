@@ -6,7 +6,6 @@
 package conformance_test
 
 import (
-	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -29,10 +28,9 @@ const (
 // and settings of the caller's environment. Otherwise the prepared directory
 // (livetest.PreparedEnv) gives one per case of the forge's table
 // (livetest.PreparedCases) with one of events, each the subtest the case
-// names, on the demo's checkout there. The subtest's inputs
-// (livetest.SetInputs) are what `just test-live-consumer <forge>` hands a
-// trial in its environment: the checkout, the event and the case's settings,
-// with the prepared images and the case's builder.
+// names, on the demo's checkout there. The subtest's environment is what
+// `just test-live-consumer <forge>` hands a trial: the checkout, the event
+// and the case's settings, with the prepared images and the case's builder.
 // With neither, the test is skipped with usage.
 func forEachConsumerCheckout(t *testing.T, forge provider.ForgeAPI, usage string, trial func(t *testing.T, root string), events ...string) {
 	t.Helper()
@@ -65,14 +63,18 @@ func forEachConsumerCheckout(t *testing.T, forge provider.ForgeAPI, usage string
 			}
 
 			root := filepath.Join(prepared, "demos", c.Demo)
+			t.Setenv(consumerCheckoutEnv, root)
+			t.Setenv(consumerEventEnv, c.Event)
+			t.Setenv(consumerSettingsEnv, strings.Join(settings, "\n"))
+			t.Setenv(livetest.ImageBuilderEnv(forge), c.Builder)
 
-			environment[consumerCheckoutEnv] = root
-			environment[consumerEventEnv] = c.Event
-			environment[consumerSettingsEnv] = strings.Join(settings, "\n")
-			environment[livetest.ImageBuilderEnv(forge)] = c.Builder
-			maps.Copy(environment, c.LaneEnvironment(string(forge)))
+			for name, value := range environment {
+				t.Setenv(name, value)
+			}
 
-			livetest.SetInputs(t, environment)
+			for name, value := range c.LaneEnvironment(string(forge)) {
+				t.Setenv(name, value)
+			}
 
 			trial(t, root)
 		})

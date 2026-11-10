@@ -6,6 +6,7 @@
 package conformance_test
 
 import (
+	"os"
 	"testing"
 
 	"github.com/diggsweden/forge-ci/internal/domain/provider"
@@ -18,7 +19,7 @@ import (
 func TestGitLabWorkflow_InterruptedJob(t *testing.T) {
 	livetest.RegisterLiveScenario(t)
 
-	if livetest.Input(t, "FORGE_CI_LIVE_INTERRUPT_PROBE") != "gitlab-workflow" {
+	if os.Getenv("FORGE_CI_LIVE_INTERRUPT_PROBE") != "gitlab-workflow" {
 		livetest.NotCoveredf(t, "active-job interruption requires FORGE_CI_LIVE_INTERRUPT_PROBE=gitlab-workflow and an observed launcher signal")
 	}
 

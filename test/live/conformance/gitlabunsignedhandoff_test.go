@@ -7,6 +7,7 @@ package conformance_test
 
 import (
 	"context"
+	"os"
 	"strings"
 	"testing"
 
@@ -20,7 +21,7 @@ import (
 func TestGitLabRelease_RejectsPreseededProvenance(t *testing.T) {
 	livetest.RegisterLiveScenario(t)
 
-	root := livetest.Input(t, consumerCheckoutEnv)
+	root := os.Getenv(consumerCheckoutEnv)
 	if root == "" {
 		livetest.NotCoveredf(t, "requires a reviewed native consumer; the harness inserts preseeded provenance in its private build wrapper")
 	}

@@ -470,7 +470,7 @@ const (
 func trialCosignKey(t *testing.T, dir string) (string, string) {
 	t.Helper()
 
-	if reused := livetest.Input(t, signingKeyDirEnv); reused != "" {
+	if reused := os.Getenv(signingKeyDirEnv); reused != "" {
 		if err := livetest.CheckReusedSigningInputs(reused); err != nil {
 			t.Fatal(err)
 		}

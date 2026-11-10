@@ -6,6 +6,7 @@
 package conformance_test
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -17,8 +18,8 @@ import (
 func TestForgejoLayer_NPMApplicationDevelopment(t *testing.T) {
 	livetest.RegisterLiveScenario(t)
 
-	root := livetest.Input(t, consumerCheckoutEnv)
-	if root == "" || livetest.Input(t, "FORGE_CI_LIVE_NPM_APPLICATION_IMAGE") == "" {
+	root := os.Getenv(consumerCheckoutEnv)
+	if root == "" || os.Getenv("FORGE_CI_LIVE_NPM_APPLICATION_IMAGE") == "" {
 		t.Skip("name npm application source, pinned image and installed-package oracle")
 	}
 
@@ -54,7 +55,7 @@ func runForgejoNPMApplicationDevelopment(t *testing.T, root string, private bool
 		t.Fatal(err)
 	}
 
-	config := livetest.NPMApplicationFixtureConfig{RecipeDirectory: recipe, NodeImage: livetest.Input(t, "FORGE_CI_LIVE_NPM_APPLICATION_IMAGE"), Oracle: livetest.Input(t, "FORGE_CI_LIVE_NPM_APPLICATION_ORACLE"), Branch: livetest.Input(t, "FORGE_CI_LIVE_NPM_APPLICATION_BRANCH")}
+	config := livetest.NPMApplicationFixtureConfig{RecipeDirectory: recipe, NodeImage: os.Getenv("FORGE_CI_LIVE_NPM_APPLICATION_IMAGE"), Oracle: os.Getenv("FORGE_CI_LIVE_NPM_APPLICATION_ORACLE"), Branch: os.Getenv("FORGE_CI_LIVE_NPM_APPLICATION_BRANCH")}
 	consumer := livetest.NewNPMApplicationFixture(t, livetest.OpenConsumer(t, target, root), config, true)
 	layer, repo := newConsumerRepos(t, target, consumer, "npm-application-development", private)
 	jobImage := consumerBuilderJobImage(t, target, builder, layer)

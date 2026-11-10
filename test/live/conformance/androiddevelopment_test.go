@@ -12,6 +12,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"io"
+	"os"
 	"strings"
 	"testing"
 
@@ -36,7 +37,7 @@ func TestForgejoLayer_AndroidDevelopment(t *testing.T) {
 func TestGitLabLayer_AndroidDevelopment(t *testing.T) {
 	livetest.RegisterLiveScenario(t)
 
-	root := livetest.Input(t, consumerCheckoutEnv)
+	root := os.Getenv(consumerCheckoutEnv)
 	if root == "" {
 		t.Skip("set FORGE_CI_LIVE_CONSUMER and FORGE_CI_LIVE_CONSUMER_IMAGE_ARCHIVE for the Android development fixture")
 	}

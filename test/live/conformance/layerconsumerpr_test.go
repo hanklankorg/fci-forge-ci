@@ -95,7 +95,7 @@ func lintPRCase(t *testing.T, source string, unavailable bool) consumerPRCase {
 	image := consumerPRLinterlessImage
 
 	if !unavailable {
-		image = livetest.Input(t, consumerPRLintImageEnv)
+		image = os.Getenv(consumerPRLintImageEnv)
 		if image == "" {
 			// A full run without the image has not judged the lint finding,
 			// and must not read as if it had.

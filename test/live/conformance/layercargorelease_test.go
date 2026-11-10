@@ -7,6 +7,7 @@ package conformance_test
 
 import (
 	"bytes"
+	"os"
 	"slices"
 	"strings"
 	"testing"
@@ -49,7 +50,7 @@ const cargoReleaseImageEnv = "FORGE_CI_LIVE_CARGO_RELEASE_IMAGE"
 func TestForgejoLayer_CargoBinaryRelease(t *testing.T) {
 	livetest.RegisterLiveScenario(t)
 
-	image := livetest.Input(t, cargoReleaseImageEnv)
+	image := os.Getenv(cargoReleaseImageEnv)
 	if image == "" {
 		livetest.NotCoveredf(t, "set %s to a digest-pinned Rust job image, the one a Cargo consumer's CI_JOB_IMAGE names; the version job and the build have no Cargo without one", cargoReleaseImageEnv)
 	}

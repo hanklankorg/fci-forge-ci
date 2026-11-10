@@ -10,6 +10,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"slices"
 	"strings"
 	"testing"
@@ -51,7 +52,7 @@ func runGitLabConsumerTrial(t *testing.T, root string, private bool) {
 	target := livetest.Accept(t, provider.ForgeGitLab)
 
 	consumer := livetest.OpenConsumer(t, target, root)
-	if gate := livetest.Input(t, "FORGE_CI_LIVE_GITLAB_GATE_SOURCE"); gate != "" {
+	if gate := os.Getenv("FORGE_CI_LIVE_GITLAB_GATE_SOURCE"); gate != "" {
 		consumer = consumer.WithGitLabGateFromSource(t, gate)
 	}
 
@@ -60,13 +61,13 @@ func runGitLabConsumerTrial(t *testing.T, root string, private bool) {
 	engineRepo := livetest.NewPublicScratchRepo(t, target, "gitlab-consumer-layer", livetest.ReadLayerAnonymously)
 	layer := livetest.PushLayer(t, target, engineRepo)
 	consumer = consumer.WithDraftLayer(t, layer)
-	image := livetest.PushJobImage(t, target, engineRepo, livetest.Input(t, "FORGE_CI_LIVE_CONSUMER_IMAGE_ARCHIVE"))
+	image := livetest.PushJobImage(t, target, engineRepo, os.Getenv("FORGE_CI_LIVE_CONSUMER_IMAGE_ARCHIVE"))
 	repo := livetest.NewBareScratchRepo(t, target, "gitlab-consumer-trial", consumer.ObjectFormat, private)
 
 	images := livetest.GitLabGateImages{Job: image, ExtraJobs: livetest.PushGitLabGateExtraJobImages(t, target, consumer, func(name string) string {
 		return livetest.NewPublicScratchRepo(t, target, "gitlab-consumer-job-image-"+strings.ToLower(name), livetest.ReadJobImageAnonymously)
 	})}
-	if archive := livetest.Input(t, "FORGE_CI_LIVE_LINT_IMAGE_ARCHIVE"); archive != "" {
+	if archive := os.Getenv("FORGE_CI_LIVE_LINT_IMAGE_ARCHIVE"); archive != "" {
 		images.Lint = livetest.PushJobImage(t, target, livetest.NewPublicScratchRepo(t, target, "gitlab-consumer-lint-image", livetest.ReadJobImageAnonymously), archive)
 	}
 

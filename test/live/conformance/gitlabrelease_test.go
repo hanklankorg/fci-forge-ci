@@ -51,7 +51,7 @@ func TestGitLabRelease_ConsumerTrial(t *testing.T) {
 	livetest.RegisterLiveScenario(t)
 
 	// A full run keeps its coverage requirement: only a focused one may skip.
-	if livetest.Input(t, consumerCheckoutEnv) == "" && livetest.Input(t, livetest.PreparedEnv) == "" {
+	if os.Getenv(consumerCheckoutEnv) == "" && os.Getenv(livetest.PreparedEnv) == "" {
 		livetest.NotCoveredf(t, "use the GitLab consumer-release recipe with a clean reviewed checkout")
 	}
 
@@ -69,7 +69,7 @@ func TestGitLabRelease_ConsumerTrial(t *testing.T) {
 func TestGitLabRelease_ConsumerBranchProtection(t *testing.T) {
 	livetest.RegisterLiveScenario(t)
 
-	root := livetest.Input(t, consumerCheckoutEnv)
+	root := os.Getenv(consumerCheckoutEnv)
 	if root == "" {
 		livetest.NotCoveredf(t, "consumer branch protection requires a clean reviewed checkout")
 	}
@@ -150,7 +150,7 @@ func runGitLabBranchProtection(t *testing.T, root string, private bool) {
 func TestGitLabRelease_BuildImageCapability(t *testing.T) {
 	livetest.RegisterLiveScenario(t)
 
-	archive := livetest.Input(t, "FORGE_CI_LIVE_BUILD_IMAGE_ARCHIVE")
+	archive := os.Getenv("FORGE_CI_LIVE_BUILD_IMAGE_ARCHIVE")
 	if archive == "" || !livetest.Requires(t, provider.ForgeGitLab, livetest.NeedsInRunner) {
 		livetest.NotCoveredf(t, "builder probe requires a reviewed build image archive and GitLab runner")
 	}
@@ -212,7 +212,7 @@ const (
 func gitlabConsumerSettings(t *testing.T, consumerRoot string) livetest.GitLabReleaseSettings {
 	t.Helper()
 
-	settings, err := livetest.ParseGitLabReleaseSettings(livetest.Input(t, consumerSettingsEnv))
+	settings, err := livetest.ParseGitLabReleaseSettings(os.Getenv(consumerSettingsEnv))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -795,15 +795,15 @@ func gitlabReleaseArchiveInputs(t *testing.T, needBuild, builderJobs, kaniko boo
 	t.Helper()
 
 	archives := gitlabReleaseArchives{
-		job: livetest.Input(t, "FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE"), signer: livetest.Input(t, "FORGE_CI_LIVE_SIGNER_IMAGE_ARCHIVE"),
-		lint: livetest.Input(t, "FORGE_CI_LIVE_LINT_IMAGE_ARCHIVE"),
+		job: os.Getenv("FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE"), signer: os.Getenv("FORGE_CI_LIVE_SIGNER_IMAGE_ARCHIVE"),
+		lint: os.Getenv("FORGE_CI_LIVE_LINT_IMAGE_ARCHIVE"),
 	}
 	if archives.job == "" || archives.signer == "" {
 		livetest.NotCoveredf(t, "signed GitLab release requires reviewed job and signer image archives")
 	}
 
 	if needBuild {
-		archives.build = livetest.Input(t, "FORGE_CI_LIVE_BUILD_IMAGE_ARCHIVE")
+		archives.build = os.Getenv("FORGE_CI_LIVE_BUILD_IMAGE_ARCHIVE")
 		if archives.build == "" {
 			livetest.NotCoveredf(t, "consumer release requires a reviewed build image archive beside the non-root check image")
 		}
@@ -811,12 +811,12 @@ func gitlabReleaseArchiveInputs(t *testing.T, needBuild, builderJobs, kaniko boo
 
 	switch {
 	case builderJobs && kaniko:
-		archives.kaniko = livetest.Input(t, "FORGE_CI_LIVE_KANIKO_JOB_IMAGE_ARCHIVE")
+		archives.kaniko = os.Getenv("FORGE_CI_LIVE_KANIKO_JOB_IMAGE_ARCHIVE")
 		if archives.kaniko == "" {
 			livetest.NotCoveredf(t, "kaniko release images and exports require FORGE_CI_LIVE_KANIKO_JOB_IMAGE_ARCHIVE, a saved kaniko job image")
 		}
 	case builderJobs:
-		archives.buildah = livetest.Input(t, "FORGE_CI_LIVE_BUILDAH_JOB_IMAGE_ARCHIVE")
+		archives.buildah = os.Getenv("FORGE_CI_LIVE_BUILDAH_JOB_IMAGE_ARCHIVE")
 		if archives.buildah == "" {
 			livetest.NotCoveredf(t, "Buildah release images and exports require FORGE_CI_LIVE_BUILDAH_JOB_IMAGE_ARCHIVE, a saved Buildah job image")
 		}

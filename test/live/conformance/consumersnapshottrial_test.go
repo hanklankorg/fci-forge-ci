@@ -6,6 +6,7 @@
 package conformance_test
 
 import (
+	"os"
 	"regexp"
 	"testing"
 
@@ -18,7 +19,7 @@ import (
 func TestForgejoLayer_ConsumerSnapshotTrial(t *testing.T) {
 	livetest.RegisterLiveScenario(t)
 
-	root := livetest.Input(t, consumerCheckoutEnv)
+	root := os.Getenv(consumerCheckoutEnv)
 	if root == "" {
 		t.Skip("set FORGE_CI_LIVE_CONSUMER to a clean consumer checkout")
 	}
@@ -27,13 +28,13 @@ func TestForgejoLayer_ConsumerSnapshotTrial(t *testing.T) {
 		t.Fatal("snapshot trials require disposable scratch repositories")
 	}
 
-	image := livetest.Input(t, "FORGE_CI_LIVE_SNAPSHOT_JOB_IMAGE")
+	image := os.Getenv("FORGE_CI_LIVE_SNAPSHOT_JOB_IMAGE")
 	if !regexp.MustCompile(`^\S+@sha256:[0-9a-f]{64}$`).MatchString(image) {
 		t.Fatal("FORGE_CI_LIVE_SNAPSHOT_JOB_IMAGE must be digest-pinned")
 	}
 
 	dependencySecrets := map[string]string{}
-	if path := livetest.Input(t, "FORGE_CI_LIVE_SNAPSHOT_DEPENDENCY_TOKEN_FILE"); path != "" {
+	if path := os.Getenv("FORGE_CI_LIVE_SNAPSHOT_DEPENDENCY_TOKEN_FILE"); path != "" {
 		dependencySecrets["DEPENDENCY_GITHUB_TOKEN"] = livetest.ReadSecretFile(t, "DEPENDENCY_GITHUB_TOKEN", path)
 	}
 

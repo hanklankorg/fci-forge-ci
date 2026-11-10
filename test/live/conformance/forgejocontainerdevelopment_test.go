@@ -8,6 +8,7 @@ package conformance_test
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -23,7 +24,7 @@ import (
 func TestForgejoLayer_ContainerDevelopment(t *testing.T) {
 	livetest.RegisterLiveScenario(t)
 
-	root := livetest.Input(t, consumerCheckoutEnv)
+	root := os.Getenv(consumerCheckoutEnv)
 	if root == "" {
 		t.Skip("name a clean Cargo container-first development consumer with FORGE_CI_LIVE_CONSUMER")
 	}

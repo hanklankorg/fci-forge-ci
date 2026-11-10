@@ -7,6 +7,7 @@ package conformance_test
 
 import (
 	"maps"
+	"os"
 	"strings"
 	"testing"
 
@@ -44,7 +45,7 @@ func TestForgejoLayer_Snapshot(t *testing.T) {
 func runForgejoSnapshot(t *testing.T, root string, private bool) {
 	t.Helper()
 
-	settings, err := livetest.ParseTrialSettings(livetest.Input(t, consumerEventEnv), consumerSettingsWords(t))
+	settings, err := livetest.ParseTrialSettings(os.Getenv(consumerEventEnv), consumerSettingsWords())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -53,7 +54,7 @@ func runForgejoSnapshot(t *testing.T, root string, private bool) {
 		t.Fatalf("the event is %s; this trial runs %s", settings.Event, livetest.TrialSnapshot)
 	}
 
-	builder, err := livetest.ForgejoConsumerImageBuilder(settings.Variables, livetest.Input(t, livetest.ForgejoImageBuilderEnv))
+	builder, err := livetest.ForgejoConsumerImageBuilder(settings.Variables, os.Getenv(livetest.ForgejoImageBuilderEnv))
 	if err != nil {
 		t.Fatal(err)
 	}
