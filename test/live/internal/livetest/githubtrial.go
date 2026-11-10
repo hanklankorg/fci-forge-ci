@@ -5,6 +5,7 @@ package livetest
 
 import (
 	"bufio"
+	"cmp"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
@@ -810,6 +811,49 @@ func (trial *GitHubTrial) ReportRun(repo string, run *github.WorkflowRun) {
 
 		if strings.HasPrefix(excerpt, "could not fetch the job log") || strings.Contains(excerpt, "[job log evidence incomplete:") {
 			trial.reportJobAnnotations(ctx, repo, job)
+		}
+	}
+
+	if len(jobs.Jobs) == 0 {
+		trial.reportRefChecks(ctx, repo, run.GetHeadSHA())
+	}
+}
+
+// A run GitHub refused before any job (startup_failure) has no job to ask.
+// What GitHub says of it, if anything, is on the checks of the run's commit:
+// print each one's conclusion, title and summary, and its annotations.
+func (trial *GitHubTrial) reportRefChecks(ctx context.Context, repo, sha string) { //nolint:funcorder // keep failure diagnostics beside their caller.
+	checks, _, err := trial.api.Checks.ListCheckRunsForRef(ctx, trial.org, repo, sha, &github.ListCheckRunsOptions{ListOptions: github.ListOptions{PerPage: 20}})
+	if err != nil {
+		trial.tb.Logf("  (no job ran; the checks of %s are unavailable: %v)", sha, err)
+
+		return
+	}
+
+	trial.tb.Logf("  no job ran; %d checks on %s", checks.GetTotal(), sha)
+
+	for _, check := range checks.CheckRuns {
+		summary := check.GetOutput().GetSummary()
+		if len(summary) > 2048 {
+			summary = strings.ToValidUTF8(summary[:2048], "\uFFFD") + " [truncated]"
+		}
+
+		trial.tb.Logf("  check %s: %s %q %s", check.GetName(), cmp.Or(check.GetConclusion(), check.GetStatus()), check.GetOutput().GetTitle(), summary)
+
+		annotations, _, err := trial.api.Checks.ListCheckRunAnnotations(ctx, trial.org, repo, check.GetID(), &github.ListOptions{PerPage: 10})
+		if err != nil {
+			trial.tb.Logf("    check annotations unavailable: %v", err)
+
+			continue
+		}
+
+		for _, annotation := range annotations {
+			message := annotation.GetMessage()
+			if len(message) > 2048 {
+				message = strings.ToValidUTF8(message[:2048], "\uFFFD") + " [truncated]"
+			}
+
+			trial.tb.Logf("    check annotation: %s", message)
 		}
 	}
 }
