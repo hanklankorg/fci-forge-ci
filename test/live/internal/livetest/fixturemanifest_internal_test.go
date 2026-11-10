@@ -118,7 +118,6 @@ func TestContractProjectsFixtureFacts(t *testing.T) {
 		require.True(t, named)
 
 		endpoint["fixture_manifest_file"] = "/private/manifest-" + name + ".json"
-		endpoint["runner"] = map[string]any{"label": "ubuntu-latest"}
 		endpoint["ssh"] = map[string]any{"base_url": "ssh://git@forgejo.compose.forgelab:2222", "host_key_fingerprint": "SHA256:fixture"}
 	}
 

@@ -1,5 +1,5 @@
 {
-  "version": 5,
+  "version": 6,
   "generation": {
     "id": "run-neutral-fixture"
   },
@@ -28,7 +28,11 @@
         "provider_id": "101",
         "name": "lab-targets-run-neutral-fixture",
         "created_at": "2026-08-06T10:00:00Z"
-      }
+      },
+      "runners": [
+        {"role": "ordinary", "platform": "linux/amd64", "tags": ["ubuntu-latest"], "exclusive": false},
+        {"role": "build", "platform": "linux/amd64", "tags": ["privileged"], "exclusive": true}
+      ]
     },
     {
       "name": "gitea",
@@ -53,7 +57,10 @@
         "provider_id": "102",
         "name": "lab-targets-run-neutral-fixture",
         "created_at": "2026-08-06T10:00:00Z"
-      }
+      },
+      "runners": [
+        {"role": "ordinary", "platform": "linux/amd64", "tags": ["ubuntu-latest"], "exclusive": false}
+      ]
     },
     {
       "name": "gitlab",
@@ -79,7 +86,11 @@
         "name": "lab-targets-run-neutral-fixture",
         "created_at": "2026-08-06T10:00:00Z",
         "expires_at": "2026-09-05"
-      }
+      },
+      "runners": [
+        {"role": "ordinary", "platform": "linux/amd64", "tags": [], "exclusive": false},
+        {"role": "build", "platform": "linux/amd64", "tags": ["privileged"], "exclusive": true}
+      ]
     }
   ],
   "fulcio": {

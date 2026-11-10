@@ -130,7 +130,7 @@ No source justfile, lint configuration, pin or application file is patched.
 The Go adapter records `.gitlab/generic-cli-checks` as `buildah-integration`.
 Release acceptance reads that explicit marker and the `go` kind from regular
 Git blobs at the admitted commit, and requires the contract's
-`runner.privileged_label` for `Check: consumer checks` only. Restricted
+build runner pool for `Check: consumer checks` only. Restricted
 `Check: release request` authorizes the signed immutable request first; the
 consumer-check job freshly checks out and revalidates it before the original
 suite runs. Cargo and unmarked consumers keep untagged checks. This grants no

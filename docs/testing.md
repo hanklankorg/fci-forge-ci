@@ -477,7 +477,7 @@ consumer](#showing-a-consumer) the demo.
 
 #### Running it
 
-The tier needs one input: a neutral live-target contract, version 5, for this
+The tier needs one input: a neutral live-target contract, version 6, for this
 suite's lab account, `forgeci`. Forge Lab writes it to the contract module's default
 path, `$XDG_STATE_HOME/forge-lab/targets/forgeci.json` (`~/.local/state` when
 unset), as JSON data, never sourced, owner-only on disk. Everything else is
@@ -519,8 +519,8 @@ launcher's host tools: `base64`, `cosign`, `flock`, `jq`, `syft`, `buildah`,
 `mise which` resolves it to an installed tool other than mise; otherwise run
 `mise install && mise reshim`. Buildah
 must work for the current user. The suite builds
-host binaries and runner binaries for the architecture the contract's
-`runner.arch` names, writes caches/evidence, runs containers
+host binaries and runner binaries for the architecture of the contract's
+ordinary runner pool, writes caches/evidence, runs containers
 and trusted runner jobs, may fetch modules/images, and deletes/recreates
 `fci-` resources on the lab.
 
@@ -707,14 +707,19 @@ from the `-test.v` text the log already holds, by the same reading that decides
 the verdict, so the retained log stays the readable evidence and the two cannot
 disagree.
 
-One live run per lab account runs at a time. Scenarios delete and recreate
-fixed `fci-<scenario>` repositories, so two concurrent runs would clobber each
-other; the script takes a non-blocking `flock` on
-`${XDG_STATE_HOME:-$HOME/.local/state}/forge-ci/live.lock` and a second run
-exits with status 2. The lock does not follow `FORGE_CI_LIVE_EVIDENCE_ROOT`, and
-`go test` runs without the descriptor, so a lingering gpg-agent or buildah
-child cannot hold it. It covers runs that share one `$HOME`: a run from a
-container with its own `HOME` does not see it.
+One live run per lab account and provider runs at a time. Scenarios delete
+and recreate fixed `fci-<scenario>` repositories under the run's account, so
+two runs as one account would clobber each other. The script takes
+non-blocking `flock`s under
+`${XDG_STATE_HOME:-$HOME/.local/state}/forge-ci/`: `live.lock` and its
+provider's lock shared, and the lock of its lab account on that provider
+exclusive, so a second run as that account exits with status 2 while runs on
+another provider or as another account go on;
+[live-runs.md](live-runs.md#execution-scopes-and-locks) shows how. The locks
+do not follow `FORGE_CI_LIVE_EVIDENCE_ROOT`, and `go test` runs without the
+descriptors, so a lingering gpg-agent or buildah child cannot hold them. They
+cover runs that share one `$HOME`: a run from a container with its own `HOME`
+does not see them.
 
 #### What the contract is, and what it is not
 
@@ -837,10 +842,10 @@ the same way and commits a file that names another key, or no file: the run
 must fail in the job that signs, before the bot's key is loaded, and leave no
 release commit, final tag or release.
 
-Rootless Buildah needs user namespaces, which the runner under the
-contract's `runner.label` may deny. The scenarios that build an image with it,
+Rootless Buildah needs user namespaces, which the contract's ordinary
+runner pool may deny. The scenarios that build an image with it,
 this one and the container and Rust development scenarios on Forgejo, run
-those jobs on the runner the contract's `runner.privileged_label` names,
+those jobs on the contract's build runner pool,
 through `CI_RUNNER_LABEL_CONTAINER`, and skip when the contract names none.
 On Forge Lab's Compose road, start its runners with the full-release
 acknowledgement and mint the contract again. A build that fails there is a
@@ -866,7 +871,7 @@ export FORGE_CI_LIVE_IMAGE_PLAN_JOB_IMAGE="$(just test-live-image kaniko-job /ab
 just test-live '^TestForgejoLayer_ResolvedImagePlan$'
 ```
 
-Use a current version-5 `forgeci` lab contract (`LAB_TARGETS_FILE` when needed).
+Use a current version-6 `forgeci` lab contract (`LAB_TARGETS_FILE` when needed).
 The existing layer checksum and committed-`.forgejo/` guards apply; an isolated
 committed snapshot is suitable for testing changes before their real commit.
 The image publisher uses the same consumer-trial scratch layer coordinate as
@@ -1190,7 +1195,7 @@ like every trial, and each needs `FORGE_CI_LIVE_SIGNER_IMAGE` as above:
   full-release acknowledgement,
   `COMPOSE_FORGEJO_FULL_RELEASE_ACK=trusted-local-full-release just compose-runners forgejo`
   in its checkout, and mint the contract again. The trial sets
-  `CI_RUNNER_LABEL_CONTAINER` to the contract's `runner.privileged_label`
+  `CI_RUNNER_LABEL_CONTAINER` to the tag of the contract's build runner pool
   unless `CI_IMAGE_BUILDER=kaniko`, so the image builds go there:
 
   ```text
@@ -2013,7 +2018,7 @@ build environment variables.
 Optional trailing uppercase `KEY=value` arguments set literal environment variables only
 for the key-free consumer build command. Their meaning belongs
 to the consumer, except `RELEASE_PLATFORMS`: a consumer trial on Forgejo or
-GitLab sets it to `linux/<runner.arch>` when it is not given, and refuses a
+GitLab sets it to the ordinary runner pool's platform when it is not given, and refuses a
 selection of another architecture before anything is pushed, because the lab's
 runners build and run what is selected and a release never emulates. On
 GitLab it is also the policy's `release-platforms` when the consumer declares
@@ -2122,7 +2127,7 @@ release's export jobs with the selected builder (`multiarch-image build-arch
 verified base exists. A consumer build that extracts a binary with `forge-ci
 container build`, such as hello-cargo-container's, belongs to its export
 script. The Go CLI integration fixture's checks are Buildah's own
-integration tests, so they still need `runner.privileged_label`, and are not
+integration tests, so they still need the build runner pool, and are not
 covered without it; `TestGitLabRelease_BuildImageCapability` probes a
 Buildah builder. The minimal release builds no image.
 
@@ -2132,8 +2137,9 @@ GitLab this setting, on Forgejo `FORGE_CI_LIVE_FORGEJO_IMAGE_BUILDER`, which
 the snapshot workflow receives as the consumer's `CI_IMAGE_BUILDER` and
 `CI_IMAGE_BUILDER_JOB_IMAGE`. Under kaniko they push the kaniko job image of
 `FORGE_CI_LIVE_KANIKO_JOB_IMAGE_ARCHIVE`, labelled with their engine
-project, and build on the ordinary runner; under Buildah they need
-`runner.privileged_label`. A lab that cannot run the selected builder
+project, and build on the ordinary runner pool on Forgejo. Under Buildah, and
+on GitLab under either builder, they build on the build runner pool: GitLab's
+ordinary pool takes untagged jobs and the product asks for a build tag. A lab that cannot run the selected builder
 reports them not covered. A Forgejo consumer trial selects its builder with
 `CI_IMAGE_BUILDER` and refuses a different Forgejo setting.
 
@@ -2164,7 +2170,7 @@ under `/kaniko`; see `containers/kaniko-job/Containerfile`.
 
 The npm application and Maven service fixtures call the shared snapshot
 workflow, which already selects the builder and job container. Maven still
-needs `runner.privileged_label` for its Podman service-readiness check with
+needs the build runner pool for its Podman service-readiness check with
 either builder; it keeps the existing single container-runner binding. The
 registry/signer smoke remains an explicit Buildah storage-capability probe and
 is not covered by a Kaniko run. Conflicting consumer-plan/runtime bindings fail

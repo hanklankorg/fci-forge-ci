@@ -132,12 +132,7 @@ func runGitLabConsumerLifecycle(t *testing.T, root string, private bool) {
 	target := livetest.Accept(t, provider.ForgeGitLab)
 	builder := livetest.ChooseImageBuilder(t, target)
 
-	// build-runner-tags-linux-amd64 is never empty: the selected builder's
-	// runner, else, for kaniko on GitLab, the lab's own runner label.
 	buildTags := builder.RunnerLabels
-	if len(buildTags) == 0 {
-		buildTags = []string{livetest.RunnerLabel(t, target)}
-	}
 
 	if platforms := settings.Variables["RELEASE_PLATFORMS"]; platforms != "linux/amd64" {
 		livetest.NotCoveredf(t, "the snapshot and the release build images for %s only on tagged arm64 runners, which the lab has none of", platforms)

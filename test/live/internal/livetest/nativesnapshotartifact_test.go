@@ -450,12 +450,7 @@ func TestGitLabSnapshotArtifactFirst(t *testing.T) {
 
 	imageRepository := registry + "/" + strings.ToLower(RepoSlug(target, consumer))
 
-	// build-runner-tags-linux-amd64 is never empty: the builder's runner,
-	// else, for kaniko on GitLab, the lab's own runner label.
 	buildTags := choice.RunnerLabels
-	if len(buildTags) == 0 {
-		buildTags = []string{RunnerLabel(t, target)}
-	}
 
 	tagJSON, err := json.Marshal(buildTags)
 	if err != nil {

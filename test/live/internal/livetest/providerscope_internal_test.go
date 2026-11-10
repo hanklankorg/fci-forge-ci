@@ -70,8 +70,8 @@ func TestLiveProviderScopeLimitsExecutionAndCannotClaimFull(t *testing.T) {
 
 func TestLiveProviderScopeChoosesOnlyItsRunnerArchitecture(t *testing.T) {
 	lab := &labcontract.Contract{Endpoints: []labcontract.Endpoint{
-		{Name: "gitlab", Kind: labcontract.GitLab, Capabilities: []string{capabilityWorkflowRuns}, Runner: &labcontract.Runner{Arch: "amd64"}},
-		{Name: "forgejo", Kind: labcontract.Forgejo, Capabilities: []string{capabilityWorkflowRuns}, Runner: &labcontract.Runner{Arch: "arm64"}},
+		{Name: "gitlab", Kind: labcontract.GitLab, Capabilities: []string{capabilityWorkflowRuns}, Runners: labcontract.Runners{{Role: labcontract.RoleOrdinary, Platform: "linux/amd64"}}},
+		{Name: "forgejo", Kind: labcontract.Forgejo, Capabilities: []string{capabilityWorkflowRuns}, Runners: labcontract.Runners{{Role: labcontract.RoleOrdinary, Platform: "linux/arm64"}}},
 	}}
 
 	for _, tc := range []struct{ scope, arch string }{{"gitlab", "amd64"}, {"forgejo", "arm64"}} {

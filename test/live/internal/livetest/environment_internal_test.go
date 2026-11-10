@@ -6,6 +6,7 @@ package livetest
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -62,16 +63,19 @@ func TestNotCovered_OnlyExplicitFocusedRunsMaySkip(t *testing.T) {
 }
 
 // withoutWorkflowRuns removes the deployed-runner capability from every
-// endpoint of the compose fixture.
+// endpoint of the compose fixture, and the runner pools the contract
+// publishes exactly beside it.
 func withoutWorkflowRuns(t *testing.T, body string) string {
 	t.Helper()
 
 	const capability = ",\n        \"workflow-runs\""
-	if !strings.Contains(body, capability) {
-		t.Fatalf("fixture no longer declares %q", capability)
+
+	pools := regexp.MustCompile(`,\n      "runners": \[\n(?:        \{.*\n)+      \]`)
+	if !strings.Contains(body, capability) || !pools.MatchString(body) {
+		t.Fatalf("fixture no longer declares %q with its runner pools", capability)
 	}
 
-	return strings.ReplaceAll(body, capability, "")
+	return pools.ReplaceAllString(strings.ReplaceAll(body, capability, ""), "")
 }
 
 func withoutPackages(t *testing.T, body string) string {
@@ -238,7 +242,7 @@ func TestRequires_EachOutcomeIsDistinct(t *testing.T) {
 	})
 
 	t.Run("a forge absent from the contract is fatal, not a skip", func(t *testing.T) {
-		setCurrentContract(t, writeContract(t, fixtureBody(t, "neutral-targets-v5-github.json")))
+		setCurrentContract(t, writeContract(t, fixtureBody(t, "neutral-targets-github.json")))
 
 		tb := &recordingTB{}
 		if Requires(tb, provider.ForgeGitLab, NeedsInRunner) || !strings.Contains(tb.fatal, "gitlab: no endpoint of that kind") || len(tb.logs) != 0 {

@@ -18,6 +18,8 @@ import (
 	"strings"
 	"time"
 
+	"codefloe.com/itiquette/forge-lab-contract/labcontract"
+
 	"github.com/diggsweden/forge-ci/internal/domain/errs"
 	"github.com/diggsweden/forge-ci/internal/domain/provider"
 	"github.com/diggsweden/forge-ci/internal/retry"
@@ -669,34 +671,48 @@ func SetRepoVariable(tb TB, target Target, repo, name, value string) {
 	}
 }
 
-// RunnerLabel is the label the contract says this endpoint's runner takes
-// jobs for.
+// RunnerLabel is the tag the contract says a job carries to reach this
+// endpoint's ordinary runner pool.
 //
 // The probes of this tier name `ubuntu-latest` themselves and bring their own
-// image. A workflow of the layer runs in the image the label selects, so the
-// label is the environment's to state, and a contract that deploys a runner
-// without publishing its label cannot schedule the layer at all.
+// image. A workflow of the layer runs in the image the tag selects, so the
+// tag is the environment's to state. GitLab's ordinary pool takes untagged
+// jobs and has none to name: a GitLab scenario leaves its ordinary jobs
+// untagged and never asks.
 func RunnerLabel(tb TB, target Target) string {
 	tb.Helper()
 	requireAccepted(tb, target)
 
-	label := runnerOf(target.endpoint).Label
-	if label == "" {
-		tb.Fatalf("livetest: the contract publishes no runner.label for endpoint %q, so a workflow of the layer has nothing to schedule on",
-			target.endpoint.Name)
+	pool, _ := runnerPool(target.endpoint, labcontract.RoleOrdinary)
+	if len(pool.Tags) != 1 {
+		tb.Fatalf("livetest: the contract publishes the tags %q for the ordinary runner pool of endpoint %q, and a workflow of the layer schedules on one",
+			pool.Tags, target.endpoint.Name)
 	}
 
-	return label
+	return pool.Tags[0]
 }
 
-// PrivilegedRunnerLabel is the label the contract says a runner that permits
-// user namespaces takes jobs for, or "" when it names none. Rootless Buildah
-// needs them, and the runner under RunnerLabel may deny them.
+// PrivilegedRunnerLabel is the tag the contract says a job carries to reach
+// this endpoint's build pool, whose runners permit user namespaces, or ""
+// when it publishes none. Rootless Buildah needs them, and the runner under
+// RunnerLabel may deny them. A GitLab build job is tagged with it whichever
+// builder it runs: the product asks for a build tag, and the ordinary pool
+// has none.
 func PrivilegedRunnerLabel(tb TB, target Target) string {
 	tb.Helper()
 	requireAccepted(tb, target)
 
-	return runnerOf(target.endpoint).PrivilegedLabel
+	pool, published := runnerPool(target.endpoint, labcontract.RoleBuild)
+	if !published {
+		return ""
+	}
+
+	if len(pool.Tags) != 1 {
+		tb.Fatalf("livetest: the contract publishes the tags %q for the build runner pool of endpoint %q, and this tier schedules on one",
+			pool.Tags, target.endpoint.Name)
+	}
+
+	return pool.Tags[0]
 }
 
 // readActions decodes one Actions API answer of the scratch repository.

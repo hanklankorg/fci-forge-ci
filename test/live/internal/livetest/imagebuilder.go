@@ -123,14 +123,16 @@ func ImageBuilderEnv(forge provider.ForgeAPI) string {
 }
 
 // ImageBuilderChoice is where and with what a scenario's image builds run:
-// Buildah on the contract's runner that permits user namespaces, or kaniko on
-// the ordinary runner, in a kaniko job image.
+// Buildah on the contract's build pool, whose runners permit user namespaces,
+// or kaniko in a kaniko job image.
 type ImageBuilderChoice struct {
 	// Builder is ImageBuilderBuildah or ImageBuilderKaniko.
 	Builder string
-	// RunnerLabels are the labels (GitLab tags) the image builds run on:
-	// the privileged label for Buildah; for kaniko the ordinary runner's on
-	// Forgejo and none on GitLab, whose untagged runner is the ordinary one.
+	// RunnerLabels are the one label (GitLab tag) the image builds run on:
+	// the build pool's, except for kaniko on Forgejo, which needs no user
+	// namespaces and runs on the ordinary pool. GitLab's ordinary pool takes
+	// untagged jobs and the product asks for a build tag, so kaniko builds
+	// there carry the build pool's too.
 	RunnerLabels []string
 
 	kanikoArchive string
@@ -151,17 +153,21 @@ func ChooseImageBuilder(tb TB, target Target) ImageBuilderChoice {
 			NotCoveredf(tb, "the run selects kaniko (%s=kaniko), whose image builds need %s, a saved kaniko job image", env, KanikoJobImageArchiveEnv)
 		}
 
-		labels := []string{}
 		if target.Forge == provider.ForgeForgejo {
-			labels = []string{RunnerLabel(tb, target)}
+			return ImageBuilderChoice{Builder: ImageBuilderKaniko, RunnerLabels: []string{RunnerLabel(tb, target)}, kanikoArchive: archive}
 		}
 
-		return ImageBuilderChoice{Builder: ImageBuilderKaniko, RunnerLabels: labels, kanikoArchive: archive}
+		label := PrivilegedRunnerLabel(tb, target)
+		if label == "" {
+			NotCoveredf(tb, "the run selects kaniko (%s=kaniko) on GitLab, whose build jobs need a tag, and the contract publishes no build runner pool to take it from", env)
+		}
+
+		return ImageBuilderChoice{Builder: ImageBuilderKaniko, RunnerLabels: []string{label}, kanikoArchive: archive}
 	}
 
 	label := PrivilegedRunnerLabel(tb, target)
 	if label == "" {
-		NotCoveredf(tb, "the run selects Buildah (%s unset or buildah), whose image builds need the contract's runner.privileged_label, a runner that permits user namespaces, and the lab names none; select kaniko with %s=kaniko", env, env)
+		NotCoveredf(tb, "the run selects Buildah (%s unset or buildah), whose image builds need the contract's build runner pool, whose runners permit user namespaces, and the lab publishes none; select kaniko with %s=kaniko", env, env)
 	}
 
 	return ImageBuilderChoice{Builder: ImageBuilderBuildah, RunnerLabels: []string{label}}
@@ -178,7 +184,7 @@ func ContainerRunnerLabel(tb TB, target Target, why string) string {
 
 	label := PrivilegedRunnerLabel(tb, target)
 	if label == "" {
-		NotCoveredf(tb, "%s, which needs the contract's runner.privileged_label, a runner that permits user namespaces, whichever builder builds the image", why)
+		NotCoveredf(tb, "%s, which needs the contract's build runner pool, whose runners permit user namespaces, whichever builder builds the image", why)
 	}
 
 	return label

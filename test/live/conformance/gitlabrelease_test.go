@@ -405,8 +405,6 @@ func runGitLabReleaseScenario(t *testing.T, consumerRoot string, scenario gitlab
 
 	var consumer *livetest.Consumer
 
-	checksNeedBuildah := false
-
 	if consumerRoot != "" {
 		opened := livetest.OpenConsumer(t, target, consumerRoot)
 		if preseeded {
@@ -418,18 +416,6 @@ func runGitLabReleaseScenario(t *testing.T, consumerRoot string, scenario gitlab
 		}
 
 		consumer = &opened
-		if opened.GitLabChecksNeedBuildah(t) {
-			label := livetest.PrivilegedRunnerLabel(t, target)
-			if label == "" && profile.kaniko {
-				livetest.NotCoveredf(t, "the Go CLI integration fixture's checks run Buildah themselves, whatever builds the images; they need runner.privileged_label")
-			}
-
-			if label == "" {
-				t.Fatal("the admitted Go CLI integration fixture requires runner.privileged_label for Buildah checks")
-			}
-
-			checksNeedBuildah = true
-		}
 	}
 
 	layer := livetest.PushLayer(t, target, gitlabReleaseRepo(t, target, "release-engine", livetest.ReadLayerAnonymously))
@@ -502,30 +488,22 @@ func runGitLabReleaseScenario(t *testing.T, consumerRoot string, scenario gitlab
 		checks, build = []string{"test -f CHANGELOG.md"}, []string{gitlabBaseBuild}
 	}
 
-	// The consumer's checks and the image and export jobs run on
-	// build-runner-tags-linux-amd64, which is never empty: the runner the
-	// selected builder needs, a lab that cannot run it reporting the scenario
-	// not covered; the one that permits user namespaces for checks that run
-	// Buildah; else the lab's own runner label.
-	buildRunnerTags := []string{}
+	// The consumer's checks and build commands, every planned family job, the
+	// final release-files invocation and the image and export jobs run on
+	// build-runner-tags-linux-amd64, which is never empty: the contract's
+	// build pool, whichever builder runs, since GitLab's ordinary pool takes
+	// untagged jobs and has no tag to give. A lab that cannot run the
+	// selected builder reports the scenario not covered.
 	if profile.releaseImages || len(profile.export) != 0 {
-		buildRunnerTags = livetest.ChooseImageBuilder(t, target).RunnerLabels
+		livetest.ChooseImageBuilder(t, target)
 	}
 
-	if checksNeedBuildah {
-		buildRunnerTags = []string{livetest.PrivilegedRunnerLabel(t, target)}
+	buildLabel := livetest.PrivilegedRunnerLabel(t, target)
+	if buildLabel == "" {
+		livetest.NotCoveredf(t, "a GitLab release's build jobs need a tag, and the contract publishes no build runner pool to take it from")
 	}
 
-	if len(buildRunnerTags) == 0 {
-		buildRunnerTags = []string{livetest.RunnerLabel(t, target)}
-	}
-
-	// Consumer build commands stay on the build role, including all planned
-	// family jobs and the final release-files invocation. Do not move this
-	// capability to the ordinary/version runner to accommodate the fan-out.
-	if label := livetest.PrivilegedRunnerLabel(t, target); label != "" && consumer != nil && !profile.kaniko {
-		buildRunnerTags = []string{label}
-	}
+	buildRunnerTags := []string{buildLabel}
 
 	runnerTags := []string{}
 

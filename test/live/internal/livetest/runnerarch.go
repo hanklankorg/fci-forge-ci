@@ -64,11 +64,11 @@ func labRunnerArch(lab *labcontract.Contract) (string, error) {
 			continue
 		}
 
-		runnerArch := runnerOf(endpoint).Arch
+		runnerArch := runnerArchOf(endpoint)
 
 		switch {
 		case runnerArch == "":
-			return "", fmt.Errorf("endpoint %q runs workflows but its contract publishes no runner.arch; emit the contract again with a Forge Lab that publishes it: %w",
+			return "", fmt.Errorf("endpoint %q runs workflows but its contract publishes no ordinary runner pool; emit the contract again with a Forge Lab that publishes it: %w",
 				endpoint.Name, errs.ErrValidation)
 		case arch == "":
 			arch = runnerArch
@@ -91,23 +91,34 @@ func RunnerArch(tb TB, target Target) string {
 	tb.Helper()
 	requireAccepted(tb, target)
 
-	arch := runnerOf(target.endpoint).Arch
+	arch := runnerArchOf(target.endpoint)
 	if arch == "" {
-		tb.Fatalf("livetest: the contract publishes no runner.arch for endpoint %q; emit it again with a Forge Lab that publishes it",
+		tb.Fatalf("livetest: the contract publishes no ordinary runner pool for endpoint %q; emit it again with a Forge Lab that publishes it",
 			target.endpoint.Name)
 	}
 
 	return arch
 }
 
-// runnerOf is the runner the endpoint's jobs reach, empty when the contract
-// publishes none.
-func runnerOf(endpoint labcontract.Endpoint) labcontract.Runner {
-	if endpoint.Runner == nil {
-		return labcontract.Runner{}
+// runnerPool is the endpoint's pool of role. This tier builds for one runner
+// architecture, so it takes the first and asks for no platform.
+func runnerPool(endpoint labcontract.Endpoint, role labcontract.Role) (labcontract.RunnerPool, bool) {
+	for _, pool := range endpoint.Runners {
+		if pool.Role == role {
+			return pool, true
+		}
 	}
 
-	return *endpoint.Runner
+	return labcontract.RunnerPool{}, false
+}
+
+// runnerArchOf is the architecture of the endpoint's ordinary pool, "" when
+// the contract publishes none.
+func runnerArchOf(endpoint labcontract.Endpoint) string {
+	pool, _ := runnerPool(endpoint, labcontract.RoleOrdinary)
+	_, arch, _ := strings.Cut(pool.Platform, "/")
+
+	return arch
 }
 
 // NativeReleasePlatforms returns a trial's consumer variables with the release

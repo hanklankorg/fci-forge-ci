@@ -195,7 +195,7 @@ func TestCheckLiveInputs_GuardsWithoutTouchingAProvider(t *testing.T) {
 		"no forge this tier drives": {body: func(t *testing.T) string {
 			t.Helper()
 
-			return fixtureBody(t, "neutral-targets-v5-github.json")
+			return fixtureBody(t, "neutral-targets-github.json")
 		}, reason: "carries no endpoint this tier drives"},
 	} {
 		t.Run(name, func(t *testing.T) {

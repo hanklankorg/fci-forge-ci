@@ -1,7 +1,7 @@
 code.gitea.io/sdk/gitea v0.25.1 h1:yywxWwoV+SdjHtbC6unBiXojWdZOtoHuGhEazEXeWuE=
 code.gitea.io/sdk/gitea v0.25.1/go.mod h1:uDFWYBU8dgZsgOHwe6C/6olxvf8FHguNB3wW1i83fgg=
-codefloe.com/itiquette/forge-lab-contract v0.93.0 h1:re6ILP5YHel9URfACEJnHyCgsdH25JpW7xJu14t7A2I=
-codefloe.com/itiquette/forge-lab-contract v0.93.0/go.mod h1:8M7vjMzDYOAkfstQSk3OwA0Y1CkcJ7IuJskddIOlMK0=
+codefloe.com/itiquette/forge-lab-contract v0.94.0 h1:a9n9E88oB3H0lBgUQyn1rYVMAtWUAybY6DY1UvUj1JM=
+codefloe.com/itiquette/forge-lab-contract v0.94.0/go.mod h1:azGE4uM8uRrqFmi2DdYYA93iQeMNnAiQlp3ABsK/K+M=
 dario.cat/mergo v1.0.2 h1:85+piFYR1tMbRrLcDwR18y4UKJ3aH1Tbzi24VRW1TK8=
 dario.cat/mergo v1.0.2/go.mod h1:E/hbnu0NxMFBjpMIE34DRGLWqDy0g5FuKDhCb31ngxA=
 github.com/42wim/httpsig v1.3.0 h1:HK2bieeZ99X9IvOoc1ST6yrhLek0f4MqlEGES2JCP3g=
