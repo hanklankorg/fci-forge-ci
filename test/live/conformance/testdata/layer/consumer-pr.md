@@ -80,5 +80,5 @@ finding is deterministic without one. This slice also does not test a release
 publication job's refusal of adverse lint findings; Forgejo's release
 workflows take no `enforce-lint`. GitLab/GitHub native work remains held;
 Forgejo reproducible-build enforcement remains unconsumed and refused
-(`TestCampaignAdminDeclarationsNameConsumedInputsOnly`). No provider or
+(`TestLaneAdminInputsAreOnesTheForgeConsumes`). No provider or
 release-wide enforcement coverage is implied by these PR cases.

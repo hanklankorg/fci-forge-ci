@@ -76,7 +76,7 @@ beside another run. It takes the same arguments as the run:
 just test-live-preflight                                   # as just test-live
 just test-live-preflight '^TestGitLabLayer_ConsumerTrial$' # as just test-live <scenario>
 FORGE_CI_LIVE_PREFLIGHT=1 just test-live-consumer gitlab /absolute/consumer pull-request
-FORGE_CI_LIVE_PREFLIGHT=1 just campaign-lane ~/campaigns/k3s gitlab test/live/campaigns/k3s-private-gitlab.cases
+FORGE_CI_LIVE_PREFLIGHT=1 just test-live-prepared ~/campaigns/k3s gitlab '^TestGitLabLayer_ConsumerTrial$/^private$'
 ```
 
 `FORGE_CI_LIVE_PREFLIGHT=1` reaches the launcher, `scripts/ci/run-live-tests.sh`,
@@ -86,8 +86,9 @@ run. Each scenario then runs up to its admission boundary: everything it
 checks before its first effect, such as the runner capabilities the contract
 declares, the contract's credential for that forge, and the consumer checkout
 and gate it was given. Runner inputs are not judged here: the engine refuses a
-plan whose platform has no runner when the run plans it. A campaign lane first
-plans the cases file, as for the run, and then preflights each case.
+plan whose platform has no runner when the run plans it. A prepared run first
+checks the prepared directory against the checkout, as for the run, and then
+preflights each case.
 
 A scenario declares its boundary with `livetest.RegisterAdmittedScenario(t)` in
 place of `RegisterLiveScenario`, and calls `livetest.Admitted(t)` before its
@@ -163,87 +164,81 @@ does not merge or rewrite resource policy. To deliberately choose the legacy
 unbudgeted route, remove inherited requirements explicitly before invocation.
 
 Prepare once, from a clean checkout whose engine checksum is fresh, naming
-each lane the campaign will run as `<provider>=<cases file>`. It publishes the
+what the campaign will run: `forgejo` or `gitlab`, every lane of the forge, or
+a lane of `livetest.PreparedLanes` by name
+(`test/live/internal/livetest/preparedlanes.go`). It publishes the
 kaniko job, signer and named nanolinter job images with Forge Lab, saves the
 signer image, the Buildah and kaniko job images
 (`FORGE_CI_LIVE_BUILDAH_JOB_IMAGE_ARCHIVE`, `FORGE_CI_LIVE_KANIKO_JOB_IMAGE_ARCHIVE`)
 and the runtime images as archives, exports every demo as a one-commit
 checkout and writes `<dir>/campaign.env` (references and paths, no secrets,
-and `CAMPAIGN_COMMIT`). The runtime images are those the named cases need,
-each as `FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_<TARGET>`: every one a case names as
-`@FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_<TARGET>`, and on GitLab the scenarios' go
-image, also `FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE`, and every
-`$CI_JOB_IMAGE_<TARGET>` the gate of a named demo checks in
-(`go run ./test/live/internal/livetest/preflight campaign-runtime-targets . gitlab=<cases file> flavor=<flavor> ...`
+and `CAMPAIGN_COMMIT`). The runtime images are those the GitLab cases of the
+named lanes need, each as `FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_<TARGET>`: the
+image of each case's flavor, the scenarios' go image, also
+`FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE`, every `$CI_JOB_IMAGE_<TARGET>` the gate of
+a case's demo checks in, and the producer families of a snapshot
+(`go run ./test/live/internal/livetest/preflight campaign-runtime-targets . <forge or lane> ... flavor=<flavor> ...`
 lists them). Each nanolinter job image is published as `JOB_IMAGE_<FLAVOR>`
 and saved as `LINT_IMAGE_ARCHIVE_<FLAVOR>`, the flavor in capitals with `-` as
-`_`; a case naming a flavor the campaign is not given is refused before
-anything is built:
+`_`; a lane with a case of a flavor the campaign is not given is refused
+before anything is built:
 
 ```bash
 just campaign-prepare ~/src/forge-lab ~/campaigns/k3s \
-  forgejo=test/live/campaigns/k3s-private-forgejo.cases \
-  gitlab=test/live/campaigns/k3s-private-gitlab.cases \
+  k3s-private-forgejo k3s-private-gitlab \
   job-image=go:<local image> job-image=java:<local image> \
   job-image=javascript-typescript:<local image> job-image=rust:<local image>
 ```
 
-Then run one lane a provider, side by side, against fresh forgeci targets
-(minted with `LAB_ROAD=k3s` in Forge Lab for that road). `LAB_TARGETS_FILE`,
-`FORGE_CI_LIVE_CONSUMER_VISIBILITY` and the GitLab image builder,
-`FORGE_CI_LIVE_GITLAB_IMAGE_BUILDER=buildah|kaniko`, stay the caller's; the
-builder is the whole GitLab lane's, kaniko for the k3s cases. The image
-archives are the campaign's or the case's own: the lane clears a caller's
-`FORGE_CI_LIVE_LINT_IMAGE_ARCHIVE` and any image variable campaign.env does not
-set.
+The cases are rows of two Go tables, `livetest.ForgejoPreparedCases` and
+`livetest.GitLabPreparedCases` (`test/live/internal/livetest/preparedcases.go`).
+Each runs as the subtest `<test>/<lane>/<demo>/<event>/<builder>/<visibility>`
+of the live test of its event:
+
+| Forge | Event | Test |
+|---|---|---|
+| forgejo | pull-request, release | `TestForgejoLayer_ConsumerTrial` |
+| forgejo | lifecycle | `TestForgejoLayer_ConsumerLifecycle` |
+| forgejo | snapshot | `TestForgejoLayer_Snapshot` |
+| gitlab | pull-request | `TestGitLabLayer_ConsumerTrial` |
+| gitlab | release | `TestGitLabRelease_ConsumerTrial` |
+| gitlab | lifecycle | `TestGitLabLayer_ConsumerLifecycle` |
+| gitlab | snapshot | `TestGitLabLayer_Snapshot` |
+
+`just test-live-prepared <dir> <forge> <pattern>` runs the cases a `go test
+-run` pattern selects, on the demos and images of the prepared directory. It
+refuses a checkout other than `CAMPAIGN_COMMIT`, or one with changes on top.
+A case takes its images from `campaign.env` and its builder from its own row;
+an image variable left in the caller's environment is never taken for one. A
+case whose image was not prepared fails naming the missing key.
+
+Run one forge beside the other, against fresh forgeci targets (minted with
+`LAB_ROAD=k3s` in Forge Lab for that road). `LAB_TARGETS_FILE`,
+`FORGE_CI_LIVE_CONSUMER_VISIBILITY` and the administrator inputs,
+`FORGE_CI_LIVE_ADMIN_<CHECK>`, stay the caller's:
 
 ```bash
 export FORGE_CI_LIVE_CONSUMER_VISIBILITY=private
-export FORGE_CI_LIVE_FORGEJO_IMAGE_BUILDER=kaniko
-export FORGE_CI_LIVE_ADMIN_LINT=false
-export FORGE_CI_LIVE_ADMIN_VULNERABILITIES=false
-export FORGE_CI_LIVE_ADMIN_APPLICATION_TESTS=false
-just campaign-lane ~/campaigns/k3s forgejo test/live/campaigns/k3s-private-forgejo.cases &
-FORGE_CI_LIVE_GITLAB_IMAGE_BUILDER=kaniko FORGE_CI_LIVE_ADMIN_REPRODUCIBLE_BUILDS=true \
-  just campaign-lane ~/campaigns/k3s gitlab test/live/campaigns/k3s-private-gitlab.cases &
+just test-live-prepared ~/campaigns/k3s forgejo '^TestForgejoLayer_ConsumerTrial$/^private$' &
+FORGE_CI_LIVE_ADMIN_REPRODUCIBLE_BUILDS=true \
+  just test-live-prepared ~/campaigns/k3s gitlab '^(TestGitLabLayer_ConsumerTrial|TestGitLabRelease_ConsumerTrial)$/^private$' &
 wait
 ```
 
-A cases file can declare expected run settings before its first case:
+The `private` and `private-android` lanes hold their cases to private
+repositories, and on GitLab to the reproducible-build check, whatever the
+caller sets (`PreparedCase.LaneEnvironment`). Set both as above all the same,
+so the run header records what ran. The other lanes fix nothing: unset
+visibility runs each case public and private.
 
-```text
-setting visibility=private
-setting image-builder=kaniko
-setting admin-lint=false
-setting admin-vulnerabilities=false
-setting admin-application-tests=false
-setting admin-reproducible-builds=true
-```
-
-The lane checks these declarations against the caller's effective settings before
-running any case. Declarations do not override the environment. Missing visibility
-means `both`, and an unset provider-specific image-builder selector means `buildah`,
-as in the scenarios. Each Forgejo consumer case also resolves its own
-`CI_IMAGE_BUILDER` (default `buildah`); it must match a declared builder and any
-explicit Forgejo run selector. A conflicting later case refuses the entire plan,
-before earlier cases execute or the conflicting trial creates repositories.
-Unknown declarations, mismatches, duplicate declarations and
-settings after a case are refused. Preparation validates the declaration syntax
-before building images. The checked-in private k3s lanes require private visibility
-and Kaniko; set the corresponding Forgejo or GitLab image-builder selector.
-The four administrator settings are independent and default to `false`. For these
-lanes the controller sets lint, vulnerabilities and application tests to `false`,
-and for the GitLab lane explicitly enables reproducible builds, as its declaration
-requires. An administrator setting is declared, or enforced by the run, only
-where an orchestrator of the lane's forge declares its input,
-`enforce-<check>`, read from this checkout's `.forgejo/workflows` and
-`.forgejo/actions` or `templates/`: no Forgejo orchestrator takes
-`enforce-reproducible-builds`, so the Forgejo lanes declare none. A
-declaration nothing on the lane consumes is refused at preparation and before
-the lane runs, and so is a run that enforces such a check, which its record
-would otherwise claim. Each controller variable accepts exactly
-`true` or `false`; invalid values refuse preflight. Checks still run when their
-findings are nonblocking.
+The four administrator inputs are independent and default to `false`; each
+accepts exactly `true` or `false`, and an invalid value refuses preflight.
+Checks still run when their findings are nonblocking. An input reaches a check
+only where an orchestrator of the forge declares it, `enforce-<check>`, read
+from this checkout's `.forgejo/workflows` and `.forgejo/actions` or
+`templates/`. No Forgejo orchestrator takes `enforce-reproducible-builds`, so
+leave `FORGE_CI_LIVE_ADMIN_REPRODUCIBLE_BUILDS` unset on Forgejo: nothing
+there reads it, and the run header would claim a check that never ran.
 
 The harness supplies literals only in the wrappers and independent GitLab policy
 projects it owns. Consumer source checkouts and repository variables receive no
@@ -253,109 +248,94 @@ preserve their root push workflow and jobs in that policy project, with its loca
 gate include bound to the captured administrator gate. Forgejo and GitHub wrappers
 receive only the settings declared by the called engine workflow/action at its
 exact pinned Git commit, including when local uncommitted files differ.
-The lane exports the four `FORGE_CI_LIVE_ADMIN_*` inputs it was admitted with
-to every case, `false` where none was set, so each run header and verdict
-records them on both forges. The embedded engine default stays report-only; no lab-only policy source
+The embedded engine default stays report-only; no lab-only policy source
 edit or checksum rebuild is needed to choose the run's settings.
 
-A cases file then holds one case a line: `consumer <demo>
-<pull-request|release|lifecycle> [key=value ...]` or `scenario <TestName>
-[key=value ...]`. Explicit scenario inputs
-are supported by the native consumer recipes described below. A value `@NAME` is campaign.env's
-`NAME`; a GitLab consumer names its archives with `job-archive=` (and for a
-release `build-archive=` and `signer-archive=`), for example
-`job-archive=@FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_JAVA`, which a campaign prepared
-with that cases file has, and a release runs its `job-image` jobs as the
-runtime images' `nonroot` with `job-user=65532:65532`. A GitLab consumer whose
-gate includes the nanolinter component names its flavor's archive,
-`lint-archive=@LINT_IMAGE_ARCHIVE_JAVA` for example, for that case alone.
-Every runtime image archive and the Buildah and kaniko job images reach every
-case, so a gate's further job images and a release's image jobs find theirs. The live preflight reads both
-files as data and plans the lane (`test/live/internal/livetest/campaign.go`); it refuses
-a checkout other than `CAMPAIGN_COMMIT` and any case it cannot read before the
-first runs, among them a case whose archive, or a further job image of its
-demo's gate, the campaign was not prepared with, and a GitLab consumer whose
-gate lints without `lint-archive=`. The lane then runs past failures and fails when any case did. Read the outcome from
-`<dir>/<provider>.results`, one tab-separated line a case: interval, case,
-exit status and the `verdict.json` to read, as above.
+A lane of `livetest.PreparedLanes` also names the live tests it runs beside
+its cases. The nine of `k3s-private-gitlab` run in the go runtime image and
+are not table cases, so nothing hands them the prepared images. Give each the
+value of the same key in `<dir>/campaign.env`:
+
+```bash
+FORGE_CI_LIVE_CONSUMER_VISIBILITY=private FORGE_CI_LIVE_ADMIN_REPRODUCIBLE_BUILDS=true \
+FORGE_CI_LIVE_GITLAB_IMAGE_BUILDER=kaniko \
+FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE=<path> FORGE_CI_LIVE_SIGNER_IMAGE=<reference> \
+FORGE_CI_LIVE_SIGNER_IMAGE_ARCHIVE=<path> FORGE_CI_LIVE_KANIKO_JOB_IMAGE_ARCHIVE=<path> \
+  just test-live-prepared ~/campaigns/k3s gitlab '^TestGitLabRelease_MinimalSignedArtifacts$'
+```
+
+The scenarios of `build-capability-gitlab`, `harness-inputs-forgejo`,
+`harness-inputs-gitlab`, `interruption-manual-gitlab` and
+`release-images-forgejo` take an operator's own checkout or archive and run
+through the recipes described below.
+
+A run goes on past a failed case and fails when any case did. Read the
+outcome from the `verdict.json` beside the run's log, as above.
 
 ### Rerun one cell
 
-A selector after the cases file reruns the matrix cell it names and nothing
-more: `<demo>[/<event>][/<setting>=<value>...]`, the consumer cases of the
-demo and event whose run has those axis values, in the words of the testing
-overlay (`test/live/campaigns/evidence.txt`): `image-builder=buildah|kaniko`,
-the case's own builder, `admin-<check>=true|false`, the lane's input, and
-`visibility=public|private`, which narrows a run of both visibilities to
-that one and exports it to the case. `<TestName>` is a scenario case. Every
-case is still planned first, so the whole file's typos are caught, and a
-selector that names no case, a word other than the event without `=`, or
-selectors of two visibilities, are refused. A selected case that runs with
-another value, such as a visibility or GitLab builder the run inherits from
-the caller, is refused naming that value:
+The pattern of one case, down to its visibility, reruns the matrix cell it
+names and nothing more:
 
 ```bash
-just campaign-lane ~/campaigns/lc gitlab test/live/campaigns/lifecycle-gitlab.cases hello-maven-service/lifecycle/image-builder=buildah/visibility=public
-just campaign-lane ~/campaigns/lc forgejo test/live/campaigns/lifecycle-forgejo.cases hello-maven-service/lifecycle/image-builder=buildah/visibility=private
-just campaign-lane ~/campaigns/sn gitlab test/live/campaigns/snapshot-gitlab.cases hello-monorepo/snapshot/image-builder=buildah/visibility=public
+just test-live-prepared ~/campaigns/lc gitlab '^TestGitLabLayer_ConsumerLifecycle$/^lifecycle$/^hello-maven-service$/^lifecycle$/^buildah$/^public$'
+just test-live-prepared ~/campaigns/lc forgejo '^TestForgejoLayer_ConsumerLifecycle$/^lifecycle$/^hello-maven-service$/^lifecycle$/^buildah$/^private$'
+just test-live-prepared ~/campaigns/sn gitlab '^TestGitLabLayer_Snapshot$/^snapshot$/^hello-monorepo$/^snapshot$/^buildah$/^public$'
 ```
 
+`go test -run` does not fail on a pattern that matches nothing, so check that
+the verdict lists the case.
+
 A hosted GitHub cell is the demo's fixture workflow for the event, run by
-the same recipe with `github` and `<demo>/<event>` in place of the cases
-file, from a one-commit checkout of the built-in demo, inside Forge Lab's
-hosted session; the settings are `just test-live-consumer github`'s, and
-the line goes to `<dir>/github.results`:
+`just campaign-github <dir> <demo>/<event>` from a one-commit checkout of the
+built-in demo, inside Forge Lab's hosted session; the settings are
+`just test-live-consumer github`'s, and the cell's line goes to
+`<dir>/github.results`:
 
 ```bash
-just campaign-lane ~/campaigns/hosted github hello-maven-service/lifecycle org=<id>
-just campaign-lane ~/campaigns/hosted github hello-go-cli/release org=<id> fixtures=test/live/github-gpg workflow=release-gpg.yml
-just campaign-lane ~/campaigns/hosted github hello-go-cli/release org=<id> fixtures=test/live/github-no-sboms workflow=release-no-sboms.yml
-just campaign-lane ~/campaigns/hosted github hello-go-cli/release org=<id> fixtures=test/live/github-no-changelog workflow=release-no-changelog.yml
-just campaign-lane ~/campaigns/hosted github hello-npm-package/pull-request org=<id> fixtures=test/live/github-fork head=fork
+just campaign-github ~/campaigns/hosted hello-maven-service/lifecycle org=<id>
+just campaign-github ~/campaigns/hosted hello-go-cli/release org=<id> fixtures=test/live/github-gpg workflow=release-gpg.yml
+just campaign-github ~/campaigns/hosted hello-go-cli/release org=<id> fixtures=test/live/github-no-sboms workflow=release-no-sboms.yml
+just campaign-github ~/campaigns/hosted hello-go-cli/release org=<id> fixtures=test/live/github-no-changelog workflow=release-no-changelog.yml
+just campaign-github ~/campaigns/hosted hello-npm-package/pull-request org=<id> fixtures=test/live/github-fork head=fork
 ```
 
 The settings after the cell are passed to the trial unchanged, so each
 variant fixture root is its own cell.
 
 Hosted cells do not run the lab launcher/classifier: `github.results` records
-the exit status with `verdict=-`, not a lab `verdict.json` path. Retain each
+the interval, the cell and its exit status with `verdict=-`, not a lab
+`verdict.json` path. Retain each
 cell's stdout/stderr and exit status, engine/consumer revisions, native run IDs
-and cleanup output separately; the lane's temporary output copy is removed.
+and cleanup output separately; the recipe's temporary output copy is removed.
 For parallel hosted cells, [prepare the shared engine once and reuse it](validation-invariants.md#1-freeze-the-engine-before-parallel-consumers)
-within one guarded session. These cells are not lab `.cases` lanes.
+within one guarded session. These cells are not cases of the lab tables.
 
 ### Lifecycle
 
-`test/live/campaigns/lifecycle-forgejo.cases` and
-`test/live/campaigns/lifecycle-gitlab.cases` run the linked flow of one
-consumer in one scratch repository, the `lifecycle` event, for each demo with
-a development route on the provider:
+The `lifecycle` lane of each table runs the linked flow of one consumer in one
+scratch repository, the `lifecycle` event, for each demo with a development
+route on the forge: `hello-maven-service`, `hello-cargo-container`,
+`hello-npm-service` and, on Forgejo alone, `hello-go-service`, which ships no
+GitLab release build.
 
-```text
-consumer hello-maven-service lifecycle CI_JOB_IMAGE=@JOB_IMAGE_JAVA CI_IMAGE_BUILDER=buildah RELEASE_PLATFORMS=linux/amd64
-consumer hello-maven-service lifecycle CI_JOB_IMAGE=@JOB_IMAGE_JAVA CI_IMAGE_BUILDER=kaniko CI_IMAGE_BUILDER_JOB_IMAGE=@KANIKO_JOB_IMAGE RELEASE_PLATFORMS=linux/amd64
-consumer hello-cargo-container lifecycle CI_JOB_IMAGE=@JOB_IMAGE_RUST CI_IMAGE_BUILDER=buildah RELEASE_PLATFORMS=linux/amd64
-consumer hello-npm-service lifecycle CI_JOB_IMAGE=@JOB_IMAGE_JAVASCRIPT_TYPESCRIPT CI_IMAGE_BUILDER=buildah RELEASE_PLATFORMS=linux/amd64
-consumer hello-maven-service lifecycle job-archive=@FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_JAVA build-archive=@FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_JAVA signer-archive=@FORGE_CI_LIVE_SIGNER_IMAGE_ARCHIVE lint-archive=@LINT_IMAGE_ARCHIVE_JAVA version=0.2.0 job-user=65532:65532
-consumer hello-cargo-container lifecycle job-archive=@FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_RUST build-archive=@FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_RUST signer-archive=@FORGE_CI_LIVE_SIGNER_IMAGE_ARCHIVE lint-archive=@LINT_IMAGE_ARCHIVE_RUST version=0.2.0 job-user=65532:65532
-consumer hello-npm-service lifecycle job-archive=@FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_NODE build-archive=@FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_NODE signer-archive=@FORGE_CI_LIVE_SIGNER_IMAGE_ARCHIVE lint-archive=@LINT_IMAGE_ARCHIVE_JAVASCRIPT_TYPESCRIPT version=0.2.0 job-user=65532:65532
+```bash
+just test-live-prepared <dir> forgejo '^TestForgejoLayer_ConsumerLifecycle$/^lifecycle$'
+just test-live-prepared <dir> gitlab '^TestGitLabLayer_ConsumerLifecycle$/^lifecycle$'
 ```
 
-Neither file declares a visibility, a builder or an administrator setting.
+The lane fixes no visibility and no administrator input.
 The visibility is the run's selector: `FORGE_CI_LIVE_CONSUMER_VISIBILITY`
-unset or `both` runs each line public and private. So are the
+unset or `both` runs each case public and private. So are the
 administrator inputs: `FORGE_CI_LIVE_ADMIN_<CHECK>=true` enforces that check
-on every line, unset enforces none, and the run header records them. The
-builder on GitLab is the lane's selector, `FORGE_CI_LIVE_GITLAB_IMAGE_BUILDER`
-(unset or `buildah`, or `kaniko`), under which every GitLab line runs; on Forgejo it is the consumer's
-`CI_IMAGE_BUILDER` variable, so the Forgejo file carries one line per builder,
-and `FORGE_CI_LIVE_FORGEJO_IMAGE_BUILDER` stays unset (set, it refuses the other
-builder's line). On Forgejo both builders' image builds, and the service's
+on every case, unset enforces none, and the run header records them. The
+builder is each case's own. The GitLab table has every demo once a builder;
+the Forgejo table has `hello-maven-service` with both and the others with
+Buildah. On Forgejo both builders' image builds, and the service's
 readiness, run on the contract's container/readiness runner
 (`CI_RUNNER_LABEL_CONTAINER`); on GitLab kaniko builds on the ordinary runner.
 
-The same reader, `key=value` words and `@NAME` expansion as the other consumer
-events; only the event word is new. On Forgejo the phases, each ending the
+On Forgejo the phases, each ending the
 lifecycle when it fails, with their acceptance owners unchanged:
 
 1. **Pull request.** The consumer is rendered once, with the release's public
@@ -513,29 +493,23 @@ would be a workflow of the demo's, not a setting.
 
 ### Snapshot
 
-`test/live/campaigns/snapshot-forgejo.cases` and
-`test/live/campaigns/snapshot-gitlab.cases` run the `snapshot` event: the
+The `snapshot` lane of each table runs the `snapshot` event: the
 lifecycle's development phase alone, over every image the planner plans from
 the demo's declaration. It is the route of every development cell no
-lifecycle line runs: the multi-image demos' until their full lifecycle
+lifecycle case runs: the multi-image demos' until their full lifecycle
 exists, and `hello-go-service`'s on GitLab, which has no GitLab release
 build. It releases nothing and does not couple to a release's image
-fan-out:
-
-```text
-consumer hello-cargo-workspace snapshot CI_JOB_IMAGE=@JOB_IMAGE_RUST CI_IMAGE_BUILDER=buildah
-consumer hello-cargo-workspace snapshot job-archive=@FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_RUST
-consumer hello-monorepo snapshot job-archive=@FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_JAVA
-consumer hello-go-service snapshot job-archive=@FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_GO
-```
+fan-out. Forgejo runs `hello-cargo-workspace` with Buildah; GitLab runs
+`hello-cargo-workspace`, `hello-monorepo` and `hello-go-service`, each once a
+builder.
 
 Each cell reruns with one command:
 
 ```bash
-just campaign-lane <dir> forgejo test/live/campaigns/snapshot-forgejo.cases hello-cargo-workspace/snapshot/image-builder=buildah/visibility=public
-just campaign-lane <dir> gitlab test/live/campaigns/snapshot-gitlab.cases hello-cargo-workspace/snapshot/image-builder=buildah/visibility=public
-just campaign-lane <dir> gitlab test/live/campaigns/snapshot-gitlab.cases hello-monorepo/snapshot/image-builder=buildah/visibility=public
-just campaign-lane <dir> gitlab test/live/campaigns/snapshot-gitlab.cases hello-go-service/snapshot/image-builder=buildah/visibility=public
+just test-live-prepared <dir> forgejo '^TestForgejoLayer_Snapshot$/^snapshot$/^hello-cargo-workspace$/^snapshot$/^buildah$/^public$'
+just test-live-prepared <dir> gitlab '^TestGitLabLayer_Snapshot$/^snapshot$/^hello-cargo-workspace$/^snapshot$/^buildah$/^public$'
+just test-live-prepared <dir> gitlab '^TestGitLabLayer_Snapshot$/^snapshot$/^hello-monorepo$/^snapshot$/^buildah$/^public$'
+just test-live-prepared <dir> gitlab '^TestGitLabLayer_Snapshot$/^snapshot$/^hello-go-service$/^snapshot$/^buildah$/^public$'
 ```
 
 The declaration is the lifecycle's, `livetest.ServiceSnapshotSource`, overlaid
@@ -575,8 +549,8 @@ declaration>`, a variant of the consumer's own declaration staged in place of
 `hello-maven-service` ships one, `.forge-ci/artifacts-build-sbom.yml`: the
 artifact-first producer keeps its Build SBOM and the image gets none, so the
 run's retained evidence must hold the image's scan and no
-`sbom.cyclonedx.json` (`livetest.SnapshotEvidenceFindings`). No cases file has
-a line for it; run it standalone from an exported checkout:
+`sbom.cyclonedx.json` (`livetest.SnapshotEvidenceFindings`). No table case
+runs it; run it standalone from an exported checkout:
 
 ```bash
 just test-live-consumer forgejo <exported hello-maven-service> snapshot CI_JOB_IMAGE=<nanolinter java image, digest reference> CI_IMAGE_BUILDER=buildah snapshot-declaration=.forge-ci/artifacts-build-sbom.yml
@@ -592,16 +566,16 @@ component probes no readiness, so none is claimed. The event takes
 the runtime image of its toolchain family,
 `FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_<FAMILY>`, which `campaign-prepare`
 prepares from the plan (none for the container-first Cargo workspace,
-`java` and `node` for the monorepo), and the images with the lane's
+`java` and `node` for the monorepo), and the images with the case's
 builder. `job-archive=` is required even without producers and is not the
 builder archive: Buildah requires `FORGE_CI_LIVE_BUILDAH_JOB_IMAGE_ARCHIVE`,
-kaniko requires `FORGE_CI_LIVE_KANIKO_JOB_IMAGE_ARCHIVE`. Campaign admission
-and the standalone trial refuse a missing selected-builder archive before
+kaniko requires `FORGE_CI_LIVE_KANIKO_JOB_IMAGE_ARCHIVE`. A table case and
+the standalone trial refuse a missing archive of their builder before
 creating mutable resources. The development registry credential is a protected
 variable scoped to the publisher's environment, on a protected `main`. No release build,
 signer or lint archive is asked for.
 
-The generated [Testing matrices](testing-matrices.md) show these lines in the
+The generated [Testing matrices](testing-matrices.md) show these cases in the
 snapshot columns, `📝 snapshot`; a run's verdict is evidence for the
 `development` flow of the overlay. amd64 runners only for now. Standalone
 `test-live-consumer <forge> <checkout> snapshot …` runs the same test
@@ -609,22 +583,22 @@ outside a campaign.
 
 ### Explicit-input Forgejo consumer trials
 
-`test/live/campaigns/harness-inputs-forgejo.cases` illustrates the existing native
-`TestForgejoLayer_ConsumerTrial` with `checkout=@NATIVE_CONSUMER`. Add an absolute,
-clean, reviewed Git root as `NATIVE_CONSUMER` in `campaign.env` and keep it frozen.
-The example PR also requires `JOB_IMAGE_GO`, prepared with
-`job-image=go:<reviewed local image>`; choose an image satisfying the consumer's
-actual tool contract. The case declarations require private visibility and
-Buildah. These are expectations, not environment overrides.
+The lane `harness-inputs-forgejo` is the native
+`TestForgejoLayer_ConsumerTrial` on a checkout of the operator's own: an
+absolute, clean, reviewed Git root, kept frozen. Its pull request names the
+job image on the command line, a reviewed nanolinter image by digest that
+satisfies the consumer's actual tool contract; its release requests a version:
 
-Explicit inputs select `test-live-consumer forgejo <checkout> <event>`, defaulting
-to release. `event=pull-request` selects the native PR route. Only those two
-events are admitted here: development snapshots have a distinct scenario and
-must not be relabelled as releases. Bare scenario selection is unchanged.
-Missing references, duplicate checkout/event selectors, unknown settings and
-other providers refuse the whole plan before the first case executes. All
-normal source, target, acknowledgement, resource, locking and cleanup gates remain.
-The consumer's own workflows and packaging run without a replacement build.
+```bash
+export FORGE_CI_LIVE_CONSUMER_VISIBILITY=private FORGE_CI_LIVE_FORGEJO_IMAGE_BUILDER=buildah
+just test-live-consumer forgejo <checkout> pull-request CI_JOB_IMAGE=<digest reference>
+just test-live-consumer forgejo <checkout> release version=0.3.0
+```
+
+Only those two events are run this way: development snapshots have a
+distinct scenario and must not be relabelled as releases. All normal source,
+target, acknowledgement, resource, locking and cleanup gates remain. The
+consumer's own workflows and packaging run without a replacement build.
 
 The release oracle verifies offered Cosign bundles. For authenticated
 `checksums.txt` or `*_checksums.txt` it also verifies every uniquely named
@@ -637,8 +611,15 @@ outside this repository.
 
 #### Local release-image output readback
 
-`test/live/campaigns/release-images-forgejo.cases` opts a native image release into
-`release-images-config=<repository-relative declaration>`. The setting is
+The lane `release-images-forgejo` opts a native image release into
+`release-images-config=<repository-relative declaration>`:
+
+```bash
+FORGE_CI_LIVE_CONSUMER_VISIBILITY=private FORGE_CI_LIVE_FORGEJO_IMAGE_BUILDER=buildah \
+  just test-live-consumer forgejo <checkout> release version=0.3.0 release-images-config=.forge-ci/artifacts.yml RELEASE_PLATFORMS=linux/amd64
+```
+
+The setting is
 release-only, mutually exclusive with external `image=` verification, and does
 not change the consumer build or declaration. It requires the accepted local
 registry and the standard engine `release-images` run artifact; a missing,
@@ -674,7 +655,7 @@ bytes at the copied path, and the published image's file must have them too.
 A hand-off `COPY` that names no one file and absolute path is a failure. An
 image whose Containerfile builds for itself copies none and is not compared,
 which the log states; other architectures are not read.
-`test/live/campaigns/release-variants-forgejo.cases` runs it for the Go
+The `release-variants` lane of the Forgejo table runs it for the Go
 service; no shipped Cargo demo builds its image from a released file.
 
 ### Explicit-input GitLab regressions
@@ -732,53 +713,69 @@ Local inert regressions cover wrapper/DAG ordering, fail-closed checkpoint behav
 and receipt identity; only a later explicit-input live run can prove GitLab's
 cancellation/retry semantics and registry/signing outcome.
 
-`test/live/campaigns/harness-inputs-gitlab.cases` supplies the four consumer case
-lines. After preparing the normal images, add these reviewed references/absolute
-paths as literal entries in `campaign.env`:
+The lane `harness-inputs-gitlab` runs four of these on the operator's own
+consumers, with private visibility, kaniko and the reproducible-build check.
+`<native>` is a reviewed native-release consumer and `<recovery>` the reviewed
+recovery consumer described above; each archive is a reviewed image whose
+toolchain fits its consumer:
 
-- `NATIVE_CONSUMER`, `NATIVE_JOB_ARCHIVE`, `NATIVE_BUILD_ARCHIVE`, `NATIVE_SIGNER_ARCHIVE`, `NATIVE_LINT_ARCHIVE`;
-- `RECOVERY_CONSUMER`, `RECOVERY_JOB_ARCHIVE`, `RECOVERY_BUILD_ARCHIVE`, `RECOVERY_LINT_ARCHIVE`.
+```bash
+export FORGE_CI_LIVE_CONSUMER_VISIBILITY=private FORGE_CI_LIVE_ADMIN_REPRODUCIBLE_BUILDS=true FORGE_CI_LIVE_GITLAB_IMAGE_BUILDER=kaniko
+just test-live-gitlab-branch-protection <native>
+just test-live-consumer gitlab <native> release job-archive=<job> build-archive=<build> signer-archive=<signer> lint-archive=<lint> scenario=TestGitLabRelease_ConsumerTrial
+just test-live-consumer gitlab <native> release job-archive=<job> build-archive=<build> signer-archive=<signer> lint-archive=<lint> scenario=TestGitLabRelease_RejectsPreseededProvenance
+just test-live-consumer gitlab <recovery> release job-archive=<job> build-archive=<build> signer-archive=<signer> lint-archive=<lint> version=0.3.0 scenario=TestGitLabRelease_ConsumerInterruptedRecovery
+```
 
-The archive toolchains must fit their consumer. Checkouts must be clean reviewed
-Git roots and kept frozen through the lane. Scenario input records use
-`checkout=@NAME` and explicit archive words; missing references, duplicate
-checkout/selector settings, invalid scenario names and incomplete inputs refuse
-the whole plan. These explicit-input consumers do not infer additional lint or
-runtime images from the demo catalog; provide every image their gate requires.
-The example case lines include `lint-archive=` for a gate that lints. Remove that
-word for a consumer whose gate does not lint; a mismatch is refused at admission.
+Checkouts must be clean reviewed Git roots and kept frozen through the runs.
+These consumers do not infer additional lint or runtime images from the demo
+catalog; provide every image their gate requires. `lint-archive=` is for a
+gate that lints. Leave it out for a consumer whose gate does not lint; a
+mismatch is refused at admission.
 
-Run `build-capability-gitlab.cases` separately with
-`FORGE_CI_LIVE_GITLAB_IMAGE_BUILDER=buildah` and `BUILD_PROBE_ARCHIVE` in
-`campaign.env`. It requires a privileged runner and a reviewed Buildah RUN-capable
-image. A Kaniko lane is refused before any case executes; changing only the
-archive cannot change the selected builder.
+The lane `build-capability-gitlab` is the Buildah probe, run apart with a
+reviewed Buildah RUN-capable image on a privileged runner:
 
-For interruption, run the dedicated recipe separately, or use the one-case
-`interruption-manual-gitlab.cases`. Observe `fci-live-interruption-ready` in the
+```bash
+FORGE_CI_LIVE_CONSUMER_VISIBILITY=private FORGE_CI_LIVE_GITLAB_IMAGE_BUILDER=buildah \
+  just test-live-gitlab-buildah <build archive>
+```
+
+The lane `interruption-manual-gitlab` is the dedicated recipe, run apart:
+
+```bash
+FORGE_CI_LIVE_CONSUMER_VISIBILITY=private just test-live-gitlab-interrupted-job
+```
+
+Observe `fci-live-interruption-ready` in the
 owned GitLab job trace, then interrupt the launcher with Ctrl-C. Its expected
 outcome is exit 130, an `interrupted` verdict and normal exact-resource cleanup
-receipts. The campaign lane stops on interruption; this is not an automated PASS
+receipts. This is not an automated PASS
 and must not be counted as normal successful scenario coverage. If the fixture
 finishes its sleep normally, it fails rather than claiming cancellation proof.
 
 ### Optional Android lane
 
-The default k3s cases do not prepare the large Android SDK/runtime image.
-To opt in, add both of these arguments to the same `campaign-prepare` command:
+The lane `k3s-private-gitlab` does not prepare the large Android SDK/runtime
+image. To opt in, add both of these arguments to the same `campaign-prepare`
+command:
 
 ```text
-gitlab=test/live/campaigns/k3s-private-android-gitlab.cases
+k3s-private-android-gitlab
 job-image=kotlin:localhost/nanolinter-kotlin:latest
 ```
 
 Supply a reviewed local Kotlin-flavour nanolinter image under that name first.
-The additional cases file makes prepare build the linux/amd64 Android runtime
-archive; missing Kotlin lint input is refused before any image build. Keep the
-ordinary cases-file arguments too when preparing the combined campaign. Then
-run the optional file with `campaign-lane <dir> gitlab
-test/live/campaigns/k3s-private-android-gitlab.cases`, with the same private
-visibility and selected builder as the ordinary lane. It runs the real Android
+The lane makes prepare build the linux/amd64 Android runtime archive; missing
+Kotlin lint input is refused before any image build. `gitlab`, every lane of
+the forge, includes it. Then run its case:
+
+```bash
+FORGE_CI_LIVE_CONSUMER_VISIBILITY=private FORGE_CI_LIVE_ADMIN_REPRODUCIBLE_BUILDS=true \
+  just test-live-prepared <dir> gitlab '^TestGitLabLayer_ConsumerTrial$/^private-android$'
+```
+
+It runs the real Android
 demo MR gate without production signing/store credentials. Debug APKs use the
 normal Android debug signing; release APK/AAB outputs remain unsigned.
 Budget additional SDK image/archive and Gradle-cache disk space before preparing

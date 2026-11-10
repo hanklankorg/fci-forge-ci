@@ -18,30 +18,28 @@ import (
 	"github.com/diggsweden/forge-ci/internal/testutil/testfs"
 )
 
-// These tests drive campaign.sh lane and demo-checkout.sh offline. A fake go
-// plays the preflight and hands over a plan; a fake just records each case's
-// argv and the environment it saw, prints a verdict path and exits as told.
-// What a plan holds and refuses is tested in test/live/internal/livetest; these pin
-// what the script does with one: run it in order, past failures, and record.
+// These tests drive campaign.sh and demo-checkout.sh offline. A fake go
+// records the preflight's argv and refuses; a fake just records each call's
+// argv, prints a verdict path and exits as told. Which images a campaign
+// prepares is tested in test/live/internal/livetest; these pin what the
+// script refuses before any effect and what a GitHub cell runs and records.
 
 const fakeCampaignGo = `#!/usr/bin/env bash
 printf '%s\n' "$*" >>"$FAKE_GO_ARGV"
-[[ -z "${FAKE_PLAN_REFUSAL:-}" ]] || { printf 'campaign: %s\n' "$FAKE_PLAN_REFUSAL" >&2; exit 2; }
-cat -- "$FAKE_PLAN"
+exit 2
 `
 
 const fakeCampaignJust = `#!/usr/bin/env bash
 printf '%s\n' "$*" >>"$FAKE_JUST_ARGV"
-printf 'provider=%s signer=%s lint=%s\n' "$FORGE_CI_LIVE_PROVIDER" "${FORGE_CI_LIVE_SIGNER_IMAGE:-}" "${FORGE_CI_LIVE_LINT_IMAGE_ARCHIVE-unset}" >>"$FAKE_JUST_ENV"
 calls=$(wc -l <"$FAKE_JUST_ARGV")
 printf 'suite output\nLive verdict: /evidence/%s/verdict.json\n' "${calls// /}"
 case "$*" in
 *TestFails*) exit 1 ;;
-*TestInterrupted*) exit 130 ;;
 esac
 `
 
-// campaignLane is one campaign directory, a plan for it and fakes to run it.
+// campaignLane is one campaign directory and the fakes to run the script on
+// it.
 type campaignLane struct {
 	dir, workDir, argvFile, goArgvFile, envFile string
 	env                                         []string
@@ -75,26 +73,9 @@ func newCampaignLane(t *testing.T, extraEnv ...string) campaignLane {
 		"FAKE_GO_ARGV=" + lane.goArgvFile,
 		"FAKE_JUST_ARGV=" + lane.argvFile,
 		"FAKE_JUST_ENV=" + lane.envFile,
-		// The caller's: the plan, not the caller, names the provider.
-		"FORGE_CI_LIVE_PROVIDER=all",
 	}, extraEnv...)
 
 	return lane
-}
-
-// run hands the lane the plan of NUL-terminated fields and runs it with the
-// relative cases file lane.cases; it returns stderr and the exit status.
-func (lane campaignLane) run(t *testing.T, provider string, plan ...string) (string, int) {
-	t.Helper()
-
-	planFile := filepath.Join(t.TempDir(), "plan")
-	if err := os.WriteFile(planFile, []byte(strings.Join(plan, "\x00")+"\x00"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	env := append(slices.Clone(lane.env), "FAKE_PLAN="+planFile)
-
-	return runScript(t, lane.workDir, env, "campaign.sh", "lane", lane.dir, provider, "lane.cases")
 }
 
 func runScript(t *testing.T, dir string, env []string, script string, args ...string) (string, int) {
@@ -168,7 +149,7 @@ func TestImagePreparationResourceRefusalPreservesDestinations(t *testing.T) {
 			writeExecutable(t, fake, "#!/usr/bin/env bash\nprintf '%s\\0' \"$@\" >\"$FAKE_GO_ARGV\"\nexit 2\n")
 			env := append(slices.Clone(lane.env), "GO="+fake, "FORGE_CI_IMAGE_BUILD_BUDGET=required")
 
-			args := []string{"prepare", lab, lane.dir, "forgejo=lane.cases", "build-budget=required", "build-cpus=2; literal"}
+			args := []string{"prepare", lab, lane.dir, "forgejo", "build-budget=required", "build-cpus=2; literal"}
 			if script == "publish-live-image.sh" {
 				args = []string{"signer", lab, sentinel}
 			}
@@ -275,7 +256,7 @@ func TestImagePreparationInheritedRequiredOnly(t *testing.T) {
 			env := append(slices.Clone(lane.env), "GO="+fake, "FORGE_CI_IMAGE_BUILD_BUDGET=required")
 			if route == "campaign" {
 				// No explicit resource words: only the inherited-requirement gate can refuse.
-				_, code := runScript(t, lane.workDir, env, "campaign.sh", "prepare", lab, lane.dir, "forgejo=lane.cases")
+				_, code := runScript(t, lane.workDir, env, "campaign.sh", "prepare", lab, lane.dir, "forgejo")
 				if code != 2 {
 					t.Fatalf("campaign exit %d", code)
 				}
@@ -326,109 +307,6 @@ func TestImagePreparationInheritedRequiredOnly(t *testing.T) {
 	}
 }
 
-func TestCampaignLane_RunsThePlanInOrderAndRecordsEachCase(t *testing.T) {
-	t.Parallel()
-
-	// The caller's lint archive is not a case's: the plan clears it.
-	lane := newCampaignLane(t, "FORGE_CI_LIVE_LINT_IMAGE_ARCHIVE=/caller/lint.tar")
-
-	stderr, status := lane.run(t, "forgejo", "unset", "FORGE_CI_LIVE_LINT_IMAGE_ARCHIVE",
-		"env", "FORGE_CI_LIVE_PROVIDER=forgejo", "env", "FORGE_CI_LIVE_SIGNER_IMAGE=lab/signer@sha256:aa",
-		"case", "consumer hello-go-cli release A=b c", "5", "test-live-consumer", "forgejo", "/c/demos/hello-go-cli", "release", "A=b c",
-		"case", "scenario TestFails", "2", "test-live", "^TestFails$",
-		"case", "scenario TestThird", "2", "test-live", "^TestThird$")
-	if status != 1 {
-		t.Fatalf("status %d, want 1 for a failed case\n%s", status, stderr)
-	}
-
-	// The preflight is asked from the repository about the caller's cases file.
-	if got := readLines(t, lane.goArgvFile); len(got) != 1 ||
-		got[0] != "run ./test/live/internal/livetest/preflight campaign-plan "+reporoot.Path(t)+" "+lane.dir+" forgejo "+filepath.Join(lane.workDir, "lane.cases") {
-		t.Fatalf("go calls %q", got)
-	}
-
-	justfile := "--justfile " + filepath.Join(reporoot.Path(t), "justfile")
-
-	want := []string{
-		justfile + " test-live-consumer forgejo /c/demos/hello-go-cli release A=b c",
-		justfile + " test-live ^TestFails$",
-		justfile + " test-live ^TestThird$",
-	}
-	if got := readLines(t, lane.argvFile); strings.Join(got, "\n") != strings.Join(want, "\n") {
-		t.Fatalf("just calls:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
-	}
-
-	for _, seen := range readLines(t, lane.envFile) {
-		if seen != "provider=forgejo signer=lab/signer@sha256:aa lint=unset" {
-			t.Errorf("a case saw %q", seen)
-		}
-	}
-
-	results := readLines(t, filepath.Join(lane.dir, "forgejo.results"))
-	if len(results) != 3 {
-		t.Fatalf("results:\n%s", strings.Join(results, "\n"))
-	}
-
-	for i, wantCase := range []string{
-		"consumer hello-go-cli release A=b c\texit=0\tverdict=/evidence/1/verdict.json",
-		"scenario TestFails\texit=1\tverdict=/evidence/2/verdict.json",
-		"scenario TestThird\texit=0\tverdict=/evidence/3/verdict.json",
-	} {
-		interval, rest, _ := strings.Cut(results[i], "\t")
-		if rest != wantCase || !strings.Contains(interval, "Z/20") {
-			t.Errorf("result %d: %q, want <start>/<end>\\t%q", i, results[i], wantCase)
-		}
-	}
-}
-
-func TestCampaignLane_StopsAtAnInterruptedCase(t *testing.T) {
-	t.Parallel()
-
-	lane := newCampaignLane(t)
-
-	stderr, status := lane.run(t, "gitlab", "env", "FORGE_CI_LIVE_PROVIDER=gitlab",
-		"case", "scenario TestInterrupted", "2", "test-live", "^TestInterrupted$",
-		"case", "scenario TestNext", "2", "test-live", "^TestNext$")
-	if status != 130 || !strings.Contains(stderr, "interrupted") {
-		t.Fatalf("status %d, want 130 and the interruption named\n%s", status, stderr)
-	}
-
-	if calls := readLines(t, lane.argvFile); len(calls) != 1 {
-		t.Fatalf("an interrupted lane went on: %q", calls)
-	}
-
-	if results := readLines(t, filepath.Join(lane.dir, "gitlab.results")); len(results) != 1 || !strings.Contains(results[0], "\texit=130\t") {
-		t.Fatalf("results %q", results)
-	}
-}
-
-func TestCampaignLane_RunsNothingThePreflightRefuses(t *testing.T) {
-	t.Parallel()
-
-	lane := newCampaignLane(t, "FAKE_PLAN_REFUSAL=the campaign was prepared for another commit")
-
-	stderr, status := lane.run(t, "forgejo", "case", "scenario TestA", "2", "test-live", "^TestA$")
-	if status != 2 || !strings.Contains(stderr, "another commit") {
-		t.Fatalf("status %d, want the refusal (2)\n%s", status, stderr)
-	}
-
-	if calls := readLines(t, lane.argvFile); calls != nil {
-		t.Fatalf("a refused lane ran %q", calls)
-	}
-
-	// Nor a plan the script cannot read as one: an export that is no variable.
-	lane = newCampaignLane(t)
-	if stderr, status := lane.run(t, "forgejo", "env", "-f x", "case", "scenario TestA", "2", "test-live", "^TestA$"); status != 2 || readLines(t, lane.argvFile) != nil {
-		t.Fatalf("status %d, want a refusal (2) and no case run\n%s", status, stderr)
-	}
-
-	// Nor a clear that is no variable name.
-	lane = newCampaignLane(t)
-	if stderr, status := lane.run(t, "forgejo", "unset", "-f x", "case", "scenario TestA", "2", "test-live", "^TestA$"); status != 2 || readLines(t, lane.argvFile) != nil {
-		t.Fatalf("status %d, want a refusal (2) and no case run\n%s", status, stderr)
-	}
-}
-
 func TestCampaignPrepare_RefusesAnArgumentItCannotName(t *testing.T) {
 	t.Parallel()
 
@@ -446,19 +324,25 @@ func TestCampaignPrepare_RefusesAnArgumentItCannotName(t *testing.T) {
 		{"job-image=go:localhost/a b"},
 		{"image=go:localhost/a"},
 		{"job-image=go:localhost/a", "job-image=go:localhost/b"},
-		{"github=lane.cases"},
+		{"gitlab=lane.cases"},
 		{"gitlab="},
+		{"Gitlab"},
+		{"../gitlab"},
 	} {
-		stderr, status := runScript(t, lane.workDir, lane.env, "campaign.sh", append([]string{"prepare", forgeLab, filepath.Join(t.TempDir(), "c"), "gitlab=lane.cases"}, images...)...)
+		stderr, status := runScript(t, lane.workDir, lane.env, "campaign.sh", append([]string{"prepare", forgeLab, filepath.Join(t.TempDir(), "c"), "gitlab"}, images...)...)
 		if status != 2 || !strings.Contains(stderr, "campaign: ") {
 			t.Errorf("%q: status %d, want a refusal (2)\n%s", images, status, stderr)
 		}
 	}
 
-	// A campaign prepares for the lanes it names, so it names one.
+	// A campaign prepares for the forges or lanes it names, so it names one.
 	if stderr, status := runScript(t, lane.workDir, lane.env, "campaign.sh", "prepare", forgeLab, filepath.Join(t.TempDir(), "c"), "job-image=go:localhost/a"); status != 2 ||
-		!strings.Contains(stderr, "campaign: name the lanes") {
+		!strings.Contains(stderr, "campaign: name what the campaign prepares for") {
 		t.Errorf("status %d, want the lanes asked for (2)\n%s", status, stderr)
+	}
+
+	if calls := readLines(t, lane.goArgvFile); calls != nil {
+		t.Fatalf("a refused prepare asked the preflight: %q", calls)
 	}
 
 	if calls := readLines(t, lane.argvFile); calls != nil {
@@ -503,40 +387,18 @@ func TestDemoCheckout_IsOneCommitOfTheDemo(t *testing.T) {
 	}
 }
 
-// Selectors reach the preflight after the cases file, which plans the lane
-// whole and keeps the cases they name.
-func TestCampaignLane_HandsTheSelectorsToThePlan(t *testing.T) {
-	t.Parallel()
-
-	lane := newCampaignLane(t)
-	planFile := filepath.Join(t.TempDir(), "plan")
-
-	if err := os.WriteFile(planFile, []byte("case\x00scenario TestA\x002\x00test-live\x00^TestA$\x00"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	stderr, status := runScript(t, lane.workDir, append(slices.Clone(lane.env), "FAKE_PLAN="+planFile),
-		"campaign.sh", "lane", lane.dir, "gitlab", "lane.cases", "hello-maven-service/lifecycle", "TestA")
-	if status != 0 {
-		t.Fatalf("status %d\n%s", status, stderr)
-	}
-
-	if got := readLines(t, lane.goArgvFile); len(got) != 1 || !strings.HasSuffix(got[0], " gitlab "+filepath.Join(lane.workDir, "lane.cases")+" hello-maven-service/lifecycle TestA") {
-		t.Fatalf("preflight argv %q, want the selectors after the cases file", got)
-	}
-}
-
-// On github the lane is one cell: a one-commit checkout of the built-in
-// demo, run through test-live-consumer github with the caller's settings,
-// recorded in github.results, with no campaign preflight. A selector that
-// is not <demo>/<event> is refused before anything runs.
-func TestCampaignLane_RunsAGitHubCellFromTheBuiltInDemo(t *testing.T) {
+// A GitHub cell is a one-commit checkout of the built-in demo, run through
+// test-live-consumer github with the caller's settings and recorded in
+// github.results with its interval, exit status and verdict, with no
+// campaign preflight. The script exits as the cell did. A cell that is not
+// <demo>/<event> is refused before anything runs.
+func TestCampaignGitHub_RunsACellFromTheBuiltInDemo(t *testing.T) {
 	t.Parallel()
 
 	lane := newCampaignLane(t)
 	lane.env[0] += string(os.PathListSeparator) + testenv.GNUPath(t, "ls", "cp", "mkdir")
 
-	stderr, status := runScript(t, lane.workDir, lane.env, "campaign.sh", "lane", lane.dir, "github", "hello-go-cli/release", "org=1", "version=0.2.0")
+	stderr, status := runScript(t, lane.workDir, lane.env, "campaign.sh", "github", lane.dir, "hello-go-cli/release", "org=1", "version=0.2.0")
 	if status != 0 {
 		t.Fatalf("status %d\n%s", status, stderr)
 	}
@@ -546,22 +408,46 @@ func TestCampaignLane_RunsAGitHubCellFromTheBuiltInDemo(t *testing.T) {
 		t.Fatalf("just calls %q, want one", calls)
 	}
 
+	if !strings.HasPrefix(calls[0], "--justfile "+filepath.Join(reporoot.Path(t), "justfile")+" ") {
+		t.Fatalf("just argv %q, want this repository's justfile", calls[0])
+	}
+
 	words := strings.Fields(calls[0])[2:] // --justfile <repository justfile>
 	if len(words) != 6 || words[0] != "test-live-consumer" || words[1] != "github" || words[3] != "release" || words[4] != "org=1" || words[5] != "version=0.2.0" {
 		t.Fatalf("just argv %q, want test-live-consumer github <checkout> release org=1 version=0.2.0", calls[0])
 	}
 
-	if results := readLines(t, filepath.Join(lane.dir, "github.results")); len(results) != 1 || !strings.Contains(results[0], "consumer hello-go-cli/release org=1 version=0.2.0\texit=0\t") {
-		t.Fatalf("results %q, want the cell's line", results)
+	// A failed cell is recorded too, and is the script's status.
+	if stderr, status := runScript(t, lane.workDir, lane.env, "campaign.sh", "github", lane.dir, "hello-go-cli/release", "scenario=TestFails"); status != 1 {
+		t.Fatalf("status %d, want the failed cell's (1)\n%s", status, stderr)
+	}
+
+	results := readLines(t, filepath.Join(lane.dir, "github.results"))
+	if len(results) != 2 {
+		t.Fatalf("results %q, want a line a cell", results)
+	}
+
+	for i, want := range []string{
+		"consumer hello-go-cli/release org=1 version=0.2.0\texit=0\tverdict=/evidence/1/verdict.json",
+		"consumer hello-go-cli/release scenario=TestFails\texit=1\tverdict=/evidence/2/verdict.json",
+	} {
+		interval, rest, _ := strings.Cut(results[i], "\t")
+		if rest != want || !strings.Contains(interval, "Z/20") {
+			t.Errorf("result %d: %q, want <start>/<end>\\t%q", i, results[i], want)
+		}
 	}
 
 	if calls := readLines(t, lane.goArgvFile); calls != nil {
 		t.Fatalf("a GitHub cell ran the campaign preflight: %q", calls)
 	}
 
-	for _, selector := range []string{"hello-go-cli", "../x/release", "hello-go-cli/release/extra"} {
-		if stderr, status := runScript(t, lane.workDir, lane.env, "campaign.sh", "lane", lane.dir, "github", selector, "org=1"); status != 2 {
-			t.Errorf("%q: status %d, want a refusal (2)\n%s", selector, status, stderr)
+	for _, args := range [][]string{{lane.dir, "hello-go-cli"}, {lane.dir, "../x/release"}, {lane.dir, "hello-go-cli/release/extra"}, {"relative", "hello-go-cli/release"}, {lane.dir}} {
+		if stderr, status := runScript(t, lane.workDir, lane.env, "campaign.sh", append([]string{"github"}, append(args, "org=1")...)...); status != 2 {
+			t.Errorf("%q: status %d, want a refusal (2)\n%s", args, status, stderr)
 		}
+	}
+
+	if calls := readLines(t, lane.argvFile); len(calls) != 2 {
+		t.Fatalf("a refused cell ran: %q", calls)
 	}
 }

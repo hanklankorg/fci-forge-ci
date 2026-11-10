@@ -20,6 +20,10 @@ import (
 	"github.com/diggsweden/forge-ci/internal/testutil/evidence"
 )
 
+// snapshotJobImage is a job image by digest, as a lifecycle's and a
+// snapshot's CI_JOB_IMAGE must be.
+const snapshotJobImage = "registry.invalid/java@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+
 // What the consumers under testdata/consumer pin: an organization's copy of
 // the layer and its release trust, none of them the lab's.
 const (

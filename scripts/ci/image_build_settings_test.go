@@ -274,7 +274,7 @@ exit 17
 		t.Fatal(err)
 	}
 
-	cmd := exec.CommandContext(t.Context(), testBash(t), filepath.Join(root, "scripts/ci/campaign.sh"), "prepare", lab, destination, "forgejo=lane.cases", "build-budget=required", "build-cpus=3", "build-memory-mib=2048", "compiler-jobs=1")
+	cmd := exec.CommandContext(t.Context(), testBash(t), filepath.Join(root, "scripts/ci/campaign.sh"), "prepare", lab, destination, "forgejo", "build-budget=required", "build-cpus=3", "build-memory-mib=2048", "compiler-jobs=1")
 	cmd.Env = append(os.Environ(), "PATH="+bin+string(os.PathListSeparator)+os.Getenv("PATH"), "GO="+filepath.Join(bin, "go"), "RECEIPT="+filepath.Join(root, "receipt"))
 	output, err := cmd.CombinedOutput()
 

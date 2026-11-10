@@ -12,7 +12,7 @@ Source checks cannot create live evidence or discharge required native proof.
 
 The baseline is commit `afd06f71f395bf101ef57de8d31926f56c0c05e7`, tree
 `74ec3b04bb08ff290aad208cdd07fe7c162f81f9`. It supplies the existing campaign
-selectors and lifecycles; it is not the older root checkout or a feature-lane
+cases and lifecycles; it is not the older root checkout or a feature-lane
 successor. Structural source boundaries, in order:
 
 | Boundary | Tree | Meaning |
@@ -112,7 +112,7 @@ data, commands and modes; unchanged production owners are outside these moves.
 | `test/live/cases/maven-issuer-service/**` (1) | `test/live/fixtures/services/maven-issuer-service/**` | MOVE integrated; KEEP byte-identical disposable issuer runtime setup |
 | `test/live/cases/npm-rest-service/**` (3) | `test/live/fixtures/services/npm-rest-service/**` | MOVE integrated; KEEP installed-package oracle, operator inputs and failure history; reference edits only |
 | `test/live/cases/rust-development/**` (18) | `test/live/fixtures/development/rust-development/**` | MOVE integrated; KEEP four-role image-byte/source receipts; README path/depth edits only |
-| `test/live/campaigns/**` (12 `.cases` + `evidence.txt`) | Same owner | KEEP all selections and historical evidence; no new grammar, scheduling retirement or evidence regeneration |
+| `test/live/campaigns/evidence.txt` | Same owner | KEEP historical evidence, no regeneration; the selections are the Go tables (`livetest.PreparedLanes`, `PreparedCases`) |
 | `.github/**`, `.forgejo/**`, `templates/**`, production `internal/**`, `cmd/**` | Same production owners | KEEP native authority and behavior, including planners/adapters; no production implementation move |
 | `scripts/ci/**`, guards, configuration, licensing and docs referencing those groups | Same owners with current paths | REFACTOR references only; launcher supervision, signals, scopes and cleanup retained |
 
@@ -259,22 +259,20 @@ the approved attempt failed and does not establish native acceptance:
 
 | Road | Maintained Maven-service lifecycle command | Prerequisites, owner and evidence distinction |
 |---|---|---|
-| Forgejo | `just campaign-lane <prepared-dir> forgejo test/live/campaigns/lifecycle-forgejo.cases hello-maven-service/lifecycle/image-builder=buildah/visibility=public` | Java digest-pinned nanolinter job image, signer and container/readiness runner; conformance `TestForgejoLayer_ConsumerLifecycle`; provider-scoped launcher log plus classifier `verdict.json` |
-| GitLab | `just campaign-lane <prepared-dir> gitlab test/live/campaigns/lifecycle-gitlab.cases hello-maven-service/lifecycle/image-builder=buildah/visibility=public` | Prepared Java job/build, signer/lint and selected-builder archives; pinned policy and guarded release runner profile; `TestGitLabLayer_ConsumerLifecycle`; native child-pipeline evidence, no readiness; live hold remains |
-| Hosted GitHub | `just campaign-lane <evidence-dir> github hello-maven-service/lifecycle org=<authorized-id>` | One guarded hosted session, frozen prepared SDK/images reused, separate private release PAT file and all three fixture workflows; `TestGitHubLayer_ConsumerLifecycle`; retained per-cell output/exit/run IDs/cleanup, **not** a lab classifier receipt |
+| Forgejo | `just test-live-prepared <prepared-dir> forgejo '^TestForgejoLayer_ConsumerLifecycle$/^lifecycle$/^hello-maven-service$/^lifecycle$/^buildah$/^public$'` | Java digest-pinned nanolinter job image, signer and container/readiness runner; conformance `TestForgejoLayer_ConsumerLifecycle`; provider-scoped launcher log plus classifier `verdict.json` |
+| GitLab | `just test-live-prepared <prepared-dir> gitlab '^TestGitLabLayer_ConsumerLifecycle$/^lifecycle$/^hello-maven-service$/^lifecycle$/^buildah$/^public$'` | Prepared Java job/build, signer/lint and selected-builder archives; pinned policy and guarded release runner profile; `TestGitLabLayer_ConsumerLifecycle`; native child-pipeline evidence, no readiness; live hold remains |
+| Hosted GitHub | `just campaign-github <evidence-dir> hello-maven-service/lifecycle org=<authorized-id>` | One guarded hosted session, frozen prepared SDK/images reused, separate private release PAT file and all three fixture workflows; `TestGitHubLayer_ConsumerLifecycle`; retained per-cell output/exit/run IDs/cleanup, **not** a lab classifier receipt |
 
-For Forgejo keep the global builder selector unset: whole-file admission sees
-both Buildah and Kaniko before selecting a cell. GitLab lane builder must agree
-with the selector (unset defaults Buildah). A selector does not bypass whole-file
-source/settings/archive admission. Both existing lifecycle files also contain
-other consumers; selecting one cell does not qualify those consumers.
+A cell is one subtest of its case in the Go tables ([`preparedcases.go`](../test/live/internal/livetest/preparedcases.go)):
+builder and visibility are parts of its name. Naming one cell does not bypass
+source, settings or archive admission. Both lifecycle lanes also hold other
+consumers; running one cell does not qualify those consumers.
 
 Single-phase requests remain maintained, not retired: local `pull-request`,
 `snapshot`, `release` dispatch through `just test-live-consumer <forge> <checkout>`
 with the documented native inputs; hosted uses `pull-request`, **`dev-release`**,
-`release`, never literal `snapshot`. The checked-in snapshot campaign files have
-no Maven-service row: use its standalone snapshot command or the lifecycle, not
-an invented selector. GitLab lifecycle does not accept old `version-bump=maven`.
+`release`, never literal `snapshot`. The snapshot lanes have
+no Maven-service case: use its standalone snapshot command or the lifecycle. GitLab lifecycle does not accept old `version-bump=maven`.
 Hosted `image=<declared-name>` selects the optional release-image oracle; do not
 claim image verification merely from release success.
 
@@ -332,7 +330,7 @@ under `~/.local/state/forge-ci/live-runs/` by start time.
 | GitHub SARIF ingestion | **Covered** on a public repository: the product's upload is read back as one analysis and one alert, and an upload with a rejected credential is denied and leaves none (`TestGitHubSecurity_SARIFUploadAPI`). **Not possible** on a private repository of the test organization: it has no GitHub Advanced Security. The attestation API has no hosted check. **Open:** a private consumer in the test organization was refused before any job ran (`startup_failure`, hosted run 42766434756, 2026-11-10), with the workflow and engine a public consumer starts from; GitHub gives the API no reason, and the organization's budget for private repositories was used up at the time, which is the likely cause. Private hosted cells and a build against a private package wait for that budget. |
 | SBOM policy presence and absence | **Covered:** `release.sboms: none` offers no SBOM bundle (hosted run 42732438408) and a GitHub release trial whose declaration asks for an artifact SBOM must offer exactly one; a Forgejo snapshot's retained evidence holds the image SBOM exactly when the plan generates one (`SnapshotEvidenceFindings`, in every Forgejo snapshot and lifecycle; absent in run 632). **Product-unsupported:** an image SBOM for a container-first producer. |
 | Adverse report-only and enforcing pairs | **Covered:** application-test findings under both policies and a compile error as the operational control, in the pull request and in the release, with nothing published when blocked (`TestForgejoLayer_ConsumerPullRequest`, `TestForgejoLayer_MinimalBinaryRelease`, runs 590 to 609 and the rerun of 2026-11-10); a lint finding and a lint tool that is absent. A job the gate withholds is judged by never having been taken by a runner: Forgejo lists it as blocked in one run and skipped in the next. **Not possible in this lab:** a deterministic vulnerability finding, since every scanner needs a network advisory database. Reproducibility enforcement on Forgejo stays a refusal. |
-| Release-image builds, shapes and promotion | **Covered:** a release's images are read back from the registry with signature, SBOM and provenance, and an image that copies a released file holds its bytes (`release-variants-forgejo.cases`, runs 588 and 589). **Product-unsupported** on Forgejo: build secrets, a custom image name and extraction. **Product finding, fixed:** a release promoted to a second registry with `--stage-repo` arrived under its digest and without its signature, because `cosign copy` leaves behind a signature stored as an OCI referrer. The registry adapter now copies the image, its referrers and the cosign evidence tags itself; the promoted image verifies with the public key alone on the GitLab registry (`TestLedger_Promote_AcrossRegistries_CarriesTheSignature`, 2026-11-10). |
+| Release-image builds, shapes and promotion | **Covered:** a release's images are read back from the registry with signature, SBOM and provenance, and an image that copies a released file holds its bytes (lane `release-variants-forgejo`, runs 588 and 589). **Product-unsupported** on Forgejo: build secrets, a custom image name and extraction. **Product finding, fixed:** a release promoted to a second registry with `--stage-repo` arrived under its digest and without its signature, because `cosign copy` leaves behind a signature stored as an OCI referrer. The registry adapter now copies the image, its referrers and the cosign evidence tags itself; the promoted image verifies with the public key alone on the GitLab registry (`TestLedger_Promote_AcrossRegistries_CarriesTheSignature`, 2026-11-10). |
 | Signing methods and trust | **Covered:** the release commit and tag are verified against the expected key and must fail against another (`releaseSignerFindings`); a request signed by an untrusted or another key is refused before any effect (`TestForgejoLayer_PrepareReleaseRefusesAnUntrustedRequest`, runs 561 to 564); every GitHub release trial verifies the Git signatures of commit and tag by kind. **Needs external approval:** cloud KMS and any write to a public transparency log. The two new GitHub variants use the GPG profile for that reason. |
 | Version, changelog and consecutive releases | **Covered:** both changelog renderers and each version-file family, two releases in a row, each held to its commit's scope (runs 580 to 587); a release without a changelog prepares no commit and tags the request commit (hosted run 42735239830); the changelog release from the CLI (runs 550 and 551). **Product finding, fixed:** a dry run of `version commit-changelog-release` asked the release URL over the caller's unpinned SSH; with the signing key it now reads over the pinned route and signs or pushes nothing (runs 649 and 650). |
 | Package destinations and fresh use | **Covered:** npm and Maven on Forgejo and GitLab and a Gradle library on Forgejo reach a fresh consumer, npm and Maven also one without a credential (2026-11-10); a second publish of changed bytes is refused for npm on both and for Maven on Forgejo, each held to the registry's conflict answer. GitLab's Maven registry accepts a duplicate by its own policy. **Needs external approval:** Maven Central, the app stores and npmjs. |
@@ -376,13 +374,12 @@ cut from a branch other than main.
 `snapshot.yml`, which no shipped fixture has: it is an operator's scenario for
 a checkout of their own.
 
-Scenarios that pass when named and that no campaign row or recipe selects:
+Scenarios that pass when named and that no lane or recipe selects:
 `TestForgejoLayer_ConsumerDevelopment`, `TestForgejoLayer_ContainerDevelopment`,
 `TestForgejoMavenLibraryConsumer_Development` and `_Stable`,
 `TestForgejoMavenReactorConsumer_Development` and
 `TestForgejoLayer_CargoBinaryRelease`. Each proves something no selected
-scenario does; they get their selectors when the campaign rows become Go
-test parameters. `TestForgejoLayer_NPMApplicationDevelopment` builds an image
+scenario does, and none is a case of the Go tables. `TestForgejoLayer_NPMApplicationDevelopment` builds an image
 through the snapshot workflow and judges the installed package only, not the
 image; it needs an operator's npm service checkout to run.
 
@@ -404,7 +401,7 @@ public Buildah Linux/amd64 Maven-service lifecycle cell**, the exact first
 command above, using signed `af9da105` in the named scratch repositories
 `forgeci/fci-consumer-lifecycle` and `forgeci/fci-consumer-trial-layer`.
 It includes PR, native merge, artifact-first snapshot/readiness, stable release
-and owned cleanup. It is not approval for the whole cases file, private/Kaniko
+and owned cleanup. It is not approval for the whole lifecycle lane, private/Kaniko
 variants, other consumers or held provider lanes. Serializing this bounded first
 acceptance is deliberate scope control, not a recommendation to serialize future
 independent ready providers.
@@ -483,15 +480,14 @@ Source abbreviations (only typographical shortcuts in this appendix):
 
 | Source | Exact maintained entrypoint, selection and assertion owner |
 |---|---|
-| FP / FR | [`layerconsumertrial_test.go`](../test/live/conformance/layerconsumertrial_test.go), `TestForgejoLayer_ConsumerTrial`; [`k3s-private-forgejo.cases`](../test/live/campaigns/k3s-private-forgejo.cases), selector `<row-demo>/pull-request` or `<row-demo>/release`; consumer gate/run checks versus shared `requestRelease`/signature and authenticated checksum-subject checks |
-| LP / LR | [`gitlabconsumertrial_test.go`](../test/live/conformance/gitlabconsumertrial_test.go), `TestGitLabLayer_ConsumerTrial`, versus [`gitlabrelease_test.go`](../test/live/conformance/gitlabrelease_test.go), `TestGitLabRelease_ConsumerTrial`; [`k3s-private-gitlab.cases`](../test/live/campaigns/k3s-private-gitlab.cases), corresponding `<row-demo>/pull-request` or `/release`; native policy/runtime gate versus signed release/package/image checks |
+| FP / FR | [`layerconsumertrial_test.go`](../test/live/conformance/layerconsumertrial_test.go), `TestForgejoLayer_ConsumerTrial`; lane `k3s-private-forgejo`, case `private/<row-demo>/pull-request` or `private/<row-demo>/release`; consumer gate/run checks versus shared `requestRelease`/signature and authenticated checksum-subject checks |
+| LP / LR | [`gitlabconsumertrial_test.go`](../test/live/conformance/gitlabconsumertrial_test.go), `TestGitLabLayer_ConsumerTrial`, versus [`gitlabrelease_test.go`](../test/live/conformance/gitlabrelease_test.go), `TestGitLabRelease_ConsumerTrial`; lane `k3s-private-gitlab`, case `private/<row-demo>/pull-request` or `private/<row-demo>/release`; native policy/runtime gate versus signed release/package/image checks |
 | GP / GD / GR | [`githubconsumer/consumertrial_test.go`](../test/live/githubconsumer/consumertrial_test.go), `TestGitHubLayer_ConsumerTrial`; `just test-live-consumer github <exported-row-checkout> pull-request`, `dev-release` or `release org=<id>`; each row's `consumer/test/live/github/workflows/{pullrequest,release-dev,release}.yml`. `judge`, development artifact/source checks, `CheckRelease`; `checkImages` is opt-in, not universal |
-| FC / LC / GC | [`consumerlifecycle_test.go`](../test/live/conformance/consumerlifecycle_test.go) `TestForgejoLayer_ConsumerLifecycle`; [`gitlabconsumerlifecycle_test.go`](../test/live/conformance/gitlabconsumerlifecycle_test.go) `TestGitLabLayer_ConsumerLifecycle`; [`githubconsumer/lifecycle_test.go`](../test/live/githubconsumer/lifecycle_test.go) `TestGitHubLayer_ConsumerLifecycle`. Lab selection: `<row-demo>/lifecycle` in the linked lifecycle cases below; hosted command as above with `lifecycle`. Preserve `requireMerge`, `requireServiceDevelopment`, `requireGitLabServiceSnapshot`, `requireGitLabLifecyclePipelines`, `judgeSnapshot`, `requireInventory` and the provider-specific release checks |
-| FS / LS | [`forgejosnapshot_test.go`](../test/live/conformance/forgejosnapshot_test.go) `TestForgejoLayer_Snapshot`; [`gitlabsnapshot_test.go`](../test/live/conformance/gitlabsnapshot_test.go) `TestGitLabLayer_Snapshot`; `<row-demo>/snapshot` in [`snapshot-forgejo.cases`](../test/live/campaigns/snapshot-forgejo.cases) / [`snapshot-gitlab.cases`](../test/live/campaigns/snapshot-gitlab.cases); shared `RequireSnapshotImages`, native source/plan/receipt/registry checks, no readiness |
+| FC / LC / GC | [`consumerlifecycle_test.go`](../test/live/conformance/consumerlifecycle_test.go) `TestForgejoLayer_ConsumerLifecycle`; [`gitlabconsumerlifecycle_test.go`](../test/live/conformance/gitlabconsumerlifecycle_test.go) `TestGitLabLayer_ConsumerLifecycle`; [`githubconsumer/lifecycle_test.go`](../test/live/githubconsumer/lifecycle_test.go) `TestGitHubLayer_ConsumerLifecycle`. Lab selection: case `lifecycle/<row-demo>/lifecycle/<builder>` of the lanes `lifecycle-forgejo` and `lifecycle-gitlab`; hosted command as above with `lifecycle`. Preserve `requireMerge`, `requireServiceDevelopment`, `requireGitLabServiceSnapshot`, `requireGitLabLifecyclePipelines`, `judgeSnapshot`, `requireInventory` and the provider-specific release checks |
+| FS / LS | [`forgejosnapshot_test.go`](../test/live/conformance/forgejosnapshot_test.go) `TestForgejoLayer_Snapshot`; [`gitlabsnapshot_test.go`](../test/live/conformance/gitlabsnapshot_test.go) `TestGitLabLayer_Snapshot`; case `snapshot/<row-demo>/snapshot/<builder>` of the lanes `snapshot-forgejo` / `snapshot-gitlab`; shared `RequireSnapshotImages`, native source/plan/receipt/registry checks, no readiness |
 
-`FP:24` means the actual line in FP's linked cases file, not a new selector.
-FC/LC line numbers refer to [`lifecycle-forgejo.cases`](../test/live/campaigns/lifecycle-forgejo.cases)
-and [`lifecycle-gitlab.cases`](../test/live/campaigns/lifecycle-gitlab.cases).
+A source in a cell is that source's case of the row's demo in [`preparedcases.go`](../test/live/internal/livetest/preparedcases.go);
+the lanes are `livetest.PreparedLanes`.
 `NA` means no applicable declared image route or served native release, **not a
 claim that the product can never support it**. `gap` means no saved/fixture road;
 `ref` is the named harness admission refusal. Every source entry is KEEP at its
@@ -499,18 +495,18 @@ current moved owner; no absent cell authorizes retirement of another flow.
 
 | Matrix row / inherited E key | PR / MR | Artifact-first snapshot | Container-first snapshot | Release | Full lifecycle |
 |---|---|---|---|---|---|
-| [hello-android](testing-matrices.md#1-capabilities-by-project-kind--flow-cells-forgejo--gitlab--github) | F gap: no workflow; LP in [Android cases](../test/live/campaigns/k3s-private-android-gitlab.cases):14; GP | NA / NA / NA: no image | NA / NA / NA: no image | NA / NA / NA: no served release | ref no container / NA no release build / ref no service route |
-| [hello-cargo-container](testing-matrices.md#1-capabilities-by-project-kind--flow-cells-forgejo--gitlab--github) | FP:33 / LP:34 / GP | NA / NA / NA: container-first | FC:34 / LC:35 / GC (also GD); E's old fixture run is not this demo's current proof | FR:34 / LR:45 / GR | FC:34 / LC:35 / GC |
-| [hello-cargo-workspace](testing-matrices.md#1-capabilities-by-project-kind--flow-cells-forgejo--gitlab--github) | FP:36 / LP:39 / GP | NA / NA / NA: container-first | FS:29 / LS:34 / ref two-image service scope, no GD fixture | FR:37 / LR:46 / GR | ref / ref / ref: two images outside one-service scope |
-| [hello-go-cli](testing-matrices.md#1-capabilities-by-project-kind--flow-cells-forgejo--gitlab--github) | FP:18 / LP:31 / GP | NA / NA / NA: no image | NA / NA / NA: no image | FR:19 / NA no release build / GR; inherited GPG profile uses `fixtures=test/live/github-gpg workflow=release-gpg.yml`, not default-profile equivalence | ref no container / NA no release build / ref no service route |
-| [hello-go-service](testing-matrices.md#1-capabilities-by-project-kind--flow-cells-forgejo--gitlab--github) | FP:21 / LP:35 / GP | NA / NA / NA: container-first | FC:36 / LS:36 / GC (also GD) | FR:22 / NA no release build / GR | FC:36 / NA no release build / GC |
-| [hello-gradle](testing-matrices.md#1-capabilities-by-project-kind--flow-cells-forgejo--gitlab--github) | F gap: no workflow / LP:37 / GP | NA / NA / NA: no image | NA / NA / NA: no image | NA no workflow / NA no release build / GR; retain E's zero-Cosign/five-GPG partial limitation | ref no container / NA no release build / ref no service route |
+| [hello-android](testing-matrices.md#1-capabilities-by-project-kind--flow-cells-forgejo--gitlab--github) | F gap: no workflow; LP in lane `k3s-private-android-gitlab`; GP | NA / NA / NA: no image | NA / NA / NA: no image | NA / NA / NA: no served release | ref no container / NA no release build / ref no service route |
+| [hello-cargo-container](testing-matrices.md#1-capabilities-by-project-kind--flow-cells-forgejo--gitlab--github) | FP / LP / GP | NA / NA / NA: container-first | FC / LC / GC (also GD); E's old fixture run is not this demo's current proof | FR / LR / GR | FC / LC / GC |
+| [hello-cargo-workspace](testing-matrices.md#1-capabilities-by-project-kind--flow-cells-forgejo--gitlab--github) | FP / LP / GP | NA / NA / NA: container-first | FS / LS / ref two-image service scope, no GD fixture | FR / LR / GR | ref / ref / ref: two images outside one-service scope |
+| [hello-go-cli](testing-matrices.md#1-capabilities-by-project-kind--flow-cells-forgejo--gitlab--github) | FP / LP / GP | NA / NA / NA: no image | NA / NA / NA: no image | FR / NA no release build / GR; inherited GPG profile uses `fixtures=test/live/github-gpg workflow=release-gpg.yml`, not default-profile equivalence | ref no container / NA no release build / ref no service route |
+| [hello-go-service](testing-matrices.md#1-capabilities-by-project-kind--flow-cells-forgejo--gitlab--github) | FP / LP / GP | NA / NA / NA: container-first | FC / LS / GC (also GD) | FR / NA no release build / GR | FC / NA no release build / GC |
+| [hello-gradle](testing-matrices.md#1-capabilities-by-project-kind--flow-cells-forgejo--gitlab--github) | F gap: no workflow / LP / GP | NA / NA / NA: no image | NA / NA / NA: no image | NA no workflow / NA no release build / GR; retain E's zero-Cosign/five-GPG partial limitation | ref no container / NA no release build / ref no service route |
 | [hello-ios](testing-matrices.md#1-capabilities-by-project-kind--flow-cells-forgejo--gitlab--github) | F gap: no workflow / L gap: no gate / GP macOS simulator/archive only | NA / NA / NA: no image | NA / NA / NA: no image | NA / NA / NA: no served release | ref no container / NA no release build / ref no service route |
-| [hello-maven](testing-matrices.md#1-capabilities-by-project-kind--flow-cells-forgejo--gitlab--github) | FP:30 / LP:32 / GP | NA / NA / NA: no image | NA / NA / NA: no image | FR:31 / LR:42 / GR | ref / ref / ref: no container, not the actual library adapter |
-| [hello-maven-service](testing-matrices.md#1-capabilities-by-project-kind--flow-cells-forgejo--gitlab--github) | FP:24 / LP:36 / GP | FC:32–33 / LC:34 / GC (also GD); E's retired A snapshot remains historical | NA / NA / NA: artifact-first | FR:25 / LR:44 / GR | FC:32–33 / LC:34 / GC; inherited GitLab partial/failed attempts remain distinct |
-| [hello-monorepo](testing-matrices.md#1-capabilities-by-project-kind--flow-cells-forgejo--gitlab--github) | F gap: no workflow / LP:38 / G gap: no fixture | ref no Forgejo release pin / LS:35 / ref no root-container route or GD fixture | NA / NA / NA: artifact-first | NA / NA / NA: no served release | ref no root container / NA no release build / ref no root container |
-| [hello-npm-package](testing-matrices.md#1-capabilities-by-project-kind--flow-cells-forgejo--gitlab--github) | FP:39 / LP:40 / GP | NA / NA / NA: no image | NA / NA / NA: no image | FR:40 / LR:47 / GR; signed tarball is not guaranteed npm registry publication | ref / ref / ref: no container/service route |
-| [hello-npm-service](testing-matrices.md#1-capabilities-by-project-kind--flow-cells-forgejo--gitlab--github) | FP:27 / LP:33 / GP | FC:35 / LC:36 / GC (also GD) | NA / NA / NA: artifact-first | FR:28 / LR:43 / GR | FC:35 / LC:36 / GC |
+| [hello-maven](testing-matrices.md#1-capabilities-by-project-kind--flow-cells-forgejo--gitlab--github) | FP / LP / GP | NA / NA / NA: no image | NA / NA / NA: no image | FR / LR / GR | ref / ref / ref: no container, not the actual library adapter |
+| [hello-maven-service](testing-matrices.md#1-capabilities-by-project-kind--flow-cells-forgejo--gitlab--github) | FP / LP / GP | FC / LC / GC (also GD); E's retired A snapshot remains historical | NA / NA / NA: artifact-first | FR / LR / GR | FC / LC / GC; inherited GitLab partial/failed attempts remain distinct |
+| [hello-monorepo](testing-matrices.md#1-capabilities-by-project-kind--flow-cells-forgejo--gitlab--github) | F gap: no workflow / LP / G gap: no fixture | ref no Forgejo release pin / LS / ref no root-container route or GD fixture | NA / NA / NA: artifact-first | NA / NA / NA: no served release | ref no root container / NA no release build / ref no root container |
+| [hello-npm-package](testing-matrices.md#1-capabilities-by-project-kind--flow-cells-forgejo--gitlab--github) | FP / LP / GP | NA / NA / NA: no image | NA / NA / NA: no image | FR / LR / GR; signed tarball is not guaranteed npm registry publication | ref / ref / ref: no container/service route |
+| [hello-npm-service](testing-matrices.md#1-capabilities-by-project-kind--flow-cells-forgejo--gitlab--github) | FP / LP / GP | FC / LC / GC (also GD) | NA / NA / NA: artifact-first | FR / LR / GR | FC / LC / GC |
 
 Inputs remain in each referenced case and consumer declaration under
 [`fixtures/consumers`](../test/live/fixtures/consumers/README.md), not a second
@@ -519,8 +515,8 @@ Refusal/NA interpretation is owned by [`campaignlifecycle.go`](../test/live/inte
 (`serviceSnapshotAdmission`, `campaignAdmitSnapshot`) and
 [`testingmatrices.go`](../test/live/internal/livetest/testingmatrices.go)
 (`lifecycleApplies`, `lifecycleState`, `developmentCell`, `releaseCell`).
-`TestCampaignLifecycle_RefusesWhatItCannotRun`,
-`TestCampaignSnapshot_RefusesWhatItCannotRun` and `TestTestingMatricesInSync`
+`TestPreparedCasesRunWhatTheirDemoAdmits`,
+`TestAdmissionRefusesWhatADemoCannotRun` and `TestTestingMatricesInSync`
 retain executable source checks; they do not make these native runs pass.
 Missing dedicated Go/Rust library downstream publication, npm workspace and
 Maven reactor rows remain explicit fixture/capability decisions, not aliases of
@@ -556,10 +552,10 @@ all live evidence is inherited, not newly observed.
 | signing / [GPG declaration](testing-matrices.md#2-e2e-scenarios--variants-lifecycle-unless-stated) | Go-CLI `artifacts-gpg.yml`, hosted exact GPG fixture profile; profile/boundary tests and `CheckRelease`; no service lifecycle demo |
 | signing / [default](testing-matrices.md#2-e2e-scenarios--variants-lifecycle-unless-stated) | Declaration/native release default, e.g. Cargo; shared bundle checks retain native method; no default→GPG/keyless/KMS equivalence |
 | signing / [sigstore](testing-matrices.md#2-e2e-scenarios--variants-lifecycle-unless-stated) | Maven/npm/Go service native release and signature-subject checks; actual key/keyless/transparency admission remains native, not a generic setting copied here |
-| image builder / [buildah](testing-matrices.md#2-e2e-scenarios--variants-lifecycle-unless-stated) | Forgejo case variable versus GitLab lane builder/archive; `ForgejoConsumerImageBuilder`, `TestCampaignAdmissionChecksTheEffectiveBuilderOfEveryConsumer`, FS/LS/FC/LC receipts; hosted has no campaign-builder lane |
-| image builder / [kaniko](testing-matrices.md#2-e2e-scenarios--variants-lifecycle-unless-stated) | Same native owners plus digest/source-labelled Kaniko job image and archive admission; preserve Forgejo whole-file mixed-builder rule; hosted has no equivalent selector |
-| visibility / [public](testing-matrices.md#2-e2e-scenarios--variants-lifecycle-unless-stated) | `ConsumerVisibilities`, existing `/visibility=public` selector; native repository/publication/readback authority, not private access proof |
-| visibility / [private](testing-matrices.md#2-e2e-scenarios--variants-lifecycle-unless-stated) | Same selector/native owners, `CheckPrivateReleaseAssets` and applicable authenticated image readbacks; private job-image pull is a distinct witness |
+| image builder / [buildah](testing-matrices.md#2-e2e-scenarios--variants-lifecycle-unless-stated) | The case's `Builder`: a Forgejo setting, a GitLab builder archive; `ForgejoConsumerImageBuilder`, `TestForgejoSettingsOfACase`, `TestGitLabEnvironmentOfASnapshot`, FS/LS/FC/LC receipts; hosted has no campaign-builder lane |
+| image builder / [kaniko](testing-matrices.md#2-e2e-scenarios--variants-lifecycle-unless-stated) | Same native owners plus digest/source-labelled Kaniko job image and archive admission; hosted has no equivalent builder choice |
+| visibility / [public](testing-matrices.md#2-e2e-scenarios--variants-lifecycle-unless-stated) | `ConsumerVisibilities`, the case's `public` subtest; native repository/publication/readback authority, not private access proof |
+| visibility / [private](testing-matrices.md#2-e2e-scenarios--variants-lifecycle-unless-stated) | Same native owners and the `private` subtest, `CheckPrivateReleaseAssets` and applicable authenticated image readbacks; private job-image pull is a distinct witness |
 | enforcement / [admin lint](testing-matrices.md#2-e2e-scenarios--variants-lifecycle-unless-stated) | `adminInputEnvironment`, `adminSettingsConsumed`, `ComponentAdminInputs`; generated wrappers/pinned policy consume declared lint enforcement; `TestConsumerPlanBindsAdminInputsOnlyInItsGeneratedWrappers`; no hosted campaign lane |
 | enforcement / [admin vulnerabilities](testing-matrices.md#2-e2e-scenarios--variants-lifecycle-unless-stated) | Same authority owner, independent vulnerability input; `TestAdminWrapperRejectsConsumerValuesAndMergedInputAuthority`; real consuming-job refusal still requires native proof; no hosted lane |
 | enforcement / [admin application-tests](testing-matrices.md#2-e2e-scenarios--variants-lifecycle-unless-stated) | Same authority owner, independent application-test input; `TestGitLabAdminPolicyKeepsEnforcementOutOfConsumerRendering`; no consumer override or hosted lane |
@@ -569,11 +565,11 @@ all live evidence is inherited, not newly observed.
 | architecture / [arm64](testing-matrices.md#2-e2e-scenarios--variants-lifecycle-unless-stated) | D-5 exclusion on all native release roads; cross-compile assets/OCI fixtures do not execute ARM; iOS gate exception is not generalized |
 
 Authoritative source links for the input/assertion references above:
-[`campaignsettings.go`](../test/live/internal/livetest/campaignsettings.go),
+[`preparedcases.go`](../test/live/internal/livetest/preparedcases.go),
 [`campaignadmin.go`](../test/live/internal/livetest/campaignadmin.go),
 [`admininputs.go`](../test/live/internal/livetest/admininputs.go),
 [`admininputs_internal_test.go`](../test/live/internal/livetest/admininputs_internal_test.go),
-[`campaignsettings_internal_test.go`](../test/live/internal/livetest/campaignsettings_internal_test.go),
+[`preparedcases_internal_test.go`](../test/live/internal/livetest/preparedcases_internal_test.go),
 [`servicesnapshot.go`](../test/live/internal/livetest/servicesnapshot.go),
 [`snapshotoracle.go`](../test/live/internal/livetest/snapshotoracle.go).
 Effective settings/defaults stay in these owners and the existing road docs.
@@ -589,30 +585,30 @@ Effective settings/defaults stay in these owners and the existing road docs.
 | [Canonical host delivery, option B](testing-matrices.md#1b-platform-capabilities-not-per-project-kind) | KEEP existing canonical CLI/bootstrap/runtime owners and [E7](testing-parity.md#e7-b-source-integration-and-c-hold). Matrix queued/running lane is historical; no current-source hosted authenticated-delivery result/entrypoint is established by this source-only audit. CLI checksum/local PASSMATCH is not that acceptance; pending provider proof is an explicit gap |
 
 All kept non-lifecycle matrix-2 rows also receive KEEP, **not** lifecycle
-equivalence. Each test below is in `test/live/conformance`; the linked cases
-file is the exact input owner. The [kept-row table](testing-matrices.md#2-e2e-scenarios--variants-lifecycle-unless-stated)
+equivalence. Each test below is in `test/live/conformance`; its lane in
+[`preparedlanes.go`](../test/live/internal/livetest/preparedlanes.go) names it. The [kept-row table](testing-matrices.md#2-e2e-scenarios--variants-lifecycle-unless-stated)
 and E's `scenario` keys retain evidence; an unrun row is not promoted here.
 
-| Existing case row | Current test source and unique assertion/input boundary |
+| Lane and scenario | Current test source and unique assertion/input boundary |
 |---|---|
-| [build-capability-gitlab](../test/live/campaigns/build-capability-gitlab.cases) | `gitlabrelease_test.go`: `TestGitLabRelease_BuildImageCapability`; privileged Buildah RUN archive, not normal Kaniko capability |
-| [harness-inputs-forgejo](../test/live/campaigns/harness-inputs-forgejo.cases), PR row | `layerconsumertrial_test.go`: `TestForgejoLayer_ConsumerTrial`; explicit checkout/event/flavor input admission and native PR, not release |
-| Same file, release row | Same test, explicit checkout/release request/version; authenticated checksum subjects; not the PR's assertion set |
-| [harness-inputs-gitlab](../test/live/campaigns/harness-inputs-gitlab.cases), branch protection | `gitlabrelease_test.go`: `TestGitLabRelease_ConsumerBranchProtection`; explicit checkout and protected-branch refusal |
-| Same file, native release | `gitlabrelease_test.go`: `TestGitLabRelease_ConsumerTrial`; exact checkout/archives and native signed release |
-| Same file, preseed negative | `gitlabunsignedhandoff_test.go`: `TestGitLabRelease_RejectsPreseededProvenance`; refuse unsigned/preseeded handoff |
-| Same file, interrupted recovery | `gitlabpromotionretry_test.go`: `TestGitLabRelease_ConsumerInterruptedRecovery`; original child/request/candidate, delayed signing, retry convergence |
-| [interruption-manual-gitlab](../test/live/campaigns/interruption-manual-gitlab.cases) | `gitlabinterruption_test.go`: `TestGitLabWorkflow_InterruptedJob`; external interruption/130 and cleanup, not normal success |
-| [k3s-private-gitlab](../test/live/campaigns/k3s-private-gitlab.cases):29 | `gitlabrelease_test.go`: `TestGitLabRelease_MinimalSignedArtifacts`; minimal signed profile, not full consumer inventory |
-| Same file:49 | `gitlabcheck_test.go`: `TestGitLabCheck_ChecksOutPrivateConsumerWithJobToken`; native private-read authority |
-| Same file:50 | `gitlabcheck_test.go`: `TestGitLabCheck_ChecksOutTheConsumerPipelineCommit`; exact pipeline commit, not branch-head clone |
-| Same file:51 | `gitlabpolicy_test.go`: `TestGitLabPolicy_ConsumerCannotReplaceTheSigningPipeline`; pinned policy survives hostile consumer, inert key/sentinel preserved |
-| Same file:52 | `gitlabpolicy_test.go`: `TestGitLabPolicy_JobTokenCannotWriteThePublicationRegistry`; negative publication-project write plus producer-project positive control |
-| Same file:53 | `gitlabrelease_test.go`: `TestGitLabRelease_MinimalBranchProtection`; minimal owner protection/refusal |
-| Same file:54 | `gitlabserialization_test.go`: `TestGitLabRelease_ResourceGroupSpansTheChild`; second bridge queues while first child holds resource |
-| Same file:55 | `gitlabpromotionretry_test.go`: `TestGitLabRelease_PromotionRetryAfterRegistryWrite`; original failed-write journal and immutable digest converge |
-| Same file:56 | `gitlabbootstrap_test.go`: `TestGitLabBootstrap_PublishesAndDownloadsTheRecordedBinary`; exact bootstrap binary delivery; E explicitly withholds its failed latest verdict |
-| [release-images-forgejo](../test/live/campaigns/release-images-forgejo.cases) | FR `TestForgejoLayer_ConsumerTrial` + `releaseimageoutputs_test.go`; release-only opt-in `release-images-config`, verified prepared-commit declaration, unique unexpired receipts and exact image/signature readbacks, not generic base/final namespaces |
+| `build-capability-gitlab` | `gitlabrelease_test.go`: `TestGitLabRelease_BuildImageCapability`; privileged Buildah RUN archive, not normal Kaniko capability |
+| `harness-inputs-forgejo`, PR row | `layerconsumertrial_test.go`: `TestForgejoLayer_ConsumerTrial`; explicit checkout/event/flavor input admission and native PR, not release |
+| Same lane, release row | Same test, explicit checkout/release request/version; authenticated checksum subjects; not the PR's assertion set |
+| `harness-inputs-gitlab`, branch protection | `gitlabrelease_test.go`: `TestGitLabRelease_ConsumerBranchProtection`; explicit checkout and protected-branch refusal |
+| Same lane, native release | `gitlabrelease_test.go`: `TestGitLabRelease_ConsumerTrial`; exact checkout/archives and native signed release |
+| Same lane, preseed negative | `gitlabunsignedhandoff_test.go`: `TestGitLabRelease_RejectsPreseededProvenance`; refuse unsigned/preseeded handoff |
+| Same lane, interrupted recovery | `gitlabpromotionretry_test.go`: `TestGitLabRelease_ConsumerInterruptedRecovery`; original child/request/candidate, delayed signing, retry convergence |
+| `interruption-manual-gitlab` | `gitlabinterruption_test.go`: `TestGitLabWorkflow_InterruptedJob`; external interruption/130 and cleanup, not normal success |
+| `k3s-private-gitlab` | `gitlabrelease_test.go`: `TestGitLabRelease_MinimalSignedArtifacts`; minimal signed profile, not full consumer inventory |
+| Same lane | `gitlabcheck_test.go`: `TestGitLabCheck_ChecksOutPrivateConsumerWithJobToken`; native private-read authority |
+| Same lane | `gitlabcheck_test.go`: `TestGitLabCheck_ChecksOutTheConsumerPipelineCommit`; exact pipeline commit, not branch-head clone |
+| Same lane | `gitlabpolicy_test.go`: `TestGitLabPolicy_ConsumerCannotReplaceTheSigningPipeline`; pinned policy survives hostile consumer, inert key/sentinel preserved |
+| Same lane | `gitlabpolicy_test.go`: `TestGitLabPolicy_JobTokenCannotWriteThePublicationRegistry`; negative publication-project write plus producer-project positive control |
+| Same lane | `gitlabrelease_test.go`: `TestGitLabRelease_MinimalBranchProtection`; minimal owner protection/refusal |
+| Same lane | `gitlabserialization_test.go`: `TestGitLabRelease_ResourceGroupSpansTheChild`; second bridge queues while first child holds resource |
+| Same lane | `gitlabpromotionretry_test.go`: `TestGitLabRelease_PromotionRetryAfterRegistryWrite`; original failed-write journal and immutable digest converge |
+| Same lane | `gitlabbootstrap_test.go`: `TestGitLabBootstrap_PublishesAndDownloadsTheRecordedBinary`; exact bootstrap binary delivery; E explicitly withholds its failed latest verdict |
+| `release-images-forgejo` | FR `TestForgejoLayer_ConsumerTrial` + `releaseimageoutputs_test.go`; release-only opt-in `release-images-config`, verified prepared-commit declaration, unique unexpired receipts and exact image/signature readbacks, not generic base/final namespaces |
 
 ## Appendix C: each original HAR/PAR requirement ID
 

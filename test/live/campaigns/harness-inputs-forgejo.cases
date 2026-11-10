@@ -1,7 +1,0 @@
-# SPDX-FileCopyrightText: 2026 Digg - Agency for Digital Government
-# SPDX-License-Identifier: CC0-1.0
-# Reviewed native checkout with PR and release workflows; packaging stays opaque.
-setting visibility=private
-setting image-builder=buildah
-scenario TestForgejoLayer_ConsumerTrial checkout=@NATIVE_CONSUMER event=pull-request CI_JOB_IMAGE=@JOB_IMAGE_GO
-scenario TestForgejoLayer_ConsumerTrial checkout=@NATIVE_CONSUMER event=release version=0.3.0

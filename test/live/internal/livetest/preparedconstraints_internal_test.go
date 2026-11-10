@@ -91,6 +91,36 @@ func TestPreparedCasesRunWhatTheirDemoAdmits(t *testing.T) {
 	})
 }
 
+// The admissions refuse a demo that cannot run the event, and say what it
+// lacks: a table that added such a case would fail the test above with this.
+// The Go service ships no GitLab release build, so no GitLab release or
+// lifecycle; the Go CLI no container, so no snapshot and no lifecycle.
+func TestAdmissionRefusesWhatADemoCannotRun(t *testing.T) {
+	t.Parallel()
+
+	service := demoConsumerDir(reporoot.Path(t), "hello-go-service")
+	cli := demoConsumerDir(reporoot.Path(t), "hello-go-cli")
+
+	if err := matrixLifecycleAdmission(campaignForgejo, service); err != nil {
+		t.Fatalf("the Go service's Forgejo lifecycle: %v", err)
+	}
+
+	for name, test := range map[string]struct {
+		err  error
+		want string
+	}{
+		"GitLab release without a build":   {requireGitLabReleaseBuild(service), "no " + GitLabConsumerBuildScript},
+		"GitLab lifecycle without a build": {matrixLifecycleAdmission(campaignGitLab, service), "no " + GitLabConsumerBuildScript},
+		"Forgejo snapshot of no container": {campaignAdmitSnapshot(campaignForgejo, cli), "no development route"},
+		"GitLab snapshot of no container":  {campaignAdmitSnapshot(campaignGitLab, cli), "no development route"},
+		"lifecycle of no container":        {matrixLifecycleAdmission(campaignForgejo, cli), "no root Containerfile"},
+	} {
+		if !errors.Is(test.err, errs.ErrValidation) || !strings.Contains(test.err.Error(), test.want) {
+			t.Errorf("%s: %v, want a refusal naming %q", name, test.err, test.want)
+		}
+	}
+}
+
 // A release must not request a version its demo neither declares nor bumps
 // to: the release refuses a commit that does not carry the version it is
 // asked for, and that costs a live run to learn. So every release case

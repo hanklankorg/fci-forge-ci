@@ -14,7 +14,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -152,14 +151,11 @@ func relativePackages(verdict *livetest.LiveRunVerdict) {
 }
 
 // campaign runs a campaign mode. `campaign-env-check <file>` validates a
-// campaign.env before campaign-prepare puts it in place; `campaign-plan
-// <repository> <dir> <forgejo|gitlab> <cases-file> [<selector>...]` prints
-// the lane the script runs, or the cases the selectors name, for the commit
-// checked out in the working directory, whose orchestrators at <repository>
-// decide which administrator settings a cases file may declare; `campaign-runtime-targets
-// <repository> <forgejo|gitlab>=<cases-file>... [flavor=<job-image flavor>...]`
-// prints the runtime targets campaign-prepare builds for those lanes, one a
-// line, and refuses a case naming a nanolinter image of another flavor.
+// campaign.env before campaign-prepare puts it in place;
+// `campaign-runtime-targets <repository> <forgejo|gitlab|lane>...
+// [flavor=<job-image flavor>...]` prints the runtime targets campaign-prepare
+// builds for those lanes of the Go tables, one a line, and refuses a case
+// whose nanolinter image is of another flavor.
 func campaign(mode string, args []string) error {
 	switch {
 	case mode == "campaign-env-check" && len(args) == 1:
@@ -167,41 +163,22 @@ func campaign(mode string, args []string) error {
 
 		return err
 	case mode == "campaign-runtime-targets" && len(args) >= 2:
-		var lanes, flavors []string
+		var names, flavors []string
 
 		for _, arg := range args[1:] {
 			if flavor, isFlavor := strings.CutPrefix(arg, "flavor="); isFlavor {
 				flavors = append(flavors, flavor)
 			} else {
-				lanes = append(lanes, arg)
+				names = append(names, arg)
 			}
 		}
 
-		targets, err := livetest.CampaignRuntimeTargets(args[0], lanes, flavors)
+		targets, err := livetest.CampaignRuntimeTargets(args[0], names, flavors)
 		for _, target := range targets {
 			fmt.Println(target)
 		}
 
 		return err
-	case mode == "campaign-plan" && len(args) >= 4:
-		head, err := exec.CommandContext(context.Background(), "git", "rev-parse", "--verify", "HEAD").Output()
-		if err != nil {
-			return fmt.Errorf("read HEAD: %w", err)
-		}
-
-		settings, err := livetest.CampaignRunSettings(args[2], os.Getenv)
-		if err != nil {
-			return err
-		}
-
-		settings.Select = args[4:]
-
-		plan, err := livetest.PlanCampaignLane(args[0], args[1], args[2], args[3], strings.TrimSpace(string(head)), settings)
-		if err != nil {
-			return err
-		}
-
-		return livetest.WriteCampaignPlan(os.Stdout, plan)
 	default:
 		usage()
 
@@ -319,8 +296,7 @@ func usage() {
 	fmt.Fprintln(os.Stderr, "       preflight classify-run <exit-code> <retained-log>")
 	fmt.Fprintln(os.Stderr, "       preflight campaign-env-check <campaign.env>")
 	fmt.Fprintln(os.Stderr, "       preflight gitlab-consumer-scenario | gitlab-lifecycle-settings (validates FORGE_CI_LIVE_CONSUMER_SETTINGS)")
-	fmt.Fprintln(os.Stderr, "       preflight campaign-plan <repository> <dir> <forgejo|gitlab> <cases-file> [<selector>...]")
-	fmt.Fprintln(os.Stderr, "       preflight campaign-runtime-targets <repository> <forgejo|gitlab>=<cases-file>... [flavor=<flavor>...]")
+	fmt.Fprintln(os.Stderr, "       preflight campaign-runtime-targets <repository> <forgejo|gitlab|lane>... [flavor=<flavor>...]")
 	fmt.Fprintln(os.Stderr, "       preflight testing-matrices <repository> | testing-evidence <live-runs> [<hosted-runs>]")
 	fmt.Fprintln(os.Stderr, "usage: preflight [signing-inputs | runner-arch | consumer-trial-layer | host-tools] (signing-inputs checks only FORGE_CI_LIVE_SIGNING_KEY_DIR; host-tools checks only this host; other modes read the forgeci lab contract)")
 	os.Exit(2)

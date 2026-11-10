@@ -187,3 +187,16 @@ func TestGitLabReleaseDemosDeclareTheirImagesOnce(t *testing.T) {
 		t.Fatal("no GitLab release demo found; the walk, not the demos, was measured")
 	}
 }
+
+// forgejoArtifactsConfig is the artifacts-config input a Forgejo release
+// workflow passes the layer's called workflow, "" for the default.
+func forgejoArtifactsConfig(t *testing.T, path, called string) string {
+	t.Helper()
+
+	artifactsConfig, err := forgejoCalledArtifactsConfig(path, called)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	return artifactsConfig
+}

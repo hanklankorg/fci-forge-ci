@@ -21,7 +21,6 @@ import (
 	"github.com/diggsweden/forge-ci/internal/domain/output"
 	"github.com/diggsweden/forge-ci/internal/domain/pipeline"
 	"github.com/diggsweden/forge-ci/internal/domain/provenance"
-	"github.com/diggsweden/forge-ci/internal/testutil/reporoot"
 )
 
 func releaseOutputFixture(t *testing.T) (ReleaseImageOutputs, []imageledger.Entry) {
@@ -296,22 +295,12 @@ func TestReleaseImageOutputSettingsAreExplicitAndReleaseOnly(t *testing.T) {
 	}
 }
 
-func TestCampaignForgejoSavedReleaseImageReadback(t *testing.T) {
+// The operator's native image release (docs/live-campaigns.md, Forgejo
+// release images) opts into the readback with these settings.
+func TestNativeReleaseSettingsSelectTheImageReadback(t *testing.T) {
 	t.Parallel()
 
-	body, err := os.ReadFile(filepath.Join(reporoot.Path(t), "test/live/campaigns/release-images-forgejo.cases"))
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	dir, cases := newCampaign(t, "CAMPAIGN_COMMIT="+campaignHead+"\nNATIVE_CONSUMER="+t.TempDir()+"\n", string(body))
-
-	plan, err := PlanCampaignLane(reporoot.Path(t), dir, campaignForgejo, cases, campaignHead, CampaignRun{Settings: map[string]string{"visibility": "private", "image-builder": "buildah"}})
-	if err != nil || len(plan.Cases) != 1 {
-		t.Fatalf("saved image readback plan: %+v, %v", plan, err)
-	}
-
-	settings, err := ParseTrialSettings(plan.Cases[0].Args[3], plan.Cases[0].Args[4:])
+	settings, err := ParseTrialSettings(TrialRelease, []string{"version=0.3.0", "release-images-config=.forge-ci/artifacts.yml", "RELEASE_PLATFORMS=linux/amd64"})
 	if err != nil || settings.ReleaseImagesConfig != ".forge-ci/artifacts.yml" {
 		t.Fatalf("readback was not selected: %+v, %v", settings, err)
 	}

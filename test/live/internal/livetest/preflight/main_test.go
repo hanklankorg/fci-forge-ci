@@ -120,7 +120,7 @@ exit 17
 				t.Fatal(err)
 			}
 
-			args := []string{filepath.Join(root, "scripts/ci/campaign.sh"), "prepare", lab, destination, "forgejo=lane.cases"}
+			args := []string{filepath.Join(root, "scripts/ci/campaign.sh"), "prepare", lab, destination, "forgejo"}
 			env := append(preflightCLIEnvironment(t), "PATH="+bin+string(os.PathListSeparator)+os.Getenv("PATH"), "GO="+filepath.Join(bin, "go"), "PREFLIGHT_TEST_BINARY="+binary, "RECEIPT="+filepath.Join(root, "receipt"))
 			wantStatus := 17
 

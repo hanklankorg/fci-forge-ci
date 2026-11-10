@@ -13,13 +13,6 @@ import (
 	"github.com/diggsweden/forge-ci/internal/domain/snapshotimage"
 )
 
-// campaignSupportsLifecycle reports whether a demo runs the lifecycle event on
-// a provider: whether it has a development route there. A demo without one is
-// refused, not run as a shorter flow.
-func campaignSupportsLifecycle(provider, checkout string) bool {
-	return campaignAdmitLifecycle(provider, checkout) == nil
-}
-
 // campaignAdmitLifecycle refuses a lifecycle case whose demo has no
 // development route, the lifecycle's development phase: a service snapshot
 // of the demo's one container, which the snapshot-images policy builds from
@@ -66,13 +59,6 @@ func serviceSnapshotAdmission(checkout, source string) error {
 	}
 
 	return nil
-}
-
-// campaignSupportsSnapshot reports whether a demo runs the snapshot event on
-// a provider: whether it has the development route for every image the
-// planner plans from its declaration there.
-func campaignSupportsSnapshot(provider, checkout string) bool {
-	return campaignAdmitSnapshot(provider, checkout) == nil
 }
 
 // campaignAdmitSnapshot refuses a snapshot case whose demo has no

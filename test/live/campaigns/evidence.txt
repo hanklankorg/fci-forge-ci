@@ -11,7 +11,7 @@
 # matrix 1 takes the best mark of a flow whatever its values. Each mark's
 # note names its evidence root. What is derivable, a line's
 # existence or a refusal, is not written here; the generator reads it from
-# the lanes' cases (livetest.PreparedLanes) and the planner. `go run ./test/live/internal/livetest/preflight
+# the lanes' cases (livetest.PreparedLanes) and the demos' admission. `go run ./test/live/internal/livetest/preflight
 # testing-evidence <live-runs> [<hosted-runs>]` drafts the lines from the
 # recorded verdicts and hosted trials (latest run of each flow wins); review
 # the draft before replacing these. A drafted failure is kept out until its

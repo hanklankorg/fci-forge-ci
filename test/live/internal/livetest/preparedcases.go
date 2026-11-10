@@ -206,7 +206,7 @@ func (c PreparedCase) LaneEnvironment(forge string) map[string]string {
 // images taken from prepared, the prepared directory's campaign.env. A case
 // whose image was not prepared is refused, naming the key that is missing.
 func (c PreparedCase) Settings(prepared map[string]string) ([]string, error) {
-	jobImage := "JOB_IMAGE_" + strings.ToUpper(strings.ReplaceAll(c.JobImage, "-", "_"))
+	jobImage := campaignJobImagePrefix + campaignFlavorKey(c.JobImage)
 	if prepared[jobImage] == "" {
 		return nil, c.notPrepared(jobImage)
 	}
@@ -294,12 +294,13 @@ func (c PreparedCase) GitLabSettings() []string {
 // GitLabEnvironment is what a GitLab consumer trial of the case reads from
 // its environment and prepared, the prepared directory's campaign.env, holds.
 // The job image is the runtime archive of the case's flavor, or of Runtime.
-// A snapshot takes it alone. A merge request takes it as its consumer image
-// and lints in the flavor's nanolinter archive. A release and a lifecycle
-// take it as job and build image, sign with the prepared signer and lint as
-// the merge request does. A missing archive is refused, naming its key; one
-// the event does not take is empty, as is any that was not prepared: a value
-// left in the caller's environment is never taken for one.
+// A snapshot takes it alone, and builds in the saved job image of its
+// builder. A merge request takes it as its consumer image and lints in the
+// flavor's nanolinter archive. A release and a lifecycle take it as job and
+// build image, sign with the prepared signer and lint as the merge request
+// does. A missing archive is refused, naming its key; one the event does not
+// take is empty, as is any that was not prepared: a value left in the
+// caller's environment is never taken for one.
 func (c PreparedCase) GitLabEnvironment(prepared map[string]string) (map[string]string, error) {
 	environment := map[string]string{gitLabJobArchiveEnv: "", gitLabBuildArchiveEnv: "", gitLabSignerArchiveEnv: "", gitLabLintArchiveEnv: ""}
 
@@ -320,6 +321,10 @@ func (c PreparedCase) GitLabEnvironment(prepared map[string]string) (map[string]
 	}
 
 	if c.Event == TrialSnapshot {
+		if builder := GitLabSnapshotBuilderArchiveEnv(c.Builder); prepared[builder] == "" {
+			return nil, c.notPrepared(builder)
+		}
+
 		environment[gitLabJobArchiveEnv] = prepared[job]
 
 		return environment, nil
