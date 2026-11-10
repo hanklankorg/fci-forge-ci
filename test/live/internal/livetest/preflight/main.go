@@ -280,6 +280,8 @@ func preflightFact(mode string) (string, error) {
 		return "reused signing input metadata accepted (key validity remains signer-verified)", err
 	case "runner-arch":
 		return livetest.LabRunnerArch()
+	case "provider-account":
+		return livetest.LabProviderAccount()
 	case "consumer-trial-layer":
 		return livetest.ConsumerTrialLayerURL()
 	case "host-tools":
@@ -298,6 +300,6 @@ func usage() {
 	fmt.Fprintln(os.Stderr, "       preflight gitlab-consumer-scenario | gitlab-lifecycle-settings (validates FORGE_CI_LIVE_CONSUMER_SETTINGS)")
 	fmt.Fprintln(os.Stderr, "       preflight prepared-runtime-targets <repository> <forgejo|gitlab|lane>... [flavor=<flavor>...]")
 	fmt.Fprintln(os.Stderr, "       preflight testing-matrices <repository> | testing-evidence <live-runs> [<hosted-runs>]")
-	fmt.Fprintln(os.Stderr, "usage: preflight [signing-inputs | runner-arch | consumer-trial-layer | host-tools] (signing-inputs checks only FORGE_CI_LIVE_SIGNING_KEY_DIR; host-tools checks only this host; other modes read the forgeci lab contract)")
+	fmt.Fprintln(os.Stderr, "usage: preflight [signing-inputs | runner-arch | provider-account | consumer-trial-layer | host-tools] (signing-inputs checks only FORGE_CI_LIVE_SIGNING_KEY_DIR; host-tools checks only this host; other modes read the forgeci lab contract)")
 	os.Exit(2)
 }

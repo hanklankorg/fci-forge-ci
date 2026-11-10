@@ -115,9 +115,13 @@ fi
 # the resolution the scenarios use.
 (cd -- "$repo_root" && "$go_bin" run ./test/live/internal/livetest/preflight host-tools) >/dev/null
 
-# All-provider/older launchers own live.lock exclusively. A provider-scoped run
-# takes it shared plus its provider lock exclusively: independent providers may
-# overlap, while fixed same-provider repositories and mixed old/new runs cannot.
+# An all-provider launcher owns live.lock exclusively. A provider-scoped run
+# takes it shared, its provider lock shared and the lock of its lab account on
+# that provider exclusively: a run's scratch repositories and packages all sit
+# under its account, so independent providers may overlap, and so may runs on
+# one provider under different accounts (each its own LAB_TARGETS_FILE), while
+# two runs on one account cannot. An older launcher takes the provider lock
+# exclusively, which keeps it apart from every run on that provider.
 # Locks stay at fixed state paths and are never unlinked. The shell alone holds
 # them through test cleanup; changing the evidence directory cannot split them.
 # A preflight writes nothing to the lab, so it takes no lock and may run beside
@@ -136,8 +140,19 @@ else
   }
   if [[ "$provider_scope" != all ]]; then
     exec 7>"$lock_dir/live-$provider_scope.lock"
-    flock -n 7 || {
+    flock -s -n 7 || {
       printf 'live: another %s live run holds %s; wait for it to finish\n' "$provider_scope" "$lock_dir/live-$provider_scope.lock" >&2
+      exit 2
+    }
+    account=$(cd -- "$repo_root" && "$go_bin" run ./test/live/internal/livetest/preflight provider-account 7>&- 9>&-)
+    [[ "$account" =~ ^[a-z0-9][a-z0-9-]*$ ]] || {
+      printf 'live: the %s lab account %q cannot name a lock\n' "$provider_scope" "$account" >&2
+      exit 2
+    }
+    account_lock=$lock_dir/live-$provider_scope-$account.lock
+    exec 6>"$account_lock"
+    flock -n 6 || {
+      printf 'live: another %s live run as %s holds %s; wait for it to finish, or run as another lab account\n' "$provider_scope" "$account" "$account_lock" >&2
       exit 2
     }
   fi
@@ -205,9 +220,9 @@ trap 'rm -rf -- "$state"' EXIT
   # Run the compiled suites directly: the go test driver's signal handling
   # can terminate a test before its cancellation-aware cleanup runs.
   install -d -m 0700 -- "$state/tests"
-  "$go_bin" test -c -tags=live -buildvcs=false -o "$state/tests/" ./test/live/internal/livetest/... ./test/live/conformance ./test/live/githubconsumer 9>&-
-) 7>&- 9>&-
-packages=$(cd -- "$repo_root" && "$go_bin" list -tags=live -f '{{if or .TestGoFiles .XTestGoFiles}}{{.Dir}}{{end}}' ./test/live/internal/livetest/... ./test/live/conformance ./test/live/githubconsumer 7>&- 9>&-)
+  "$go_bin" test -c -tags=live -buildvcs=false -o "$state/tests/" ./test/live/internal/livetest/... ./test/live/conformance ./test/live/githubconsumer 6>&- 9>&-
+) 6>&- 7>&- 9>&-
+packages=$(cd -- "$repo_root" && "$go_bin" list -tags=live -f '{{if or .TestGoFiles .XTestGoFiles}}{{.Dir}}{{end}}' ./test/live/internal/livetest/... ./test/live/conformance ./test/live/githubconsumer 6>&- 7>&- 9>&-)
 
 export FORGE_CI_LIVE_BIN="$state/forge-ci-host"
 export FORGE_CI_LIVE_RUNNER_BIN="$state/forge-ci-runner"
@@ -244,6 +259,7 @@ filter=()
 # Keep the logger alive during cancellation so cleanup failures reach the
 # durable evidence. Neither it nor test children inherit either live lock.
 exec 8> >(
+  exec 6>&-
   exec 7>&-
   exec 9>&-
   trap '' INT TERM
@@ -279,7 +295,7 @@ while IFS= read -r package; do
   printf 'FORGE_CI_LIVE_PACKAGE_BEGIN %s\n' "$package" >&8
   (
     cd -- "$package" || exit
-    exec "$state/tests/${package##*/}.test" -test.paniconexit0 -test.count=1 -test.timeout=3h -test.v "${filter[@]}" 7>&- 9>&- 8>&-
+    exec "$state/tests/${package##*/}.test" -test.paniconexit0 -test.count=1 -test.timeout=3h -test.v "${filter[@]}" 6>&- 7>&- 9>&- 8>&-
   ) >&8 2>&1 &
   suite_pid=$!
   wait_for_child "$suite_pid"
@@ -302,7 +318,7 @@ set -e
 # read from the redacted log and given the run's header as values, not as the
 # shell-quoted text the log holds.
 classification=$(cd -- "$repo_root" && FORGE_CI_LIVE_RUN_STARTED_AT="$started_at" FORGE_CI_LIVE_RUN_SOURCE_COMMIT="$source_commit" \
-  FORGE_CI_LIVE_RUN_SCENARIO="$scenario" "$go_bin" run ./test/live/internal/livetest/preflight classify-run "$status" "$log" 7>&- 9>&-) || classification='1 failed'
+  FORGE_CI_LIVE_RUN_SCENARIO="$scenario" "$go_bin" run ./test/live/internal/livetest/preflight classify-run "$status" "$log" 6>&- 7>&- 9>&-) || classification='1 failed'
 read -r status verdict <<<"$classification"
 if [[ "$interrupted" -ne 0 ]]; then
   status=130

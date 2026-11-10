@@ -69,9 +69,18 @@ func TestLiveLauncherWaitsForCleanupAndReleasesLock(t *testing.T) {
 			lock := filepath.Join(root, "state/forge-ci/live.lock")
 			requireLiveLock(t, ctx, lock, true)
 
-			providerLock := filepath.Join(root, "state/forge-ci/live-forgejo.lock")
+			// A provider-scoped run holds its account's lock alone and shares
+			// its provider's, so a run as another account may start beside it.
+			providerLock := filepath.Join(root, "state/forge-ci/live-forgejo-forgeci.lock")
 			if mode == "provider-scoped signal" {
 				requireLiveLock(t, ctx, providerLock, true)
+
+				shared := filepath.Join(root, "state/forge-ci/live-forgejo.lock")
+				if err := exec.CommandContext(ctx, "flock", "-s", "-n", shared, "true").Run(); err != nil {
+					t.Fatalf("the provider lock is not shared: %v", err)
+				}
+
+				requireLiveLock(t, ctx, shared, true)
 			}
 
 			signal := syscall.SIGTERM
@@ -219,6 +228,7 @@ case "$mode" in
   run)
     if [[ "${2:-}" = classify-run ]]; then
       if [[ "$3" = 130 ]]; then printf '130 interrupted\n'; else printf '%s failed\n' "$3"; fi
+    elif [[ "${2:-}" = provider-account ]]; then printf 'forgeci\n'
     else printf 'inert preflight\n'; fi
     ;;
   list) printf '%s\n' "$FORGE_CI_LIVE_PACKAGE_DIR" ;;

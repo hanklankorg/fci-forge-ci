@@ -43,12 +43,26 @@ contract identity/provenance. Read each lane's outcome from the `verdict.json`
 beside its log; an `infrastructure` verdict is the lab's failure, not the
 product's: fix the lab and run the case again rather than counting it either way.
 
-The launcher takes the existing `live.lock` shared and its provider lock
-exclusive. Different providers can overlap; the same provider remains exclusive
-because fixtures use fixed repository names. Unscoped/all-provider and older
-launchers take `live.lock` exclusively, so mixed old/new runs still conflict
-safely. Locks remain held through test cleanup and are not inherited by suites
-or loggers. Never unlink a lock file or split HOME/XDG to create concurrency.
+The launcher takes the existing `live.lock` shared, its provider lock shared
+and the lock of its lab account on that provider exclusive. Fixtures use fixed
+repository names under the run's account, so two runs on one provider conflict
+only when they act as the same account. Different providers can overlap, and
+so can runs on one provider that each hold their own account's contract:
+
+```sh
+# In Forge Lab, once per extra account; the lab's runners serve every account.
+LAB_TARGETS_FILE=/absolute/forgeci-2.json just targets --account forgeci-2 gitlab forgejo
+# Here, beside a run that uses the forgeci contract:
+LAB_TARGETS_FILE=/absolute/forgeci-2.json just test-live-prepared <dir> gitlab '<pattern>'
+```
+
+Give each run a pattern that selects different cases, so no case runs twice.
+One prepared directory serves every account: its images are public in the lab
+registry or pushed by each run from the saved archives. Unscoped/all-provider
+launchers take `live.lock` exclusively, and older launchers their provider
+lock, so mixed old/new runs still conflict safely. Locks remain held through
+test cleanup and are not inherited by suites or loggers. Never unlink a lock
+file or split HOME/XDG to create concurrency.
 
 For GitHub, use the guarded Forge Lab hosted session recipe and its own
 organization lock; shared SDK preparation precedes parallel read-only reuse by
