@@ -45,7 +45,7 @@ const lifecycleBranch = "development"
 func TestForgejoLayer_ConsumerLifecycle(t *testing.T) {
 	livetest.RegisterLiveScenario(t)
 
-	forEachConsumerCheckout(t, "just test-live-consumer forgejo <checkout> lifecycle", func(t *testing.T, root string) {
+	forEachConsumerCheckout(t, provider.ForgeForgejo, "just test-live-consumer forgejo <checkout> lifecycle", func(t *testing.T, root string) {
 		if livetest.DemoName() != "" {
 			t.Fatal("a lifecycle runs in disposable scratch repositories, not in a kept demo")
 		}

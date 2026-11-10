@@ -44,20 +44,17 @@ const gitlabRequestedMainRule = `$CI_PIPELINE_SOURCE == "api" && $CI_COMMIT_REF_
 func TestGitLabLayer_Snapshot(t *testing.T) {
 	livetest.RegisterLiveScenario(t)
 
-	root := os.Getenv(consumerCheckoutEnv)
-	if root == "" {
-		t.Skip("no consumer checkout is named; run `just test-live-consumer gitlab <checkout> snapshot job-archive=<path>`")
-	}
+	forEachConsumerCheckout(t, provider.ForgeGitLab, "just test-live-consumer gitlab <checkout> snapshot job-archive=<path>", func(t *testing.T, root string) {
+		if livetest.DemoName() != "" {
+			t.Fatal("a snapshot runs in disposable scratch projects, not in a kept demo")
+		}
 
-	if livetest.DemoName() != "" {
-		t.Fatal("a snapshot runs in disposable scratch projects, not in a kept demo")
-	}
-
-	for _, visibility := range livetest.ConsumerVisibilities(t) {
-		t.Run(visibility.Name, func(t *testing.T) {
-			runGitLabSnapshot(t, root, visibility.Private)
-		})
-	}
+		for _, visibility := range livetest.ConsumerVisibilities(t) {
+			t.Run(visibility.Name, func(t *testing.T) {
+				runGitLabSnapshot(t, root, visibility.Private)
+			})
+		}
+	}, livetest.TrialSnapshot)
 }
 
 func runGitLabSnapshot(t *testing.T, root string, private bool) {

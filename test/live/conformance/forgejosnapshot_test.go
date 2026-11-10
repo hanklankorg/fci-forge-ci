@@ -29,7 +29,7 @@ import (
 func TestForgejoLayer_Snapshot(t *testing.T) {
 	livetest.RegisterLiveScenario(t)
 
-	forEachConsumerCheckout(t, "just test-live-consumer forgejo <checkout> snapshot CI_JOB_IMAGE=<digest reference>", func(t *testing.T, root string) {
+	forEachConsumerCheckout(t, provider.ForgeForgejo, "just test-live-consumer forgejo <checkout> snapshot CI_JOB_IMAGE=<digest reference>", func(t *testing.T, root string) {
 		if livetest.DemoName() != "" {
 			t.Fatal("a snapshot runs in disposable scratch repositories, not in a kept demo")
 		}

@@ -83,20 +83,19 @@ const gitlabMainPushRule = `$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_REF_NAME
 func TestGitLabLayer_ConsumerLifecycle(t *testing.T) {
 	livetest.RegisterLiveScenario(t)
 
-	root := os.Getenv(consumerCheckoutEnv)
-	if root == "" {
-		t.Skip("no consumer checkout is named; run `just test-live-consumer gitlab <checkout> lifecycle job-archive=<path> build-archive=<path> signer-archive=<path> lint-archive=<path>`")
-	}
+	const usage = "just test-live-consumer gitlab <checkout> lifecycle job-archive=<path> build-archive=<path> signer-archive=<path> lint-archive=<path>"
 
-	if livetest.DemoName() != "" {
-		t.Fatal("a lifecycle runs in disposable scratch projects, not in a kept demo")
-	}
+	forEachConsumerCheckout(t, provider.ForgeGitLab, usage, func(t *testing.T, root string) {
+		if livetest.DemoName() != "" {
+			t.Fatal("a lifecycle runs in disposable scratch projects, not in a kept demo")
+		}
 
-	for _, visibility := range livetest.ConsumerVisibilities(t) {
-		t.Run(visibility.Name, func(t *testing.T) {
-			runGitLabConsumerLifecycle(t, root, visibility.Private)
-		})
-	}
+		for _, visibility := range livetest.ConsumerVisibilities(t) {
+			t.Run(visibility.Name, func(t *testing.T) {
+				runGitLabConsumerLifecycle(t, root, visibility.Private)
+			})
+		}
+	}, livetest.TrialLifecycle)
 }
 
 func runGitLabConsumerLifecycle(t *testing.T, root string, private bool) {

@@ -55,7 +55,7 @@ const (
 func TestForgejoLayer_ConsumerTrial(t *testing.T) {
 	livetest.RegisterLiveScenario(t)
 
-	forEachConsumerCheckout(t, "just test-live-consumer forgejo <checkout> <pull-request|release>", func(t *testing.T, root string) {
+	forEachConsumerCheckout(t, provider.ForgeForgejo, "just test-live-consumer forgejo <checkout> <pull-request|release>", func(t *testing.T, root string) {
 		visibilities := livetest.ConsumerVisibilities(t)
 		// The npm registry belongs to the owner, not to the scratch repository, so
 		// a second case would publish the same name@version again and be refused.

@@ -5,6 +5,7 @@ package livetest
 
 import (
 	"errors"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -81,17 +82,131 @@ func TestForgejoPreparedCasesMatchCasesFiles(t *testing.T) {
 	}
 }
 
-func TestForgejoPreparedCaseNamesAreUnique(t *testing.T) {
+// gitLabPrepared is a campaign.env with every archive a GitLab case can name.
+var gitLabPrepared = map[string]string{
+	"FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_GO": "/c/go.tar", "FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_JAVA": "/c/java.tar",
+	"FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_NODE": "/c/node.tar", "FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_RUST": "/c/rust.tar",
+	"FORGE_CI_LIVE_SIGNER_IMAGE_ARCHIVE": "/c/signer.tar", "FORGE_CI_LIVE_BUILDAH_JOB_IMAGE_ARCHIVE": "/c/buildah.tar",
+	"LINT_IMAGE_ARCHIVE_JAVA": "/c/lint-java.tar", "LINT_IMAGE_ARCHIVE_RUST": "/c/lint-rust.tar",
+	"LINT_IMAGE_ARCHIVE_JAVASCRIPT_TYPESCRIPT": "/c/lint-js.tar",
+}
+
+// Temporary scaffolding, as above, for GitLabPreparedCases: each lane is the
+// consumer rows of its former file, with the archives each row named handed
+// over as the consumer recipe exported them.
+func TestGitLabPreparedCasesMatchCasesFiles(t *testing.T) {
 	t.Parallel()
 
-	seen := map[string]bool{}
+	archives := map[string]string{
+		"job-archive": gitLabJobArchiveEnv, "build-archive": gitLabBuildArchiveEnv,
+		"signer-archive": gitLabSignerArchiveEnv, "lint-archive": gitLabLintArchiveEnv,
+	}
 
-	for _, c := range ForgejoPreparedCases {
-		if seen[c.Name()] {
-			t.Errorf("two cases are named %s", c.Name())
+	for lane, file := range map[string]string{LaneLifecycle: "lifecycle-gitlab.cases", LaneSnapshot: "snapshot-gitlab.cases"} {
+		t.Run(lane, func(t *testing.T) {
+			t.Parallel()
+
+			body, err := os.ReadFile(filepath.Join(reporoot.Path(t), "test/live/campaigns", file))
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			var want []string
+
+			for line := range strings.SplitSeq(string(body), "\n") {
+				words := strings.Fields(line)
+				if len(words) < 3 || words[0] != caseConsumer {
+					continue
+				}
+
+				row := []string{}
+
+				for _, word := range words[3:] {
+					key, value, _ := strings.Cut(word, "=")
+					if env, isArchive := archives[key]; isArchive {
+						key, value = env, gitLabPrepared[strings.TrimPrefix(value, "@")]
+					}
+
+					row = append(row, key+"="+value)
+				}
+
+				slices.Sort(row)
+				want = append(want, strings.Join(append(words[1:3], row...), " "))
+			}
+
+			var got []string
+
+			for _, c := range GitLabPreparedCases {
+				if c.Lane != lane {
+					continue
+				}
+
+				environment, err := c.GitLabEnvironment(gitLabPrepared)
+				if err != nil {
+					t.Fatal(err)
+				}
+
+				row := c.GitLabSettings()
+
+				for _, env := range archives {
+					if environment[env] != "" {
+						row = append(row, env+"="+environment[env])
+					}
+				}
+
+				slices.Sort(row)
+				got = append(got, strings.Join(append([]string{c.Demo, c.Event}, row...), " "))
+			}
+
+			if len(want) == 0 || !slices.Equal(got, want) {
+				t.Fatalf("the lane's cases:\n%s\nthe file's consumer rows:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+			}
+		})
+	}
+}
+
+// A lifecycle without its signer or lint archive is refused by name, and no
+// archive is taken from anywhere but the prepared directory.
+func TestGitLabEnvironmentNamesTheMissingArchive(t *testing.T) {
+	t.Parallel()
+
+	lifecycle := GitLabPreparedCases[0]
+
+	for _, missing := range []string{"FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_JAVA", "FORGE_CI_LIVE_SIGNER_IMAGE_ARCHIVE", "LINT_IMAGE_ARCHIVE_JAVA"} {
+		prepared := maps.Clone(gitLabPrepared)
+		delete(prepared, missing)
+
+		_, err := lifecycle.GitLabEnvironment(prepared)
+		if !errors.Is(err, errs.ErrValidation) || !strings.Contains(err.Error(), "has no "+missing+";") {
+			t.Errorf("without %s: %v", missing, err)
 		}
+	}
 
-		seen[c.Name()] = true
+	snapshot, err := GitLabPreparedCases[len(GitLabPreparedCases)-1].GitLabEnvironment(gitLabPrepared)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, key := range []string{gitLabBuildArchiveEnv, gitLabSignerArchiveEnv, gitLabLintArchiveEnv, KanikoJobImageArchiveEnv} {
+		if value, cleared := snapshot[key]; !cleared || value != "" {
+			t.Errorf("a snapshot's %s is %q, cleared=%t", key, value, cleared)
+		}
+	}
+}
+
+func TestPreparedCaseNamesAreUnique(t *testing.T) {
+	t.Parallel()
+
+	for _, cases := range [][]PreparedCase{ForgejoPreparedCases, GitLabPreparedCases} {
+		seen := map[string]bool{}
+
+		for _, c := range cases {
+			if seen[c.Name()] {
+				t.Errorf("two cases are named %s", c.Name())
+			}
+
+			seen[c.Name()] = true
+		}
 	}
 }
 

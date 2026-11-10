@@ -94,6 +94,20 @@ var ForgejoPreparedCases = []PreparedCase{
 	{Lane: LanePrivate, Demo: "hello-npm-package", Event: TrialRelease, JobImage: flavorJS, Builder: ImageBuilderKaniko, Version: "0.2.0", Platforms: nativePlatform},
 }
 
+// GitLabPreparedCases are the GitLab consumer trials of the shipped demos.
+// TestGitLabLayer_ConsumerLifecycle runs the lifecycles and
+// TestGitLabLayer_Snapshot the snapshots, each as the subtest Name names.
+// A lifecycle releases Version.
+var GitLabPreparedCases = []PreparedCase{
+	{Lane: LaneLifecycle, Demo: "hello-maven-service", Event: TrialLifecycle, JobImage: flavorJava, Builder: ImageBuilderBuildah, Version: "0.2.0"},
+	{Lane: LaneLifecycle, Demo: "hello-cargo-container", Event: TrialLifecycle, JobImage: flavorRust, Builder: ImageBuilderBuildah, Version: "0.2.0"},
+	{Lane: LaneLifecycle, Demo: "hello-npm-service", Event: TrialLifecycle, JobImage: flavorJS, Builder: ImageBuilderBuildah, Version: "0.2.0"},
+
+	{Lane: LaneSnapshot, Demo: "hello-cargo-workspace", Event: TrialSnapshot, JobImage: flavorRust, Builder: ImageBuilderBuildah},
+	{Lane: LaneSnapshot, Demo: "hello-monorepo", Event: TrialSnapshot, JobImage: flavorJava, Builder: ImageBuilderBuildah},
+	{Lane: LaneSnapshot, Demo: "hello-go-service", Event: TrialSnapshot, JobImage: flavorGo, Builder: ImageBuilderBuildah},
+}
+
 // Name is the case's subtest name, <lane>/<demo>/<event>/<builder>, one per
 // case. `-run` matches it element by element.
 func (c PreparedCase) Name() string {
@@ -155,4 +169,79 @@ func PreparedForgejoEnvironment(prepared map[string]string) map[string]string {
 	}
 
 	return environment
+}
+
+// The archives a GitLab consumer trial reads from its environment, as
+// `just test-live-consumer gitlab` names them from job-archive=,
+// build-archive=, signer-archive= and lint-archive=.
+const (
+	gitLabJobArchiveEnv    = "FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE"
+	gitLabBuildArchiveEnv  = "FORGE_CI_LIVE_BUILD_IMAGE_ARCHIVE"
+	gitLabSignerArchiveEnv = "FORGE_CI_LIVE_SIGNER_IMAGE_ARCHIVE"
+	gitLabLintArchiveEnv   = "FORGE_CI_LIVE_LINT_IMAGE_ARCHIVE"
+
+	// The user the lifecycle's job images run as.
+	gitLabLifecycleJobUser = "65532:65532"
+)
+
+// gitLabRuntimeTarget is the runtime image a flavor's demos build and check
+// in on GitLab, the <TARGET> of GitLabJobImageArchiveEnv.
+var gitLabRuntimeTarget = map[string]string{flavorGo: "GO", flavorJava: "JAVA", flavorJS: "NODE", flavorRust: "RUST"}
+
+// GitLabSettings are the trial's settings of the case on GitLab, one
+// key=value each: a lifecycle's release version and job user, and none for a
+// snapshot, which takes its job image alone.
+func (c PreparedCase) GitLabSettings() []string {
+	if c.Event != TrialLifecycle {
+		return nil
+	}
+
+	return []string{settingVersion + "=" + c.Version, "job-user=" + gitLabLifecycleJobUser}
+}
+
+// GitLabEnvironment is what a GitLab consumer trial of the case reads from
+// its environment and prepared, the prepared directory's campaign.env, holds.
+// The job image is the runtime archive of the case's flavor; a lifecycle
+// builds in it too, signs with the prepared signer and lints with the
+// flavor's nanolinter archive, and a missing one of those is refused, naming
+// its key. A snapshot takes none of the three, so they are empty, as is any
+// archive that was not prepared: a value left in the caller's environment is
+// never taken for one.
+func (c PreparedCase) GitLabEnvironment(prepared map[string]string) (map[string]string, error) {
+	environment := map[string]string{gitLabBuildArchiveEnv: "", gitLabSignerArchiveEnv: "", gitLabLintArchiveEnv: ""}
+
+	for _, key := range []string{signerImageEnv, GitLabSnapshotBuilderArchiveEnv(ImageBuilderBuildah), KanikoJobImageArchiveEnv} {
+		environment[key] = prepared[key]
+	}
+
+	// A gate's further job image takes its runtime archive by name.
+	for key, value := range prepared {
+		if strings.HasPrefix(key, GitLabJobImageArchiveEnv) {
+			environment[key] = value
+		}
+	}
+
+	job := GitLabJobImageArchiveEnv + gitLabRuntimeTarget[c.JobImage]
+	if prepared[job] == "" {
+		return nil, c.notPrepared(job)
+	}
+
+	environment[gitLabJobArchiveEnv] = prepared[job]
+
+	if c.Event != TrialLifecycle {
+		return environment, nil
+	}
+
+	lint := campaignLintArchivePrefix + campaignFlavorKey(c.JobImage)
+	for _, key := range []string{gitLabSignerArchiveEnv, lint} {
+		if prepared[key] == "" {
+			return nil, c.notPrepared(key)
+		}
+	}
+
+	environment[gitLabBuildArchiveEnv] = prepared[job]
+	environment[gitLabSignerArchiveEnv] = prepared[gitLabSignerArchiveEnv]
+	environment[gitLabLintArchiveEnv] = prepared[lint]
+
+	return environment, nil
 }
