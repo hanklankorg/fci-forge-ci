@@ -13,15 +13,9 @@ The pinned `build-go` action always runs tests. Its existing administrator
 renderer supplies `enforce-application-tests` from
 `FORGE_CI_LIVE_ADMIN_APPLICATION_TESTS`. Run the same scenario with `false` and
 `true` in separate authorized runs; do not override the value in consumer YAML.
-For a reviewed cases file containing the existing syntax
-`scenario TestForgejoLayer_ConsumerPullRequest`, use the bare campaign selector
-`TestForgejoLayer_ConsumerPullRequest` in both runs. Scenario selectors do not
-accept administrator-axis suffixes. Set
-`FORGE_CI_LIVE_ADMIN_APPLICATION_TESTS=false` or `true` in the existing lane
-environment; an optional `setting admin-application-tests=false` or `true`
-declaration in that run's reviewed cases file must match the lane's input.
-Declarations validate the input; they do not choose it. No new case-setting
-language is needed. Direct focused runs can select
+Set `FORGE_CI_LIVE_ADMIN_APPLICATION_TESTS=false` or `true` in the run's
+environment and select `TestForgejoLayer_ConsumerPullRequest` in both runs.
+Direct focused runs can select
 `^TestForgejoLayer_ConsumerPullRequest$/public$/sha1$/application-test-findings$`
 or `application-test-compile-error`; the `clean` subtest is the positive control.
 

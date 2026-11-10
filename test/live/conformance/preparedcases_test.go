@@ -48,7 +48,7 @@ func forEachConsumerCheckout(t *testing.T, forge provider.ForgeAPI, usage string
 		t.Skip("no consumer checkout is named; run `" + usage + "`, or set " + livetest.PreparedEnv + " to run the prepared demos")
 	}
 
-	env, err := livetest.ReadCampaignEnv(filepath.Join(prepared, livetest.CampaignEnvFile))
+	env, err := livetest.ReadPreparedEnvFile(filepath.Join(prepared, livetest.PreparedEnvFile))
 	if err != nil {
 		t.Fatal(err)
 	}

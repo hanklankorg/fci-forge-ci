@@ -27,7 +27,7 @@ import (
 func eachPreparedCase(t *testing.T, check func(t *testing.T, forge string, c PreparedCase, consumer string)) {
 	t.Helper()
 
-	for _, forge := range []string{campaignForgejo, campaignGitLab} {
+	for _, forge := range []string{forgeForgejo, forgeGitLab} {
 		for _, c := range PreparedCases(forge) {
 			t.Run(forge+"/"+c.Name(), func(t *testing.T) {
 				t.Parallel()
@@ -62,9 +62,9 @@ func TestPreparedCasesRunWhatTheirDemoAdmits(t *testing.T) {
 		case TrialLifecycle:
 			err = matrixLifecycleAdmission(forge, consumer)
 		case TrialSnapshot:
-			err = campaignAdmitSnapshot(forge, consumer)
+			err = admitSnapshot(forge, consumer)
 		case TrialRelease:
-			if forge == campaignGitLab {
+			if forge == forgeGitLab {
 				err = requireGitLabReleaseBuild(consumer)
 			}
 		case TrialPullRequest:
@@ -76,7 +76,7 @@ func TestPreparedCasesRunWhatTheirDemoAdmits(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		if forge != campaignGitLab || c.Event == TrialSnapshot {
+		if forge != forgeGitLab || c.Event == TrialSnapshot {
 			return
 		}
 
@@ -101,7 +101,7 @@ func TestAdmissionRefusesWhatADemoCannotRun(t *testing.T) {
 	service := demoConsumerDir(reporoot.Path(t), "hello-go-service")
 	cli := demoConsumerDir(reporoot.Path(t), "hello-go-cli")
 
-	if err := matrixLifecycleAdmission(campaignForgejo, service); err != nil {
+	if err := matrixLifecycleAdmission(forgeForgejo, service); err != nil {
 		t.Fatalf("the Go service's Forgejo lifecycle: %v", err)
 	}
 
@@ -110,10 +110,10 @@ func TestAdmissionRefusesWhatADemoCannotRun(t *testing.T) {
 		want string
 	}{
 		"GitLab release without a build":   {requireGitLabReleaseBuild(service), "no " + GitLabConsumerBuildScript},
-		"GitLab lifecycle without a build": {matrixLifecycleAdmission(campaignGitLab, service), "no " + GitLabConsumerBuildScript},
-		"Forgejo snapshot of no container": {campaignAdmitSnapshot(campaignForgejo, cli), "no development route"},
-		"GitLab snapshot of no container":  {campaignAdmitSnapshot(campaignGitLab, cli), "no development route"},
-		"lifecycle of no container":        {matrixLifecycleAdmission(campaignForgejo, cli), "no root Containerfile"},
+		"GitLab lifecycle without a build": {matrixLifecycleAdmission(forgeGitLab, service), "no " + GitLabConsumerBuildScript},
+		"Forgejo snapshot of no container": {admitSnapshot(forgeForgejo, cli), "no development route"},
+		"GitLab snapshot of no container":  {admitSnapshot(forgeGitLab, cli), "no development route"},
+		"lifecycle of no container":        {matrixLifecycleAdmission(forgeForgejo, cli), "no root Containerfile"},
 	} {
 		if !errors.Is(test.err, errs.ErrValidation) || !strings.Contains(test.err.Error(), test.want) {
 			t.Errorf("%s: %v, want a refusal naming %q", name, test.err, test.want)
@@ -152,7 +152,7 @@ func TestPreparedReleaseCasesRequestWhatTheirDemoDeclaresOrBump(t *testing.T) {
 		}
 
 		bumps, err := PlannedVersionBumps(consumer, artifactsConfig)
-		if forge == campaignForgejo {
+		if forge == forgeForgejo {
 			bumps, err = ForgejoPlannedVersionBumps(consumer, defaults.Workflow)
 		}
 
@@ -165,7 +165,7 @@ func TestPreparedReleaseCasesRequestWhatTheirDemoDeclaresOrBump(t *testing.T) {
 			t.Errorf("the release requests %s, but the demo declares %s and its release does not bump; give the case Version %s", requested, declared, declared)
 		}
 
-		if forge == campaignForgejo && len(bumps) != 0 && requested == declared {
+		if forge == forgeForgejo && len(bumps) != 0 && requested == declared {
 			t.Errorf("the release bumps to %s, which the demo already declares; Forgejo refuses a bump that changes nothing, so request another version", requested)
 		}
 	})
@@ -232,7 +232,7 @@ func TestPreparedLanesNameLiveTests(t *testing.T) {
 		names = append(names, lane.Scenarios...)
 	}
 
-	for _, forge := range []string{campaignForgejo, campaignGitLab} {
+	for _, forge := range []string{forgeForgejo, forgeGitLab} {
 		for _, c := range PreparedCases(forge) {
 			names = append(names, PreparedCaseTest(forge, c.Event))
 		}
@@ -245,21 +245,21 @@ func TestPreparedLanesNameLiveTests(t *testing.T) {
 	}
 }
 
-// campaign.env is read as data and never evaluated: a line that is not
+// prepared.env is read as data and never evaluated: a line that is not
 // KEY=value with a capital key, an empty value, a key set twice, a NUL byte
 // and a file that names no commit are refused.
-func TestReadCampaignEnvRefusesWhatIsNotData(t *testing.T) {
+func TestReadPreparedEnvFileRefusesWhatIsNotData(t *testing.T) {
 	t.Parallel()
 
-	const good = "# images\n\nCAMPAIGN_COMMIT=0123\nJOB_IMAGE_GO=lab/go\n"
+	const good = "# images\n\nPREPARED_COMMIT=0123\nJOB_IMAGE_GO=lab/go\n"
 
-	path := writeFile(t, filepath.Join(t.TempDir(), CampaignEnvFile), good)
-	if env, err := ReadCampaignEnv(path); err != nil || len(env) != 2 || env["JOB_IMAGE_GO"] != "lab/go" {
-		t.Fatalf("a campaign.env of two keys: %v %v", env, err)
+	path := writeFile(t, filepath.Join(t.TempDir(), PreparedEnvFile), good)
+	if env, err := ReadPreparedEnvFile(path); err != nil || len(env) != 2 || env["JOB_IMAGE_GO"] != "lab/go" {
+		t.Fatalf("a prepared.env of two keys: %v %v", env, err)
 	}
 
 	for name, test := range map[string][2]string{
-		"no commit":           {"JOB_IMAGE_GO=lab/go\n", "names no CAMPAIGN_COMMIT"},
+		"no commit":           {"JOB_IMAGE_GO=lab/go\n", "names no PREPARED_COMMIT"},
 		"a lowercase key":     {good + "job_image=lab/go\n", "want KEY=value"},
 		"a line without =":    {good + "JOB_IMAGE_JAVA\n", "want KEY=value"},
 		"a shell line":        {good + "export X=1\n", "want KEY=value"},
@@ -268,8 +268,8 @@ func TestReadCampaignEnvRefusesWhatIsNotData(t *testing.T) {
 		"a NUL byte":          {good + "JOB_IMAGE_JAVA=lab\x00/java\n", "a NUL byte"},
 		"a value in brackets": {"[images]\n" + good, "want KEY=value"},
 	} {
-		path := writeFile(t, filepath.Join(t.TempDir(), CampaignEnvFile), test[0])
-		if _, err := ReadCampaignEnv(path); !errors.Is(err, errs.ErrValidation) || !strings.Contains(err.Error(), test[1]) {
+		path := writeFile(t, filepath.Join(t.TempDir(), PreparedEnvFile), test[0])
+		if _, err := ReadPreparedEnvFile(path); !errors.Is(err, errs.ErrValidation) || !strings.Contains(err.Error(), test[1]) {
 			t.Errorf("%s: %v, want a refusal naming %q", name, err, test[1])
 		}
 	}
@@ -294,7 +294,7 @@ func TestPreparedCasesAreInAListedLane(t *testing.T) {
 		}
 	}
 
-	for _, forge := range []string{campaignForgejo, campaignGitLab} {
+	for _, forge := range []string{forgeForgejo, forgeGitLab} {
 		for _, c := range PreparedCases(forge) {
 			if listed[forge+"/"+c.Lane] == 0 {
 				t.Errorf("%s/%s: no lane lists it", forge, c.Name())

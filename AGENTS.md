@@ -4,7 +4,7 @@
 # Live acceptance campaigns
 
 For work using Forge Lab or hosted GitHub, read
-[`docs/live-campaigns.md`](docs/live-campaigns.md) before scheduling live runs.
+[`docs/live-runs.md`](docs/live-runs.md) before scheduling live runs.
 
 - Inventory cases, provider/road, dependencies, mutable resource coordinates and
   estimated peak CPU/RAM/disk. Check available host headroom and runner capacity.

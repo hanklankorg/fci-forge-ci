@@ -23,12 +23,12 @@ func TestImagePreparationShellCheckSourceContract(t *testing.T) {
 	}
 
 	root := t.TempDir()
-	for _, name := range []string{".shellcheckrc", "scripts/ci/campaign.sh", "scripts/ci/publish-live-image.sh", "scripts/ci/image-build-settings.sh"} {
+	for _, name := range []string{".shellcheckrc", "scripts/ci/prepare-live.sh", "scripts/ci/publish-live-image.sh", "scripts/ci/image-build-settings.sh"} {
 		copyImageFixture(t, root, name)
 	}
 	// Match the maintained adapter's file/config inputs, including the helper as
 	// a directly linted .sh file. Its output-array contract must stand on its own.
-	cmd := exec.CommandContext(t.Context(), shellcheck, "--format=json", "--rcfile=.shellcheckrc", "scripts/ci/campaign.sh", "scripts/ci/publish-live-image.sh", "scripts/ci/image-build-settings.sh")
+	cmd := exec.CommandContext(t.Context(), shellcheck, "--format=json", "--rcfile=.shellcheckrc", "scripts/ci/prepare-live.sh", "scripts/ci/publish-live-image.sh", "scripts/ci/image-build-settings.sh")
 
 	cmd.Dir = root
 	if output, err := cmd.CombinedOutput(); err != nil {
@@ -250,9 +250,9 @@ func copyImageFixture(t *testing.T, root, name string) {
 	}
 }
 
-func TestImagePreparationCampaignPassesSettingsBeforeCompilation(t *testing.T) {
+func TestImagePreparationPrepareLivePassesSettingsBeforeCompilation(t *testing.T) {
 	root, bin := t.TempDir(), t.TempDir()
-	for _, name := range []string{"scripts/ci/campaign.sh", "scripts/ci/image-build-settings.sh"} {
+	for _, name := range []string{"scripts/ci/prepare-live.sh", "scripts/ci/image-build-settings.sh"} {
 		copyImageFixture(t, root, name)
 	}
 
@@ -269,12 +269,12 @@ exit 17
 		t.Fatal(err)
 	}
 
-	sentinel := filepath.Join(destination, "campaign.env")
+	sentinel := filepath.Join(destination, "prepared.env")
 	if err := os.WriteFile(sentinel, []byte("preserve\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
-	cmd := exec.CommandContext(t.Context(), testBash(t), filepath.Join(root, "scripts/ci/campaign.sh"), "prepare", lab, destination, "forgejo", "build-budget=required", "build-cpus=3", "build-memory-mib=2048", "compiler-jobs=1")
+	cmd := exec.CommandContext(t.Context(), testBash(t), filepath.Join(root, "scripts/ci/prepare-live.sh"), lab, destination, "forgejo", "build-budget=required", "build-cpus=3", "build-memory-mib=2048", "compiler-jobs=1")
 	cmd.Env = append(os.Environ(), "PATH="+bin+string(os.PathListSeparator)+os.Getenv("PATH"), "GO="+filepath.Join(bin, "go"), "RECEIPT="+filepath.Join(root, "receipt"))
 	output, err := cmd.CombinedOutput()
 
@@ -295,6 +295,6 @@ exit 17
 
 	body, err := os.ReadFile(sentinel)
 	if err != nil || string(body) != "preserve\n" {
-		t.Fatal("compiler failure changed campaign destination")
+		t.Fatal("compiler failure changed the prepared destination")
 	}
 }

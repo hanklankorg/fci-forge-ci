@@ -630,7 +630,7 @@ gen-runby:
 
 # Regenerates matrices 1 and 2 of docs/testing-matrices.md from the demos'
 # declarations, the Go tables (livetest.PreparedLanes) and the live-evidence overlay
-# (test/live/campaigns/evidence.txt); matrix 1b and the prose stay as written.
+# (test/live/evidence.txt); matrix 1b and the prose stay as written.
 [doc('Generate the testing matrices sections')]
 [group('documentation')]
 gen-testing-matrices:
@@ -958,7 +958,7 @@ test-live-image kind forge_lab budget="" cpus="" memory_mib="" compiler_jobs="":
 # toolchain flavour (nanolinter, its check tools and the toolchain): the
 # demo's lint and build jobs run in it, and the snapshot builds the demo's
 # producers in it. A plain runtime image fails the lint job on the forge.
-# docs/live-campaigns.md, Lifecycle, has the rest.
+# docs/live-runs.md, Lifecycle, has the rest.
 #
 #   just test-live-consumer forgejo /absolute/hello-maven-service/consumer lifecycle CI_JOB_IMAGE=<nanolinter java image, digest reference> RELEASE_PLATFORMS=linux/amd64
 #   just test-live-consumer forgejo /absolute/hello-cargo-container/consumer lifecycle CI_JOB_IMAGE=<nanolinter rust image, digest reference> RELEASE_PLATFORMS=linux/amd64
@@ -981,7 +981,7 @@ test-live-image kind forge_lab budget="" cpus="" memory_mib="" compiler_jobs="":
 # (the non-root check image), build-archive= (the release builder) and
 # signer-archive=, plus lint-archive= when the gate lints, KEY=value build
 # variables and scenario=<exact consumer release test name>; see
-# docs/live-campaigns.md. lifecycle is the linked flow in one project under
+# docs/live-runs.md. lifecycle is the linked flow in one project under
 # one policy, for a demo with a development route on GitLab, a service
 # snapshot of its one container from the declaration its release builds its
 # images from (hello-maven-service, hello-cargo-container): a merge request on
@@ -1390,46 +1390,32 @@ test-live-gitlab-base-images job build signer:
     @FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE="$1" FORGE_CI_LIVE_BUILD_IMAGE_ARCHIVE="$2" FORGE_CI_LIVE_SIGNER_IMAGE_ARCHIVE="$3" \
         exec bash scripts/ci/run-live-tests.sh focused '^TestGitLabRelease_BaseImagesColdAndWarm$'
 
-# Prepare a live campaign: everything its lanes take, built from HEAD once.
+# Prepare a directory for live runs: everything the named lanes take, built
+# from HEAD once.
 #
 # Publishes the kaniko job and signer images and each named nanolinter job
 # image (package nanolinter-<flavor>) with Forge Lab, saves those images, the
 # Buildah job image and each runtime image the named lanes' cases and the
 # GitLab gates of their demos take as archives, exports every demo of
 # test/live/fixtures/consumers as a one-commit checkout under <dir>/demos, and writes
-# <dir>/campaign.env: image references, archive paths and CAMPAIGN_COMMIT, no
+# <dir>/prepared.env: image references, archive paths and PREPARED_COMMIT, no
 # secrets. A dirty checkout or a stale engine checksum is refused. A lane is
 # forgejo or gitlab, every lane of the forge, or one lane of
 # livetest.PreparedLanes by name; gitlab includes the Android lane, which
 # takes job-image=kotlin:<image> and the Android runtime image.
 #
-#   just campaign-prepare ~/src/forge-lab ~/campaigns/k3s \
+#   just test-live-prepare ~/src/forge-lab ~/prepared/k3s \
 #     k3s-private-forgejo k3s-private-gitlab \
 #     job-image=go:localhost/nanolinter-go:dev job-image=java:localhost/nanolinter-java:dev
 #
-# docs/live-campaigns.md, Run a campaign, has the whole run.
-[arg('dir', help='Absolute campaign directory: new, empty, or an earlier campaign to replace')]
-[arg('lanes', help='forgejo, gitlab or a lane name per lane the campaign prepares for, and optional job-image=<flavor>:<local image>, published as nanolinter-<flavor>')]
+# docs/live-runs.md, Prepare and run, has the whole run.
+[arg('dir', help='Absolute prepared directory: new, empty, or an earlier one to replace')]
+[arg('lanes', help='forgejo, gitlab or a lane name per lane to prepare for, and optional job-image=<flavor>:<local image>, published as nanolinter-<flavor>')]
 [arg('forge_lab', help='Absolute path to the Forge Lab checkout used to publish the images')]
-[doc('Live; publish this commit as a campaign')]
-[group('campaign')]
-campaign-prepare forge_lab dir +lanes:
-    @exec bash scripts/ci/campaign.sh prepare "$@"
-
-# Run one cell on hosted GitHub: a demo's event through the demo's fixture
-# workflows, from a one-commit checkout of the built-in demo, with
-# `just test-live-consumer github` settings. The cell's line is appended to
-# <dir>/github.results. It runs inside Forge Lab's
-# `just github run ... -- just --justfile <this> campaign-github ...`:
-#
-#   just campaign-github ~/campaigns/hosted hello-maven-service/lifecycle org=<id>
-[arg('dir', help='Absolute directory where github.results is written')]
-[arg('cell', help='<demo>/<event>')]
-[arg('settings', help='test-live-consumer github settings, org=<id> and the rest')]
-[doc('Live; run one hosted GitHub cell of a built-in demo; network, destructive')]
-[group('campaign')]
-campaign-github dir cell *settings:
-    @exec bash scripts/ci/campaign.sh github "$@"
+[doc('Live; prepare the images and demos of this commit')]
+[group('live')]
+test-live-prepare forge_lab dir +lanes:
+    @exec bash scripts/ci/prepare-live.sh "$@"
 
 # Run cases of the Go tables (livetest.ForgejoPreparedCases,
 # GitLabPreparedCases) on the demos and images of a prepared directory. A
@@ -1440,13 +1426,13 @@ campaign-github dir cell *settings:
 # (FORGE_CI_LIVE_CONSUMER_VISIBILITY, FORGE_CI_LIVE_ADMIN_<CHECK>). Refused
 # unless HEAD is the prepared commit with nothing on top.
 #
-#   FORGE_CI_LIVE_CONSUMER_VISIBILITY=private just test-live-prepared ~/campaigns/k3s forgejo '^TestForgejoLayer_ConsumerTrial$/^private$'
-#   just test-live-prepared ~/campaigns/k3s forgejo '^TestForgejoLayer_ConsumerLifecycle$/^lifecycle$/^hello-maven-service$/^lifecycle$/^kaniko$/^public$'
-[arg('dir', help='Absolute prepared directory from just campaign-prepare')]
+#   FORGE_CI_LIVE_CONSUMER_VISIBILITY=private just test-live-prepared ~/prepared/k3s forgejo '^TestForgejoLayer_ConsumerTrial$/^private$'
+#   just test-live-prepared ~/prepared/k3s forgejo '^TestForgejoLayer_ConsumerLifecycle$/^lifecycle$/^hello-maven-service$/^lifecycle$/^kaniko$/^public$'
+[arg('dir', help='Absolute prepared directory from just test-live-prepare')]
 [arg('forge', help='forgejo or gitlab')]
 [arg('run', help='go test -run pattern: <test>/<lane>[/<demo>/<event>/<builder>/<visibility>]')]
 [doc('Live; run prepared demo cases from the Go tables; network, destructive')]
-[group('campaign')]
+[group('live')]
 test-live-prepared dir forge run:
     @FORGE_CI_LIVE_PREPARED="$1" FORGE_CI_LIVE_PROVIDER="$2" exec bash scripts/ci/run-live-tests.sh focused "$3"
 

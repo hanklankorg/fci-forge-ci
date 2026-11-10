@@ -26,18 +26,18 @@ type PreparedLane struct {
 // [settings]`, test-live-gitlab-branch-protection, test-live-gitlab-buildah
 // or test-live-gitlab-interrupted-job.
 var PreparedLanes = []PreparedLane{
-	{Name: "build-capability-gitlab", Forge: campaignGitLab, Scenarios: []string{"TestGitLabRelease_BuildImageCapability"}},
+	{Name: "build-capability-gitlab", Forge: forgeGitLab, Scenarios: []string{"TestGitLabRelease_BuildImageCapability"}},
 	// A reviewed native checkout's pull request, then its release.
-	{Name: "harness-inputs-forgejo", Forge: campaignForgejo, Scenarios: []string{"TestForgejoLayer_ConsumerTrial", "TestForgejoLayer_ConsumerTrial"}},
-	{Name: "harness-inputs-gitlab", Forge: campaignGitLab, Scenarios: []string{
+	{Name: "harness-inputs-forgejo", Forge: forgeForgejo, Scenarios: []string{"TestForgejoLayer_ConsumerTrial", "TestForgejoLayer_ConsumerTrial"}},
+	{Name: "harness-inputs-gitlab", Forge: forgeGitLab, Scenarios: []string{
 		"TestGitLabRelease_ConsumerBranchProtection", gitlabConsumerTrialTest, gitlabPreseededTest, gitlabRecoveryTest,
 	}},
-	{Name: "interruption-manual-gitlab", Forge: campaignGitLab, Scenarios: []string{"TestGitLabWorkflow_InterruptedJob"}},
-	{Name: "k3s-private-android-gitlab", Forge: campaignGitLab, Lane: LanePrivateAndroid},
-	{Name: "k3s-private-forgejo", Forge: campaignForgejo, Lane: LanePrivate},
+	{Name: "interruption-manual-gitlab", Forge: forgeGitLab, Scenarios: []string{"TestGitLabWorkflow_InterruptedJob"}},
+	{Name: "k3s-private-android-gitlab", Forge: forgeGitLab, Lane: LanePrivateAndroid},
+	{Name: "k3s-private-forgejo", Forge: forgeForgejo, Lane: LanePrivate},
 	// The minimal signed release and the narrower policy scenarios run in
 	// the go runtime image, beside the demos' gates and releases.
-	{Name: "k3s-private-gitlab", Forge: campaignGitLab, Lane: LanePrivate, Scenarios: []string{
+	{Name: "k3s-private-gitlab", Forge: forgeGitLab, Lane: LanePrivate, Scenarios: []string{
 		"TestGitLabRelease_MinimalSignedArtifacts",
 		"TestGitLabCheck_ChecksOutPrivateConsumerWithJobToken",
 		"TestGitLabCheck_ChecksOutTheConsumerPipelineCommit",
@@ -48,10 +48,10 @@ var PreparedLanes = []PreparedLane{
 		"TestGitLabRelease_PromotionRetryAfterRegistryWrite",
 		"TestGitLabBootstrap_PublishesAndDownloadsTheRecordedBinary",
 	}},
-	{Name: "lifecycle-forgejo", Forge: campaignForgejo, Lane: LaneLifecycle},
-	{Name: "lifecycle-gitlab", Forge: campaignGitLab, Lane: LaneLifecycle},
-	{Name: "release-images-forgejo", Forge: campaignForgejo, Scenarios: []string{"TestForgejoLayer_ConsumerTrial"}},
-	{Name: "release-variants-forgejo", Forge: campaignForgejo, Lane: LaneReleaseVariants},
-	{Name: "snapshot-forgejo", Forge: campaignForgejo, Lane: LaneSnapshot},
-	{Name: "snapshot-gitlab", Forge: campaignGitLab, Lane: LaneSnapshot},
+	{Name: "lifecycle-forgejo", Forge: forgeForgejo, Lane: LaneLifecycle},
+	{Name: "lifecycle-gitlab", Forge: forgeGitLab, Lane: LaneLifecycle},
+	{Name: "release-images-forgejo", Forge: forgeForgejo, Scenarios: []string{"TestForgejoLayer_ConsumerTrial"}},
+	{Name: "release-variants-forgejo", Forge: forgeForgejo, Lane: LaneReleaseVariants},
+	{Name: "snapshot-forgejo", Forge: forgeForgejo, Lane: LaneSnapshot},
+	{Name: "snapshot-gitlab", Forge: forgeGitLab, Lane: LaneSnapshot},
 }

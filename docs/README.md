@@ -82,7 +82,7 @@ Current architectural decisions and the constraints future changes must retain.
 
 - [Development](DEVELOPMENT.md) - Local development, testing, branch verification, and releasing forge-ci itself.
 - [Testing](testing.md) - Go test helpers and testing conventions.
-- [Live Campaigns](live-campaigns.md) - Plan, launch and retain evidence for resource-aware asynchronous live campaigns.
+- [Live Runs](live-runs.md) - Plan, launch and retain evidence for resource-aware asynchronous live runs.
 - [Validation Invariants](validation-invariants.md) - Invariants and regressions from native consumer trials.
 - [Scripts](scripts.md) - Every shell script in the repository, by directory, and what moved to the Go binary.
 - [Workflow Design Policy](workflow-design-policy.md) - Design rules for maintainers extending the workflow graph.

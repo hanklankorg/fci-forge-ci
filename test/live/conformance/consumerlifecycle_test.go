@@ -22,7 +22,7 @@ const lifecycleBranch = "development"
 // repository, run on the lab against the layer of this checkout. It is a
 // demo's with a development route: the harness's service development
 // workflow over the service snapshot of its one container, for a consumer of
-// any snapshot family (docs/live-campaigns.md, Lifecycle):
+// any snapshot family (docs/live-runs.md, Lifecycle):
 //
 //  1. a pull request from development into main, judged by the consumer's
 //     own pull-request workflow;
@@ -121,7 +121,7 @@ func runForgejoConsumerLifecycle(t *testing.T, root string, private bool) {
 	}
 
 	// The layer is the consumer trial's, as for its other events: the
-	// campaign's kaniko job image is labelled for that repository, and a run
+	// prepared kaniko job image is labelled for that repository, and a run
 	// admits it for no other (livetest.ConsumerTrialLayerURL).
 	scenario := layerScenario{target: target, label: livetest.RunnerLabel(t, target)}
 	scenario.layer = newConsumerLayer(t, target, livetest.ConsumerTrial)

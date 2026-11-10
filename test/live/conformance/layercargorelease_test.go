@@ -18,7 +18,7 @@ import (
 
 // cargoReleaseImageEnv names the Rust job image the release runs its
 // version job and its build in, pinned by digest: the image a Cargo
-// consumer's CI_JOB_IMAGE names, which the campaigns publish as
+// consumer's CI_JOB_IMAGE names, which a prepare publishes as
 // JOB_IMAGE_RUST. It needs bash, git, curl, sha256sum, tar, gzip and a
 // Cargo of edition 2024 that builds for the runner's own platform.
 const cargoReleaseImageEnv = "FORGE_CI_LIVE_CARGO_RELEASE_IMAGE"

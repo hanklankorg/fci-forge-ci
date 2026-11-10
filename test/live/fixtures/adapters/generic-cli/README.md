@@ -146,7 +146,7 @@ GitLab.
 
 Uses the existing `TestGitLabRelease_ConsumerTrial` and `templates/release*.yml`
 policy. Unit verification alone does not establish live acceptance. Read each
-campaign's retained verdict and job evidence for its exact source, image and
+run's retained verdict and job evidence for its exact source, image and
 provider scope; one successful lane does not establish another lane's outcome.
 
 ## Operator preparation
@@ -210,7 +210,7 @@ trusted signing/publication and public readback. Ephemeral checks are not public
 The `lifecycle` event (the `lifecycle` lane of
 `livetest.ForgejoPreparedCases` and `livetest.GitLabPreparedCases`) links
 these stages for the demos with a development route, through the native Maven-service and snapshot routes, not these CLI
-adapters. See `docs/live-campaigns.md`, Lifecycle, for its phases and limits.
+adapters. See `docs/live-runs.md`, Lifecycle, for its phases and limits.
 
 | Product lane | Remaining requirement |
 | --- | --- |

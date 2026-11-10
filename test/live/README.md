@@ -17,7 +17,7 @@
 - `fixtures/development/rust-development`: four-role development receipt fixture.
 - `fixtures/development/maven-reactor`: parent POM, library and application reactor.
 - `fixtures/libraries/gradle-jvm`: Gradle library producer and its fresh downstream consumer build.
-- `campaigns`: campaign declarations and the hand-maintained evidence overlay.
+- `evidence.txt`: the hand-maintained evidence overlay of the testing matrices.
 
 Ordinary `go test ./...` runs untagged support and fixture tests; the `live` tag
 gates scenarios. To compile tagged owners without executing their TestMain or
@@ -25,5 +25,5 @@ scenarios, use `go test -tags=live -exec=/bin/true ./test/live/internal/livetest
 from the repository root. This is compilation evidence, not live proof.
 
 Live execution stays behind the guarded launcher in `scripts/ci`; see
-[testing](../../docs/testing.md) and [campaign safety](../../docs/live-campaigns.md).
+[testing](../../docs/testing.md) and [live runs](../../docs/live-runs.md).
 Production planners, adapters and CLI remain under `internal` and `cmd/forge-ci`.

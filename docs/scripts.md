@@ -57,7 +57,7 @@ contract.
 
 | Path | Purpose |
 |------|---------|
-| `scripts/ci/campaign.sh` | A live campaign: prepares one commit's inputs once, for the cases of the Go tables that `just test-live-prepared` runs on them, and runs one hosted GitHub cell of a built-in demo. Behind `just campaign-prepare` and `just campaign-github`; see [live campaigns](live-campaigns.md). |
+| `scripts/ci/prepare-live.sh` | Prepares one commit's inputs once in a directory: the images and demo checkouts the cases of the Go tables run on with `just test-live-prepared`. Behind `just test-live-prepare`; see [live runs](live-runs.md#prepare-and-run). |
 | `scripts/ci/canonical-cli-delivery.sh` | Protected canonical delivery glue for `canonical-cli-bootstrap.yml`; transport is the pinned native Actions upload/download pair. |
 | `scripts/ci/canonical-consumer.sh` | Receiver glue for the `consume-canonical-cli` action, run from a fresh administrator-pinned engine checkout; see [canonical prerequisite consumption](canonical-prerequisite-consumption.md). |
 | `scripts/ci/demo-checkout.sh` | Makes a built-in demo, `test/live/fixtures/consumers/<name>/consumer`, a one-commit repository for a consumer trial. Behind `just demo`. |

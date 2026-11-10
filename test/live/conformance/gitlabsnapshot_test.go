@@ -30,7 +30,7 @@ const gitlabRequestedMainRule = `$CI_PIPELINE_SOURCE == "api" && $CI_COMMIT_REF_
 // A snapshot on GitLab: the lifecycle's development phase alone, in
 // one GitLab project under one pinned policy that includes the
 // snapshot-images component and nothing else, over every image the planner
-// plans from the consumer's declaration (docs/live-campaigns.md, Snapshot).
+// plans from the consumer's declaration (docs/live-runs.md, Snapshot).
 // The consumer's main and a change on branch development are pushed before
 // the policy is in place, and no rule of it admits a push; the harness then
 // requests one pipeline on main, whose child snapshots development, and

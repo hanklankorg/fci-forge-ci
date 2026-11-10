@@ -76,7 +76,7 @@ func TestPreflightCLIZeroResourceOptions(t *testing.T) {
 	}
 }
 
-func TestPreflightCLICampaignWithoutResourceWords(t *testing.T) {
+func TestPreflightCLIPrepareLiveWithoutResourceWords(t *testing.T) {
 	for _, mode := range []string{"default", "inherited-required", "invalid-inherited", "conflicting-explicit"} {
 		t.Run(mode, func(t *testing.T) {
 			root, bin := t.TempDir(), t.TempDir()
@@ -92,7 +92,7 @@ func TestPreflightCLICampaignWithoutResourceWords(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			for _, name := range []string{"scripts/ci/campaign.sh", "scripts/ci/image-build-settings.sh"} {
+			for _, name := range []string{"scripts/ci/prepare-live.sh", "scripts/ci/image-build-settings.sh"} {
 				body, err := os.ReadFile(filepath.Join(reporoot.Path(t), name))
 				if err != nil {
 					t.Fatal(err)
@@ -112,7 +112,7 @@ exit 17
 
 			lab, destination := t.TempDir(), t.TempDir()
 			write(filepath.Join(lab, "justfile"), "")
-			sentinel := filepath.Join(destination, "campaign.env")
+			sentinel := filepath.Join(destination, "prepared.env")
 			write(sentinel, "preserve\n")
 
 			binary, err := os.Executable()
@@ -120,7 +120,7 @@ exit 17
 				t.Fatal(err)
 			}
 
-			args := []string{filepath.Join(root, "scripts/ci/campaign.sh"), "prepare", lab, destination, "forgejo"}
+			args := []string{filepath.Join(root, "scripts/ci/prepare-live.sh"), lab, destination, "forgejo"}
 			env := append(preflightCLIEnvironment(t), "PATH="+bin+string(os.PathListSeparator)+os.Getenv("PATH"), "GO="+filepath.Join(bin, "go"), "PREFLIGHT_TEST_BINARY="+binary, "RECEIPT="+filepath.Join(root, "receipt"))
 			wantStatus := 17
 

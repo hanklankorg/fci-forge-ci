@@ -120,7 +120,7 @@ func TestParseTrialSettings_ReadsTheCallersWords(t *testing.T) {
 	}
 
 	// A lifecycle selects its builder as the other events do: kaniko is the
-	// consumer's CI_IMAGE_BUILDER with the campaign's job image.
+	// consumer's CI_IMAGE_BUILDER with the prepared job image.
 	kaniko, err := ParseTrialSettings(TrialLifecycle, []string{"CI_JOB_IMAGE=" + snapshotJobImage, "CI_IMAGE_BUILDER=kaniko", "CI_IMAGE_BUILDER_JOB_IMAGE=" + snapshotJobImage})
 	if err != nil || kaniko.Variables["CI_IMAGE_BUILDER"] != ImageBuilderKaniko || kaniko.Variables["CI_IMAGE_BUILDER_JOB_IMAGE"] != snapshotJobImage {
 		t.Errorf("a lifecycle with kaniko = %+v, %v", kaniko, err)

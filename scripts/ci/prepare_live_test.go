@@ -18,42 +18,37 @@ import (
 	"github.com/diggsweden/forge-ci/internal/testutil/testfs"
 )
 
-// These tests drive campaign.sh and demo-checkout.sh offline. A fake go
+// These tests drive prepare-live.sh and demo-checkout.sh offline. A fake go
 // records the preflight's argv and refuses; a fake just records each call's
-// argv, prints a verdict path and exits as told. Which images a campaign
-// prepares is tested in test/live/internal/livetest; these pin what the
-// script refuses before any effect and what a GitHub cell runs and records.
+// argv. Which images a prepare builds is tested in
+// test/live/internal/livetest; these pin what the script refuses before any
+// effect.
 
-const fakeCampaignGo = `#!/usr/bin/env bash
+const fakePrepareGo = `#!/usr/bin/env bash
 printf '%s\n' "$*" >>"$FAKE_GO_ARGV"
 exit 2
 `
 
-const fakeCampaignJust = `#!/usr/bin/env bash
+const fakePrepareJust = `#!/usr/bin/env bash
 printf '%s\n' "$*" >>"$FAKE_JUST_ARGV"
-calls=$(wc -l <"$FAKE_JUST_ARGV")
-printf 'suite output\nLive verdict: /evidence/%s/verdict.json\n' "${calls// /}"
-case "$*" in
-*TestFails*) exit 1 ;;
-esac
 `
 
-// campaignLane is one campaign directory and the fakes to run the script on
+// prepareLane is one prepared directory and the fakes to run the script on
 // it.
-type campaignLane struct {
+type prepareLane struct {
 	dir, workDir, argvFile, goArgvFile, envFile string
 	env                                         []string
 }
 
-func newCampaignLane(t *testing.T, extraEnv ...string) campaignLane {
+func newPrepareLane(t *testing.T, extraEnv ...string) prepareLane {
 	t.Helper()
 
 	fakeDir, state := testfs.NewReal(t).Root, testfs.NewReal(t).Root
-	writeExecutable(t, filepath.Join(fakeDir, "go"), fakeCampaignGo)
-	writeExecutable(t, filepath.Join(fakeDir, "just"), fakeCampaignJust)
+	writeExecutable(t, filepath.Join(fakeDir, "go"), fakePrepareGo)
+	writeExecutable(t, filepath.Join(fakeDir, "just"), fakePrepareJust)
 
-	lane := campaignLane{
-		dir:        filepath.Join(state, "campaign"),
+	lane := prepareLane{
+		dir:        filepath.Join(state, "prepared"),
 		workDir:    testfs.NewReal(t).Root,
 		argvFile:   filepath.Join(state, "just-argv"),
 		goArgvFile: filepath.Join(state, "go-argv"),
@@ -127,11 +122,11 @@ func readLines(t *testing.T, path string) []string {
 }
 
 func TestImagePreparationResourceRefusalPreservesDestinations(t *testing.T) {
-	for _, script := range []string{"campaign.sh", "publish-live-image.sh"} {
+	for _, script := range []string{"prepare-live.sh", "publish-live-image.sh"} {
 		t.Run(script, func(t *testing.T) {
-			lane := newCampaignLane(t)
+			lane := newPrepareLane(t)
 
-			sentinel := filepath.Join(lane.dir, "campaign.env")
+			sentinel := filepath.Join(lane.dir, "prepared.env")
 			if err := os.WriteFile(sentinel, []byte("preserve\n"), 0o600); err != nil {
 				t.Fatal(err)
 			}
@@ -149,7 +144,7 @@ func TestImagePreparationResourceRefusalPreservesDestinations(t *testing.T) {
 			writeExecutable(t, fake, "#!/usr/bin/env bash\nprintf '%s\\0' \"$@\" >\"$FAKE_GO_ARGV\"\nexit 2\n")
 			env := append(slices.Clone(lane.env), "GO="+fake, "FORGE_CI_IMAGE_BUILD_BUDGET=required")
 
-			args := []string{"prepare", lab, lane.dir, "forgejo", "build-budget=required", "build-cpus=2; literal"}
+			args := []string{lab, lane.dir, "forgejo", "build-budget=required", "build-cpus=2; literal"}
 			if script == "publish-live-image.sh" {
 				args = []string{"signer", lab, sentinel}
 			}
@@ -173,7 +168,7 @@ func TestImagePreparationResourceRefusalPreservesDestinations(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			if script == "campaign.sh" && !strings.Contains(string(argv), "build-cpus=2; literal\x00") {
+			if script == "prepare-live.sh" && !strings.Contains(string(argv), "build-cpus=2; literal\x00") {
 				t.Fatalf("lost token boundary %q", argv)
 			}
 		})
@@ -189,7 +184,7 @@ func TestImageArchiveRequiredResourcesRefuseBeforeEffects(t *testing.T) {
 	root := reporoot.Path(t)
 	for _, recipe := range []string{"buildah-job-image-archive", "runtime-image-archive"} {
 		t.Run(recipe, func(t *testing.T) {
-			lane := newCampaignLane(t)
+			lane := newPrepareLane(t)
 
 			sentinel := filepath.Join(lane.dir, "archive.tar")
 			if err := os.WriteFile(sentinel, []byte("keep"), 0o600); err != nil {
@@ -233,9 +228,9 @@ func TestImagePreparationInheritedRequiredOnly(t *testing.T) {
 		t.Skip("requires Just")
 	}
 
-	for _, route := range []string{"campaign", "test-live-image", "buildah-job-image-archive", "runtime-image-archive"} {
+	for _, route := range []string{"prepare-live", "test-live-image", "buildah-job-image-archive", "runtime-image-archive"} {
 		t.Run(route, func(t *testing.T) {
-			lane := newCampaignLane(t)
+			lane := newPrepareLane(t)
 			fake := filepath.Join(t.TempDir(), "go")
 			writeExecutable(t, fake, "#!/usr/bin/env bash\nprintf '%s\\0' \"$@\" >\"$FAKE_GO_ARGV\"\nprintf '%s' \"${FORGE_CI_IMAGE_BUILD_BUDGET-unset}\" >\"$FAKE_JUST_ENV\"\n[[ ${FORGE_CI_IMAGE_BUILD_BUDGET-} != required ]] || exit 2\nexit 0\n")
 
@@ -248,17 +243,17 @@ func TestImagePreparationInheritedRequiredOnly(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			sentinel := filepath.Join(lane.dir, "campaign.env")
+			sentinel := filepath.Join(lane.dir, "prepared.env")
 			if err := os.WriteFile(sentinel, []byte("keep"), 0o600); err != nil {
 				t.Fatal(err)
 			}
 
 			env := append(slices.Clone(lane.env), "GO="+fake, "FORGE_CI_IMAGE_BUILD_BUDGET=required")
-			if route == "campaign" {
+			if route == "prepare-live" {
 				// No explicit resource words: only the inherited-requirement gate can refuse.
-				_, code := runScript(t, lane.workDir, env, "campaign.sh", "prepare", lab, lane.dir, "forgejo")
+				_, code := runScript(t, lane.workDir, env, "prepare-live.sh", lab, lane.dir, "forgejo")
 				if code != 2 {
-					t.Fatalf("campaign exit %d", code)
+					t.Fatalf("prepare-live exit %d", code)
 				}
 			} else {
 				args := []string{"--justfile", filepath.Join(reporoot.Path(t), "justfile"), route}
@@ -287,7 +282,7 @@ func TestImagePreparationInheritedRequiredOnly(t *testing.T) {
 			argv, err := os.ReadFile(lane.goArgvFile)
 
 			want := "image-build-settings\x00\x00\x00\x00\x00"
-			if route == "campaign" {
+			if route == "prepare-live" {
 				want = "image-build-settings-options\x00"
 			}
 
@@ -307,7 +302,7 @@ func TestImagePreparationInheritedRequiredOnly(t *testing.T) {
 	}
 }
 
-func TestCampaignPrepare_RefusesAnArgumentItCannotName(t *testing.T) {
+func TestPrepareLive_RefusesAnArgumentItCannotName(t *testing.T) {
 	t.Parallel()
 
 	forgeLab := t.TempDir()
@@ -315,7 +310,7 @@ func TestCampaignPrepare_RefusesAnArgumentItCannotName(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	lane := newCampaignLane(t)
+	lane := newPrepareLane(t)
 	for _, images := range [][]string{
 		{"job-image=Go:localhost/nanolinter-go:dev"},
 		{"job-image=go/x:localhost/nanolinter-go:dev"},
@@ -329,15 +324,15 @@ func TestCampaignPrepare_RefusesAnArgumentItCannotName(t *testing.T) {
 		{"Gitlab"},
 		{"../gitlab"},
 	} {
-		stderr, status := runScript(t, lane.workDir, lane.env, "campaign.sh", append([]string{"prepare", forgeLab, filepath.Join(t.TempDir(), "c"), "gitlab"}, images...)...)
-		if status != 2 || !strings.Contains(stderr, "campaign: ") {
+		stderr, status := runScript(t, lane.workDir, lane.env, "prepare-live.sh", append([]string{forgeLab, filepath.Join(t.TempDir(), "c"), "gitlab"}, images...)...)
+		if status != 2 || !strings.Contains(stderr, "prepare-live: ") {
 			t.Errorf("%q: status %d, want a refusal (2)\n%s", images, status, stderr)
 		}
 	}
 
-	// A campaign prepares for the forges or lanes it names, so it names one.
-	if stderr, status := runScript(t, lane.workDir, lane.env, "campaign.sh", "prepare", forgeLab, filepath.Join(t.TempDir(), "c"), "job-image=go:localhost/a"); status != 2 ||
-		!strings.Contains(stderr, "campaign: name what the campaign prepares for") {
+	// A prepare is for the forges or lanes it names, so it names one.
+	if stderr, status := runScript(t, lane.workDir, lane.env, "prepare-live.sh", forgeLab, filepath.Join(t.TempDir(), "c"), "job-image=go:localhost/a"); status != 2 ||
+		!strings.Contains(stderr, "prepare-live: name what to prepare for") {
 		t.Errorf("status %d, want the lanes asked for (2)\n%s", status, stderr)
 	}
 
@@ -384,70 +379,5 @@ func TestDemoCheckout_IsOneCommitOfTheDemo(t *testing.T) {
 		if stderr, status := runScript(t, "", env, "demo-checkout.sh", args...); status != 2 {
 			t.Errorf("%q: status %d, want a refusal (2)\n%s", args, status, stderr)
 		}
-	}
-}
-
-// A GitHub cell is a one-commit checkout of the built-in demo, run through
-// test-live-consumer github with the caller's settings and recorded in
-// github.results with its interval, exit status and verdict, with no
-// campaign preflight. The script exits as the cell did. A cell that is not
-// <demo>/<event> is refused before anything runs.
-func TestCampaignGitHub_RunsACellFromTheBuiltInDemo(t *testing.T) {
-	t.Parallel()
-
-	lane := newCampaignLane(t)
-	lane.env[0] += string(os.PathListSeparator) + testenv.GNUPath(t, "ls", "cp", "mkdir")
-
-	stderr, status := runScript(t, lane.workDir, lane.env, "campaign.sh", "github", lane.dir, "hello-go-cli/release", "org=1", "version=0.2.0")
-	if status != 0 {
-		t.Fatalf("status %d\n%s", status, stderr)
-	}
-
-	calls := readLines(t, lane.argvFile)
-	if len(calls) != 1 {
-		t.Fatalf("just calls %q, want one", calls)
-	}
-
-	if !strings.HasPrefix(calls[0], "--justfile "+filepath.Join(reporoot.Path(t), "justfile")+" ") {
-		t.Fatalf("just argv %q, want this repository's justfile", calls[0])
-	}
-
-	words := strings.Fields(calls[0])[2:] // --justfile <repository justfile>
-	if len(words) != 6 || words[0] != "test-live-consumer" || words[1] != "github" || words[3] != "release" || words[4] != "org=1" || words[5] != "version=0.2.0" {
-		t.Fatalf("just argv %q, want test-live-consumer github <checkout> release org=1 version=0.2.0", calls[0])
-	}
-
-	// A failed cell is recorded too, and is the script's status.
-	if stderr, status := runScript(t, lane.workDir, lane.env, "campaign.sh", "github", lane.dir, "hello-go-cli/release", "scenario=TestFails"); status != 1 {
-		t.Fatalf("status %d, want the failed cell's (1)\n%s", status, stderr)
-	}
-
-	results := readLines(t, filepath.Join(lane.dir, "github.results"))
-	if len(results) != 2 {
-		t.Fatalf("results %q, want a line a cell", results)
-	}
-
-	for i, want := range []string{
-		"consumer hello-go-cli/release org=1 version=0.2.0\texit=0\tverdict=/evidence/1/verdict.json",
-		"consumer hello-go-cli/release scenario=TestFails\texit=1\tverdict=/evidence/2/verdict.json",
-	} {
-		interval, rest, _ := strings.Cut(results[i], "\t")
-		if rest != want || !strings.Contains(interval, "Z/20") {
-			t.Errorf("result %d: %q, want <start>/<end>\\t%q", i, results[i], want)
-		}
-	}
-
-	if calls := readLines(t, lane.goArgvFile); calls != nil {
-		t.Fatalf("a GitHub cell ran the campaign preflight: %q", calls)
-	}
-
-	for _, args := range [][]string{{lane.dir, "hello-go-cli"}, {lane.dir, "../x/release"}, {lane.dir, "hello-go-cli/release/extra"}, {"relative", "hello-go-cli/release"}, {lane.dir}} {
-		if stderr, status := runScript(t, lane.workDir, lane.env, "campaign.sh", append([]string{"github"}, append(args, "org=1")...)...); status != 2 {
-			t.Errorf("%q: status %d, want a refusal (2)\n%s", args, status, stderr)
-		}
-	}
-
-	if calls := readLines(t, lane.argvFile); len(calls) != 2 {
-		t.Fatalf("a refused cell ran: %q", calls)
 	}
 }

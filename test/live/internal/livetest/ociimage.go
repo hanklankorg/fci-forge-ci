@@ -85,6 +85,13 @@ func PushJobImage(tb TB, target Target, repo, archive string) string {
 // $CI_JOB_IMAGE_NODE of a check component.
 const GitLabJobImageArchiveEnv = "FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_"
 
+// GitLabSnapshotProducerArchiveEnv names the variable of the runtime image
+// archive a GitLab snapshot builds a producer of the toolchain family in:
+// the family is the runtime target of its toolchain (containers/runtime).
+func GitLabSnapshotProducerArchiveEnv(family string) string {
+	return GitLabJobImageArchiveEnv + strings.ToUpper(family)
+}
+
 // PushGitLabGateExtraJobImages publishes, as PushJobImage does, every further
 // job image the consumer's gate names, each to a project repoFor names, and
 // returns them for GitLabGateImages.ExtraJobs. A run that was not given one

@@ -16,7 +16,7 @@ import (
 	"github.com/diggsweden/forge-ci/internal/testutil/reporoot"
 )
 
-// preparedImages is a campaign.env with every image a Forgejo case can name.
+// preparedImages is a prepared.env with every image a Forgejo case can name.
 var preparedImages = map[string]string{
 	"JOB_IMAGE_GO":                    "registry.invalid/go@sha256:" + strings.Repeat("1", 64),
 	"JOB_IMAGE_JAVA":                  "registry.invalid/java@sha256:" + strings.Repeat("2", 64),
@@ -109,7 +109,7 @@ func TestPreparedCasesHaveSettingsTheirTrialTakes(t *testing.T) {
 	}
 }
 
-// gitLabPrepared is a campaign.env with every archive a GitLab case can name.
+// gitLabPrepared is a prepared.env with every archive a GitLab case can name.
 var gitLabPrepared = map[string]string{
 	"FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_GO": "/c/go.tar", "FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_JAVA": "/c/java.tar",
 	"FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_NODE": "/c/node.tar", "FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_RUST": "/c/rust.tar",
@@ -263,17 +263,17 @@ func TestPrivateLaneFixesItsVisibilityAndReproducibleBuilds(t *testing.T) {
 
 	private := PreparedCase{Lane: LanePrivate}
 
-	if got := private.LaneEnvironment(campaignForgejo); !maps.Equal(got, map[string]string{"FORGE_CI_LIVE_CONSUMER_VISIBILITY": "private"}) {
+	if got := private.LaneEnvironment(forgeForgejo); !maps.Equal(got, map[string]string{"FORGE_CI_LIVE_CONSUMER_VISIBILITY": "private"}) {
 		t.Errorf("a private Forgejo case fixes %v", got)
 	}
 
-	if got := private.LaneEnvironment(campaignGitLab); !maps.Equal(got, map[string]string{
+	if got := private.LaneEnvironment(forgeGitLab); !maps.Equal(got, map[string]string{
 		"FORGE_CI_LIVE_CONSUMER_VISIBILITY": "private", "FORGE_CI_LIVE_ADMIN_REPRODUCIBLE_BUILDS": "true",
 	}) {
 		t.Errorf("a private GitLab case fixes %v", got)
 	}
 
-	if got := (PreparedCase{Lane: LaneLifecycle}).LaneEnvironment(campaignGitLab); got != nil {
+	if got := (PreparedCase{Lane: LaneLifecycle}).LaneEnvironment(forgeGitLab); got != nil {
 		t.Errorf("a lifecycle case fixes %v", got)
 	}
 

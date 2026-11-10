@@ -78,7 +78,7 @@ const (
 // under test that its workflows call. ConsumerLifecycle names a lifecycle's
 // consumer copy, on either forge. On Forgejo a lifecycle serves the layer
 // from the trial's layer repository: a run admits a kaniko job image only
-// for the repository its source label names, and the campaign prepares one,
+// for the repository its source label names, and the prepare publishes one,
 // labelled for that repository (ConsumerTrialLayerURL), so every event of a
 // consumer trial runs its workflows from it, a snapshot's too.
 // SnapshotScenario names a snapshot's consumer copy, on either forge.

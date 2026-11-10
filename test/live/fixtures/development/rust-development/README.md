@@ -33,7 +33,7 @@ not build or publish container images.
 
 ## Live provider execution
 
-Read [the campaign instructions](../../../../../docs/live-campaigns.md) before
+Read [the live-run instructions](../../../../../docs/live-runs.md) before
 scheduling provider work. Copy `consumer/` to a fresh disposable directory,
 excluding `target/`, initialize a Git repository there and commit its files.
 Set `FORGE_CI_LIVE_CONSUMER` to that clean checkout's absolute path. This is the

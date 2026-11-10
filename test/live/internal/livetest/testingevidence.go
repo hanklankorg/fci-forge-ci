@@ -142,7 +142,7 @@ func preparedCaseEvidence(verdict LiveRunVerdict) map[string]string {
 
 	cases := map[string]forgeCase{}
 
-	for _, forge := range []string{campaignForgejo, campaignGitLab} {
+	for _, forge := range []string{forgeForgejo, forgeGitLab} {
 		for _, c := range PreparedCases(forge) {
 			cases[PreparedCaseTest(forge, c.Event)+"/"+c.Name()] = forgeCase{forge, c}
 		}
@@ -196,7 +196,7 @@ func adminAxes(run LiveRunHeader) []string {
 
 	for _, check := range enforcement.Checks {
 		if value := run.Inputs[strings.ToLower(adminInputEnvironment(check))]; value != "" {
-			axes = append(axes, campaignAdminSetting(check)+"="+value)
+			axes = append(axes, adminSetting(check)+"="+value)
 		}
 	}
 
@@ -313,7 +313,7 @@ func hostedEvidenceKey(script, consumer, flow string) string {
 		flow = matrixDevelopment
 	}
 
-	if !campaignDemo.MatchString(demo) || !slices.Contains([]string{TrialPullRequest, TrialRelease, matrixDevelopment, TrialLifecycle}, flow) {
+	if !demoName.MatchString(demo) || !slices.Contains([]string{TrialPullRequest, TrialRelease, matrixDevelopment, TrialLifecycle}, flow) {
 		return ""
 	}
 
@@ -329,7 +329,7 @@ func evidenceKey(run LiveRunHeader) string {
 	_, path, found := strings.Cut(filepath.ToSlash(run.Inputs["forge_ci_live_consumer"]), "/demos/")
 
 	demo := strings.TrimSuffix(path, "/consumer")
-	if !found || !campaignDemo.MatchString(demo) || !isCampaignProvider(run.Provider) {
+	if !found || !demoName.MatchString(demo) || !isLabForge(run.Provider) {
 		return ""
 	}
 
@@ -371,9 +371,9 @@ func evidenceAxes(run LiveRunHeader) string {
 	builder, err := "", error(nil)
 
 	switch run.Provider {
-	case campaignForgejo:
+	case forgeForgejo:
 		builder, err = ForgejoConsumerImageBuilder(variables, input(ForgejoImageBuilderEnv))
-	case campaignGitLab:
+	case forgeGitLab:
 		builder, _ = imageBuilderValue(input(GitLabImageBuilderEnv))
 	}
 

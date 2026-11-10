@@ -36,8 +36,8 @@ Principles (owner direction 2026-11-08):
 
 Matrices 1 and 2 are generated from one source by `just gen-testing-matrices`
 (`livetest.RenderTestingMatrices`): the shipped demos' declarations as the
-planner and the campaign admission read them, the cases files' lines and
-settings, and the live marks of `test/live/campaigns/evidence.txt`, a
+planner and the demo admission read them, the cases and lanes of the Go
+tables, and the live marks of `test/live/evidence.txt`, a
 hand-kept overlay keyed by forge, demo and flow, since whether a run proved
 something is a judgement; `go run ./test/live/internal/livetest/preflight
 testing-evidence ~/.local/state/forge-ci/live-runs <hosted-runs>` drafts it
@@ -46,7 +46,7 @@ records, each trial line of a controller or batch script read with its own
 exit receipt and finish time. A refusal carries the planner's or the
 admission's reason. Matrix 1b is hand-kept. `TestTestingMatricesInSync` in
 `test/live/internal/livetest` fails when the committed tables are stale.
-No campaign lane runs on hosted GitHub. There a
+No prepared lane runs on hosted GitHub. There a
 line is the fixture workflow a demo ships under `test/live/github/workflows`
 for the event the hosted trial settings name, and the lifecycle has one when
 the demo ships all three and the hosted settings accept the lifecycle.

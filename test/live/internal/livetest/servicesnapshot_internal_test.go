@@ -280,7 +280,7 @@ func TestServiceSnapshotDeclarationRefusesUnsupportedInputs(t *testing.T) {
 }
 
 // The demos' own declarations decide which has a development route: the one
-// ServiceSnapshotSource names, as the GitLab lifecycle and the campaign
+// ServiceSnapshotSource names, as the GitLab lifecycle and the demo
 // admission read it. A demo whose declaration the snapshot cannot build has
 // none, and the reason is the planner's, not a name's.
 func TestServiceSnapshotSourceOfTheDemos(t *testing.T) {

@@ -150,19 +150,19 @@ func relativePackages(verdict *livetest.LiveRunVerdict) {
 	}
 }
 
-// campaign runs a campaign mode. `campaign-env-check <file>` validates a
-// campaign.env before campaign-prepare puts it in place;
-// `campaign-runtime-targets <repository> <forgejo|gitlab|lane>...
-// [flavor=<job-image flavor>...]` prints the runtime targets campaign-prepare
+// prepared runs a mode of `just test-live-prepare`. `prepared-env-check
+// <file>` validates a prepared.env before the prepare puts it in place;
+// `prepared-runtime-targets <repository> <forgejo|gitlab|lane>...
+// [flavor=<job-image flavor>...]` prints the runtime targets the prepare
 // builds for those lanes of the Go tables, one a line, and refuses a case
 // whose nanolinter image is of another flavor.
-func campaign(mode string, args []string) error {
+func prepared(mode string, args []string) error {
 	switch {
-	case mode == "campaign-env-check" && len(args) == 1:
-		_, err := livetest.ReadCampaignEnv(args[0])
+	case mode == "prepared-env-check" && len(args) == 1:
+		_, err := livetest.ReadPreparedEnvFile(args[0])
 
 		return err
-	case mode == "campaign-runtime-targets" && len(args) >= 2:
+	case mode == "prepared-runtime-targets" && len(args) >= 2:
 		var names, flavors []string
 
 		for _, arg := range args[1:] {
@@ -173,7 +173,7 @@ func campaign(mode string, args []string) error {
 			}
 		}
 
-		targets, err := livetest.CampaignRuntimeTargets(args[0], names, flavors)
+		targets, err := livetest.PreparedRuntimeTargets(args[0], names, flavors)
 		for _, target := range targets {
 			fmt.Println(target)
 		}
@@ -187,7 +187,7 @@ func campaign(mode string, args []string) error {
 }
 
 // withArguments runs the modes that take arguments: a testing document is
-// printed, every other mode is a campaign mode.
+// printed, every other mode is a prepare mode.
 func withArguments(mode string, args []string) error {
 	if mode == imageBuildSettingsOptionsMode || (mode == "image-build-settings" && len(args) == 4) {
 		var (
@@ -234,7 +234,7 @@ func withArguments(mode string, args []string) error {
 		return err
 	}
 
-	return campaign(mode, args)
+	return prepared(mode, args)
 }
 
 // testingDocument renders a testing document. `testing-matrices <repository>`
@@ -294,9 +294,9 @@ func preflightFact(mode string) (string, error) {
 func usage() {
 	fmt.Fprintln(os.Stderr, "       preflight image-build-resources <default|required> <cpus-or-empty> <memory-MiB-or-empty> <compiler-jobs-or-empty> (validate requested limits; enforcement unmeasured)")
 	fmt.Fprintln(os.Stderr, "       preflight classify-run <exit-code> <retained-log>")
-	fmt.Fprintln(os.Stderr, "       preflight campaign-env-check <campaign.env>")
+	fmt.Fprintln(os.Stderr, "       preflight prepared-env-check <prepared.env>")
 	fmt.Fprintln(os.Stderr, "       preflight gitlab-consumer-scenario | gitlab-lifecycle-settings (validates FORGE_CI_LIVE_CONSUMER_SETTINGS)")
-	fmt.Fprintln(os.Stderr, "       preflight campaign-runtime-targets <repository> <forgejo|gitlab|lane>... [flavor=<flavor>...]")
+	fmt.Fprintln(os.Stderr, "       preflight prepared-runtime-targets <repository> <forgejo|gitlab|lane>... [flavor=<flavor>...]")
 	fmt.Fprintln(os.Stderr, "       preflight testing-matrices <repository> | testing-evidence <live-runs> [<hosted-runs>]")
 	fmt.Fprintln(os.Stderr, "usage: preflight [signing-inputs | runner-arch | consumer-trial-layer | host-tools] (signing-inputs checks only FORGE_CI_LIVE_SIGNING_KEY_DIR; host-tools checks only this host; other modes read the forgeci lab contract)")
 	os.Exit(2)

@@ -153,7 +153,7 @@ requires the `Prepare: version rust` job and its patch, a release commit that
 changes exactly `CHANGELOG.md`, `Cargo.toml` and `Cargo.lock`, both Cargo files
 at the released version, and that version in the published binary. It needs the
 signer image and `FORGE_CI_LIVE_CARGO_RELEASE_IMAGE`, a digest-pinned Rust job
-image the runner can pull (the campaigns' `JOB_IMAGE_RUST`), and skips without
+image the runner can pull (a prepared directory's `JOB_IMAGE_RUST`), and skips without
 it. It builds no image and does not exercise the Build SBOM of `build-cargo`.
 
 ### Isolated npm/Cargo release-version evidence
@@ -415,14 +415,14 @@ setup, evidence and cleanup.
 
 | Forge / event | Command | Preparation |
 |---|---|---|
-| Forgejo PR, release or lifecycle | `just test-live-consumer forgejo <checkout> <pull-request\|release\|lifecycle> [setting ...]` | Local `forgeci` contract and runner; consumer job image; signer image for releases; lifecycle: the Maven service demo and the container/readiness runner (docs/live-campaigns.md, Lifecycle) |
-| Forgejo snapshot | `just test-live-consumer forgejo <checkout> snapshot CI_JOB_IMAGE=<digest reference> [CI_IMAGE_BUILDER=buildah\|kaniko]` | A planned image route and the selected builder's prerequisites; [snapshot admission](live-campaigns.md#snapshot); no readiness |
+| Forgejo PR, release or lifecycle | `just test-live-consumer forgejo <checkout> <pull-request\|release\|lifecycle> [setting ...]` | Local `forgeci` contract and runner; consumer job image; signer image for releases; lifecycle: the Maven service demo and the container/readiness runner (docs/live-runs.md, Lifecycle) |
+| Forgejo snapshot | `just test-live-consumer forgejo <checkout> snapshot CI_JOB_IMAGE=<digest reference> [CI_IMAGE_BUILDER=buildah\|kaniko]` | A planned image route and the selected builder's prerequisites; [snapshot admission](live-runs.md#snapshot); no readiness |
 | GitLab MR | `just test-live-consumer gitlab <checkout> pull-request job-archive=<image-archive>` | Local `forgeci` contract and runner; prepared MR job image archive |
 | GitLab release | `just test-live-consumer gitlab <checkout> release job-archive=<archive> build-archive=<archive> signer-archive=<archive> [setting ...]` | Local contract, prepared image archives and guarded full-release runner profile |
-| GitLab lifecycle | `just test-live-consumer gitlab <checkout> lifecycle job-archive=<archive> build-archive=<archive> signer-archive=<archive> lint-archive=<archive> [setting ...]` | As the release; a demo with a service snapshot and a GitLab release, `hello-maven-service` or `hello-cargo-container` (docs/live-campaigns.md, Lifecycle) |
-| GitLab snapshot | `just test-live-consumer gitlab <checkout> snapshot job-archive=<archive>` | Planned images, selected builder archive and any producer runtime archives; [snapshot admission](live-campaigns.md#snapshot); no readiness |
+| GitLab lifecycle | `just test-live-consumer gitlab <checkout> lifecycle job-archive=<archive> build-archive=<archive> signer-archive=<archive> lint-archive=<archive> [setting ...]` | As the release; a demo with a service snapshot and a GitLab release, `hello-maven-service` or `hello-cargo-container` (docs/live-runs.md, Lifecycle) |
+| GitLab snapshot | `just test-live-consumer gitlab <checkout> snapshot job-archive=<archive>` | Planned images, selected builder archive and any producer runtime archives; [snapshot admission](live-runs.md#snapshot); no readiness |
 | GitHub PR, development build or release | `just test-live-consumer github <checkout> <pull-request\|dev-release\|release> org=<org-id> [setting ...]` | Forge Lab's hosted `github run` session, consumer workflow fixtures and public engine images |
-| GitHub lifecycle | `just test-live-consumer github <checkout> lifecycle org=<org-id> [version=X.Y.Z] [image=<name>]` | As the release, plus the consumer's `release-dev.yml` fixture and the release credential; the `hello-maven-service`, `hello-cargo-container`, `hello-go-service` and `hello-npm-service` demos (docs/live-campaigns.md, Lifecycle) |
+| GitHub lifecycle | `just test-live-consumer github <checkout> lifecycle org=<org-id> [version=X.Y.Z] [image=<name>]` | As the release, plus the consumer's `release-dev.yml` fixture and the release credential; the `hello-maven-service`, `hello-cargo-container`, `hello-go-service` and `hello-npm-service` demos (docs/live-runs.md, Lifecycle) |
 
 See [Forgejo trials](#trying-a-consumer), [GitLab acceptance](#gitlab-live-acceptance)
 and [GitHub trials](#trying-a-consumer-on-github). `just test-live` is the local
@@ -469,8 +469,8 @@ just demo-delete forgejo hello-maven
 Before any launch, check for conflicting runs and runner changes: same-provider
 runs share fixed resources, and the full-release wrapper swaps the runner.
 Independent focused providers may overlap under the supported
-[execution scopes and locks](live-campaigns.md#execution-scopes-and-locks),
-subject to [shared dependencies](live-campaigns.md#shared-dependencies).
+[execution scopes and locks](live-runs.md#execution-scopes-and-locks),
+subject to [shared dependencies](live-runs.md#shared-dependencies).
 Never bypass a held lock. [Running it](#running-it) prepares the lab, [Trying a
 consumer](#trying-a-consumer) explains the trial, [Showing a
 consumer](#showing-a-consumer) the demo.
@@ -540,7 +540,7 @@ The launcher drains the redacted log before releasing its lock and returns
 allow at least `TimeoutStopSec=180` so it does not kill this cleanup early.
 When using Forge Lab's full-release wrapper, run `just test-live-preflight`
 with the run's arguments first (see
-[the live preflight](live-campaigns.md#preflight-a-run)): the wrapper swaps the privileged runner in before the launcher's own
+[the live preflight](live-runs.md#preflight-a-run)): the wrapper swaps the privileged runner in before the launcher's own
 preflight runs, so a stale contract refused inside it costs two runner swaps
 instead of seconds. The wrapper's child shutdown grace must
 cover the suite's two-minute cleanup. Use the current three-minute default
@@ -915,7 +915,7 @@ development snapshot to release, `TestForgejoLayer_ConsumerLifecycle`, in the
 scratch repository `fci-consumer-lifecycle` with the layer served as below.
 Its `CI_JOB_IMAGE` is a nanolinter image of the java flavour, the one image
 the demo's lint and build jobs run in and the snapshot builds the service
-with; docs/live-campaigns.md, Lifecycle, describes its phases and limits.
+with; docs/live-runs.md, Lifecycle, describes its phases and limits.
 
 It is `TestForgejoLayer_ConsumerTrial` behind `just test-live`'s script, so
 the contract, the lock, the preflight and the log are the same. The test
@@ -1565,7 +1565,7 @@ three runs, two tags and one release. It takes `version=` and `image=`, not
 `workflow=`; the development workflow must take a `source-branch` input and
 run on dispatch only, as the demo's does, so pushing `development` starts no
 run. The `hello-maven-service` demo is the consumer it was built
-for; docs/live-campaigns.md, Lifecycle, describes the phases on every forge.
+for; docs/live-runs.md, Lifecycle, describes the phases on every forge.
 
 A variant is a fixture root of its own, named with `fixtures=`, so that an
 ordinary trial never installs a second workflow for the same event. The
@@ -1688,7 +1688,7 @@ What the caller brings:
   containing a bounded fine-grained PAT. There is no fallback to the context's
   management/Packages token. PR, development and engine-only `prepare` runs do
   not require it. Token-kind admission does not prove provider permissions;
-  see [release credential admission](live-campaigns.md#execution-scopes-and-locks).
+  see [release credential admission](live-runs.md#execution-scopes-and-locks).
 - **Public engine images.** A consumer's job pulls the engine's runtime images
   from GHCR without credentials, and the API cannot change a package's
   visibility, so after the engine's first build the owner makes its
@@ -1758,7 +1758,7 @@ proves that a deployed service works.
 ##### Service development
 
 A demo's development snapshot is phase 3 of the Forgejo lifecycle
-(`TestForgejoLayer_ConsumerLifecycle`; docs/live-campaigns.md, Lifecycle): the
+(`TestForgejoLayer_ConsumerLifecycle`; docs/live-runs.md, Lifecycle): the
 harness's service development workflow
 (`test/live/internal/livetest/testdata/service-development.yml.tmpl`) dispatched on the
 merged `main`, snapshotting `development` with the shared
@@ -1981,7 +1981,7 @@ just test-live-consumer gitlab /absolute/maven-consumer release \
   signer-archive=/absolute/signer-image.tar version=0.2.0
 
 # Maven service demo: the lifecycle, merge request to merge to development
-# snapshot to release (TestGitLabLayer_ConsumerLifecycle; docs/live-campaigns.md,
+# snapshot to release (TestGitLabLayer_ConsumerLifecycle; docs/live-runs.md,
 # Lifecycle). The build image is also the Java image the snapshot builds with.
 just test-live-consumer gitlab /absolute/hello-maven-service/consumer lifecycle \
   job-archive=/absolute/java-image.tar build-archive=/absolute/java-image.tar \

@@ -6,6 +6,7 @@ package livetest
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 
@@ -13,7 +14,70 @@ import (
 	"github.com/diggsweden/forge-ci/internal/domain/snapshotimage"
 )
 
-// campaignAdmitLifecycle refuses a lifecycle case whose demo has no
+// What a shipped demo admits: where its consumer checkout is, which events it
+// has a route for on a lab forge, and what its GitLab gate runs in.
+
+// demosDir holds the shipped demos, relative to the repository root.
+const demosDir = "test/live/fixtures/consumers"
+
+// demoConsumerDir is the consumer checkout a shipped demo is run from.
+func demoConsumerDir(root, demo string) string {
+	return filepath.Join(root, filepath.FromSlash(demosDir), demo, "consumer")
+}
+
+func isDir(path string) bool {
+	info, err := os.Stat(path)
+
+	return err == nil && info.IsDir()
+}
+
+// requireGitLabReleaseBuild refuses a GitLab release of a demo without the
+// build the release policy's build job runs, GitLabConsumerBuildScript: the
+// release commands are the adopter's, and the example demos ship their
+// merge-request gate alone (test/live/fixtures/consumers/README.md), so their GitLab
+// release is not a case to run.
+func requireGitLabReleaseBuild(checkout string) error {
+	info, err := os.Lstat(filepath.Join(checkout, GitLabConsumerBuildScript))
+	if err != nil || !info.Mode().IsRegular() {
+		return fmt.Errorf("the demo has no %s, so no GitLab release: its release commands are the adopter's (test/live/fixtures/consumers/README.md): %w", GitLabConsumerBuildScript, errs.ErrValidation)
+	}
+
+	return nil
+}
+
+// demoGate is what a demo's GitLab gate runs in beside $CI_JOB_IMAGE: the
+// NAME of each $CI_JOB_IMAGE_<NAME> it checks in, and whether it lints in
+// $CI_LINT_IMAGE.
+type demoGate struct {
+	extraJobs []string
+	lints     bool
+}
+
+// readDemoGate reads the demo's GitLab gate at path; a demo without one runs
+// in nothing further.
+func readDemoGate(path string) (demoGate, error) {
+	body, err := os.ReadFile(path) //nolint:gosec // A demo of this repository, read as data.
+	if errors.Is(err, fs.ErrNotExist) {
+		return demoGate{}, nil
+	}
+
+	if err != nil {
+		return demoGate{}, err
+	}
+
+	var gate demoGate
+	if gate.extraJobs, err = gitlabGateExtraJobImages(body); err == nil {
+		gate.lints, err = gitlabGateLints(body)
+	}
+
+	if err != nil {
+		return demoGate{}, fmt.Errorf("%s: %w", path, err)
+	}
+
+	return gate, nil
+}
+
+// admitLifecycle refuses a lifecycle case whose demo has no
 // development route, the lifecycle's development phase: a service snapshot
 // of the demo's one container, which the snapshot-images policy builds from
 // the declaration the demo's release builds its images from
@@ -23,9 +87,9 @@ import (
 // demo's. The case's settings are held to the lifecycle's rules where every
 // case's settings are: ParseTrialSettings on Forgejo,
 // ParseGitLabLifecycleSettings in the GitLab admission.
-func campaignAdmitLifecycle(provider, checkout string) error {
-	if !isCampaignProvider(provider) {
-		return fmt.Errorf("%s runs on %s and %s: %w", TrialLifecycle, campaignForgejo, campaignGitLab, errs.ErrValidation)
+func admitLifecycle(provider, checkout string) error {
+	if !isLabForge(provider) {
+		return fmt.Errorf("%s runs on %s and %s: %w", TrialLifecycle, forgeForgejo, forgeGitLab, errs.ErrValidation)
 	}
 
 	source, err := ServiceSnapshotSource(checkout)
@@ -61,7 +125,7 @@ func serviceSnapshotAdmission(checkout, source string) error {
 	return nil
 }
 
-// campaignAdmitSnapshot refuses a snapshot case whose demo has no
+// admitSnapshot refuses a snapshot case whose demo has no
 // development route over every planned image: the declaration its release
 // builds its images from (ServiceSnapshotSource), which the planner must plan
 // in the snapshot's scope (snapshotImagesScope), on Forgejo through the
@@ -69,16 +133,16 @@ func serviceSnapshotAdmission(checkout, source string) error {
 // Forgejo release workflow pins the layer, on GitLab through the component,
 // which needs nothing of the demo's but the declaration. The snapshot
 // releases nothing, so no release build is asked for.
-func campaignAdmitSnapshot(provider, checkout string) error {
-	if !isCampaignProvider(provider) {
-		return fmt.Errorf("%s runs on %s and %s: %w", TrialSnapshot, campaignForgejo, campaignGitLab, errs.ErrValidation)
+func admitSnapshot(provider, checkout string) error {
+	if !isLabForge(provider) {
+		return fmt.Errorf("%s runs on %s and %s: %w", TrialSnapshot, forgeForgejo, forgeGitLab, errs.ErrValidation)
 	}
 
 	if _, err := snapshotImagesAdmission(checkout); err != nil {
 		return err
 	}
 
-	if provider != campaignForgejo {
+	if provider != forgeForgejo {
 		return nil
 	}
 

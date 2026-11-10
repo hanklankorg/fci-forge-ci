@@ -8,7 +8,7 @@ current bounded-acquisition runtime proof is pinned to `51781c82`, not this
 later documentation base. This is a retained-evidence snapshot, not a release
 readiness declaration, exhaustive suite audit or production adoption claim.
 See [testing conventions](testing.md) for tiers and
-[live campaigns](live-campaigns.md) for launch/authorization rules.
+[live runs](live-runs.md) for launch/authorization rules.
 
 ## Reading the proof
 
@@ -34,7 +34,7 @@ must not be collapsed into a single all-features provider tick.
 | --- | --- | --- | --- |
 | Full Gommitlint release inventory and Cosign readback | ✅ Live-proven · FORGE-LAB: 81 names, 26 bundles [E1](#e1-forgejo-full-release) | ✅ Live-proven · FORGE-LAB: 81 names, 26 bundles [E2](#e2-gitlab-full-release) | ⏳ Pending/unproven for this full profile; reduced case below is different |
 | Package GPG, final images and negative verification in that GitLab release | ⏳ Not qualified by this row | ✅ Live-proven · FORGE-LAB: 9 GPG sidecars, 2 images/attestations; changed content/signature and wrong key refused [E2](#e2-gitlab-full-release) | ⏳ Not qualified by this row |
-| Reduced Gommitlint release | n/a — GitHub-only reduced profile; Forgejo is covered by the full campaign row | n/a — GitHub-only reduced profile; GitLab is covered by the full campaign row | ✅ Live-proven · HOSTED: 8 assets, 4 Cosign bundles, **0 GPG**; 745.19 s [E3](#e3-github-reduced-release) |
+| Reduced Gommitlint release | n/a — GitHub-only reduced profile; Forgejo is covered by the full release row | n/a — GitHub-only reduced profile; GitLab is covered by the full release row | ✅ Live-proven · HOSTED: 8 assets, 4 Cosign bundles, **0 GPG**; 745.19 s [E3](#e3-github-reduced-release) |
 | Classified first-profile release: exact 11 public assets, real package and signatures, original producer/signer authority through publication | ⏳ Pending/unproven | ⏳ Pending/unproven | ◐ Partial proof · LOCAL/OFFLINE only; **HOSTED unproven** [E4](#e4-local-source517-qualification) |
 
 The two full releases have matching **name inventories**, not cross-forge
@@ -67,7 +67,7 @@ production trust, Cargo, ARM runtime or full 81-file/image parity.
 | A: artifact-first snapshot image/service | ✅ Live-proven · FORGE-LAB: public Linux/amd64 Buildah unsigned snapshot, run **517**, controller `063a49d9` / demo `3d5108ad`; native case PASS in 290 s [E6](#e6-e2e-a-native-pass-and-retained-failures). Earlier failures remain failed; the previous `image=true` cause is unresolved. |
 | B: development acceptance | ◐ Reviewed source integrated locally at `3c5be102`; representative Forgejo generic/Cargo native proofs are still pending. A's PASS satisfies the prerequisite, not B acceptance [E7](#e7-b-source-integration-and-c-hold). |
 | C: release-bundle checks | ◐ Source-only reviewed candidate on `34894e69`, **HOLD / unmerged** as a separate milestone. No C live acceptance [E7](#e7-b-source-integration-and-c-hold). |
-| D: linked flow | ◐ Source only: `TestForgejoLayer_ConsumerLifecycle` and `TestGitLabLayer_ConsumerLifecycle` with the `lifecycle` lane of `livetest.ForgejoPreparedCases` and `livetest.GitLabPreparedCases` (pull/merge request → native merge → service development snapshot → signed release, `hello-maven-service`, amd64 only; see docs/live-campaigns.md, Lifecycle); the visibility is the run's selector and the builder each case's own, so the two lanes cover visibility × builder. No live pass yet on either forge; ordered A → B → C → D gates remain. Whole-file deletion: **NONE**. |
+| D: linked flow | ◐ Source only: `TestForgejoLayer_ConsumerLifecycle` and `TestGitLabLayer_ConsumerLifecycle` with the `lifecycle` lane of `livetest.ForgejoPreparedCases` and `livetest.GitLabPreparedCases` (pull/merge request → native merge → service development snapshot → signed release, `hello-maven-service`, amd64 only; see docs/live-runs.md, Lifecycle); the visibility is the run's selector and the builder each case's own, so the two lanes cover visibility × builder. No live pass yet on either forge; ordered A → B → C → D gates remain. Whole-file deletion: **NONE**. |
 
 A's latest native cleanup completed without a reported error; no standalone
 per-object absence proof was emitted. Its acceptance is the actual run-517 native
@@ -76,10 +76,10 @@ failed attempts are not reinterpreted as passes or as established causal proof.
 
 ## Evidence coordinates and source anchors
 
-Coordinates below are relative to the **configured retained campaign evidence
+Coordinates below are relative to the **configured retained live-run evidence
 root**, not repository files or public CI links. Public canonical URLs are not
 available for this snapshot. Retention can expire; missing evidence means
-downgrade/requalify, not infer success. Do not commit campaign archives, logs,
+downgrade/requalify, not infer success. Do not commit live-run archives, logs,
 snapshots, credentials or signer keys alongside this page.
 
 ### E1: Forgejo full release
@@ -99,7 +99,7 @@ PASS 1268.72 s. Retained inventory:
 `gitlab-e53ea2e9-92da8403-profile-v2/release-b9a2eeef2cada90628f79790-inventory.json`.
 The log records the bundle/GPG/image verifications and three passing negative
 subcases. Do not substitute `gitlab-e53ea2e9-92da8403-rebuild.log`: that earlier
-campaign ended **failed**, so its name is not a reproducibility pass. No
+run ended **failed**, so its name is not a reproducibility pass. No
 20-file byte-rebuild claim is made without a separately verified receipt.
 
 ### E3: GitHub reduced release

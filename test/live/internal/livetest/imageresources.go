@@ -152,14 +152,14 @@ func AdmitImageBuildResources(mode, cpus, memory, jobs string) error {
 	}
 }
 
-// AdmitImageBuildOptions is the campaign's sole resource-option reader.
+// AdmitImageBuildOptions is the prepare's sole resource-option reader.
 func AdmitImageBuildOptions(options []string, getenv func(string) string) error {
 	_, err := ResolveImageBuildOptions(options, getenv)
 
 	return err
 }
 
-// ResolveImageBuildOptions reads campaign options and resolves inherited settings.
+// ResolveImageBuildOptions reads the prepare's options and resolves inherited settings.
 func ResolveImageBuildOptions(options []string, getenv func(string) string) ([]string, error) {
 	values := map[string]string{}
 	seen := map[string]bool{}

@@ -6,7 +6,7 @@
 // with no network, or with no access to github.com.
 //
 // Only pages for people who adopt and run Forge CI are embedded. Maintainer
-// pages (development, test campaigns, design policy, ADRs) stay in the
+// pages (development, live runs, design policy, ADRs) stay in the
 // repository. TestEmbeddedPagesMatchList in this package keeps the list and
 // the go:embed directive in step.
 package docs

@@ -295,7 +295,7 @@ func TestReleaseImageOutputSettingsAreExplicitAndReleaseOnly(t *testing.T) {
 	}
 }
 
-// The operator's native image release (docs/live-campaigns.md, Forgejo
+// The operator's native image release (docs/live-runs.md, Forgejo
 // release images) opts into the readback with these settings.
 func TestNativeReleaseSettingsSelectTheImageReadback(t *testing.T) {
 	t.Parallel()

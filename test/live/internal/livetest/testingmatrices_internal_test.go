@@ -180,7 +180,7 @@ func TestReadMatricesRefusesAnUnknownSubject(t *testing.T) {
 func TestLaneValueCellShowsAMarkOnTheValuesItsRunHad(t *testing.T) {
 	t.Parallel()
 
-	lane := matrixLane{name: "lc-forgejo", provider: campaignForgejo, cases: []PreparedCase{
+	lane := matrixLane{name: "lc-forgejo", provider: forgeForgejo, cases: []PreparedCase{
 		{Demo: "qualified", Event: TrialLifecycle, Builder: ImageBuilderBuildah}, {Demo: "qualified", Event: TrialLifecycle, Builder: ImageBuilderKaniko},
 		{Demo: "unqualified", Event: TrialLifecycle, Builder: ImageBuilderBuildah},
 	}}
@@ -205,7 +205,7 @@ func TestLaneValueCellShowsAMarkOnTheValuesItsRunHad(t *testing.T) {
 			t.Parallel()
 
 			data := matrices{demos: []matrixDemo{{name: test.demo, admission: map[string]error{}}}, lanes: []matrixLane{lane}, evidence: evidence}
-			if got := data.laneValueCell(campaignForgejo, test.setting, test.value); got != test.want {
+			if got := data.laneValueCell(forgeForgejo, test.setting, test.value); got != test.want {
 				t.Fatalf("cell %q, want %q", got, test.want)
 			}
 		})
@@ -314,7 +314,7 @@ func TestSeedTestingEvidenceReadsSnapshotRunsAsDevelopment(t *testing.T) {
 	t.Parallel()
 
 	live := t.TempDir()
-	for provider, scenario := range map[string]string{campaignForgejo: "TestForgejoLayer_Snapshot", campaignGitLab: "TestGitLabLayer_Snapshot"} {
+	for provider, scenario := range map[string]string{forgeForgejo: "TestForgejoLayer_Snapshot", forgeGitLab: "TestGitLabLayer_Snapshot"} {
 		writeFile(t, filepath.Join(live, provider, "verdict.json"), `{"verdict":"passed","run":{"provider":"`+provider+`","started_at":"2026-11-09T10:00:00Z",`+
 			`"scenario":"^`+scenario+`$","inputs":{"forge_ci_live_consumer":"/c/demos/hello-cargo-workspace/consumer","forge_ci_live_consumer_event":"snapshot"}}}`)
 	}

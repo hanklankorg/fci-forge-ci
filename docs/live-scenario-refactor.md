@@ -112,7 +112,7 @@ data, commands and modes; unchanged production owners are outside these moves.
 | `test/live/cases/maven-issuer-service/**` (1) | `test/live/fixtures/services/maven-issuer-service/**` | MOVE integrated; KEEP byte-identical disposable issuer runtime setup |
 | `test/live/cases/npm-rest-service/**` (3) | `test/live/fixtures/services/npm-rest-service/**` | MOVE integrated; KEEP installed-package oracle, operator inputs and failure history; reference edits only |
 | `test/live/cases/rust-development/**` (18) | `test/live/fixtures/development/rust-development/**` | MOVE integrated; KEEP four-role image-byte/source receipts; README path/depth edits only |
-| `test/live/campaigns/evidence.txt` | Same owner | KEEP historical evidence, no regeneration; the selections are the Go tables (`livetest.PreparedLanes`, `PreparedCases`) |
+| `test/live/evidence.txt` | Same owner | KEEP historical evidence, no regeneration; the selections are the Go tables (`livetest.PreparedLanes`, `PreparedCases`) |
 | `.github/**`, `.forgejo/**`, `templates/**`, production `internal/**`, `cmd/**` | Same production owners | KEEP native authority and behavior, including planners/adapters; no production implementation move |
 | `scripts/ci/**`, guards, configuration, licensing and docs referencing those groups | Same owners with current paths | REFACTOR references only; launcher supervision, signals, scopes and cleanup retained |
 
@@ -191,7 +191,7 @@ Remaining apparent old-root references are explained, not fallback discovery:
   table cases now require utility-layer enforcement for that old name. They
   remain regressions against a reintroduced exemption, not a supported legacy
   source owner or a migrated current-package guard witness.
-- Exported campaign `<prepared-dir>/demos` and consumers' own `test/live/github`
+- Exported `<prepared-dir>/demos` and consumers' own `test/live/github`
   or GPG workflow profiles are maintained runtime interfaces, not legacy source
   roots. Historical evidence coordinates and authenticated regression fixtures
   remain historical; they must not be modernized into new acceptance claims.
@@ -218,7 +218,7 @@ SNAPSHOT package publication is implied by the service image snapshot.
 | Contract | Existing source/assertion owner; preserved boundary |
 |---|---|
 | Exported bytes, modes, one clean commit, nonempty-destination refusal | `scripts/ci/demo-checkout.sh`; `demo_checkout_test.go` invokes the real exporter for all twelve consumers |
-| One saved selection, no alternate pilot cases | `campaign.go`, `campaignlifecycle.go`, `campaignsettings.go` and their tests in `test/live/internal/livetest`; existing lifecycle case files |
+| One saved selection, no alternate pilot cases | `prepared.go`, `preparedcases.go`, `demoadmission.go` and their tests in `test/live/internal/livetest` |
 | Admitted source and declaration, private-index overlays and rendering | Kit `consumer*`, `servicesnapshot*`, `servicedevelopment*`, `gitlabconsumer*`, `githubstage*`; product pipeline/snapshot planners remain owners of expected outputs |
 | Forgejo PR and merge | `test/live/conformance/consumerlifecycle_test.go`: PR/run/source checks; no release/tag side effects; `MirrorRepo.RequireMergeOf` checks parents/tree |
 | Snapshot payload/source/digest | Shared kit `snapshotoracle.go`, `RequireSnapshotImages`; conformance `servicedevelopment_test.go`; producer checks and frozen plan/receipts/registry readbacks |
@@ -244,13 +244,13 @@ the missing layer, not a missing second driver.
 ## Three maintained native roads
 
 Use the [consumer command chooser](testing.md#trying-a-consumer),
-[lifecycle contracts](live-campaigns.md#lifecycle),
-[snapshot contracts](live-campaigns.md#snapshot) and
-[single-cell selection](live-campaigns.md#rerun-one-cell).
+[lifecycle contracts](live-runs.md#lifecycle),
+[snapshot contracts](live-runs.md#snapshot) and
+[single-cell selection](live-runs.md#rerun-one-cell).
 These links own settings/defaults; this page does not copy a settings table.
 For standalone trials, use an absolute clean independent consumer Git root,
 exported with `bash scripts/ci/demo-checkout.sh hello-maven-service <empty-dir>`;
-do not pass the nested recipe in the engine Git checkout. Campaign preparation
+do not pass the nested recipe in the engine Git checkout. `just test-live-prepare`
 exports its own consumer checkouts.
 
 The following commands describe the maintained roads, **not executed by this
@@ -261,7 +261,7 @@ the approved attempt failed and does not establish native acceptance:
 |---|---|---|
 | Forgejo | `just test-live-prepared <prepared-dir> forgejo '^TestForgejoLayer_ConsumerLifecycle$/^lifecycle$/^hello-maven-service$/^lifecycle$/^buildah$/^public$'` | Java digest-pinned nanolinter job image, signer and container/readiness runner; conformance `TestForgejoLayer_ConsumerLifecycle`; provider-scoped launcher log plus classifier `verdict.json` |
 | GitLab | `just test-live-prepared <prepared-dir> gitlab '^TestGitLabLayer_ConsumerLifecycle$/^lifecycle$/^hello-maven-service$/^lifecycle$/^buildah$/^public$'` | Prepared Java job/build, signer/lint and selected-builder archives; pinned policy and guarded release runner profile; `TestGitLabLayer_ConsumerLifecycle`; native child-pipeline evidence, no readiness; live hold remains |
-| Hosted GitHub | `just campaign-github <evidence-dir> hello-maven-service/lifecycle org=<authorized-id>` | One guarded hosted session, frozen prepared SDK/images reused, separate private release PAT file and all three fixture workflows; `TestGitHubLayer_ConsumerLifecycle`; retained per-cell output/exit/run IDs/cleanup, **not** a lab classifier receipt |
+| Hosted GitHub | `just test-live-consumer github <prepared-dir>/demos/hello-maven-service lifecycle org=<authorized-id>` | One guarded hosted session, frozen prepared SDK/images reused, separate private release PAT file and all three fixture workflows; `TestGitHubLayer_ConsumerLifecycle`; retained per-cell output/exit/run IDs/cleanup, **not** a lab classifier receipt |
 
 A cell is one subtest of its case in the Go tables ([`preparedcases.go`](../test/live/internal/livetest/preparedcases.go)):
 builder and visibility are parts of its name. Naming one cell does not bypass
@@ -276,9 +276,9 @@ no Maven-service case: use its standalone snapshot command or the lifecycle. Git
 Hosted `image=<declared-name>` selects the optional release-image oracle; do not
 claim image verification merely from release success.
 
-All roads retain [scope/lock and credential admission](live-campaigns.md#execution-scopes-and-locks),
+All roads retain [scope/lock and credential admission](live-runs.md#execution-scopes-and-locks),
 [hosted prepare/reuse invariants](validation-invariants.md#1-freeze-the-engine-before-parallel-consumers)
-and [shared-resource coordination](live-campaigns.md#shared-dependencies).
+and [shared-resource coordination](live-runs.md#shared-dependencies).
 No GitLab hold, hosted organization restriction, protected-job or classified lane
 is resumed. No cross-provider proof substitution is permitted. Native scope is
 Linux/amd64; arm64 cross-build assets are not native proof, and the iOS macOS
@@ -469,7 +469,7 @@ closed until those separately approved results exist.
 This is a baseline-to-current migration crosswalk, not runnable configuration.
 Each row label links its authoritative [matrix 1](testing-matrices.md#1-capabilities-by-project-kind--flow-cells-forgejo--gitlab--github)
 row; evidence is the existing overlay keyed by **provider / that row's demo /
-flow**, [E](../test/live/campaigns/evidence.txt), with its exact dated notes:
+flow**, [E](../test/live/evidence.txt), with its exact dated notes:
 PR uses `pull-request`, either snapshot column uses `development`, release uses
 `release`, and the linked whole flow uses `lifecycle`. Missing E keys stay
 unproven; neither the snapshot column name nor `snapshot` is a new evidence key.
@@ -511,8 +511,8 @@ current moved owner; no absent cell authorizes retirement of another flow.
 Inputs remain in each referenced case and consumer declaration under
 [`fixtures/consumers`](../test/live/fixtures/consumers/README.md), not a second
 settings table. Native fixture availability was checked in each consumer tree.
-Refusal/NA interpretation is owned by [`campaignlifecycle.go`](../test/live/internal/livetest/campaignlifecycle.go)
-(`serviceSnapshotAdmission`, `campaignAdmitSnapshot`) and
+Refusal/NA interpretation is owned by [`demoadmission.go`](../test/live/internal/livetest/demoadmission.go)
+(`serviceSnapshotAdmission`, `admitSnapshot`) and
 [`testingmatrices.go`](../test/live/internal/livetest/testingmatrices.go)
 (`lifecycleApplies`, `lifecycleState`, `developmentCell`, `releaseCell`).
 `TestPreparedCasesRunWhatTheirDemoAdmits`,
@@ -552,21 +552,20 @@ all live evidence is inherited, not newly observed.
 | signing / [GPG declaration](testing-matrices.md#2-e2e-scenarios--variants-lifecycle-unless-stated) | Go-CLI `artifacts-gpg.yml`, hosted exact GPG fixture profile; profile/boundary tests and `CheckRelease`; no service lifecycle demo |
 | signing / [default](testing-matrices.md#2-e2e-scenarios--variants-lifecycle-unless-stated) | Declaration/native release default, e.g. Cargo; shared bundle checks retain native method; no default→GPG/keyless/KMS equivalence |
 | signing / [sigstore](testing-matrices.md#2-e2e-scenarios--variants-lifecycle-unless-stated) | Maven/npm/Go service native release and signature-subject checks; actual key/keyless/transparency admission remains native, not a generic setting copied here |
-| image builder / [buildah](testing-matrices.md#2-e2e-scenarios--variants-lifecycle-unless-stated) | The case's `Builder`: a Forgejo setting, a GitLab builder archive; `ForgejoConsumerImageBuilder`, `TestForgejoSettingsOfACase`, `TestGitLabEnvironmentOfASnapshot`, FS/LS/FC/LC receipts; hosted has no campaign-builder lane |
+| image builder / [buildah](testing-matrices.md#2-e2e-scenarios--variants-lifecycle-unless-stated) | The case's `Builder`: a Forgejo setting, a GitLab builder archive; `ForgejoConsumerImageBuilder`, `TestForgejoSettingsOfACase`, `TestGitLabEnvironmentOfASnapshot`, FS/LS/FC/LC receipts; hosted has no prepared builder lane |
 | image builder / [kaniko](testing-matrices.md#2-e2e-scenarios--variants-lifecycle-unless-stated) | Same native owners plus digest/source-labelled Kaniko job image and archive admission; hosted has no equivalent builder choice |
 | visibility / [public](testing-matrices.md#2-e2e-scenarios--variants-lifecycle-unless-stated) | `ConsumerVisibilities`, the case's `public` subtest; native repository/publication/readback authority, not private access proof |
 | visibility / [private](testing-matrices.md#2-e2e-scenarios--variants-lifecycle-unless-stated) | Same native owners and the `private` subtest, `CheckPrivateReleaseAssets` and applicable authenticated image readbacks; private job-image pull is a distinct witness |
-| enforcement / [admin lint](testing-matrices.md#2-e2e-scenarios--variants-lifecycle-unless-stated) | `adminInputEnvironment`, `adminSettingsConsumed`, `ComponentAdminInputs`; generated wrappers/pinned policy consume declared lint enforcement; `TestConsumerPlanBindsAdminInputsOnlyInItsGeneratedWrappers`; no hosted campaign lane |
+| enforcement / [admin lint](testing-matrices.md#2-e2e-scenarios--variants-lifecycle-unless-stated) | `adminInputEnvironment`, `adminSettingsConsumed`, `ComponentAdminInputs`; generated wrappers/pinned policy consume declared lint enforcement; `TestConsumerPlanBindsAdminInputsOnlyInItsGeneratedWrappers`; no hosted prepared lane |
 | enforcement / [admin vulnerabilities](testing-matrices.md#2-e2e-scenarios--variants-lifecycle-unless-stated) | Same authority owner, independent vulnerability input; `TestAdminWrapperRejectsConsumerValuesAndMergedInputAuthority`; real consuming-job refusal still requires native proof; no hosted lane |
 | enforcement / [admin application-tests](testing-matrices.md#2-e2e-scenarios--variants-lifecycle-unless-stated) | Same authority owner, independent application-test input; `TestGitLabAdminPolicyKeepsEnforcementOutOfConsumerRendering`; no consumer override or hosted lane |
 | enforcement / [admin reproducible-builds](testing-matrices.md#2-e2e-scenarios--variants-lifecycle-unless-stated) | Same consumed-input validation; GitLab templates declare it, Forgejo does not. Generated Forgejo lane listing is **not** executable enforcement support: declaring/enabling unconsumed input refuses; explicit source/generator representation limitation, no hosted lane |
-| enforcement / [none enforced](testing-matrices.md#2-e2e-scenarios--variants-lifecycle-unless-stated) | `readAdminInputs` report-only defaults and wrapper literal tests; checks still run, not an enforcement witness; hosted has no campaign lane |
+| enforcement / [none enforced](testing-matrices.md#2-e2e-scenarios--variants-lifecycle-unless-stated) | `readAdminInputs` report-only defaults and wrapper literal tests; checks still run, not an enforcement witness; hosted has no prepared lane |
 | architecture / [amd64](testing-matrices.md#2-e2e-scenarios--variants-lifecycle-unless-stated) | Declaration overlay/`RunnerArch`, FC/LC/GC and FS/LS native platform assertions; exact runner/receipt evidence required |
 | architecture / [arm64](testing-matrices.md#2-e2e-scenarios--variants-lifecycle-unless-stated) | D-5 exclusion on all native release roads; cross-compile assets/OCI fixtures do not execute ARM; iOS gate exception is not generalized |
 
 Authoritative source links for the input/assertion references above:
 [`preparedcases.go`](../test/live/internal/livetest/preparedcases.go),
-[`campaignadmin.go`](../test/live/internal/livetest/campaignadmin.go),
 [`admininputs.go`](../test/live/internal/livetest/admininputs.go),
 [`admininputs_internal_test.go`](../test/live/internal/livetest/admininputs_internal_test.go),
 [`preparedcases_internal_test.go`](../test/live/internal/livetest/preparedcases_internal_test.go),

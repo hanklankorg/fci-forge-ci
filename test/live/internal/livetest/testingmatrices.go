@@ -24,7 +24,7 @@ import (
 // docs/testing-matrices.md keeps the testing matrices. Matrix 1, project
 // kind × flow, and matrix 2, the lifecycle's variant axes, are generated here
 // between the page's markers from one source, what the tree says: the shipped
-// demos' declarations as the planner and the campaign admission read them,
+// demos' declarations as the planner and the demo admission read them,
 // the lanes with their cases and settings (PreparedLanes), and the live marks of
 // TestingMatricesEvidence, a hand-kept overlay keyed by provider, demo and
 // flow, each mark qualified with the axis values its run had, since whether a
@@ -37,7 +37,7 @@ import (
 // overlay, relative to the repository root.
 const (
 	TestingMatricesPage     = "docs/testing-matrices.md"
-	TestingMatricesEvidence = "test/live/campaigns/evidence.txt"
+	TestingMatricesEvidence = "test/live/evidence.txt"
 )
 
 const (
@@ -63,9 +63,9 @@ const (
 
 var errTestingMatrices = errors.New("testing matrices")
 
-// matrixProviders are the columns. GitHub has no campaign lane: its line for
+// matrixProviders are the columns. GitHub has no prepared lane: its line for
 // an event is the demo's fixture workflow the hosted harness runs for it.
-var matrixProviders = []string{campaignForgejo, campaignGitLab, matrixGitHub}
+var matrixProviders = []string{forgeForgejo, forgeGitLab, matrixGitHub}
 
 // githubDemoWorkflows is where a demo keeps its GitHub workflows, which a
 // GitHub trial renders into .github/workflows.
@@ -81,8 +81,8 @@ type matrixDemo struct {
 	hosted                                          map[string]bool
 	release                                         map[string]bool
 	admission                                       map[string]error
-	// snapshot is the campaign's admission of the snapshot event on each lab
-	// forge, campaignAdmitSnapshot's.
+	// snapshot is the admission of the snapshot event on each lab
+	// forge, admitSnapshot's.
 	snapshot map[string]error
 	// snapshotRefusal is the planner's refusal of the declaration's snapshot.
 	snapshotRefusal error
@@ -116,6 +116,10 @@ const (
 	visibilityBoth      = "both"
 )
 
+// adminSetting is a check's administrator setting as the testing matrices
+// and the evidence overlay name it, admin-<check>.
+func adminSetting(check enforcement.Check) string { return "admin-" + string(check) }
+
 // axisValueCovers reports whether a run that had the setting at had ran it
 // at value: the same value, or both visibilities, which runs each.
 func axisValueCovers(setting, had, value string) bool {
@@ -129,7 +133,7 @@ var matrixAxisValues = func() map[string][]string {
 		settingImageBuilder: {ImageBuilderBuildah, ImageBuilderKaniko},
 	}
 	for _, check := range enforcement.Checks {
-		axes[campaignAdminSetting(check)] = []string{strconv.FormatBool(true), strconv.FormatBool(false)}
+		axes[adminSetting(check)] = []string{strconv.FormatBool(true), strconv.FormatBool(false)}
 	}
 
 	return axes
@@ -247,13 +251,13 @@ func readMatrixDemo(name, consumer string) (matrixDemo, error) {
 
 	demo.source = source
 
-	for provider, file := range map[string]string{campaignForgejo: forgejoReleaseWorkflow, campaignGitLab: GitLabConsumerBuildScript} {
+	for provider, file := range map[string]string{forgeForgejo: forgejoReleaseWorkflow, forgeGitLab: GitLabConsumerBuildScript} {
 		if demo.release[provider], err = exists(filepath.Join(consumer, filepath.FromSlash(file))); err != nil {
 			return demo, err
 		}
 
 		demo.admission[provider] = matrixLifecycleAdmission(provider, consumer)
-		demo.snapshot[provider] = campaignAdmitSnapshot(provider, consumer)
+		demo.snapshot[provider] = admitSnapshot(provider, consumer)
 	}
 
 	cfg, err := readMatrixDeclaration(filepath.Join(consumer, filepath.FromSlash(source)))
@@ -321,15 +325,15 @@ func (demo *matrixDemo) readHosted(consumer, source string) error {
 	return nil
 }
 
-// matrixLifecycleAdmission is the campaign's admission of a lifecycle of the
+// matrixLifecycleAdmission is the admission of a lifecycle of the
 // demo on the provider, the GitLab release build included, as the lane plans
 // it.
 func matrixLifecycleAdmission(provider, consumer string) error {
-	if err := campaignAdmitLifecycle(provider, consumer); err != nil {
+	if err := admitLifecycle(provider, consumer); err != nil {
 		return err
 	}
 
-	if provider == campaignGitLab {
+	if provider == forgeGitLab {
 		return requireGitLabReleaseBuild(consumer)
 	}
 
@@ -561,7 +565,7 @@ func caseRuns(setting, value string, c PreparedCase) bool {
 // GitLab it needs the demo's release build, whose commands are the
 // adopter's; without one the lifecycle is not applicable, as the release.
 func lifecycleApplies(provider string, demo matrixDemo) bool {
-	return provider != campaignGitLab || demo.release[provider]
+	return provider != forgeGitLab || demo.release[provider]
 }
 
 // lifecycleState is a demo's lifecycle state on a provider: not applicable,
@@ -605,7 +609,7 @@ func (data matrices) releaseCell(provider string, demo matrixDemo) string {
 // developmentCell is a demo's snapshot state on a provider: the snapshot
 // runs as the lifecycle's development phase where the lifecycle applies
 // (lifecycleApplies) and admits the demo, and alone as the snapshot event
-// where a lab forge's campaign admits that. It is not applicable where
+// where a lab forge admits that. It is not applicable where
 // neither applies, the admissions' refusal where neither admits (the reasons
 // are footnoted, and the overlay's note kept, as when a fixture of the demo
 // ran), the overlay's mark, a lifecycle or snapshot line that would run it,
@@ -919,7 +923,7 @@ func (data matrices) refusalNotes() ([]string, []string) {
 			}
 		}
 
-		for _, provider := range []string{campaignForgejo, campaignGitLab} {
+		for _, provider := range []string{forgeForgejo, forgeGitLab} {
 			if err := demo.snapshot[provider]; err != nil && demo.snapshotRefusal == nil {
 				note(err, demo.name+", "+provider+" "+TrialSnapshot)
 			}

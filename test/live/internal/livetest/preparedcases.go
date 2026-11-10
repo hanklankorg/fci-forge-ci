@@ -161,9 +161,9 @@ var GitLabPreparedCases = []PreparedCase{
 // PreparedCases are the cases of a lab forge's table, none for another.
 func PreparedCases(forge string) []PreparedCase {
 	switch forge {
-	case campaignForgejo:
+	case forgeForgejo:
 		return ForgejoPreparedCases
-	case campaignGitLab:
+	case forgeGitLab:
 		return GitLabPreparedCases
 	default:
 		return nil
@@ -172,11 +172,11 @@ func PreparedCases(forge string) []PreparedCase {
 
 // preparedCaseTests name the live test that runs a forge's cases of an event.
 var preparedCaseTests = map[string]map[string]string{
-	campaignForgejo: {
+	forgeForgejo: {
 		TrialPullRequest: "TestForgejoLayer_ConsumerTrial", TrialRelease: "TestForgejoLayer_ConsumerTrial",
 		TrialLifecycle: "TestForgejoLayer_ConsumerLifecycle", TrialSnapshot: "TestForgejoLayer_Snapshot",
 	},
-	campaignGitLab: {
+	forgeGitLab: {
 		TrialPullRequest: "TestGitLabLayer_ConsumerTrial", TrialRelease: gitlabConsumerTrialTest,
 		TrialLifecycle: "TestGitLabLayer_ConsumerLifecycle", TrialSnapshot: "TestGitLabLayer_Snapshot",
 	},
@@ -204,7 +204,7 @@ func (c PreparedCase) LaneEnvironment(forge string) map[string]string {
 	}
 
 	environment := map[string]string{consumerVisibilityEnv: visibilityPrivate}
-	if forge == campaignGitLab {
+	if forge == forgeGitLab {
 		environment[adminInputEnvironment(enforcement.ReproducibleBuilds)] = "true"
 	}
 
@@ -212,10 +212,10 @@ func (c PreparedCase) LaneEnvironment(forge string) map[string]string {
 }
 
 // Settings are the trial's settings of the case, one key=value each, with the
-// images taken from prepared, the prepared directory's campaign.env. A case
+// images taken from prepared, the prepared directory's prepared.env. A case
 // whose image was not prepared is refused, naming the key that is missing.
 func (c PreparedCase) Settings(prepared map[string]string) ([]string, error) {
-	jobImage := campaignJobImagePrefix + campaignFlavorKey(c.JobImage)
+	jobImage := preparedJobImagePrefix + flavorEnvKey(c.JobImage)
 	if prepared[jobImage] == "" {
 		return nil, c.notPrepared(jobImage)
 	}
@@ -223,7 +223,7 @@ func (c PreparedCase) Settings(prepared map[string]string) ([]string, error) {
 	settings := []string{"CI_JOB_IMAGE=" + prepared[jobImage], "CI_IMAGE_BUILDER=" + c.Builder}
 
 	if c.NodeJobImage != "" {
-		nodeImage := campaignJobImagePrefix + campaignFlavorKey(c.NodeJobImage)
+		nodeImage := preparedJobImagePrefix + flavorEnvKey(c.NodeJobImage)
 		if prepared[nodeImage] == "" {
 			return nil, c.notPrepared(nodeImage)
 		}
@@ -259,11 +259,11 @@ func (c PreparedCase) Settings(prepared map[string]string) ([]string, error) {
 }
 
 func (c PreparedCase) notPrepared(key string) error {
-	return fmt.Errorf("%s: %s has no %s; prepare its image: %w", c.Name(), CampaignEnvFile, key, errs.ErrValidation)
+	return fmt.Errorf("%s: %s has no %s; prepare its image: %w", c.Name(), PreparedEnvFile, key, errs.ErrValidation)
 }
 
 // PreparedForgejoEnvironment is what a Forgejo consumer trial reads from its
-// environment and the prepared directory's campaign.env holds: the signer
+// environment and the prepared directory's prepared.env holds: the signer
 // image and the builders' saved job images. One that was not prepared is
 // empty, so a value left in the caller's environment is never taken for it.
 // The administrator inputs (FORGE_CI_LIVE_ADMIN_<CHECK>) are the caller's.
@@ -310,7 +310,7 @@ func (c PreparedCase) GitLabSettings() []string {
 }
 
 // GitLabEnvironment is what a GitLab consumer trial of the case reads from
-// its environment and prepared, the prepared directory's campaign.env, holds.
+// its environment and prepared, the prepared directory's prepared.env, holds.
 // The job image is the runtime archive of the case's flavor, or of Runtime.
 // A snapshot takes it alone, and builds in the saved job image of its
 // builder. A merge request takes it as its consumer image and lints in the
@@ -348,7 +348,7 @@ func (c PreparedCase) GitLabEnvironment(prepared map[string]string) (map[string]
 		return environment, nil
 	}
 
-	lint := campaignLintArchivePrefix + campaignFlavorKey(c.JobImage)
+	lint := preparedLintArchivePrefix + flavorEnvKey(c.JobImage)
 	if prepared[lint] == "" {
 		return nil, c.notPrepared(lint)
 	}

@@ -16,7 +16,7 @@ import (
 
 // A snapshot on Forgejo: the lifecycle's development phase alone,
 // over every image the planner plans from the consumer's declaration
-// (docs/live-campaigns.md, Snapshot). The consumer's main and a change on
+// (docs/live-runs.md, Snapshot). The consumer's main and a change on
 // branch development are pushed with Actions off; the harness's service
 // development workflow is then dispatched on main and snapshots development
 // through the snapshot-images policy. The trial requests that run and

@@ -1,4 +1,4 @@
-# Resource-aware asynchronous live campaigns
+# Resource-aware asynchronous live runs
 
 ## Plan before launch
 
@@ -76,7 +76,7 @@ beside another run. It takes the same arguments as the run:
 just test-live-preflight                                   # as just test-live
 just test-live-preflight '^TestGitLabLayer_ConsumerTrial$' # as just test-live <scenario>
 FORGE_CI_LIVE_PREFLIGHT=1 just test-live-consumer gitlab /absolute/consumer pull-request
-FORGE_CI_LIVE_PREFLIGHT=1 just test-live-prepared ~/campaigns/k3s gitlab '^TestGitLabLayer_ConsumerTrial$/^private$'
+FORGE_CI_LIVE_PREFLIGHT=1 just test-live-prepared ~/prepared/k3s gitlab '^TestGitLabLayer_ConsumerTrial$/^private$'
 ```
 
 `FORGE_CI_LIVE_PREFLIGHT=1` reaches the launcher, `scripts/ci/run-live-tests.sh`,
@@ -118,12 +118,16 @@ Instead, mint a contract of your own beside it in Forge Lab with
 then point `LAB_TARGETS_FILE` at that path here. An unscoped run is also told it
 can select the other forge with `FORGE_CI_LIVE_PROVIDER`.
 
-## Run a campaign
+## Prepare and run
+
+Prepare a directory once per commit with `just test-live-prepare`. Then run
+the cases of the Go tables on it with `just test-live-prepared`, or one
+consumer from its `demos` with `just test-live-consumer`.
 
 ### Required preparation resources (source-only admission milestone)
 
 Existing no-budget callers retain their engine behavior. To request a mandatory
-budget use `campaign-prepare ... build-budget=required [build-cpus=N]
+budget use `test-live-prepare ... build-budget=required [build-cpus=N]
 [build-memory-mib=N] [compiler-jobs=N]`. Duplicate/unknown resource words refuse.
 Direct positional recipes are `test-live-image KIND LAB [default|required]
 [CPUS] [MEMORY_MIB] [JOBS]`, `buildah-job-image-archive DIR [MODE] [CPUS]
@@ -131,14 +135,14 @@ Direct positional recipes are `test-live-image KIND LAB [default|required]
 [MEMORY_MIB] [JOBS]`. Do not pass `cpus=2` as a positional value.
 
 The required tuple defaults to 2 CPUs / 4096 MiB / jobs equal to CPUs. Empty
-positional fields keep defaults; explicit campaign values cannot be empty.
+positional fields keep defaults; explicit prepare values cannot be empty.
 Only canonical positive decimals without leading zeros/signs/whitespace are
 accepted. Memory is at least 4 MiB and at most 8796093022207 MiB; CPUs at most
 92233720368547 (signed 64-bit quota with period 100000); compiler jobs at most
 2147483647 and not greater than CPUs. Values with `default` refuse.
 
 **Required means native limits must be requested, not enforcement verified.**
-After validation, the campaign exports the resolved tuple to its child build
+After validation, the prepare exports the resolved tuple to its child build
 owners. Publishers and archive builders apply Podman CPU period/quota, memory,
 memory-plus-swap total equal to memory (no additional swap), and stage jobs=1.
 Native command failure stops that operation; there is no unbounded fallback or
@@ -159,32 +163,32 @@ Omitted direct recipe fields inherit the publisher's corresponding
 If both sources specify a nonempty field they must agree, otherwise Go admission
 refuses a conflict. In particular an explicit `default` cannot silently clear
 inherited `required`, and omission cannot clear inherited numeric requirements.
-The same Go resolver applies to campaign option words and direct recipes; shell
+The same Go resolver applies to the prepare's option words and direct recipes; shell
 does not merge or rewrite resource policy. To deliberately choose the legacy
 unbudgeted route, remove inherited requirements explicitly before invocation.
 
-Prepare once, from a clean checkout whose engine checksum is fresh, naming
-what the campaign will run: `forgejo` or `gitlab`, every lane of the forge, or
+Prepare once per commit, from a clean checkout whose engine checksum is
+fresh, naming what will run: `forgejo` or `gitlab`, every lane of the forge, or
 a lane of `livetest.PreparedLanes` by name
 (`test/live/internal/livetest/preparedlanes.go`). It publishes the
 kaniko job, signer and named nanolinter job images with Forge Lab, saves the
 signer image, the Buildah and kaniko job images
 (`FORGE_CI_LIVE_BUILDAH_JOB_IMAGE_ARCHIVE`, `FORGE_CI_LIVE_KANIKO_JOB_IMAGE_ARCHIVE`)
 and the runtime images as archives, exports every demo as a one-commit
-checkout and writes `<dir>/campaign.env` (references and paths, no secrets,
-and `CAMPAIGN_COMMIT`). The runtime images are those the GitLab cases of the
+checkout and writes `<dir>/prepared.env` (references and paths, no secrets,
+and `PREPARED_COMMIT`). The runtime images are those the GitLab cases of the
 named lanes need, each as `FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_<TARGET>`: the
 image of each case's flavor, the scenarios' go image, also
 `FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE`, every `$CI_JOB_IMAGE_<TARGET>` the gate of
 a case's demo checks in, and the producer families of a snapshot
-(`go run ./test/live/internal/livetest/preflight campaign-runtime-targets . <forge or lane> ... flavor=<flavor> ...`
+(`go run ./test/live/internal/livetest/preflight prepared-runtime-targets . <forge or lane> ... flavor=<flavor> ...`
 lists them). Each nanolinter job image is published as `JOB_IMAGE_<FLAVOR>`
 and saved as `LINT_IMAGE_ARCHIVE_<FLAVOR>`, the flavor in capitals with `-` as
-`_`; a lane with a case of a flavor the campaign is not given is refused
+`_`; a lane with a case of a flavor the prepare is not given is refused
 before anything is built:
 
 ```bash
-just campaign-prepare ~/src/forge-lab ~/campaigns/k3s \
+just test-live-prepare ~/src/forge-lab ~/prepared/k3s \
   k3s-private-forgejo k3s-private-gitlab \
   job-image=go:<local image> job-image=java:<local image> \
   job-image=javascript-typescript:<local image> job-image=rust:<local image>
@@ -207,8 +211,8 @@ of the live test of its event:
 
 `just test-live-prepared <dir> <forge> <pattern>` runs the cases a `go test
 -run` pattern selects, on the demos and images of the prepared directory. It
-refuses a checkout other than `CAMPAIGN_COMMIT`, or one with changes on top.
-A case takes its images from `campaign.env` and its builder from its own row;
+refuses a checkout other than `PREPARED_COMMIT`, or one with changes on top.
+A case takes its images from `prepared.env` and its builder from its own row;
 an image variable left in the caller's environment is never taken for one. A
 case whose image was not prepared fails naming the missing key.
 
@@ -219,9 +223,9 @@ Run one forge beside the other, against fresh forgeci targets (minted with
 
 ```bash
 export FORGE_CI_LIVE_CONSUMER_VISIBILITY=private
-just test-live-prepared ~/campaigns/k3s forgejo '^TestForgejoLayer_ConsumerTrial$/^private$' &
+just test-live-prepared ~/prepared/k3s forgejo '^TestForgejoLayer_ConsumerTrial$/^private$' &
 FORGE_CI_LIVE_ADMIN_REPRODUCIBLE_BUILDS=true \
-  just test-live-prepared ~/campaigns/k3s gitlab '^(TestGitLabLayer_ConsumerTrial|TestGitLabRelease_ConsumerTrial)$/^private$' &
+  just test-live-prepared ~/prepared/k3s gitlab '^(TestGitLabLayer_ConsumerTrial|TestGitLabRelease_ConsumerTrial)$/^private$' &
 wait
 ```
 
@@ -254,14 +258,14 @@ edit or checksum rebuild is needed to choose the run's settings.
 A lane of `livetest.PreparedLanes` also names the live tests it runs beside
 its cases. The nine of `k3s-private-gitlab` run in the go runtime image and
 are not table cases, so nothing hands them the prepared images. Give each the
-value of the same key in `<dir>/campaign.env`:
+value of the same key in `<dir>/prepared.env`:
 
 ```bash
 FORGE_CI_LIVE_CONSUMER_VISIBILITY=private FORGE_CI_LIVE_ADMIN_REPRODUCIBLE_BUILDS=true \
 FORGE_CI_LIVE_GITLAB_IMAGE_BUILDER=kaniko \
 FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE=<path> FORGE_CI_LIVE_SIGNER_IMAGE=<reference> \
 FORGE_CI_LIVE_SIGNER_IMAGE_ARCHIVE=<path> FORGE_CI_LIVE_KANIKO_JOB_IMAGE_ARCHIVE=<path> \
-  just test-live-prepared ~/campaigns/k3s gitlab '^TestGitLabRelease_MinimalSignedArtifacts$'
+  just test-live-prepared ~/prepared/k3s gitlab '^TestGitLabRelease_MinimalSignedArtifacts$'
 ```
 
 The scenarios of `build-capability-gitlab`, `harness-inputs-forgejo`,
@@ -278,36 +282,35 @@ The pattern of one case, down to its visibility, reruns the matrix cell it
 names and nothing more:
 
 ```bash
-just test-live-prepared ~/campaigns/lc gitlab '^TestGitLabLayer_ConsumerLifecycle$/^lifecycle$/^hello-maven-service$/^lifecycle$/^buildah$/^public$'
-just test-live-prepared ~/campaigns/lc forgejo '^TestForgejoLayer_ConsumerLifecycle$/^lifecycle$/^hello-maven-service$/^lifecycle$/^buildah$/^private$'
-just test-live-prepared ~/campaigns/sn gitlab '^TestGitLabLayer_Snapshot$/^snapshot$/^hello-monorepo$/^snapshot$/^buildah$/^public$'
+just test-live-prepared ~/prepared/lc gitlab '^TestGitLabLayer_ConsumerLifecycle$/^lifecycle$/^hello-maven-service$/^lifecycle$/^buildah$/^public$'
+just test-live-prepared ~/prepared/lc forgejo '^TestForgejoLayer_ConsumerLifecycle$/^lifecycle$/^hello-maven-service$/^lifecycle$/^buildah$/^private$'
+just test-live-prepared ~/prepared/sn gitlab '^TestGitLabLayer_Snapshot$/^snapshot$/^hello-monorepo$/^snapshot$/^buildah$/^public$'
 ```
 
 `go test -run` does not fail on a pattern that matches nothing, so check that
 the verdict lists the case.
 
 A hosted GitHub cell is the demo's fixture workflow for the event, run by
-`just campaign-github <dir> <demo>/<event>` from a one-commit checkout of the
-built-in demo, inside Forge Lab's hosted session; the settings are
-`just test-live-consumer github`'s, and the cell's line goes to
-`<dir>/github.results`:
+`just test-live-consumer github <checkout> <event>` from a one-commit checkout
+of the built-in demo, inside Forge Lab's hosted session. A prepared directory
+holds one for every demo, `<dir>/demos/<demo>`, as the prepared commit has it;
+`bash scripts/ci/demo-checkout.sh <demo> <empty dir>` exports one from this
+checkout:
 
 ```bash
-just campaign-github ~/campaigns/hosted hello-maven-service/lifecycle org=<id>
-just campaign-github ~/campaigns/hosted hello-go-cli/release org=<id> fixtures=test/live/github-gpg workflow=release-gpg.yml
-just campaign-github ~/campaigns/hosted hello-go-cli/release org=<id> fixtures=test/live/github-no-sboms workflow=release-no-sboms.yml
-just campaign-github ~/campaigns/hosted hello-go-cli/release org=<id> fixtures=test/live/github-no-changelog workflow=release-no-changelog.yml
-just campaign-github ~/campaigns/hosted hello-npm-package/pull-request org=<id> fixtures=test/live/github-fork head=fork
+just test-live-consumer github <dir>/demos/hello-maven-service lifecycle org=<id>
+just test-live-consumer github <dir>/demos/hello-go-cli release org=<id> fixtures=test/live/github-gpg workflow=release-gpg.yml
+just test-live-consumer github <dir>/demos/hello-go-cli release org=<id> fixtures=test/live/github-no-sboms workflow=release-no-sboms.yml
+just test-live-consumer github <dir>/demos/hello-go-cli release org=<id> fixtures=test/live/github-no-changelog workflow=release-no-changelog.yml
+just test-live-consumer github <dir>/demos/hello-npm-package pull-request org=<id> fixtures=test/live/github-fork head=fork
 ```
 
-The settings after the cell are passed to the trial unchanged, so each
-variant fixture root is its own cell.
+Each variant fixture root is its own cell.
 
-Hosted cells do not run the lab launcher/classifier: `github.results` records
-the interval, the cell and its exit status with `verdict=-`, not a lab
-`verdict.json` path. Retain each
-cell's stdout/stderr and exit status, engine/consumer revisions, native run IDs
-and cleanup output separately; the recipe's temporary output copy is removed.
+Hosted cells do not run the lab launcher or classifier, so they write no lab
+`verdict.json` and nothing records them for you. Retain each cell's
+stdout/stderr and exit status, its interval, engine/consumer revisions, native
+run IDs and cleanup output.
 For parallel hosted cells, [prepare the shared engine once and reuse it](validation-invariants.md#1-freeze-the-engine-before-parallel-consumers)
 within one guarded session. These cells are not cases of the lab tables.
 
@@ -363,7 +366,7 @@ lifecycle when it fails, with their acceptance owners unchanged:
 On Forgejo the event takes the release's settings but `workflow=`,
 `next-version=` and `interrupt-after=`; `CI_JOB_IMAGE`, pinned by digest, is a
 nanolinter image of the demo's toolchain flavour, the `job-image=<flavour>:`
-the campaign publishes: the demo's lint and build jobs run in it, and the
+the prepare publishes: the demo's lint and build jobs run in it, and the
 snapshot builds the demo's producers in it, through the repository variable
 the snapshot-images workflow reads for each producer family,
 `SNAPSHOT_ARTIFACT_JOB_IMAGE_<FAMILY>` (none for a container-first service). A
@@ -372,7 +375,7 @@ PATH". It selects its builder as the other events do, with the consumer's
 `CI_IMAGE_BUILDER`, and runs in the consumer trial's layer repository
 (`fci-consumer-trial-layer`, beside its own `fci-consumer-lifecycle`): a run
 admits a kaniko job image only for the repository its source label names, and
-the campaign's is labelled for that one, so one prepared image serves every
+the prepared one is labelled for that one, so one prepared image serves every
 event; under kaniko, `CI_IMAGE_BUILDER_JOB_IMAGE` pinned by digest is required
 before anything is created, as the run admits it by digest and label in the
 development phase. It needs what the published snapshot and a Forgejo release
@@ -433,7 +436,7 @@ image read from the repository's container package on GHCR, which is
 removed with the repository. The release is judged as
 the GitHub release trial's. The snapshot publishes with the workflow's own
 token; the release secrets are set at the release phase and not before. It
-runs outside the campaign route, inside Forge Lab's hosted session:
+runs outside the prepared lanes, inside Forge Lab's hosted session:
 `just test-live-consumer github <checkout> lifecycle org=<org-id>`
 (docs/testing.md, Trying a consumer on GitHub). On GitHub the event is
 admitted for the demos that ship all three fixtures and a service
@@ -463,8 +466,8 @@ every family (`test/live/internal/livetest/testdata/service-development.yml.tmpl
 snapshot-images workflow builds the producers in the image the repository's
 `SNAPSHOT_ARTIFACT_JOB_IMAGE_<FAMILY>` variable names, the lifecycle's
 `CI_JOB_IMAGE`, then the image; a readiness job runs the published digest.
-The campaign refuses a case before anything is created
-(`campaignAdmitLifecycle`), with the planner's reason. The generated matrix in
+A case is refused before anything is created
+(`admitLifecycle`), with the planner's reason. The generated matrix in
 [Testing matrices](testing-matrices.md) lists every demo's state; the reasons
 behind it:
 
@@ -480,7 +483,7 @@ behind it:
 
 amd64 runners only for now. Standalone
 `test-live-consumer <forge> <checkout> lifecycle …` runs the same test
-outside a campaign; the GitLab lifecycle reads the checkout's snapshot
+without a prepared directory; the GitLab lifecycle reads the checkout's snapshot
 source itself. The standalone pull-request and release trials, and GitHub's
 snapshot trial, remain the single-phase entrypoints; the lifecycle calls
 their extracted checks. On Forgejo its development phase is the one
@@ -564,7 +567,7 @@ plan` job's, the receipts the child's `Snapshot: collect` job's. The
 component probes no readiness, so none is claimed. The event takes
 `job-archive=` alone, the component's job image; each producer builds in
 the runtime image of its toolchain family,
-`FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_<FAMILY>`, which `campaign-prepare`
+`FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_<FAMILY>`, which `test-live-prepare`
 prepares from the plan (none for the container-first Cargo workspace,
 `java` and `node` for the monorepo), and the images with the case's
 builder. `job-archive=` is required even without producers and is not the
@@ -579,7 +582,7 @@ The generated [Testing matrices](testing-matrices.md) show these cases in the
 snapshot columns, `📝 snapshot`; a run's verdict is evidence for the
 `development` flow of the overlay. amd64 runners only for now. Standalone
 `test-live-consumer <forge> <checkout> snapshot …` runs the same test
-outside a campaign.
+without a prepared directory.
 
 ### Explicit-input Forgejo consumer trials
 
@@ -757,7 +760,7 @@ finishes its sleep normally, it fails rather than claiming cancellation proof.
 ### Optional Android lane
 
 The lane `k3s-private-gitlab` does not prepare the large Android SDK/runtime
-image. To opt in, add both of these arguments to the same `campaign-prepare`
+image. To opt in, add both of these arguments to the same `test-live-prepare`
 command:
 
 ```text
@@ -779,7 +782,7 @@ It runs the real Android
 demo MR gate without production signing/store credentials. Debug APKs use the
 normal Android debug signing; release APK/AAB outputs remain unsigned.
 Budget additional SDK image/archive and Gradle-cache disk space before preparing
-or starting it; the base campaign's headroom estimate does not include Android.
+or starting it; the base lanes' headroom estimate does not include Android.
 
 ## Shared dependencies
 
