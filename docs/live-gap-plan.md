@@ -58,7 +58,7 @@ Ordered by what a consumer is most likely to be.
 | 10 | Cargo without a container: no plain CLI, no library crate | A demo each, or one workspace with both |
 | 11 | Go library: a module with no binary | A demo; its release is the tag alone, as `hello-meta` |
 | 12 | Maven or Gradle application: an executable jar without an image | A demo, or a variant of `hello-maven` |
-| 13 | Multi-module builds: Maven reactor, npm workspace | A demo each |
+| 13 | Multi-module builds: the Maven reactor has a development fixture and no demo; npm workspace has neither | A demo each |
 | 14 | Monorepo release and lifecycle on the lab forges | Release workflows for the example, then rows |
 | 15 | No-build release on Forgejo and GitLab | `hello-meta` workflows for both, then rows |
 | 16 | Mobile releases, and Android on Forgejo | A disposable signing setup; a runtime image with the Android SDK |

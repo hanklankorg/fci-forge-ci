@@ -252,23 +252,6 @@ func ImageFileSHA256(tb TB, target Target, repo, digest string, paths []string) 
 	return imageFileHashes(tb, stream, paths)
 }
 
-// ImageConfig independently reads the linux/amd64 image config selected by an
-// exact published image or index digest. The selected image's digest need not
-// equal an enclosing index digest.
-func ImageConfig(tb TB, target Target, repo, digest string) *v1.ConfigFile {
-	tb.Helper()
-
-	ctx, cancel := context.WithTimeout(Context(tb), timeoutScratch)
-	defer cancel()
-
-	config, err := publishedAMD64Image(ctx, tb, target, repo, digest).ConfigFile()
-	if err != nil {
-		tb.Fatalf("read exact published image config: %v", err)
-	}
-
-	return config
-}
-
 func publishedAMD64Image(ctx context.Context, tb TB, target Target, repo, digest string) v1.Image {
 	tb.Helper()
 	requireAccepted(tb, target)

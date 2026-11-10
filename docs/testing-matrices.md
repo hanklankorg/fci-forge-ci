@@ -147,7 +147,6 @@ Kept scenario lines, by lane:
 |---|---|---|
 | build-capability-gitlab | `TestGitLabRelease_BuildImageCapability` | 📝 |
 | harness-inputs-forgejo | `TestForgejoLayer_ConsumerTrial` | 📝 |
-| harness-inputs-forgejo | `TestForgejoLayer_ConsumerTrial` | 📝 |
 | harness-inputs-gitlab | `TestGitLabRelease_ConsumerBranchProtection` | 📝 |
 | harness-inputs-gitlab | `TestGitLabRelease_ConsumerTrial` | 📝 |
 | harness-inputs-gitlab | `TestGitLabRelease_RejectsPreseededProvenance` | 📝 |

@@ -28,7 +28,7 @@ type PreparedLane struct {
 var PreparedLanes = []PreparedLane{
 	{Name: "build-capability-gitlab", Forge: forgeGitLab, Scenarios: []string{"TestGitLabRelease_BuildImageCapability"}},
 	// A reviewed native checkout's pull request, then its release.
-	{Name: "harness-inputs-forgejo", Forge: forgeForgejo, Scenarios: []string{"TestForgejoLayer_ConsumerTrial", "TestForgejoLayer_ConsumerTrial"}},
+	{Name: "harness-inputs-forgejo", Forge: forgeForgejo, Scenarios: []string{"TestForgejoLayer_ConsumerTrial"}},
 	{Name: "harness-inputs-gitlab", Forge: forgeGitLab, Scenarios: []string{
 		"TestGitLabRelease_ConsumerBranchProtection", gitlabConsumerTrialTest, gitlabPreseededTest, gitlabRecoveryTest,
 	}},
