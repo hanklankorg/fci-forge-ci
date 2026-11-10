@@ -79,6 +79,18 @@ ignored local data does not enter the snapshot.
   declare and upload the completed hand-off. Preserve the write-once guard rather
   than deleting an earlier manifest to redeclare it.
 
+- A job that calls a reusable workflow caps what the called workflow's jobs
+  may ask, at every level, whatever the consumer granted at the top. GitHub
+  checks all of it before any job starts, a skipped call too, and ends the
+  run as `startup_failure` with no job, no log and no reason in the API.
+  Comparing the consumer's grant with everything the tree asks does not find
+  an inner call that grants too little:
+  `TestInternalCallersGrantWhatTheCalledWorkflowsAsk` checks each call.
+- A route counts as started only when a native run of it started. The hosted
+  pull-request route was refused at startup for every consumer while releases
+  and a fork pull request that calls a build directly passed; nothing had run
+  the route itself.
+
 Regressions: `test/forgejobehavior/snapshotsboms_test.go`; renderer archives are
 checksum-verified by `internal/app/toolchain/changelogrenderer.go`.
 
@@ -382,3 +394,33 @@ These are explicit follow-up scenarios, not passing coverage. Extend the existin
 | P1 | GitHub SARIF upload finishes processing and is queryable for the expected commit/category | Existing security-report upload scenario; optional upload success is insufficient |
 | P1 | Representative public/private PR, development, package and container-first runs share one final engine revision | Existing prepare/reuse batching; preserve revision-specific prior evidence |
 | P2 | Required legacy SBOM ZIP/GPG sidecars and Android AAB streaming-verifier compatibility | Consumer output parity and Android artifact inspectors |
+
+## 10. Keep what the tests prove when the tests change
+
+These come from moving the live scenarios and their lanes; they hold for any
+rewrite of a test, guard or harness.
+
+- Replace a list of cases by another only under a parity test that reads
+  both, and delete the old one after that test has failed on a deliberate
+  difference. A new table that merely passes proves nothing about the old one.
+- A rewritten guard keeps every assertion of the one it replaces, or names
+  the one it drops and why. That a test of the same name exists, or that the
+  new file is longer, is not evidence: six assertions were lost that way and
+  found only by reading the old and new line by line.
+- Show that a new or restored check can fail: break what it guards, see it
+  fail, restore, and confirm the tree is back. Confirm the break landed
+  before trusting the result.
+- Assert the refusal a user reads, not only its error class, where the text
+  is the contract. A check moved from a script into the engine takes its
+  message assertions with it.
+- Before blaming the environment for a native failure, run the control that
+  differs in that one respect. A private-repository failure put down to the
+  organization's budget failed the same way in a public repository.
+- A fix to a test oracle that stays on a side branch is a broken scenario on
+  every other branch. Integrate it or list it as open; do not leave it to be
+  rediscovered by a failing native run.
+- What a run proves is read from the run itself, the names and results of its
+  tests, not from the environment the launcher happened to see. One process
+  that runs many cases has no single header that describes them.
+- Fixtures and test data name no real host or downstream project. Use
+  `registry.invalid` and the shipped demos.
