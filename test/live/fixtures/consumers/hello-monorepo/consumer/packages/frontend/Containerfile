@@ -10,7 +10,7 @@ FROM gcr.io/distroless/nodejs24-debian13:nonroot@sha256:59c479c9b8c123e66047315c
 
 # The modes are set here, not taken from the build: GitLab's release build
 # packs and unpacks under umask 077, and the runtime user must read the files.
-COPY --chmod=0755 packages/frontend/dist/ /app/
+COPY --chmod=0755 dist/ /app/
 
 USER 65532:65532
 EXPOSE 8080
