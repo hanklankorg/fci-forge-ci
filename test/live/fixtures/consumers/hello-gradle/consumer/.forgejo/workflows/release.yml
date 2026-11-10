@@ -33,7 +33,7 @@
 #                                 containers/signer/Containerfile
 #   1111111111111111111111111111111111111111111111111111111111111111  output of `sha256sum cosign.pub` for your
 #                                 organization's Cosign public key
-#   PIN_JDK_IMAGE_DIGEST          sha256 digest of the image the build job
+#   PIN_MAVEN_IMAGE_DIGEST        sha256 digest of the image the build job
 #                                 runs in: bash, git, curl and the JDK your
 #                                 build targets. The Temurin JDK image has no
 #                                 git or curl; the official Maven image built

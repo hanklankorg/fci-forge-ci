@@ -52,7 +52,7 @@ var exampleDemoValues = strings.NewReplacer(
 	"ghcr.io/itiquette/nanolinter:kotlin@sha256:PIN_DIGEST", "codefloe.com/itiquette/nanolinter:kotlin@sha256:"+unrunDigest,
 	"ghcr.io/itiquette/nanolinter:core@sha256:PIN_DIGEST", "codefloe.com/itiquette/nanolinter:core@sha256:"+unrunDigest,
 	// The Gradle release builds in the JDK image the Maven demos pin.
-	"docker.io/library/maven:3.9-eclipse-temurin-25@sha256:PIN_JDK_IMAGE_DIGEST", "docker.io/library/maven:3.9-eclipse-temurin-25@sha256:96f175708f766ea049ab6c794a85335d238894c75f8eb364bddd98086a5b7cfd",
+	"docker.io/library/maven:3.9-eclipse-temurin-25@sha256:PIN_MAVEN_IMAGE_DIGEST", "docker.io/library/maven:3.9-eclipse-temurin-25@sha256:96f175708f766ea049ab6c794a85335d238894c75f8eb364bddd98086a5b7cfd",
 	"registry.example.com/team/check-tools@sha256:PIN_IMAGE_DIGEST", gitlabJobPlaceholder,
 	// The monorepo checks and builds each part in its runtime image: Java in
 	// the trial's job image, Node in a further one.
