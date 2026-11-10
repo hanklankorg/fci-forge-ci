@@ -5,7 +5,9 @@
 # out, each a native signed release of a shipped demo.
 #
 # Two releases in a row (next-version=): the second starts from the first's
-# release commit, so a stale version, lockfile or changelog shows. Every
+# release commit, so a version file, lockfile or changelog a bump leaves
+# untouched shows. The scope check reads which files changed, not the version
+# they hold; the npm and Cargo releases read that. Every
 # release is held to its commit's scope: the changelog, which names the
 # version, and the version files of the bump, a lockfile with its manifest.
 # Between them the lines run both changelog renderers and each version-file
