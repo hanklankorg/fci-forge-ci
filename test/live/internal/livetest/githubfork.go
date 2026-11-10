@@ -67,8 +67,11 @@ func (trial *GitHubTrial) ForkConsumer(repo string) string {
 func (trial *GitHubTrial) OpenForkPullRequest(repo, fork, branch string) int {
 	trial.tb.Helper()
 
+	// Both repositories are the organization's, so the owner in head names
+	// neither: GitHub takes the head repository by its full name, and refused
+	// the bare name as an invalid head (hosted trial, 2026-11-10).
 	pull, _, err := trial.api.PullRequests.Create(trial.tb.Context(), trial.org, repo, github.CreatePullRequest{
-		Title: new("Hosted trial: fork pull request"), Head: trial.org + ":" + branch, HeadRepo: new(fork), Base: defaultBranch,
+		Title: new("Hosted trial: fork pull request"), Head: trial.org + ":" + branch, HeadRepo: new(trial.org + "/" + fork), Base: defaultBranch,
 		Body: new("Forge Lab hosted consumer trial. Disposable."),
 	})
 	if err != nil {
