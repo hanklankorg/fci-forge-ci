@@ -107,9 +107,18 @@ fi
 
 [[ "${ARTIFACT_METADATA:-}" == "$RUNNER_TEMP/forge-ci-canonical-metadata.json" && -f "$ARTIFACT_METADATA" && ! -L "$ARTIFACT_METADATA" ]] || fail 'native artifact metadata missing'
 [[ "$(stat -c %s -- "$ARTIFACT_METADATA")" -le 65536 ]] || fail 'oversized metadata'
+# GitHub records a pull_request run under the pull request's head commit;
+# GITHUB_SHA names that run's temporary merge commit instead.
+run_head_sha=$GITHUB_SHA
+if [[ "${GITHUB_EVENT_NAME:-}" == pull_request ]]; then
+  event=${GITHUB_EVENT_PATH:-}
+  [[ "$event" == /* && -f "$event" && ! -L "$event" ]] || fail 'native pull request event missing'
+  run_head_sha=$(jq -er '.pull_request.head.sha | strings' "$event") || fail 'pull request head commit missing'
+  [[ "$run_head_sha" =~ ^[0-9a-f]{40}$ ]] || fail 'pull request head commit missing'
+fi
 # Native GitHub metadata only; no new manifest/trust schema or transport client.
 jq -e --arg id "$PRODUCER_ARTIFACT_ID" --arg name "$artifact_name" \
-  --arg run "$GITHUB_RUN_ID" --arg repo "$GITHUB_REPOSITORY_ID" --arg sha "$GITHUB_SHA" '
+  --arg run "$GITHUB_RUN_ID" --arg repo "$GITHUB_REPOSITORY_ID" --arg sha "$run_head_sha" '
 	type == "object" and (.id | tostring) == $id and .name == $name and .expired == false
 	and (.workflow_run.id | tostring) == $run and (.workflow_run.repository_id | tostring) == $repo
 	and .workflow_run.head_sha == $sha

@@ -178,6 +178,31 @@ func (fixture *canonicalFixture) run(t *testing.T, mode string) ([]byte, error) 
 	return out, runErr
 }
 
+// GitHub files a pull_request run under the pull request's head commit, not
+// under the merge commit GITHUB_SHA names.
+func TestCanonicalDeliveryAdmitsAPullRequestRunByItsHeadCommit(t *testing.T) {
+	head := strings.Repeat("c", 40)
+
+	for recorded, admitted := range map[string]bool{head: true, strings.Repeat("b", 40): false} {
+		fixture := newCanonicalFixture(t)
+		event := filepath.Join(fixture.root, "event.json")
+		canonicalWrite(t, event, `{"pull_request":{"head":{"sha":"`+head+`"}}}`, 0o600)
+
+		fixture.env["GITHUB_EVENT_NAME"] = "pull_request"
+		fixture.env["GITHUB_EVENT_PATH"] = event
+		fixture.writeMetadata(t, func(m map[string]any) { m["workflow_run"].(map[string]any)["head_sha"] = recorded })
+
+		if out, err := fixture.run(t, "prepare"); err != nil {
+			t.Fatalf("prepare: %v\n%s", err, out)
+		}
+
+		out, err := fixture.run(t, "admit")
+		if admitted != (err == nil) {
+			t.Fatalf("run recorded under %s: admitted=%v, want %v\n%s", recorded, err == nil, admitted, out)
+		}
+	}
+}
+
 func TestCanonicalDeliveryReceiver(t *testing.T) {
 	for _, scenario := range []string{"verified", "foreign-id", "foreign-run", "foreign-repository", "foreign-source", "stale-attempt", "wrong-producer-ref", "wrong-checkout", "wrong-origin", "wrong-hash", "missing", "symlink", "sidecar", "nested", "missing-other-arch", "wrong-other-hash", "oversized-zip", "oversized-file", "modified-helper", "existing-destination"} {
 		t.Run(scenario, func(t *testing.T) {
