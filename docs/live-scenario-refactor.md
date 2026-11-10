@@ -295,7 +295,7 @@ and [dated parity evidence](testing-parity.md) retain their original status.
 
 | Existing family | Retained source and gap/acceptance boundary |
 |---|---|
-| Project kinds, routes, flows and axes (matrices 1/2) | All twelve consumer declarations, existing cases/admission and native entrypoints above; no dedicated Go/Rust library downstream-publication fixture/capability, npm workspace or Maven reactor row. Actual Maven library adapter/oracle is distinct from plain Maven app |
+| Project kinds, routes, flows and axes (matrices 1/2) | All twelve consumer declarations, existing cases/admission and native entrypoints above; Go module, Gradle library and Maven reactor consumers have scenarios (Phase 6 dispositions below); Rust library publishing and npm workspaces are not offered by the product. Actual Maven library adapter/oracle is distinct from plain Maven app |
 | PAR-ART, PAR-RUN, PAR-CHK, PAR-PKG | Conformance artifact/inrunner/checkout/forgepackages/mavenpublications tests; native byte handoff, output consumption and registry resolution are not rendered YAML or tarball-release proof |
 | PAR-SIGN and signing profiles | Conformance sign/keyless/basesign, release bundle checks and hosted signing/profile/boundary tests; key/GPG/keyless/KMS/distro/attestation methods remain distinct, no-Rekor lab policy retained; optional readbacks are not universally asserted |
 | PAR-REG, PAR-REL | Registry/ledger/rollback/release/assetretention plus release-image owners; preserve candidate journal, prior-tag restoration, exact asset subjects/inventory and no-write negatives, not just lifecycle success |
@@ -314,6 +314,54 @@ marks can refer to different milestones; resolve their evidence coordinates at
 the existing owners rather than promoting or erasing either here. R/G cache
 source/run linkage and independent cleanup-absence receipts remain explicit
 evidence limitations. No current-tree full lifecycle PASS is established by this page.
+
+## Phase 6 coverage dispositions (2026-11-10)
+
+Each coverage group of the plan's Phase 6 list has one of four outcomes:
+**covered** by a maintained scenario that passed natively, with its run;
+**product-unsupported**, where the product offers no such capability;
+**not possible in this lab**; or **needs external approval**. A group can
+hold more than one. Runs are of the disposable local lab (account `forgeci`,
+Compose road) and of the hosted test organization, from the local commits of
+`refactor/live-phase6-coverage-20261109`; nothing was pushed. Evidence is
+under `~/.local/state/forge-ci/live-runs/` by start time.
+
+| Group | Outcome |
+|---|---|
+| Private dependency acquisition, read principal, fork refusal | **Covered:** a fork pull request against a build that enables private dependencies is refused in the build job's first workflow step, before checkout (`head=fork`, hosted run 42730498257); `test/workflowguard` holds the same order in the three build workflows offline. A fresh consumer reads a published package with the forge's own job credential and, for Maven, anonymously (`TestInRunner_ForgePackages_*`, Forgejo and GitLab). **Open:** no native build has yet fetched a private npm, Maven or Gradle dependency through `private-dependencies`; it needs a private package in GitHub Packages. Private fork pull requests are not covered: GitHub runs them only where the organization's policy sends them. |
+| GitHub SARIF ingestion | **Covered** on a public repository: the product's upload is read back as one analysis and one alert, and an upload with a rejected credential is denied and leaves none (`TestGitHubSecurity_SARIFUploadAPI`). **Not possible** on a private repository of the test organization: it has no GitHub Advanced Security. The attestation API has no hosted check. |
+| SBOM policy presence and absence | **Covered:** `release.sboms: none` offers no SBOM bundle (hosted run 42732438408) and every other GitHub release trial must offer exactly one; a Forgejo snapshot's retained evidence holds the image SBOM exactly when the plan generates one (`SnapshotEvidenceFindings`, in every Forgejo snapshot and lifecycle; absent in run 632). **Product-unsupported:** an image SBOM for a container-first producer. |
+| Adverse report-only and enforcing pairs | **Covered:** application-test findings under both policies and a compile error as the operational control, in the pull request and in the release, with nothing published when blocked (`TestForgejoLayer_ConsumerPullRequest`, `TestForgejoLayer_MinimalBinaryRelease`, runs 590 to 609 and the rerun of 2026-11-10); a lint finding and a lint tool that is absent. A job the gate withholds is judged by never having been taken by a runner: Forgejo lists it as blocked in one run and skipped in the next. **Not possible in this lab:** a deterministic vulnerability finding, since every scanner needs a network advisory database. Reproducibility enforcement on Forgejo stays a refusal. |
+| Release-image builds, shapes and promotion | **Covered:** a release's images are read back from the registry with signature, SBOM and provenance, and an image that copies a released file holds its bytes (`release-variants-forgejo.cases`, runs 588 and 589). **Product-unsupported** on Forgejo: build secrets, a custom image name and extraction. **Open:** promotion to a second registry has no native run. |
+| Signing methods and trust | **Covered:** the release commit and tag are verified against the expected key and must fail against another (`releaseSignerFindings`); a request signed by an untrusted or another key is refused before any effect (`TestForgejoLayer_PrepareReleaseRefusesAnUntrustedRequest`, runs 561 to 564); every GitHub release trial verifies the Git signatures of commit and tag by kind. **Needs external approval:** cloud KMS and any write to a public transparency log. The two new GitHub variants use the GPG profile for that reason. |
+| Version, changelog and consecutive releases | **Covered:** both changelog renderers and each version-file family, two releases in a row, each held to its commit's scope (runs 580 to 587); a release without a changelog prepares no commit and tags the request commit (hosted run 42735239830); the changelog release from the CLI (runs 550 and 551). **Product finding, open:** a dry run of `version commit-changelog-release` still reaches the remote over SSH. |
+| Package destinations and fresh use | **Covered:** npm and Maven on Forgejo and GitLab and a Gradle library on Forgejo reach a fresh consumer; a second publish of changed bytes is refused for npm on both and for Maven on Forgejo. GitLab's Maven registry accepts a duplicate by its own policy. **Needs external approval:** Maven Central, the app stores and npmjs. |
+| Cargo artifact-first, artifacts in images, auto-derived root, meta | **Covered:** `TestForgejoLayer_CargoBinaryRelease`, public and private, held to the bumped manifest, lockfile and compiled-in version; the Go service image carries the released binaries; the auto-derived root manifest and the ambiguous-root refusal; the meta release case. |
+| Library producers and consumers | **Covered:** the Gradle library and the Maven reactor, whose development build publishes its modules (run 648). **Not possible on the Compose road:** the Go module consumer needs a forge host without a port and runs on k3s only; it is written and skips with that reason. **Product-unsupported:** Rust library publishing and npm workspaces. |
+| Mobile, full graph, protected and classified | **Held** as before, with their own prerequisites; nothing here changes them. |
+| Cleanup absence | **Covered:** every scratch teardown records what it read as absent (`FORGE_CI_LIVE_CLEANUP`); a listing that could not be read is recorded as unverified, never as absent. GitLab records the repository only. |
+
+Lanes run from the prepared campaign of `b81764ae` and, after the fixes
+below, from the commits that carry them: GitLab lifecycle three of three
+(pipelines 993 to 1012) and snapshot three of three (1020, 1023, 1029);
+Forgejo release variants six of six (runs 580 to 589). On Forgejo at
+`8fb1aa9f`, one cell at a time: the Cargo workspace snapshot (run 631), the
+Maven service snapshot under a declaration without an image SBOM (632), the
+pull request, development and release lifecycle of the Maven service with
+buildah (633 to 635) and with kaniko (636 to 638), the Cargo container (639
+to 641), the npm service (642 to 644) and the Go service (645 to 647), and
+the Maven reactor's development build (648).
+
+What the native runs corrected, each at its owner in the tests or fixtures:
+the GitLab snapshot scenario still passed the runner input the product had
+renamed; the monorepo frontend's Containerfile copied from the package
+directory while the snapshot lays an npm package at the context root; the
+snapshot evidence oracle compared a publication record with a bare tag; the
+hosted trial made its GPG key after the commit a no-changelog release signs
+at; a same-organization fork pull request needs the fork's full name; and the
+evidence step asked Forgejo for the log of a job no runner took. A hosted
+consumer trial needs a classic token as its session credential: a
+fine-grained one cannot read the packages API.
 
 ## Bounded native acceptance: failed qualification, no retry
 
