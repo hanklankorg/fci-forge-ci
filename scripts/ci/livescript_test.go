@@ -57,6 +57,8 @@ run)
     esac
   elif [[ "${3:-}" == runner-arch ]]; then
     printf '%s\n' arm64
+  elif [[ "${3:-}" == provider-account ]]; then
+    printf '%s\n' "${FAKE_LAB_ACCOUNT:-forgeci}"
   else
     printf '%s\n' "$FAKE_PREFLIGHT_REPORT"
   fi
@@ -746,15 +748,16 @@ func TestRunLiveTests_ProviderLanesOverlapAndConflictingScopesRefuse(t *testing.
 		t.Fatalf("first provider lane did not reach its held scenario: %v\n%s\n%s", err, out.String(), errOut.String())
 	}
 
-	for _, scope := range []string{"gitlab", "forgejo", "all"} {
-		second := newLiveRun(t, "FORGE_CI_LIVE_PROVIDER="+scope, "FAKE_GO_TEST_OUTPUT="+fakeSuiteOutput,
+	// Another provider overlaps, and so does the same provider as another
+	// lab account; the same account and an all-provider run are refused.
+	for _, lane := range []struct {
+		scope, account string
+		want           int
+	}{{"gitlab", "forgeci", 0}, {"forgejo", "forgeci-2", 0}, {"forgejo", "forgeci", 2}, {"all", "forgeci", 2}} {
+		scope, want := lane.scope, lane.want
+		second := newLiveRun(t, "FORGE_CI_LIVE_PROVIDER="+scope, "FAKE_LAB_ACCOUNT="+lane.account, "FAKE_GO_TEST_OUTPUT="+fakeSuiteOutput,
 			"XDG_STATE_HOME="+first.stateHome)
 		stdout, stderr, status := second.exec(t, "focused", "TestFake")
-
-		want := 2
-		if scope == "gitlab" {
-			want = 0
-		}
 
 		if status != want {
 			t.Fatalf("scope %s while Forgejo is active: status=%d, want=%d\n%s\n%s", scope, status, want, stdout, stderr)
