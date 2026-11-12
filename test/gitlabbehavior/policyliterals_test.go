@@ -1,10 +1,9 @@
-// SPDX-FileCopyrightText: The Forge CI Authors
+// SPDX-FileCopyrightText: 2026 Digg - Agency for Digital Government
 // SPDX-License-Identifier: EUPL-1.2 OR GPL-3.0-or-later
 
 package gitlabbehavior
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"maps"
@@ -15,7 +14,6 @@ import (
 	"slices"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/diggsweden/forge-ci/internal/testutil/gitlabrender"
 	"github.com/diggsweden/forge-ci/internal/testutil/reporoot"
@@ -87,6 +85,16 @@ func TestGitLabJobsTakeThePolicyFromTheirLiteralInputs(t *testing.T) {
 			wantError: "GIT_SUBMODULE_STRATEGY 'recursive'",
 		},
 		{
+			name: "release start with a variable signer tag", path: "templates/release-jobs.yml", script: releaseRequestStart,
+			given: map[string]any{"job-user": "65532:65532", "engine-sha": pin, "engine-reference": pin, "signer-runner-tags": []any{"release", "$SIGNER_RUNNER"}},
+			stop:  "object_format=sha1", env: releaseEnv, wantError: "signer-runner-tags names a $variable",
+		},
+		{
+			name: "release start without amd64 build tags", path: "templates/release-jobs.yml", script: releaseRequestStart,
+			given: map[string]any{"job-user": "65532:65532", "engine-sha": pin, "engine-reference": pin, "build-runner-tags-linux-amd64": []any{}},
+			stop:  "object_format=sha1", env: releaseEnv, wantError: "build-runner-tags-linux-amd64 is empty",
+		},
+		{
 			name: "snapshot start", path: "templates/snapshot-image-jobs.yml", script: snapshotStart,
 			given: map[string]any{"image-builder": "kaniko", "builder-job-image": kaniko}, stop: `git init --quiet "${SNAPSHOT_HELPERS}"`,
 			env: snapshotEnv, derived: map[string]string{
@@ -111,7 +119,7 @@ func TestGitLabJobsTakeThePolicyFromTheirLiteralInputs(t *testing.T) {
 		},
 		{
 			name: "snapshot plan", path: "templates/snapshot-images.yml", script: snapshotPlanPolicy,
-			given: map[string]any{"build-runner-tags-arm64": []any{"native-arm64"}},
+			given: map[string]any{"build-runner-tags-linux-arm64": []any{"native-arm64"}},
 		},
 		{
 			name: "check start", path: "templates/check.yml", script: checkStart, given: map[string]any{"job-user": ""},
@@ -219,8 +227,7 @@ func runPolicyScript(t *testing.T, script string, env []string) (string, error) 
 
 	dir := t.TempDir()
 
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-	defer cancel()
+	ctx := commandContext(t)
 
 	command := exec.CommandContext(ctx, componentBash(t), "--noprofile", "--norc", "-c", script)
 	command.Dir = dir

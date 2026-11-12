@@ -1,14 +1,12 @@
-// SPDX-FileCopyrightText: The Forge CI Authors
+// SPDX-FileCopyrightText: 2026 Digg - Agency for Digital Government
 // SPDX-License-Identifier: EUPL-1.2 OR GPL-3.0-or-later
 
 package gitlabbehavior
 
 import (
-	"context"
 	"os/exec"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/diggsweden/forge-ci/internal/testutil/gitlabrender"
 )
@@ -53,8 +51,8 @@ func TestReleaseJobsHoldTheirUserToTheirImage(t *testing.T) {
 		"a variable over job-user":        {job: "Images: plan", input: "65532:65532", variable: "0", uid: "0", gid: "0", wantError: "RC_JOB_USER is '0'"},
 		"a job-image job named a signer":  {job: "Check: consumer checks", spoof: "Sign: files and images", input: "65532:65532", variable: "0", uid: "0", gid: "0", wantError: "RC_JOB_USER is '0'"},
 		"a job-image job named the build": {job: "Images: plan", spoof: "Build: release files", input: "65532:65532", uid: "0", gid: "0", wantError: "RC_JOB_USER is '', not '65532:65532'"},
-		"the build as its image's":        {job: "Build: release files", spoof: "Check: release request", input: "65532:65532", uid: "0", gid: "0"},
-		"a variable on the build":         {job: "Build: release files", input: "65532:65532", variable: "65532:65532", uid: "65532", gid: "65532", wantError: "RC_JOB_USER is '65532:65532', not ''"},
+		"the build as its image's":        {job: "Build: java", spoof: "Check: release request", input: "65532:65532", uid: "0", gid: "0"},
+		"a variable on the build":         {job: "Build: java", input: "65532:65532", variable: "65532:65532", uid: "65532", gid: "65532", wantError: "RC_JOB_USER is '65532:65532', not ''"},
 		"a variable on an image build":    {job: "Images: build arm64", variable: "1000", uid: "1000", gid: "1000", wantError: "RC_JOB_USER is '1000', not ''"},
 		"a signer job as its image's":     {job: "Sign: files and images", input: "65532:65532", uid: "1000", gid: "1000"},
 		"a variable on a signer job":      {job: "Publish: release", spoof: "Prepare: changelog", input: "65532:65532", variable: "0", uid: "0", gid: "0", wantError: "RC_JOB_USER is '0', not ''"},
@@ -121,8 +119,7 @@ func runJobUserCheck(t *testing.T, script string, tc jobUserCase, pin ...string)
 
 	replacements := append([]string{"$[[ inputs.job-user ]]", tc.input}, pin...)
 
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-	defer cancel()
+	ctx := commandContext(t)
 
 	command := exec.CommandContext(ctx, componentBash(t), "--noprofile", "--norc", "-c", fakeID+strings.NewReplacer(replacements...).Replace(script))
 	command.Dir = dir

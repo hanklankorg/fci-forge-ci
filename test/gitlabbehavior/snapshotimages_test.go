@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: The Forge CI Authors
+// SPDX-FileCopyrightText: 2026 Digg - Agency for Digital Government
 // SPDX-License-Identifier: EUPL-1.2 OR GPL-3.0-or-later
 
 package gitlabbehavior
@@ -9,9 +9,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
+	"github.com/diggsweden/forge-ci/internal/domain/provider"
+	"github.com/diggsweden/forge-ci/internal/domain/runners"
+	"github.com/diggsweden/forge-ci/internal/testutil/gitlabrender"
 	"github.com/diggsweden/forge-ci/internal/testutil/reporoot"
 	"github.com/diggsweden/forge-ci/internal/testutil/testfs"
 	"gopkg.in/yaml.v3"
@@ -25,10 +29,14 @@ func generateSnapshot(t *testing.T, plan string, extra ...string) (map[string]an
 		t.Fatal(err)
 	}
 
-	cmd := exec.CommandContext(t.Context(), componentBash(t), "--noprofile", "--norc", "-c", `set -euo pipefail; source "$1"; snapshot_gitlab_generate plan.json child.json`, "snapshot", filepath.Join(reporoot.Path(t), ".gitlab/bin/snapshot-images.sh"))
+	// Both scripts, as the component's job sources them: snapshot_engine is the
+	// shared wrapper's, which passes the administrator settings to every
+	// engine call, and the engine binary is the seam, as in the job.
+	cmd := exec.CommandContext(t.Context(), componentBash(t), "--noprofile", "--norc", "-c", `set -euo pipefail; source "$1/.forgejo/bin/snapshot-images.sh"; source "$1/.gitlab/bin/snapshot-images.sh"; run_forge_ci() { OWNER_CLI_HELPER=1 "$OWNER_CLI_BINARY" -test.run='^TestOwnerCLI$' -- "$@"; }; snapshot_gitlab_generate plan.json child.json`, "snapshot", reporoot.Path(t))
 	cmd.Dir = dir
 	cmd.Env = append([]string{
 		"PATH=" + os.Getenv("PATH"), "HOME=" + dir,
+		"OWNER_CLI_BINARY=" + os.Args[0],
 		"CI_PIPELINE_ID=42", "RC_SERVER_URL=https://gitlab.invalid", "RC_REGISTRY=registry.gitlab.invalid", "SNAPSHOT_LAYER_PROJECT=org/engine", "SNAPSHOT_ENGINE_SHA=" + strings.Repeat("a", 40),
 		"SNAPSHOT_JOB_IMAGE=registry.example/tools@sha256:" + strings.Repeat("b", 64),
 		"SNAPSHOT_BUILD_IMAGE=registry.example/build@sha256:" + strings.Repeat("c", 64),
@@ -125,6 +133,11 @@ func TestSnapshotNativeEmptyPlanStillCollectsAndMissingArmRunnerRefuses(t *testi
 	_, output, err = generateSnapshot(t, `{"builds":[{"name":"api","arch":"arm64"}],"images":[{"name":"api"}]}`, "SNAPSHOT_ARM64_TAGS=[]")
 	if err == nil || !strings.Contains(output, "native arm64 runner") {
 		t.Fatalf("missing arm runner must refuse: %v\n%s", err, output)
+	}
+
+	_, output, err = generateSnapshot(t, `{"builds":[{"name":"api","arch":"amd64"}],"images":[{"name":"api"}]}`, "SNAPSHOT_AMD64_TAGS=[]")
+	if err == nil || !strings.Contains(output, "build-runner-tags-linux-amd64") {
+		t.Fatalf("an untagged amd64 build must refuse: %v\n%s", err, output)
 	}
 }
 
@@ -287,6 +300,87 @@ func TestSnapshotGitLabPolicyDoesNotEnterReleasePath(t *testing.T) {
 	}
 }
 
+// publish-files reaches the planner from the component's input, off by
+// default; the generated files job extends a template with no environment,
+// so no protected registry credential, builds without the job token and
+// hands its bundle over as the job's own artifact.
+func TestSnapshotGitLabFilesAreForwardedBuiltAndKeptByTheJob(t *testing.T) {
+	decoder := yaml.NewDecoder(bytes.NewReader(reporoot.ReadFile(t, "templates/snapshot-images.yml")))
+
+	var spec struct {
+		Spec struct {
+			Inputs map[string]struct {
+				Default any `yaml:"default"`
+			} `yaml:"inputs"`
+		} `yaml:"spec"`
+	}
+	if err := decoder.Decode(&spec); err != nil {
+		t.Fatal(err)
+	}
+
+	if spec.Spec.Inputs["publish-files"].Default != false || spec.Spec.Inputs["image-repository"].Default != "" {
+		t.Fatal("snapshot files must default off, and a files-only project names no image repository")
+	}
+
+	var jobs map[string]any
+	if err := decoder.Decode(&jobs); err != nil {
+		t.Fatal(err)
+	}
+
+	script, err := yaml.Marshal(jobs["Snapshot: plan"].(map[string]any)["script"])
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !strings.Contains(string(script), "SNAPSHOT_PUBLISH_FILES='$[[ inputs.publish-files ]]'") {
+		t.Fatal("the plan job must hand publish-files to the planner")
+	}
+
+	// The component's spec document, then its jobs.
+	templates := yaml.NewDecoder(bytes.NewReader(reporoot.ReadFile(t, "templates/snapshot-image-jobs.yml")))
+
+	var hidden map[string]any
+	if err := templates.Decode(&hidden); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := templates.Decode(&hidden); err != nil {
+		t.Fatal(err)
+	}
+
+	files, found := hidden[".forge-ci-snapshot-files"].(map[string]any)
+	if !found || files["extends"] != ".forge-ci-snapshot" || files["environment"] != nil || files["variables"] != nil {
+		t.Fatalf("the files template must be the plain snapshot job, with no environment of its own: %v", files)
+	}
+
+	dir := testfs.NewReal(t).Root
+	if err := os.Mkdir(filepath.Join(dir, "snapshot-source"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	program := `set -euo pipefail
+source "$1/.forgejo/bin/snapshot-images.sh"
+source "$1/.gitlab/bin/snapshot-images.sh"
+snapshot_gitlab_checkout() { :; }
+_forge_ci_arch() { HELPERS_ENGINE_ARCH=amd64; }
+snapshot_engine() {
+  test "$*" = "container snapshot-images build-files --plan ../snapshot-plan.json --name cli --output-dir snapshot-files"
+  test -z "${CI_JOB_TOKEN:-}${CI_REGISTRY_PASSWORD:-}${SNAPSHOT_REGISTRY_PASSWORD:-}${RELEASE_COSIGN_PRIVATE_KEY:-}"
+  mkdir -p snapshot-files/cli && printf built > snapshot-files/cli/cli
+}
+snapshot_gitlab_files cli
+test "$(cat snapshot-files/cli/cli)" = built
+test ! -e snapshot-source/snapshot-files
+`
+	cmd := exec.CommandContext(t.Context(), componentBash(t), "--noprofile", "--norc", "-c", program, "snapshot", reporoot.Path(t))
+	cmd.Dir = dir
+	cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + dir, "CI_JOB_TOKEN=private", "CI_REGISTRY_PASSWORD=private", "SNAPSHOT_REGISTRY_PASSWORD=private", "RELEASE_COSIGN_PRIVATE_KEY=private"}
+
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("files job: %v\n%s", err, output)
+	}
+}
+
 func TestSnapshotCheckoutUsesPinnedGitLabEventPolicyBeforeTransport(t *testing.T) {
 	for _, refuse := range []string{"false", "true"} {
 		t.Run(refuse, func(t *testing.T) {
@@ -363,5 +457,66 @@ func TestSnapshotBuildHandsOffItsOwnReadableLayouts(t *testing.T) {
 			requireMode(t, filepath.Join(dir, "snapshot-layouts/api-arch-amd64"), 0o755)
 			requireMode(t, filepath.Join(dir, "snapshot-layouts/api-arch-amd64/api-amd64.json"), 0o644)
 		})
+	}
+}
+
+// The snapshot plan admits its builds against the policy's runner tags: each
+// runner input of the component reaches the planner, as the policy gave it.
+func TestSnapshotGitLabPlanPassesEveryRunnerInput(t *testing.T) {
+	t.Parallel()
+
+	known, err := runners.Names(provider.ForgeGitLab)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	given := map[string]any{}
+	want := map[string]bool{}
+
+	for name := range gitlabrender.InputSpec(t, "templates/snapshot-images.yml") {
+		if !strings.Contains(name, "runner") {
+			continue
+		}
+
+		if !slices.Contains(known, name) {
+			t.Fatalf("%s is not a GitLab runner input", name)
+		}
+
+		value := []any{name, "native=pool"}
+		given[name] = value
+
+		encoded, err := json.Marshal(value)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		want[name+"="+string(encoded)] = true
+	}
+
+	script := yamlStrings(releaseDocumentBody(t, "templates/snapshot-images.yml")["Snapshot: plan"].(map[string]any)["script"])
+	body := `jq() { :; }; snapshot_gitlab_generate() { :; }; snapshot_plan() { printf '%s\0' "$@"; }` + "\n" +
+		gitlabrender.Script(t, "templates/snapshot-images.yml", strings.Join(script, "\n"), given)
+
+	out, err := exec.CommandContext(t.Context(), componentBash(t), "--noprofile", "--norc", "-eu", "-c", body).Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	args := strings.Split(strings.TrimSuffix(string(out), "\x00"), "\x00")
+	if len(args) == 0 || args[0] != "" {
+		t.Fatalf("the plan is not the job's own: %q", args)
+	}
+
+	for i := 1; i < len(args); i++ {
+		if args[i] != "--runner-input" || i+1 == len(args) || !want[args[i+1]] {
+			t.Fatalf("unexpected planner argument %q in %q", args[i], args)
+		}
+
+		delete(want, args[i+1])
+		i++
+	}
+
+	if len(want) != 0 {
+		t.Fatalf("runner inputs omitted from the plan: %v", want)
 	}
 }

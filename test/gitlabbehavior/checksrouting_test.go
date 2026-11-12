@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: The Forge CI Authors
+// SPDX-FileCopyrightText: 2026 Digg - Agency for Digital Government
 // SPDX-License-Identifier: EUPL-1.2 OR GPL-3.0-or-later
 
 package gitlabbehavior
@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -68,40 +69,65 @@ func TestReleaseChecksRoutingAndPreparationBarrier(t *testing.T) {
 		t.Fatalf("authorization must stay restricted and execute no consumer commands: %+v", auth)
 	}
 
-	if !reflect.DeepEqual(auth.Needs, []any{"Check: signing access", "Check: publishing access", "Check: registry access"}) {
+	if !reflect.DeepEqual(auth.Needs, []any{"Check: signing access", "Check: publishing access", map[string]any{"job": "Check: registry access", "optional": true}}) {
 		t.Fatal("authorization bypasses access preflights")
 	}
 
-	if checks.Extends != ".forge-ci-release" || checks.Stage != "check" || checks.Tags != "$[[ inputs.checks-runner-tags ]]" ||
+	if checks.Extends != ".forge-ci-release" || checks.Stage != "check" || checks.Tags != "$[[ inputs.build-runner-tags-linux-amd64 ]]" ||
 		!reflect.DeepEqual(checks.Needs, []any{map[string]any{"job": "Check: release request", "artifacts": false}}) ||
 		!reflect.DeepEqual(checks.Script, []string{"rc_request_checkout", "$[[ inputs.checks ]]"}) || checks.Environment != nil || len(checks.Rules) != 0 || checks.When != "" {
 		t.Fatalf("consumer checks lost authorization, fresh revalidation, or secret isolation: %+v", checks)
 	}
 
-	for _, name := range []string{"Prepare: changelog", "Prepare: version"} {
-		if !reflect.DeepEqual(jobs[name].Needs, []any{"Check: consumer checks"}) {
-			t.Fatalf("%s can bypass successful checks: %+v", name, jobs[name])
-		}
+	if !reflect.DeepEqual(jobs["Prepare: changelog"].Needs, []any{"Check: consumer checks"}) {
+		t.Fatalf("the changelog can bypass successful checks: %+v", jobs["Prepare: changelog"])
 	}
 
-	prepare := jobs["Prepare: release commit and tag"]
-	if !reflect.DeepEqual(prepare.Needs, []any{
+	// The plan's version jobs, whichever it names, wait for the checks and
+	// carry no rule of their own: "Release: plan" decides that they exist.
+	version := jobs[".forge-ci-release-version"]
+	if !reflect.DeepEqual(version.Needs, []any{
+		map[string]any{"job": "Check: consumer checks", "artifacts": false},
 		map[string]any{"job": "Prepare: changelog", "artifacts": true},
-		map[string]any{"job": "Prepare: version", "artifacts": true, "optional": true},
-	}) {
+	}) || len(version.Rules) != 0 {
+		t.Fatalf("a version job can bypass successful checks: %+v", version)
+	}
+
+	families := map[string][]string{"version": {"java", "node", "rust"}, "build": {"java", "node", "go", "rust", "android"}}
+
+	prepareNeeds := make([]any, 0, 1+len(families["version"]))
+	prepareNeeds = append(prepareNeeds, map[string]any{"job": "Prepare: changelog", "artifacts": true})
+
+	for _, family := range families["version"] {
+		prepareNeeds = append(prepareNeeds, map[string]any{"job": "Prepare: version " + family, "artifacts": true, "optional": true})
+	}
+
+	if prepare := jobs["Prepare: release commit and tag"]; !reflect.DeepEqual(prepare.Needs, prepareNeeds) {
 		t.Fatalf("release preparation lost required changelog or optional version barrier: %+v", prepare)
 	}
 
-	if !reflect.DeepEqual(jobs["Prepare: version"].Rules, []any{map[string]any{"if": `"$[[ inputs.version-bump ]]" != ""`}}) {
-		t.Fatal("version bump must remain optional without weakening the checks barrier")
+	if family := jobs[".forge-ci-release-build-family"]; !reflect.DeepEqual(family.Needs, []any{
+		map[string]any{"job": "Prepare: release commit and tag", "artifacts": false},
+	}) || family.Tags != "$[[ inputs.build-runner-tags-linux-amd64 ]]" || len(family.Rules) != 0 {
+		t.Fatalf("a family build bypasses gated release preparation: %+v", family)
 	}
 
-	if !reflect.DeepEqual(jobs["Build: release files"].Needs, []any{
+	buildNeeds := make([]any, 0, 3+len(families["build"]))
+	buildNeeds = append(buildNeeds,
 		map[string]any{"job": "Prepare: release commit and tag", "artifacts": false},
 		map[string]any{"job": "Build: export amd64", "artifacts": true, "optional": true},
 		map[string]any{"job": "Build: export arm64", "artifacts": true, "optional": true},
-	}) {
-		t.Fatal("build bypasses gated release preparation")
+	)
+
+	for _, family := range families["build"] {
+		buildNeeds = append(buildNeeds, map[string]any{"job": "Build: " + family, "artifacts": true, "optional": true})
+	}
+
+	// With base stages, the files wait for every base's promotion.
+	buildNeeds = append(buildNeeds, map[string]any{"job": "Base: all promoted", "artifacts": true, "optional": true})
+
+	if !reflect.DeepEqual(jobs["Build: release files"].Needs, buildNeeds) {
+		t.Fatal("build bypasses gated release preparation or a family build")
 	}
 
 	for _, arch := range []string{"amd64", "arm64"} {
@@ -110,15 +136,25 @@ func TestReleaseChecksRoutingAndPreparationBarrier(t *testing.T) {
 		}
 	}
 
-	// Only the consumer's commands and image builds are scheduled on tagged
-	// runners: the build runner, and a native arm64 runner for arm64.
+	// Every job runs on the policy's runner-tags and the signer jobs on its
+	// signer-runner-tags. Consumer checks and build commands, plus the image
+	// and export jobs of either builder, name their platform's build runner.
 	scheduled := map[string]string{
-		"Check: consumer checks":                   "$[[ inputs.checks-runner-tags ]]",
-		"Build: release files":                     "$[[ inputs.build-runner-tags ]]",
-		".forge-ci-release-image-builder-buildah":  "$[[ inputs.build-runner-tags ]]",
-		"Images: build arm64":                      "$[[ inputs.build-runner-tags-arm64 ]]",
-		".forge-ci-release-export-builder-buildah": "$[[ inputs.build-runner-tags ]]",
-		"Build: export arm64":                      "$[[ inputs.build-runner-tags-arm64 ]]",
+		".forge-ci-release":        "$[[ inputs.runner-tags ]]",
+		".forge-ci-release-signer": "$[[ inputs.signer-runner-tags ]]",
+		// The package job holds a release credential in the node image.
+		".forge-ci-release-publish-npm-packages": "$[[ inputs.signer-runner-tags ]]",
+		// A base stage builds on the build runner; its publishing job holds
+		// the registry credential in job-image.
+		".forge-ci-release-base-build":     "$[[ inputs.build-runner-tags-linux-amd64 ]]",
+		".forge-ci-release-base-publish":   "$[[ inputs.signer-runner-tags ]]",
+		"Check: consumer checks":           "$[[ inputs.build-runner-tags-linux-amd64 ]]",
+		"Build: release files":             "$[[ inputs.build-runner-tags-linux-amd64 ]]",
+		".forge-ci-release-build-family":   "$[[ inputs.build-runner-tags-linux-amd64 ]]",
+		".forge-ci-release-image-builder":  "$[[ inputs.build-runner-tags-linux-amd64 ]]",
+		"Images: build arm64":              "$[[ inputs.build-runner-tags-linux-arm64 ]]",
+		".forge-ci-release-export-builder": "$[[ inputs.build-runner-tags-linux-amd64 ]]",
+		"Build: export arm64":              "$[[ inputs.build-runner-tags-linux-arm64 ]]",
 	}
 	for name, job := range jobs {
 		if job.Tags != scheduled[name] {
@@ -126,12 +162,23 @@ func TestReleaseChecksRoutingAndPreparationBarrier(t *testing.T) {
 		}
 	}
 
+	// The unbound inputs default to untagged; the platform-bound build
+	// inputs have no default, since an untagged job could land anywhere.
 	for _, path := range []string{"templates/release.yml", "templates/release-jobs.yml"} {
 		header, _ := releaseRouting(t, path)
 
-		input := header["spec"].(map[string]any)["inputs"].(map[string]any)["checks-runner-tags"].(map[string]any)
-		if input["type"] != "array" || !reflect.DeepEqual(input["default"], []any{}) {
-			t.Fatalf("%s changed the ordinary-consumer default: %+v", path, input)
+		for _, name := range []string{"runner-tags", "signer-runner-tags", "build-runner-tags-linux-amd64", "build-runner-tags-linux-arm64"} {
+			input := header["spec"].(map[string]any)["inputs"].(map[string]any)[name].(map[string]any)
+			defaulted, hasDefault := input["default"]
+
+			want := reflect.DeepEqual(defaulted, []any{})
+			if strings.Contains(name, "-linux-") {
+				want = !hasDefault
+			}
+
+			if input["type"] != "array" || !want {
+				t.Fatalf("%s changed the default of %s: %+v", path, name, input)
+			}
 		}
 	}
 	// Check the real trigger mapping, not a duplicate rendered fixture.
@@ -149,26 +196,55 @@ func TestReleaseChecksRoutingAndPreparationBarrier(t *testing.T) {
 	trigger := root["release"].(map[string]any)["trigger"].(map[string]any)
 
 	include := trigger["include"].([]any)[0].(map[string]any)
-	if include["inputs"].(map[string]any)["checks-runner-tags"] != "$[[ inputs.checks-runner-tags ]]" {
-		t.Fatal("root component does not forward checks runner tags")
+	for _, name := range []string{"runner-tags", "signer-runner-tags", "build-runner-tags-linux-amd64", "build-runner-tags-linux-arm64"} {
+		if include["inputs"].(map[string]any)[name] != "$[[ inputs."+name+" ]]" {
+			t.Fatalf("root component does not forward %s", name)
+		}
 	}
 }
 
-func TestReleaseSummaryIncludesChecksAndOnlyEnabledVersionBump(t *testing.T) {
+// The summary lists the family jobs the request's plan names, and no other;
+// it plans again rather than downloading the jobs' files.
+func TestReleaseSummaryIncludesChecksAndOnlyThePlannedFamilyJobs(t *testing.T) {
 	t.Parallel()
 
-	for _, bump := range []string{"", "cargo"} {
-		t.Run("bump="+bump, func(t *testing.T) {
+	for _, planned := range [][]string{nil, {"Prepare: version rust", "Build: java", "Build: node", "Base: plan base", "Base: all promoted"}} {
+		t.Run(strings.Join(planned, ","), func(t *testing.T) {
 			t.Parallel()
+
 			command := exec.CommandContext(t.Context(), componentBash(t), "--noprofile", "--norc", "-eu", "-c",
-				`source "$1"; rc_engine() { printf '%s\n' "$@"; }; rc_release_summary`, "summary",
+				`source "$1"; rc_engine() { printf '%s\n' "$@"; }; rc_checkout() { printf 'checkout %s\n' "$1"; }
+rc_planned_jobs() { printf '%s' "${FAKE_PLANNED}" >"$1"; }; rc_release_summary`, "summary",
 				filepath.Join(reporoot.Path(t), ".gitlab/bin/release.sh"))
-			command.Env = []string{"PATH=/usr/bin:/bin", "RC_VERSION_BUMP=" + bump, "RELEASE_TAG=v1.2.3", "RC_RELEASE_BRANCH=main"}
+
+			jobs := ""
+			if len(planned) > 0 {
+				jobs = strings.Join(planned, "\n") + "\n"
+			}
+
+			command.Env = []string{"PATH=/usr/bin:/bin", "RELEASE_TAG=v1.2.3", "RC_RELEASE_BRANCH=main", "RELEASE_REQUEST_SHA=" + strings.Repeat("a", 40),
+				"RC_WORK=" + t.TempDir(), "FAKE_PLANNED=" + jobs, "RC_BASE_STAGES=" + map[bool]string{true: "base"}[len(planned) > 0]}
 
 			out, err := command.CombinedOutput()
-			if err != nil || !strings.Contains(string(out), "Check: consumer checks=success") ||
-				strings.Contains(string(out), "Prepare: version=success") != (bump != "") {
-				t.Fatalf("summary misrepresents checks/version jobs: %v\n%s", err, out)
+			// The plan's base jobs are listed with it, and the registry check they need.
+			bases := len(planned) > 0
+			if strings.Contains(string(out), "Base: plan base=success") != bases || strings.Contains(string(out), "Base: all promoted=success") != bases ||
+				strings.Contains(string(out), "Check: registry access=success") != bases {
+				t.Fatalf("summary misrepresents the base stage: %v\n%s", err, out)
+			}
+
+			if err != nil || !strings.Contains(string(out), "Check: consumer checks=success") || !strings.Contains(string(out), "Build: release files=success") {
+				t.Fatalf("summary misrepresents the checks or the release files: %v\n%s", err, out)
+			}
+
+			if !strings.Contains(string(out), "checkout "+strings.Repeat("a", 40)) {
+				t.Errorf("summary did not plan the request:\n%s", out)
+			}
+
+			for _, job := range []string{"Prepare: version rust", "Prepare: version java", "Build: java", "Build: node", "Build: go"} {
+				if strings.Contains(string(out), job+"=success") != slices.Contains(planned, job) {
+					t.Errorf("summary misrepresents %s:\n%s", job, out)
+				}
 			}
 		})
 	}

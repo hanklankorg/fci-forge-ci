@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: The Forge CI Authors
+// SPDX-FileCopyrightText: 2026 Digg - Agency for Digital Government
 // SPDX-License-Identifier: EUPL-1.2 OR GPL-3.0-or-later
 
 package gitlabbehavior
@@ -101,14 +101,14 @@ func TestReleaseWithImagesRendersAValidConfiguration(t *testing.T) {
 				inputs := map[string]any{
 					"release-images": true, "image-builder": builder, "builder-job-image": builderImage,
 					"artifacts-config": config, "release-platforms": "linux/amd64",
-					"job-user": "65532:65532", "version-bump": "npm", "export-files": exports, "export": []any{},
+					"job-user": "65532:65532", "runtime-image-node": builderImage, "export-files": exports, "export": []any{},
 				}
 				if exports {
 					inputs["export"] = export
 				}
 
 				if builder == "buildah" {
-					inputs["build-runner-tags"] = []any{"privileged"}
+					inputs["build-runner-tags-linux-amd64"] = []any{"privileged"}
 				}
 
 				if problems := gitlabrender.Problems(t, "templates/release.yml", inputs); len(problems) != 0 {

@@ -1,10 +1,9 @@
-// SPDX-FileCopyrightText: The Forge CI Authors
+// SPDX-FileCopyrightText: 2026 Digg - Agency for Digital Government
 // SPDX-License-Identifier: EUPL-1.2 OR GPL-3.0-or-later
 
 package gitlabbehavior
 
 import (
-	"context"
 	"maps"
 	"os"
 	"os/exec"
@@ -13,7 +12,6 @@ import (
 	"slices"
 	"strings"
 	"testing"
-	"time"
 
 	"gopkg.in/yaml.v3"
 
@@ -28,8 +26,6 @@ const (
 	parityKanikoImage  = "registry.invalid/team/kaniko-job@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	parityBuildahImage = "registry.invalid/team/buildah-job@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
 )
-
-const parityBuildImage = "registry.invalid/team/build@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 
 // The GitLab release image stage and the Forgejo release-images workflow are
 // one stage on two forges: for the same containers: declaration both plan,
@@ -106,13 +102,14 @@ func TestReleaseImageStageMatchesTheForgejoWorkflow(t *testing.T) {
 			// run, in the image it runs in, on a native runner of the arch.
 			forgejoBuilder, forgejoContainer := forgejoBuilderSelection(t, builder)
 
-			// GitLab runs every job in an image: the builder's job image.
-			wantImage, wantAMD64Tags := parityBuildahImage, []string{"privileged"}
+			// GitLab runs every job in an image: the builder's job image, on
+			// the build runner of the arch, whichever the builder.
+			wantImage := parityBuildahImage
 			if builder == "kaniko" {
-				wantImage, wantAMD64Tags = parityKanikoImage, nil
+				wantImage = parityKanikoImage
 			}
 
-			for arch, tags := range map[string][]string{"amd64": wantAMD64Tags, "arm64": {"arm64"}} {
+			for arch, tags := range map[string][]string{"amd64": {"privileged"}, "arm64": {"arm64"}} {
 				job := gitlab["Images: build "+arch]
 				if job.builder != forgejoBuilder {
 					t.Fatalf("GitLab %s builds with %s, Forgejo with %s", arch, job.builder, forgejoBuilder)
@@ -174,7 +171,7 @@ func TestReleaseImageHandoffsAreTheOnesTheirReadersRead(t *testing.T) {
 
 	for reader, reads := range map[string][]string{
 		"rc_images_build":   {`"${CI_PROJECT_DIR}/_release-images-plan/plan.json"`, `"${CI_PROJECT_DIR}/_release-build/image-context"`},
-		"rc_images_publish": {`"${CI_PROJECT_DIR}/_release-images-plan/plan.json"`, `"${CI_PROJECT_DIR}/_release-images-${arch}"`, `rc_read_handoff "${CI_PROJECT_DIR}/_release-build"`},
+		"rc_images_publish": {`"${CI_PROJECT_DIR}/_release-images-plan/plan.json"`, `"amd64=${CI_PROJECT_DIR}/_release-images-amd64"`, `"arm64=${CI_PROJECT_DIR}/_release-images-arm64"`, `rc_read_handoff "${CI_PROJECT_DIR}/_release-build"`},
 		"rc_sign_release":   {`rc_read_handoff "${CI_PROJECT_DIR}/_release-images"`, `rc_read_handoff "${CI_PROJECT_DIR}/_release-build"`},
 	} {
 		body := releaseShellFunction(t, reader)
@@ -268,7 +265,7 @@ func renderGitLabImageStage(t *testing.T, releaseImages, builder, arm64Tags stri
 
 	for name, value := range map[string]string{
 		"release-images": releaseImages, "image-builder": builder, "builder-job-image": builderImage,
-		"build-image": parityBuildImage, "build-runner-tags": `["privileged"]`, "build-runner-tags-arm64": arm64Tags,
+		"build-runner-tags-linux-amd64": `["privileged"]`, "build-runner-tags-linux-arm64": arm64Tags,
 	} {
 		text = strings.ReplaceAll(text, "$[[ inputs."+name+" ]]", value)
 	}
@@ -397,8 +394,7 @@ func forgejoBuilderSelection(t *testing.T, builder string) (string, string) {
 		}
 	}
 
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-	defer cancel()
+	ctx := commandContext(t)
 
 	outputs := filepath.Join(t.TempDir(), "outputs")
 	command := exec.CommandContext(ctx, componentBash(t), "--noprofile", "--norc", "-c", script)

@@ -1,10 +1,9 @@
-// SPDX-FileCopyrightText: The Forge CI Authors
+// SPDX-FileCopyrightText: 2026 Digg - Agency for Digital Government
 // SPDX-License-Identifier: EUPL-1.2 OR GPL-3.0-or-later
 
 package gitlabbehavior
 
 import (
-	"context"
 	"errors"
 	"os"
 	"os/exec"
@@ -13,7 +12,6 @@ import (
 	"slices"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/diggsweden/forge-ci/internal/testutil/gitlabrender"
 	"github.com/diggsweden/forge-ci/internal/testutil/reporoot"
@@ -23,26 +21,44 @@ import (
 // with. A project variable can set CI_JOB_NAME, so the role is what the job
 // may do.
 var releaseJobRoles = map[string]string{
-	"Check: signing access":           "signing-preflight",
-	"Check: publishing access":        "publish-preflight",
-	"Check: registry access":          "registry-preflight",
-	"Check: release request":          "request",
-	"Check: consumer checks":          "checks",
-	"Prepare: changelog":              "changelog",
-	"Prepare: version":                "version",
-	"Prepare: release commit and tag": "prepare",
-	"Build: release files":            "build",
-	"Build: export amd64":             "export",
-	"Build: export arm64":             "export",
-	"Images: plan":                    "images-plan",
-	"Images: build amd64":             "image-build",
-	"Images: build arm64":             "image-build",
-	"Images: publish":                 "images-publish",
-	"Sign: files and images":          "sign",
-	"Publish: images":                 "promote",
-	"Publish: release":                "publish",
-	"Publish: tidy up":                "cleanup",
-	"Summary: release":                "summary",
+	"Check: signing access":              "signing-preflight",
+	"Check: publishing access":           "publish-preflight",
+	"Check: registry access":             "registry-preflight",
+	"Check: release request":             "request",
+	"Check: consumer checks":             "checks",
+	"Prepare: changelog":                 "changelog",
+	"Prepare: version java":              "version",
+	"Prepare: version node":              "version",
+	"Prepare: version rust":              "version",
+	"Prepare: release commit and tag":    "prepare",
+	"Build: java":                        "build",
+	"Build: node":                        "build",
+	"Build: go":                          "build",
+	"Build: rust":                        "build",
+	"Build: android":                     "build",
+	"Build: release files":               "release-files",
+	"Build: export amd64":                "export",
+	"Build: export arm64":                "export",
+	"Images: plan":                       "images-plan",
+	"Images: build amd64":                "image-build",
+	"Images: build arm64":                "image-build",
+	"Images: publish":                    "images-publish",
+	"Sign: files and images":             "sign",
+	"Publish: images":                    "promote",
+	"Publish: release":                   "publish",
+	"Publish: tidy up":                   "cleanup",
+	"Publish: npm packages":              "packages",
+	"Summary: release":                   "summary",
+	"Base: plan base":                    "base-plan",
+	"Base: build base":                   "base-build",
+	"Base: publish base":                 "base-publish",
+	"Base: sign and promote base":        "base-promote",
+	"Base: plan tools+debug":             "base-plan",
+	"Base: parent tools+debug":           "base-parent",
+	"Base: build tools+debug":            "base-build",
+	"Base: publish tools+debug":          "base-publish",
+	"Base: sign and promote tools+debug": "base-promote",
+	"Base: all promoted":                 "base-gate",
 }
 
 // Each release job's start is its role, then the shared start, and each
@@ -90,7 +106,7 @@ func TestReleaseJobsOpenWithTheirLiteralRole(t *testing.T) {
 func TestReleaseJobStartFollowsItsRoleNotItsName(t *testing.T) {
 	t.Parallel()
 
-	ownHome := []string{"request", "checks", "changelog", "version", "build", "export"}
+	ownHome := []string{"request", "checks", "changelog", "release-files", "version", "build", "export", "base-plan"}
 
 	for _, builder := range []string{"buildah", "kaniko"} {
 		body := releaseJobsBodyFor(t, builder)
@@ -109,7 +125,7 @@ func TestReleaseJobStartFollowsItsRoleNotItsName(t *testing.T) {
 						t.Errorf("home in %s, want %s", home, want)
 					}
 
-					inProject := (role == "image-build" || role == "export") && builder == "kaniko"
+					inProject := (role == "image-build" || role == "export" || role == "base-build") && builder == "kaniko"
 					if want := map[bool]string{true: "project", false: "/tmp"}[inProject]; work != want {
 						t.Errorf("work in %s, want %s", work, want)
 					}
@@ -141,8 +157,7 @@ func runReleaseJobStart(t *testing.T, start, user, spoof string) (string, string
 	script := strings.Replace(gitlabrender.Script(t, "templates/release-jobs.yml", start,
 		map[string]any{"job-user": "65532:65532", "engine-sha": pin, "engine-reference": pin}), "object_format=sha1\n", probe+"\n", 1)
 
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-	defer cancel()
+	ctx := commandContext(t)
 
 	command := exec.CommandContext(ctx, componentBash(t), "--noprofile", "--norc", "-c", fakeID+script)
 	command.Dir = dir

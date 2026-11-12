@@ -4,7 +4,9 @@
 package gitlabbehavior
 
 import (
+	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -71,7 +73,11 @@ func TestComponentsClearTheEntrypointOfConsumerChosenImages(t *testing.T) {
 		{"nanolinter", "nanolinter-image"},
 		{"megalinter", "megalinter-image"},
 		{"release-jobs", "job-image"},
-		{"release-jobs", "build-image"},
+		{"release-jobs", "runtime-image-java"},
+		{"release-jobs", "runtime-image-node"},
+		{"release-jobs", "runtime-image-go"},
+		{"release-jobs", "runtime-image-rust"},
+		{"release-jobs", "runtime-image-android"},
 	} {
 		body := string(reporoot.ReadFile(t, "templates/"+use.file+".yml"))
 		want := "name: $[[ inputs." + use.input + " ]]\n    entrypoint: [\"\"]"
@@ -135,5 +141,43 @@ func TestLintComponentsFetchTheMergeRequestTargetTheSameWay(t *testing.T) {
 	// trust the checkout before any git call, or git refuses it.
 	if !strings.Contains(blocks["nanolinter"], `"GIT_CONFIG_VALUE_${git_config_count}=${CI_PROJECT_DIR:?}"`) {
 		t.Error("the lint components' merge-request base block no longer trusts the checkout (safe.directory)")
+	}
+}
+
+// The SAST report is what a merge request shows. The megalinter component
+// fails when it could not be written, and a failed gate keeps its own status.
+// Run the end of the real script with each outcome of the gate and conversion.
+func TestMegalinterFailsOnALostSASTReport(t *testing.T) {
+	t.Parallel()
+
+	const conversion = "converted=$?\n"
+
+	_, verdict, found := strings.Cut(lintScript("templates/megalinter.yml")(t), conversion)
+	if !found {
+		t.Fatal("templates/megalinter.yml no longer records the conversion's status")
+	}
+
+	// The tail closes the `if` the conversion runs in.
+	for _, test := range []struct {
+		gate, converted string
+		status          int
+	}{{"0", "0", 0}, {"0", "3", 1}, {"5", "3", 5}, {"5", "0", 5}} {
+		script := "gate=" + test.gate + "; converted=" + test.converted + "; if true; then\n" + verdict
+		output, err := exec.CommandContext(t.Context(), componentBash(t), "--noprofile", "--norc", "-c", script).CombinedOutput()
+
+		status := 0
+		if exit := (*exec.ExitError)(nil); errors.As(err, &exit) {
+			status = exit.ExitCode()
+		} else if err != nil {
+			t.Fatal(err)
+		}
+
+		if status != test.status {
+			t.Errorf("gate %s, conversion %s: the job ended %d, want %d\n%s", test.gate, test.converted, status, test.status, output)
+		}
+
+		if lost := strings.Contains(string(output), "SAST report could not be written"); lost != (test.converted != "0") {
+			t.Errorf("gate %s, conversion %s: lost report named = %t\n%s", test.gate, test.converted, lost, output)
+		}
 	}
 }

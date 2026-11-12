@@ -4,15 +4,20 @@
 package gitlabbehavior
 
 import (
-	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
+	"slices"
 	"strings"
 	"testing"
-	"time"
 
+	"github.com/diggsweden/forge-ci/internal/domain/projecttype"
+	"github.com/diggsweden/forge-ci/internal/domain/version"
+	"github.com/diggsweden/forge-ci/internal/testutil/gitlabrender"
 	"github.com/diggsweden/forge-ci/internal/testutil/reporoot"
 )
 
@@ -23,13 +28,18 @@ func TestReleaseJobRejectsCredentialsOutsideItsRole(t *testing.T) {
 
 	for _, pair := range [][2]string{
 		{"Check: release request", "RELEASE_SSH_SIGNING_KEY"},
+		{"Check: release request", "RELEASE_REGISTRY_TOKEN"},
 		{"Check: consumer checks", "RELEASE_SSH_SIGNING_KEY"},
 		{"Check: consumer checks", "RELEASE_COSIGN_PRIVATE_KEY"},
 		{"Check: consumer checks", "RELEASE_REGISTRY_TOKEN"},
 		{"Check: consumer checks", "RELEASE_TOKEN"},
 		{"Prepare: changelog", "RELEASE_COSIGN_PRIVATE_KEY"},
-		{"Prepare: version", "RELEASE_SSH_SIGNING_KEY"},
+		{"Prepare: version java", "RELEASE_SSH_SIGNING_KEY"},
+		{"Build: node", "RELEASE_TOKEN"},
 		{"Build: release files", "RELEASE_TOKEN"},
+		{"Build: release files", "RELEASE_REGISTRY_TOKEN"},
+		{"Build: export amd64", "RELEASE_REGISTRY_TOKEN"},
+		{"Images: build amd64", "RELEASE_REGISTRY_TOKEN"},
 		{"Sign: files and images", "RELEASE_SSH_SIGNING_KEY"},
 		{"Sign: files and images", "RELEASE_TOKEN"},
 		{"Publish: images", "RELEASE_COSIGN_PRIVATE_KEY"},
@@ -40,8 +50,7 @@ func TestReleaseJobRejectsCredentialsOutsideItsRole(t *testing.T) {
 		t.Run(pair[0]+"/"+pair[1], func(t *testing.T) {
 			t.Parallel()
 
-			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-			defer cancel()
+			ctx := commandContext(t)
 
 			script := filepath.Join(reporoot.Path(t), ".gitlab", "bin", "release.sh")
 			command := exec.CommandContext(ctx, componentBash(t), "--noprofile", "--norc", "-c", `source "$1"; rc_engine() { echo engine-called; }; rc_release_context`, "release-guard", script)
@@ -67,20 +76,22 @@ func TestReleaseHandoffNeverSourcesItsDigestAsShell(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-	defer cancel()
+	ctx := commandContext(t)
 
 	script := filepath.Join(reporoot.Path(t), ".gitlab", "bin", "release.sh")
 
-	const invocation = `set -eu; source "$1"; engine_status=$3; rc_engine() { echo engine-called; return "$engine_status"; }; if rc_read_handoff "$2"; then exit 0; else exit $?; fi`
+	const invocation = `set -eu; source "$1"; engine_status=$3; rc_engine() {
+if [ "$engine_status" = owner ]; then OWNER_CLI_HELPER=1 "$OWNER_CLI_BINARY" -test.run='^TestOwnerCLI$' -- "$@"; return; fi
+echo engine-called; if [ "$engine_status" != 0 ]; then return "$engine_status"; fi; mkdir dist
+}; if rc_read_handoff "$2"; then exit 0; else exit $?; fi`
 
-	command := exec.CommandContext(ctx, componentBash(t), "--noprofile", "--norc", "-c", invocation, "handoff-guard", script, dir, "0")
+	command := exec.CommandContext(ctx, componentBash(t), "--noprofile", "--norc", "-c", invocation, "handoff-guard", script, dir, "owner")
 	command.Dir = dir
-	command.Env = []string{"PATH=" + componentTools(t), "HOME=" + dir}
+	command.Env = []string{"PATH=" + componentTools(t), "HOME=" + dir, "OWNER_CLI_BINARY=" + os.Args[0]}
 
 	output, err := command.CombinedOutput()
 	if err == nil || strings.Contains(string(output), "engine-called") {
-		t.Fatal("invalid digest reached an engine operation")
+		t.Fatal("invalid digest was not refused by the Go owner")
 	}
 
 	if _, err := os.Stat(filepath.Join(dir, "exploited")); !os.IsNotExist(err) {
@@ -127,29 +138,6 @@ func TestReleaseHandoffNeverSourcesItsDigestAsShell(t *testing.T) {
 	}
 }
 
-func TestBaseSigningRequiresExplicitPolicyOptIn(t *testing.T) {
-	t.Parallel()
-
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "base-images.json"), []byte("[]"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-	defer cancel()
-
-	script := filepath.Join(reporoot.Path(t), ".gitlab", "bin", "release.sh")
-	command := exec.CommandContext(ctx, componentBash(t), "--noprofile", "--norc", "-eu", "-c",
-		`source "$1"; rc_engine() { echo engine-called; }; rc_sign_bases`, "base-policy", script)
-	command.Dir = dir
-	command.Env = []string{"PATH=/usr/bin:/bin", "HOME=" + dir, "DIST_DIR=" + dir, "RC_BASE_IMAGES=false"}
-
-	output, err := command.CombinedOutput()
-	if err == nil || strings.Contains(string(output), "engine-called") {
-		t.Fatal("a producer base ledger acquired authority without policy opt-in")
-	}
-}
-
 func TestPublicationRegistryBelongsToTheSeparateProject(t *testing.T) {
 	t.Parallel()
 
@@ -167,8 +155,7 @@ func TestPublicationRegistryBelongsToTheSeparateProject(t *testing.T) {
 		t.Run(tc.image, func(t *testing.T) {
 			t.Parallel()
 
-			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-			defer cancel()
+			ctx := commandContext(t)
 
 			script := filepath.Join(reporoot.Path(t), ".gitlab", "bin", "release.sh")
 			command := exec.CommandContext(ctx, componentBash(t), "--noprofile", "--norc", "-eu", "-c", `source "$1"; rc_publication_scope`, "publication-scope", script)
@@ -236,8 +223,7 @@ func TestReleaseBranchIsNotTakenFromTheEnvironment(t *testing.T) {
 func TestReleaseBranchInputMustBeABranchName(t *testing.T) {
 	t.Parallel()
 
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-	defer cancel()
+	ctx := commandContext(t)
 
 	script := filepath.Join(reporoot.Path(t), ".gitlab", "bin", "release.sh")
 	command := exec.CommandContext(ctx, componentBash(t), "--noprofile", "--norc", "-c",
@@ -275,11 +261,10 @@ func runReleasePrepareIn(t *testing.T, dir, script, input string, extraEnv ...st
 		}
 	}
 
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-	defer cancel()
+	ctx := commandContext(t)
 
 	command := exec.CommandContext(ctx, componentBash(t), "--noprofile", "--norc", "-c",
-		`set -eu; source "$1"; rc_engine() { printf 'engine %s\n' "$*"; }; git() { printf 'git %s\n' "$*"; }; rc_release_context; rc_request_checkout() { rc_engine validate tag commit --branch "${RC_RELEASE_BRANCH}"; }; rc_prepare_release`,
+		`set -eu; source "$1"; rc_engine() { printf 'engine %s\n' "$*"; local previous='' arg path; for arg in "$@"; do if [ "$previous" = --paths-file ]; then : >"$arg"; for path in ${FAKE_BUMP_PATHS:-}; do printf '%s\n' "$path" >>"$arg"; done; fi; previous=$arg; done; }; git() { printf 'git %s\n' "$*"; }; rc_release_context; rc_request_checkout() { rc_engine validate tag commit --branch "${RC_RELEASE_BRANCH}"; }; rc_prepare_release`,
 		"branch-guard", script)
 	command.Dir = dir
 	command.Env = []string{
@@ -288,6 +273,7 @@ func runReleasePrepareIn(t *testing.T, dir, script, input string, extraEnv ...st
 		"RELEASE_SSH_SIGNING_KEY=inert", "RC_GIT_URL=ssh://git@gitlab.invalid/team/app.git", "RC_GIT_HOST_KEY=SHA256:x",
 		"RC_BOT_NAME=bot", "RC_BOT_EMAIL=bot@invalid.example", "CI_DEFAULT_BRANCH=main", "RC_RELEASE_BRANCH_INPUT=" + input,
 		"RC_RELEASE_BRANCH=hostile", "RELEASE_BRANCH=hostile", "BRANCH=hostile", "RC_RELEASE_POLICY=stable",
+		"RC_WORK=" + dir, "RC_ARTIFACTS_CONFIG=", "RC_BASE_STAGES=", "RC_IMAGE_BUILDER=buildah",
 	}
 	command.Env = append(command.Env, extraEnv...)
 
@@ -314,46 +300,74 @@ func TestReleasePreparePassesTheGitURLOnlyWhenGiven(t *testing.T) {
 	}
 }
 
-// With a version bump, release-prepare runs no build tool: it hands the patch
-// the key-free bump job made, with that job's digest, to the engine's text
-// check, and commits the files the check names beside the changelog. Without
-// one it commits the changelog alone, and a missing patch stops the release.
+// release-prepare runs no build tool: it joins the patches the plan's
+// key-free version jobs made, each checked against its job's digest, hands
+// the joined patch with its digest and the plan to the engine's text check,
+// and commits the paths the engine says it wrote beside the changelog, not
+// whatever else the checkout holds, such as commit-msg.txt. Without a version
+// job it hands an empty patch, so the engine runs no native tool either, and
+// a patch that differs from its digest stops the release.
 func TestReleasePrepareAppliesOnlyAVerifiedVersionBump(t *testing.T) {
 	t.Parallel()
 
 	script := filepath.Join(reporoot.Path(t), ".gitlab", "bin", "release.sh")
-	digest := strings.Repeat("b", 64)
+	patches := map[string]string{"java": "diff --git a/services/backend/pom.xml b/services/backend/pom.xml\n", "node": "diff --git a/packages/frontend/package.json b/packages/frontend/package.json\n"}
+
+	handoffs := func(t *testing.T, dir string, digests map[string]string) {
+		t.Helper()
+
+		for family, patch := range patches {
+			bump := filepath.Join(dir, "_release-bump-"+family)
+			if err := os.MkdirAll(bump, 0o700); err != nil {
+				t.Fatal(err)
+			}
+
+			for name, body := range map[string]string{"version-bump.patch": patch, "digest": digests[family] + "\n"} {
+				if err := os.WriteFile(filepath.Join(bump, name), []byte(body), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+		}
+	}
+	digestOf := func(body string) string {
+		sum := sha256.Sum256([]byte(body))
+
+		return hex.EncodeToString(sum[:])
+	}
 
 	t.Run("bump", func(t *testing.T) {
 		t.Parallel()
 
-		dir, work := t.TempDir(), t.TempDir()
-		if err := os.MkdirAll(filepath.Join(dir, "_release-bump"), 0o700); err != nil {
-			t.Fatal(err)
-		}
+		dir := t.TempDir()
+		handoffs(t, dir, map[string]string{"java": digestOf(patches["java"]), "node": digestOf(patches["node"])})
 
-		for name, body := range map[string]string{"version-bump.patch": "diff --git a/pom.xml b/pom.xml\n", "digest": digest + "\n"} {
-			if err := os.WriteFile(filepath.Join(dir, "_release-bump", name), []byte(body), 0o600); err != nil {
-				t.Fatal(err)
-			}
-		}
-
-		output, err := runReleasePrepareIn(t, dir, script, "", "RC_VERSION_BUMP=maven", "RC_WORK="+work)
+		output, err := runReleasePrepareIn(t, dir, script, "", "FAKE_BUMP_PATHS=services/backend/pom.xml packages/frontend/package.json")
 		if err != nil {
 			t.Fatalf("prepare did not run: %v\n%s", err, output)
 		}
 
+		joined := patches["java"] + patches["node"]
 		for _, want := range []string{
-			"engine version apply-bump --release-policy stable --project-type maven --version v1.2.3 --working-dir . --patch " + dir + "/_release-bump/version-bump.patch --sha256 " + digest + " --paths-file " + work + "/bump-paths",
-			"--include-paths-file " + work + "/bump-paths",
+			"engine plan gitlab-release-pipeline --base-stages  --image-builder buildah --prepare-plan-output " + dir + "/prepare-plan.json",
+			"engine version bump-plan --plan-json  --version 1.2.3 --release-policy stable --patch " + dir + "/version-bump.patch --patch-sha256 " + digestOf(joined) +
+				" --paths-file " + dir + "/bump-paths",
+			"--include-paths-file " + dir + "/bump-paths",
 		} {
 			if !strings.Contains(output, want) {
 				t.Errorf("prepare output lacks %q:\n%s", want, output)
 			}
 		}
 
-		if strings.Contains(output, "engine version bump ") {
-			t.Errorf("release-prepare ran the build tool itself:\n%s", output)
+		if body, err := os.ReadFile(filepath.Join(dir, "version-bump.patch")); err != nil || string(body) != joined {
+			t.Errorf("the joined patch is %q (%v), want the java then the node patch", body, err)
+		}
+
+		if paths, err := os.ReadFile(filepath.Join(dir, "bump-paths")); err != nil || string(paths) != "services/backend/pom.xml\npackages/frontend/package.json\n" {
+			t.Errorf("bump paths are %q (%v)", paths, err)
+		}
+
+		if strings.Contains(output, "--project-type") || strings.Contains(output, "engine version bump ") {
+			t.Errorf("release-prepare ran a build tool itself:\n%s", output)
 		}
 	})
 
@@ -361,17 +375,20 @@ func TestReleasePrepareAppliesOnlyAVerifiedVersionBump(t *testing.T) {
 		t.Parallel()
 
 		output, err := runReleasePrepare(t, script, "")
-		if err != nil || strings.Contains(output, "apply-bump") || strings.Contains(output, "--include-paths-file") {
-			t.Fatalf("prepare without a bump = %v:\n%s", err, output)
+		if err != nil || !strings.Contains(output, "--patch-sha256 "+digestOf("")) || strings.Contains(output, "--include-paths-file") {
+			t.Fatalf("prepare without a version job = %v:\n%s", err, output)
 		}
 	})
 
-	t.Run("bump without its patch", func(t *testing.T) {
+	t.Run("a patch that is not its job's", func(t *testing.T) {
 		t.Parallel()
 
-		output, err := runReleasePrepare(t, script, "", "RC_VERSION_BUMP=maven", "RC_WORK="+t.TempDir())
-		if err == nil || strings.Contains(output, "commit-changelog-release") {
-			t.Fatalf("prepare went on without the bump patch:\n%s", output)
+		dir := t.TempDir()
+		handoffs(t, dir, map[string]string{"java": digestOf(patches["java"]), "node": strings.Repeat("b", 64)})
+
+		output, err := runReleasePrepareIn(t, dir, script, "")
+		if err == nil || !strings.Contains(output, "node version patch differs") || strings.Contains(output, "commit-changelog-release") {
+			t.Fatalf("prepare went on with a foreign patch:\n%s", output)
 		}
 	})
 }
@@ -404,13 +421,12 @@ func TestReleasePathGuardsStopTheJob(t *testing.T) {
 				setup = ":"
 			}
 
-			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-			defer cancel()
+			ctx := commandContext(t)
 
 			command := exec.CommandContext(ctx, componentBash(t), "--noprofile", "--norc", "-c",
-				`set -euo pipefail; source "$1"; rc_engine() { :; }; `+setup+`; `+test.call+`; echo went-on`, "guards", script)
+				`set -euo pipefail; source "$1"; `+ownerCLI+setup+`; `+test.call+`; echo went-on`, "guards", script)
 			command.Dir = t.TempDir()
-			command.Env = []string{"PATH=/usr/bin:/bin", "HOME=" + command.Dir}
+			command.Env = []string{"PATH=/usr/bin:/bin", "HOME=" + command.Dir, "OWNER_CLI_BINARY=" + os.Args[0]}
 
 			output, err := command.CombinedOutput()
 			if stopped := err != nil && !strings.Contains(string(output), "went-on"); stopped != test.stops {
@@ -427,6 +443,73 @@ var releaseSecretHolders = map[string]string{
 	"RELEASE_GPG_PRIVATE_KEY":    "Sign: files and images",
 	"RELEASE_REGISTRY_TOKEN":     "Sign: files and images",
 	"RELEASE_TOKEN":              "Publish: release",
+	"RELEASE_PACKAGE_TOKEN":      "Publish: npm packages",
+}
+
+// The package job holds the package token and no other release secret, and
+// no other job holds the package token: a job that runs the project's code,
+// or signs, could otherwise publish a package, and the job that hands
+// packages to npm could sign.
+func TestPackageCredentialBelongsToThePackageJobAlone(t *testing.T) {
+	t.Parallel()
+
+	script := filepath.Join(reporoot.Path(t), ".gitlab", "bin", "release.sh")
+	refused := func(t *testing.T, role, secret string) bool {
+		t.Helper()
+
+		command := exec.CommandContext(commandContext(t), componentBash(t), "--noprofile", "--norc", "-c",
+			`source "$1"; rc_engine() { :; }; rc_release_context`, "release-guard", script)
+		command.Dir = t.TempDir()
+		command.Env = []string{"PATH=/usr/bin:/bin", "HOME=" + command.Dir, "rc_job_role=" + role, secret + "=inert-canary-value",
+			"CI_COMMIT_TAG=release-request/v1.2.3", "CI_COMMIT_SHA=" + strings.Repeat("a", 40), "CI_DEFAULT_BRANCH=main", "RC_RELEASE_POLICY=policy"}
+
+		output, err := command.CombinedOutput()
+		wrong := strings.Contains(string(output), secret+" is available to the wrong release job")
+
+		if wrong == (err == nil) {
+			t.Fatalf("role %s with %s: %v\n%s", role, secret, err, output)
+		}
+
+		return wrong
+	}
+
+	for job, role := range releaseJobRoles {
+		if refused(t, role, "RELEASE_PACKAGE_TOKEN") != (role != "packages") {
+			t.Errorf("%s (role %s) and the package token: want it held by the package job alone", job, role)
+		}
+	}
+
+	for _, secret := range []string{
+		"RELEASE_SSH_SIGNING_KEY", "RELEASE_COSIGN_PRIVATE_KEY", "RELEASE_COSIGN_PASSPHRASE", "RELEASE_GPG_PRIVATE_KEY",
+		"RELEASE_GPG_PASSPHRASE", "RELEASE_TOKEN", "RELEASE_REGISTRY_TOKEN", "SSH_SIGNING_KEY", "COSIGN_KEY", "COSIGN_PASSWORD",
+		"GPG_SIGNING_KEY", "GPG_SIGNING_PASSWORD", "GITLAB_TOKEN",
+	} {
+		if !refused(t, "packages", secret) {
+			t.Errorf("the package job may hold %s", secret)
+		}
+	}
+
+	// The job is the signer runner's, in the environment the token is scoped
+	// to, and publishes only once the release is: after the signer's
+	// hand-off, which it publishes from, and the release's publication.
+	body := releaseJobsBodyFor(t, "buildah")
+	job := gitlabrender.ResolveExtends(t, body, body[".forge-ci-release-publish-npm-packages"].(map[string]any))
+
+	if job["tags"] != "$[[ inputs.signer-runner-tags ]]" {
+		t.Errorf("the package job's tags are %v, want the signer runner's", job["tags"])
+	}
+
+	if environment, _ := job["environment"].(map[string]any); environment["name"] != "release/packages" || environment["action"] != "prepare" {
+		t.Errorf("the package job's environment is %v", job["environment"])
+	}
+
+	wantNeeds := []any{
+		map[string]any{"job": "Sign: files and images", "artifacts": true},
+		map[string]any{"job": "Publish: release", "artifacts": false},
+	}
+	if needs, _ := job["needs"].([]any); !reflect.DeepEqual(needs, wantNeeds) {
+		t.Errorf("the package job needs %v, want %v", job["needs"], wantNeeds)
+	}
 }
 
 // Every job keeps the secrets its role needs: the policy is written in roles,
@@ -450,8 +533,7 @@ func TestReleaseJobKeepsTheCredentialsOfItsRole(t *testing.T) {
 		t.Run(pair[0]+"/"+pair[1], func(t *testing.T) {
 			t.Parallel()
 
-			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-			defer cancel()
+			ctx := commandContext(t)
 
 			script := filepath.Join(reporoot.Path(t), ".gitlab", "bin", "release.sh")
 			command := exec.CommandContext(ctx, componentBash(t), "--noprofile", "--norc", "-c",
@@ -465,5 +547,117 @@ func TestReleaseJobKeepsTheCredentialsOfItsRole(t *testing.T) {
 				t.Fatalf("the role's own credential was refused: %v\n%s", err, output)
 			}
 		})
+	}
+}
+
+// A family's version job bumps the project type the plan names for its
+// family, and hands on the diff of the version files its own bump names, its
+// file-pattern without the changelog copies, so two families' patches never
+// both carry one file.
+func TestReleaseVersionJobDiffsOnlyItsFamilyFiles(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "_release-render"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(filepath.Join(dir, "_release-render", "CHANGELOG.md"), []byte("x\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx := commandContext(t)
+
+	command := exec.CommandContext(ctx, componentBash(t), "--noprofile", "--norc", "-eu", "-c",
+		`source "$1"; rc_request_checkout() { :; }; rc_new_handoff() { mkdir -- "$1"; }
+rc_engine() { printf 'engine %s\n' "$*"; case "$*" in *bump-plan*) printf 'FILE_PATTERN=services/backend/CHANGELOG.md :(glob)services/backend/**/pom.xml\n' >"${CI_OUTPUT}" ;;
+  *"--family java --project-type-output ${RC_WORK}/project-type"*) printf 'maven\n' >"${RC_WORK}/project-type" ;; esac; }
+git() { printf 'git %s\n' "$*"; }; rc_bump_version java`,
+		"bump", filepath.Join(reporoot.Path(t), ".gitlab", "bin", "release.sh"))
+	command.Dir = dir
+	command.Env = []string{"PATH=" + componentTools(t), "CI_PROJECT_DIR=" + dir, "RC_WORK=" + dir, "RC_ARTIFACTS_CONFIG=", "RC_BASE_STAGES=", "RC_IMAGE_BUILDER=buildah",
+		"RELEASE_VERSION=1.2.3", "RELEASE_POLICY=stable"}
+
+	out, err := command.CombinedOutput()
+	if err != nil {
+		t.Fatalf("version job failed: %v\n%s", err, out)
+	}
+
+	patch, err := os.ReadFile(filepath.Join(dir, "_release-bump-java", "version-bump.patch"))
+	if err != nil || !strings.Contains(string(out), "--project-type maven") || !strings.HasSuffix(string(patch), "--dst-prefix=b/ -- :(glob)services/backend/**/pom.xml\n") {
+		t.Errorf("the version job diffed more than its family's files: %v\n%s\n%s", err, patch, out)
+	}
+}
+
+// npm gives npm-shrinkwrap.json precedence over package-lock.json, and the
+// release commit refuses a patch that leaves out the lockfile npm wrote. The
+// node family's job, with real Git and the engine's npm file pattern, hands
+// on a patch with the shrinkwrap file that the release verification accepts.
+func TestReleaseNodeVersionJobCarriesTheShrinkwrapFile(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	gitEnv := []string{"PATH=" + componentTools(t), "HOME=" + dir, "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=/dev/null"}
+	project := func(release string) {
+		for _, name := range []string{"package.json", "npm-shrinkwrap.json"} {
+			if err := os.WriteFile(filepath.Join(dir, "frontend", name), []byte(`{"name":"frontend","version":"`+release+`"}`+"\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	gitRun := func(args ...string) {
+		command := exec.CommandContext(t.Context(), "git", append([]string{"-c", "user.name=fixture", "-c", "user.email=fixture@example.invalid", "-c", "commit.gpgsign=false"}, args...)...)
+		command.Dir, command.Env = dir, gitEnv
+
+		if out, err := command.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+
+	for _, sub := range []string{"frontend", "_release-render"} {
+		if err := os.MkdirAll(filepath.Join(dir, sub), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if err := os.WriteFile(filepath.Join(dir, "_release-render", "CHANGELOG.md"), []byte("x\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	project("1.0.0")
+	gitRun("init", "-q", "-b", "main")
+	gitRun("add", "--", "frontend")
+	gitRun("commit", "-q", "-m", "initial")
+	project("1.2.3")
+
+	var pattern strings.Builder
+	for file := range strings.FieldsSeq(version.FilePattern(projecttype.NPM)) {
+		pattern.WriteString(" frontend/" + file)
+	}
+
+	ctx := commandContext(t)
+
+	command := exec.CommandContext(ctx, componentBash(t), "--noprofile", "--norc", "-eu", "-c",
+		`source "$1"; rc_request_checkout() { :; }; rc_new_handoff() { mkdir -- "$1"; }
+rc_engine() { case "$*" in *bump-plan*) printf 'FILE_PATTERN=%s\n' "${FAKE_PATTERN# }" >"${CI_OUTPUT}" ;;
+  *"--family node --project-type-output ${RC_WORK}/project-type"*) printf 'npm\n' >"${RC_WORK}/project-type" ;; esac; }; rc_bump_version node`,
+		"bump", filepath.Join(reporoot.Path(t), ".gitlab", "bin", "release.sh"))
+	command.Dir = dir
+	command.Env = append(slices.Clone(gitEnv), "CI_PROJECT_DIR="+dir, "RC_WORK="+dir, "RC_ARTIFACTS_CONFIG=", "RC_BASE_STAGES=", "RC_IMAGE_BUILDER=buildah", "RELEASE_VERSION=1.2.3", "RELEASE_POLICY=stable", "FAKE_PATTERN="+pattern.String())
+
+	if out, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("version job failed: %v\n%s", err, out)
+	}
+
+	patch, err := os.ReadFile(filepath.Join(dir, "_release-bump-node", "version-bump.patch"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	files, _ := version.BumpPatchFiles(projecttype.NPM)
+
+	result, err := version.VerifyBumpPatch(patch, files, "1.2.3")
+	if err != nil || !strings.Contains(string(patch), "b/frontend/npm-shrinkwrap.json") {
+		t.Fatalf("the node patch lost the shrinkwrap file or fails verification: %v %+v\n%s", err, result, patch)
 	}
 }

@@ -5,14 +5,12 @@ package gitlabbehavior
 
 import (
 	"bytes"
-	"context"
 	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"gopkg.in/yaml.v3"
 
@@ -65,8 +63,7 @@ func TestPublishOutputsAreDataAndOnlyKnownNamesAreImported(t *testing.T) {
 				readers.WriteString("test \"$VERSION\" = \"$EXPECTED\" && test \"$IS_SNAPSHOT\" = false\n")
 			}
 
-			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-			defer cancel()
+			ctx := commandContext(t)
 
 			command := exec.CommandContext(ctx, componentBash(t), "--noprofile", "--norc", "-eu", "-c", readers.String())
 			command.Dir = dir

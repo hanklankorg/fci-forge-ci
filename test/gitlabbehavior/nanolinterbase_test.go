@@ -6,14 +6,13 @@ package gitlabbehavior
 
 import (
 	"bytes"
-	"context"
+	"cmp"
 	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"gopkg.in/yaml.v3"
 
@@ -170,6 +169,40 @@ func TestNanolinterGivesTheEngineTheAdministratorSettings(t *testing.T) {
 	}
 }
 
+// disable-checks reaches nanolinter as --disable-check, beside the required
+// floor, and a SAST report that cannot be written fails a job whose gate passed.
+func TestNanolinterLeavesOutDisabledChecksAndFailsOnALostSASTReport(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+
+	const stub = "#!/bin/sh\nprintf '%s\\n' \"$*\" > \"$ENGINE_DIR/nanolinter-args\"\n"
+	if err := os.WriteFile(filepath.Join(dir, "nanolinter"), []byte(stub), 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(filepath.Join(dir, "out.sarif"), []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	inputs := map[string]string{"enforce-lint": "true", "enforce-vulnerabilities": "true", "disable-checks": "osv,trivy-fs", "enable-gitlab-sast": "true"}
+
+	output, err := runNanolinterScriptWith(t, dir, dir, inputs)
+	if err != nil {
+		t.Fatalf("a passing gate with a written report failed: %v\n%s", err, output)
+	}
+
+	args, err := os.ReadFile(filepath.Join(dir, "nanolinter-args"))
+	if want := "verify --require secrets,sast --disable-check osv,trivy-fs --report sarif --out -\n"; err != nil || string(args) != want {
+		t.Fatalf("nanolinter got %q, want %q (%v)", args, want, err)
+	}
+
+	output, err = runNanolinterScriptWith(t, dir, dir, inputs, "CONVERT_STATUS=3")
+	if err == nil || !strings.Contains(output, "SAST report could not be written") {
+		t.Fatalf("a lost SAST report passed: %v\n%s", err, output)
+	}
+}
+
 func runNanolinterScript(t *testing.T, dir, workspace string, env ...string) (string, error) {
 	t.Helper()
 
@@ -181,7 +214,9 @@ func runNanolinterScriptWith(t *testing.T, dir, workspace string, inputs map[str
 	// This suite checks checkout and environment transport. Policy semantics
 	// execute against real compiled engines in commands/policy integration tests.
 	// The driver records the administrator flags it was given.
-	const policyDriver = "#!/bin/sh\n[ \"$1\" = policy ] && [ \"$2\" = nanolinter ] || exit 98\nshift 2\n: > \"${0%/*}/admin-flags\"\n" +
+	// It stands in for the SAST conversion too, with the status the test names.
+	const policyDriver = "#!/bin/sh\n[ \"$1 $2 $3\" != 'security report to-gitlab-sast' ] || exit \"${CONVERT_STATUS:-0}\"\n" +
+		"[ \"$1\" = policy ] && [ \"$2\" = nanolinter ] || exit 98\nshift 2\n: > \"${0%/*}/admin-flags\"\n" +
 		"while :; do\n  case \"$1\" in\n    --enforce-*=*) printf '%s\\n' \"$1\" >> \"${0%/*}/admin-flags\"; shift ;;\n" +
 		"    --sarif-file) shift 2 ;;\n    *) break ;;\n  esac\ndone\n[ \"$1\" = -- ] || exit 98\nshift\nexec \"$@\"\n"
 	if err := os.WriteFile(filepath.Join(dir, "forge-ci"), []byte(policyDriver), 0o700); err != nil {
@@ -236,13 +271,13 @@ func runNanolinterScriptWith(t *testing.T, dir, workspace string, inputs map[str
 		t.Fatal("nanolinter component must have one script block")
 	}
 
-	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
-	defer cancel()
+	ctx := commandContext(t)
 
 	// The local forge stands in for the instance, under the name the job
 	// holds CI_SERVER_URL to.
 	rendered := strings.NewReplacer("$[[ component.sha ]]", strings.TrimSpace(string(pin)), "$[[ inputs.server-url ]]", "file://"+dir,
-		"$[[ inputs.required-lints ]]", "secrets,sast", "$[[ inputs.enable-gitlab-sast ]]", "false",
+		"$[[ inputs.required-lints ]]", "secrets,sast", "$[[ inputs.disable-checks ]]", inputs["disable-checks"],
+		"$[[ inputs.enable-gitlab-sast ]]", cmp.Or(inputs["enable-gitlab-sast"], "false"),
 		"$[[ inputs.enforce-lint ]]", inputs["enforce-lint"], "$[[ inputs.enforce-vulnerabilities ]]", inputs["enforce-vulnerabilities"]).Replace(script[0])
 	command := exec.CommandContext(ctx, componentBash(t), "--noprofile", "--norc", "-c", rendered)
 	command.Dir = workspace
@@ -250,7 +285,7 @@ func runNanolinterScriptWith(t *testing.T, dir, workspace string, inputs map[str
 	command.Env = append([]string{
 		"PATH=" + dir + ":/usr/bin:/bin", "TMPDIR=" + dir, "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=/dev/null",
 		"CI_SERVER_URL=file://" + dir, "CI_PROJECT_PATH=group/app", "CI_PROJECT_DIR=" + workspace, "CI_JOB_TOKEN=job-token",
-		"RC_FORGE_CI_REPOSITORY=engine",
+		"RC_FORGE_CI_REPOSITORY=engine", "ENGINE_DIR=" + dir,
 		"SARIF_FILE=" + filepath.Join(dir, "out.sarif"), "GL_SAST_FILE=" + filepath.Join(dir, "gl.json"),
 	}, env...)
 

@@ -1,11 +1,11 @@
-// SPDX-FileCopyrightText: The Forge CI Authors
+// SPDX-FileCopyrightText: 2026 Digg - Agency for Digital Government
 // SPDX-License-Identifier: EUPL-1.2 OR GPL-3.0-or-later
 
 package gitlabbehavior
 
 import (
 	"bytes"
-	"context"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -13,10 +13,12 @@ import (
 	"regexp"
 	"strings"
 	"testing"
-	"time"
 
 	"gopkg.in/yaml.v3"
 
+	appcontainer "github.com/diggsweden/forge-ci/internal/app/container"
+	gitlabpipeline "github.com/diggsweden/forge-ci/internal/app/gitlabpipeline"
+	"github.com/diggsweden/forge-ci/internal/domain/pipeline"
 	"github.com/diggsweden/forge-ci/internal/testutil/gitlabrender"
 	"github.com/diggsweden/forge-ci/internal/testutil/reporoot"
 )
@@ -46,16 +48,20 @@ func TestReleaseImageStageTakesItsSettingsFromThePolicy(t *testing.T) {
 			t.Fatalf("%s release-images must be an opt-in boolean: %+v", path, images)
 		}
 
-		arm64 := inputs["build-runner-tags-arm64"].(map[string]any)
-		if arm64["type"] != "array" || !reflect.DeepEqual(arm64["default"], []any{}) {
-			t.Fatalf("%s build-runner-tags-arm64 must default to no arm64 runner: %+v", path, arm64)
+		// Bound to a platform, the build inputs have no default: the policy
+		// names its runners, [] stating it has no arm64 one.
+		for _, name := range []string{"build-runner-tags-linux-amd64", "build-runner-tags-linux-arm64"} {
+			input := inputs[name].(map[string]any)
+			if _, defaulted := input["default"]; input["type"] != "array" || defaulted {
+				t.Fatalf("%s %s must be a required array: %+v", path, name, input)
+			}
 		}
 	}
 
 	root := releaseDocumentBody(t, "templates/release.yml")
 	forwarded := root["release"].(map[string]any)["trigger"].(map[string]any)["include"].([]any)[0].(map[string]any)["inputs"].(map[string]any)
 
-	for _, name := range []string{"job-user", "release-images", "artifacts-config", "release-platforms", "image-builder", "builder-job-image", "build-runner-tags-arm64"} {
+	for _, name := range []string{"job-user", "release-images", "artifacts-config", "release-platforms", "image-builder", "builder-job-image", "build-runner-tags-linux-arm64"} {
 		if forwarded[name] != "$[[ inputs."+name+" ]]" {
 			t.Fatalf("root component does not forward %s", name)
 		}
@@ -77,7 +83,7 @@ func TestReleaseImageStageTakesItsSettingsFromThePolicy(t *testing.T) {
 	}
 
 	build := body["Build: release files"].(map[string]any)
-	if !reflect.DeepEqual(build["script"], []any{"rc_release_checkout", "rc_gather_exports '$[[ inputs.export-files ]]'", "$[[ inputs.build ]]", "rc_build_handoff"}) {
+	if !reflect.DeepEqual(build["script"], []any{"rc_release_checkout", "rc_gather_bases", "rc_gather_exports '$[[ inputs.export-files ]]'", "rc_gather_families", "$[[ inputs.build ]]", "rc_build_handoff"}) {
 		t.Fatalf("the consumer build gained image work: %+v", build["script"])
 	}
 
@@ -89,12 +95,12 @@ func TestReleaseImageStageTakesItsSettingsFromThePolicy(t *testing.T) {
 
 	for arch, rule := range map[string]string{
 		"amd64": `"true" == "true"`,
-		"arm64": `'true' == 'true' && '$[[ inputs.build-runner-tags-arm64 ]]' != '[]'`,
+		"arm64": `'true' == 'true' && '$[[ inputs.build-runner-tags-linux-arm64 ]]' != '[]'`,
 	} {
 		job := gitlabrender.ResolveExtends(t, withExports, withExports["Build: export "+arch].(map[string]any))
 
 		want := []any{
-			"if ! rc_export_selected " + arch + " '$[[ inputs.release-platforms ]]'; then exit 0; fi",
+			"selected=$(rc_export_selected " + arch + " '$[[ inputs.release-platforms ]]') || exit; if [ \"$selected\" = false ]; then exit 0; fi",
 			"rc_export_prepare " + arch + " 'kaniko' '$[[ inputs.builder-job-image ]]'",
 			"$[[ inputs.export ]]",
 			"rc_export_handoff " + arch,
@@ -152,7 +158,7 @@ func TestReleaseImageStageTakesItsSettingsFromThePolicy(t *testing.T) {
 	}
 
 	arm64Rule := body["Images: build arm64"].(map[string]any)["rules"].([]any)[0].(map[string]any)["if"]
-	if arm64Rule != `'$[[ inputs.release-images ]]' == 'true' && '$[[ inputs.build-runner-tags-arm64 ]]' != '[]'` {
+	if arm64Rule != `'$[[ inputs.release-images ]]' == 'true' && '$[[ inputs.build-runner-tags-linux-arm64 ]]' != '[]'` {
 		t.Fatalf("the arm64 image job is not bound to its runner tags: %v", arm64Rule)
 	}
 
@@ -172,7 +178,7 @@ func TestReleaseImageBuilderAdmitsOnlyTheKanikoJobImage(t *testing.T) {
 	kanikoImage := "registry.invalid/team/kaniko-job@sha256:" + strings.Repeat("a", 64)
 	kaniko := []string{"CI_IMAGE_BUILDER=kaniko", "CI_IMAGE_BUILDER_JOB_IMAGE=" + kanikoImage}
 	buildahImage := "CI_IMAGE_BUILDER_JOB_IMAGE=registry.invalid/team/buildah-job@sha256:" + strings.Repeat("b", 64)
-	setupBuildah := []string{"container setup-buildah --install-packages=false "}
+	setupBuildah := []string{"container setup-image-builder --image-builder buildah", "--require-job-image --install-packages=false"}
 
 	for name, tc := range map[string]struct {
 		env       []string
@@ -181,27 +187,23 @@ func TestReleaseImageBuilderAdmitsOnlyTheKanikoJobImage(t *testing.T) {
 		calls     []string
 		wantError string
 	}{
-		"buildah by default":        {env: []string{buildahImage}, admitted: true, calls: setupBuildah},
-		"buildah named":             {env: []string{"CI_IMAGE_BUILDER=buildah", buildahImage}, admitted: true, calls: setupBuildah},
-		"buildah without its image": {env: []string{"CI_IMAGE_BUILDER=buildah"}, wantError: "buildah needs builder-job-image"},
-		"another builder":           {env: []string{"CI_IMAGE_BUILDER=docker"}, wantError: "image-builder must be buildah or kaniko"},
-		"kaniko without its image":  {env: []string{"CI_IMAGE_BUILDER=kaniko"}, wantError: "needs builder-job-image"},
-		"kaniko by tag":             {env: []string{"CI_IMAGE_BUILDER=kaniko", "CI_IMAGE_BUILDER_JOB_IMAGE=registry.invalid/team/kaniko-job:latest"}, wantError: "needs builder-job-image"},
-		"kaniko job image admitted": {env: kaniko, usable: "0", admitted: true, calls: kanikoAdmission(kanikoImage)},
-		"kaniko job image refused":  {env: kaniko, usable: "1", calls: kanikoAdmission(kanikoImage), wantError: "is not a kaniko job image built from https://gitlab.invalid/team/engine for amd64"},
+		"buildah by default":         {env: []string{buildahImage}, admitted: true, calls: setupBuildah},
+		"buildah named":              {env: []string{"CI_IMAGE_BUILDER=buildah", buildahImage}, admitted: true, calls: setupBuildah},
+		"kaniko job image admitted":  {env: kaniko, usable: "0", admitted: true, calls: []string{"container login --registry registry.invalid", "job-token-canary", "container setup-image-builder --image-builder kaniko --job-image " + kanikoImage, "--require-job-image --install-packages=false"}},
+		"kaniko job image refused":   {env: kaniko, usable: "1", calls: []string{"container setup-image-builder --image-builder kaniko"}},
+		"kaniko admission cancelled": {env: kaniko, usable: "cancel", calls: []string{"container setup-image-builder --image-builder kaniko"}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-			defer cancel()
+			ctx := commandContext(t)
 
 			work := t.TempDir()
 			script := filepath.Join(reporoot.Path(t), ".gitlab", "bin", "release.sh")
 			// The fake engine records its arguments and stdin, and fails the
 			// admission when told to.
 			command := exec.CommandContext(ctx, componentBash(t), "--noprofile", "--norc", "-euo", "pipefail", "-c",
-				`source "$1"; rc_engine() { printf '%s\n' "$*" >>"${RC_WORK}/engine"; if [ "$2" = login ]; then cat >>"${RC_WORK}/engine"; echo >>"${RC_WORK}/engine"; fi; if [ "$2" = image ]; then return "${USABLE_STATUS}"; fi; }; rc_image_builder`,
+				`source "$1"; rc_engine() { printf '%s\n' "$*" >>"${RC_WORK}/engine"; if [ "$2" = login ]; then cat >>"${RC_WORK}/engine"; echo >>"${RC_WORK}/engine"; : >"${10}"; fi; if [ "$2" = setup-image-builder ]; then if [ "${USABLE_STATUS:-}" = cancel ]; then kill -TERM "$BASHPID"; fi; return "${USABLE_STATUS:-0}"; fi; }; rc_image_builder`,
 				"image-builder", script)
 
 			command.Env = append([]string{"PATH=/usr/bin:/bin", "RC_WORK=" + work, "HELPERS_ENGINE_ARCH=amd64", "USABLE_STATUS=" + tc.usable,
@@ -222,6 +224,11 @@ func TestReleaseImageBuilderAdmitsOnlyTheKanikoJobImage(t *testing.T) {
 					t.Fatalf("the admission did not run %q:\n%s", want, calls)
 				}
 			}
+
+			leftovers, globErr := filepath.Glob(filepath.Join(work, "builder-auth.*"))
+			if globErr != nil || len(leftovers) != 0 {
+				t.Fatalf("builder auth not cleaned: %v %v", leftovers, globErr)
+			}
 		})
 	}
 }
@@ -230,11 +237,11 @@ func TestReleaseImageBuilderAdmitsOnlyTheKanikoJobImage(t *testing.T) {
 // that would stop after Prepare pushed the release commit and tag.
 // exportsCheck hands the export commands to the request check as data on
 // stdin; it runs none of them.
-const exportsCheck = "rc_check_exports '$[[ inputs.export-files ]]' '$[[ inputs.builder-job-image ]]' '$[[ inputs.release-platforms ]]' '$[[ inputs.build-runner-tags-arm64 ]]' <<'RC_EXPORT_COMMANDS'\n" +
+const exportsCheck = "rc_check_exports '$[[ inputs.export-files ]]' '$[[ inputs.builder-job-image ]]' '$[[ inputs.release-platforms ]]' '$[[ inputs.build-runner-tags-linux-arm64 ]]' <<'RC_EXPORT_COMMANDS'\n" +
 	"$[[ inputs.export ]]\nRC_EXPORT_COMMANDS\n"
 
 const releaseImagesCheck = "rc_check_release_images '$[[ inputs.release-images ]]' '$[[ inputs.image-builder ]]' " +
-	"'$[[ inputs.builder-job-image ]]' '$[[ inputs.artifacts-config ]]' '$[[ inputs.release-platforms ]]' '$[[ inputs.build-runner-tags-arm64 ]]'"
+	"'$[[ inputs.builder-job-image ]]' '$[[ inputs.artifacts-config ]]' '$[[ inputs.release-platforms ]]'"
 
 // The release request check, which runs before Prepare pushes anything,
 // refuses an image stage that would stop later: either builder without the
@@ -269,9 +276,10 @@ func TestReleaseRequestCheckRefusesAnImageStageThatWouldStop(t *testing.T) {
 
 			work := t.TempDir()
 			env := append([]string{"RC_WORK=" + work, "RELEASE_TAG=v1.2.3", "RC_REGISTRY=registry.invalid", "RC_REGISTRY_IMAGE=registry.invalid/team/app",
-				"RC_SERVER_URL=https://gitlab.invalid", "CI_PROJECT_PATH=team/app", "RC_IMAGE_LABELS=" + tc.labels}, tc.env...)
+				"RC_SERVER_URL=https://gitlab.invalid", "CI_PROJECT_PATH=team/app", "RC_IMAGE_LABELS=" + tc.labels,
+				"RC_RUNNER_TAGS=[]", "RC_SIGNER_RUNNER_TAGS=[]", `RC_BUILD_RUNNER_TAGS_LINUX_AMD64=["amd64"]`, "RC_BUILD_RUNNER_TAGS_LINUX_ARM64=[]"}, tc.env...)
 
-			output, err := runReleaseFunction(t, work, "rc_check_release_images "+tc.args+" .forge-ci/artifacts.yml '' '[]'", env...)
+			output, err := runReleaseFunction(t, work, "rc_check_release_images "+tc.args+" .forge-ci/artifacts.yml ''", env...)
 			if (err == nil) != (tc.wantError == "") || !strings.Contains(output, tc.wantError) {
 				t.Fatalf("err = %v:\n%s", err, output)
 			}
@@ -283,20 +291,11 @@ func TestReleaseRequestCheckRefusesAnImageStageThatWouldStop(t *testing.T) {
 
 			plan := "engine: container release-images plan --file .forge-ci/artifacts.yml --image-plan-json  --release-tag v1.2.3 --release-platforms  " + labelArgs +
 				"--image-repository registry.invalid/team/app --server-url https://gitlab.invalid --repository team/app " +
-				"--registry-username gitlab-ci-token --runner-archs amd64 --output " + work + "/release-images-plan.json"
+				`--registry-username gitlab-ci-token --runner-input runner-tags=[] --runner-input signer-runner-tags=[] --runner-input build-runner-tags-linux-amd64=["amd64"] --runner-input build-runner-tags-linux-arm64=[] --output ` + work + "/release-images-plan.json"
 			if strings.Contains(output, plan) != tc.planned {
 				t.Fatalf("planned=%t, want %t:\n%s", strings.Contains(output, plan), tc.planned, output)
 			}
 		})
-	}
-}
-
-func kanikoAdmission(image string) []string {
-	return []string{
-		"container login --registry registry.invalid --registry-username gitlab-ci-token --registry-password-file - --auth-file ",
-		"/builder-auth.json\njob-token-canary\n",
-		"container image usable-digest --ref " + image + " --arch amd64 --auth-file ",
-		"--require-label org.opencontainers.image.source=https://gitlab.invalid/team/engine --require-label org.opencontainers.image.title=forge-ci kaniko job image\n",
 	}
 }
 
@@ -306,8 +305,9 @@ func kanikoAdmission(image string) []string {
 func TestReleaseBuildHandoffRefusesAConsumerLedger(t *testing.T) {
 	t.Parallel()
 
-	for name, tc := range map[string]struct{ ledger, planted bool }{
+	for name, tc := range map[string]struct{ ledger, planted, baseLedger bool }{
 		"consumer ledger":         {ledger: true},
+		"consumer base ledger":    {baseLedger: true},
 		"no ledger":               {},
 		"hand-off already exists": {planted: true},
 	} {
@@ -331,6 +331,12 @@ func TestReleaseBuildHandoffRefusesAConsumerLedger(t *testing.T) {
 				}
 			}
 
+			if tc.baseLedger {
+				if err := os.WriteFile(filepath.Join(work, "dist/base-images.json"), []byte("[]"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+
 			// The consumer's build runs in this job and could leave the
 			// hand-off with its own files in it, to be merged into.
 			if tc.planted {
@@ -339,10 +345,20 @@ func TestReleaseBuildHandoffRefusesAConsumerLedger(t *testing.T) {
 				}
 			}
 
-			output, err := runReleaseFunction(t, work, `rc_build_handoff`, "CI_PROJECT_DIR="+filepath.Join(work, "project"), "RC_BASE_IMAGES=false")
+			output, err := runReleaseFunction(t, work, `rc_planned_packages() { : >"$1"; }; rc_build_handoff`, "RC_WORK="+work, "CI_PROJECT_DIR="+filepath.Join(work, "project"))
 			if tc.planted {
 				if err == nil || !strings.Contains(output, "reserved for this job") {
 					t.Fatalf("a planted hand-off was merged into: %v\n%s", err, output)
+				}
+
+				return
+			}
+
+			// Base images are the base stage's: a build that left a base
+			// ledger is refused before anything is signed.
+			if tc.baseLedger {
+				if err == nil || !strings.Contains(output, "name the base images in the release policy as base-stages") || strings.Contains(output, "engine:") {
+					t.Fatalf("a consumer base ledger was handed off: %v\n%s", err, output)
 				}
 
 				return
@@ -436,11 +452,11 @@ func TestReleaseSigningReadsTheHandoffThePolicyNames(t *testing.T) {
 
 			// The checks the signer runs before reading are stubbed; the first
 			// engine call after the read ends the run successfully.
-			body := `rc_signing_preflight() { :; }; rc_release_checkout() { :; }; ` +
+			body := `rc_signing_preflight() { :; }; rc_release_checkout() { :; }; rc_release_file_signing() { rc_file_signing=cosign; }; ` +
 				`rc_read_handoff() { echo "read: $1"; mkdir dist; ` + ledger + `export DIST_DIR=dist RELEASE_FILES_MANIFEST=dist/release-files.json; }; ` +
 				`rc_engine() { echo "engine: $*"; exit 0; }; rc_sign_release ` + tc.images
 
-			output, err := runReleaseFunction(t, work, body, "CI_PROJECT_DIR=/project")
+			output, err := runReleaseFunction(t, work, body, "CI_PROJECT_DIR=/project", "RC_SIGN_DISTRO_PACKAGES=false")
 			if (err == nil) != tc.signed {
 				t.Fatalf("signed=%t, want %t:\n%s", err == nil, tc.signed, output)
 			}
@@ -457,8 +473,7 @@ func TestReleaseSigningReadsTheHandoffThePolicyNames(t *testing.T) {
 func runReleaseFunction(t *testing.T, dir, body string, env ...string) (string, error) {
 	t.Helper()
 
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-	defer cancel()
+	ctx := commandContext(t)
 
 	script := filepath.Join(reporoot.Path(t), ".gitlab", "bin", "release.sh")
 	command := exec.CommandContext(ctx, componentBash(t), "--noprofile", "--norc", "-euo", "pipefail", "-c",
@@ -492,7 +507,7 @@ func releaseDocumentBody(t *testing.T, path string) map[string]any {
 // Each architecture's hand-off contributes only its own <name>-arch-<arch>
 // layout directories: an entry of another architecture, which could replace
 // that job's layout, or anything but such a directory stops publishing.
-func TestReleaseImagesPublishGathersEachArchitecturesOwnLayouts(t *testing.T) {
+func TestReleaseImagesPublishAdmitsEachArchitecturesOwnLayouts(t *testing.T) {
 	t.Parallel()
 
 	for name, tc := range map[string]struct {
@@ -500,36 +515,45 @@ func TestReleaseImagesPublishGathersEachArchitecturesOwnLayouts(t *testing.T) {
 		wantError string
 	}{
 		"own layouts":            {},
-		"another arch's layout":  {plant: mkdirLayout("app-arch-arm64"), wantError: "layout directory of the amd64 image job"},
-		"a file":                 {plant: writeFile(".ledger"), wantError: "layout directory of the amd64 image job"},
-		"a linked layout":        {plant: linkLayout("worker-arch-amd64"), wantError: "layout directory of the amd64 image job"},
-		"an unnamed arch layout": {plant: mkdirLayout("-arch-amd64"), wantError: "layout directory of the amd64 image job"},
+		"another arch's layout":  {plant: mkdirLayout("app-arch-arm64"), wantError: "layout entry"},
+		"a file":                 {plant: writeFile(".ledger"), wantError: "layout entry"},
+		"a linked layout":        {plant: linkLayout("worker-arch-amd64"), wantError: "layout entry"},
+		"an unnamed arch layout": {plant: mkdirLayout("-arch-amd64"), wantError: "layout entry"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
 			work := t.TempDir()
-			handoff, layouts := filepath.Join(work, "_release-images-amd64"), filepath.Join(work, "layouts")
+			handoff := filepath.Join(work, "_release-images-amd64")
 
-			for _, dir := range []string{filepath.Join(handoff, "app-arch-amd64", "layout"), layouts} {
+			for _, dir := range []string{filepath.Join(handoff, "app-arch-amd64", "layout")} {
 				if err := os.MkdirAll(dir, 0o700); err != nil {
 					t.Fatal(err)
 				}
+			}
+
+			if err := os.WriteFile(filepath.Join(handoff, "app-arch-amd64", "app-amd64.json"), []byte("{}"), 0o600); err != nil {
+				t.Fatal(err)
 			}
 
 			if tc.plant != nil {
 				tc.plant(t, handoff)
 			}
 
-			output, err := runReleaseFunction(t, work, `rc_gather_layouts "${HANDOFF}" amd64 "${LAYOUTS}"`, "HANDOFF="+handoff, "LAYOUTS="+layouts)
+			err := appcontainer.AdmitReleaseImageLayoutSources(map[string]string{"amd64": handoff}, []pipeline.ReleaseImage{{Name: "app", Archs: "amd64"}})
+
+			output := ""
+			if err != nil {
+				output = err.Error()
+			}
 
 			if (err == nil) != (tc.wantError == "") || !strings.Contains(output, tc.wantError) {
 				t.Fatalf("err = %v:\n%s", err, output)
 			}
 
 			if tc.wantError == "" {
-				if _, statErr := os.Stat(filepath.Join(layouts, "app-arch-amd64", "layout")); statErr != nil {
-					t.Fatalf("the layout was not gathered: %v", statErr)
+				if _, statErr := os.Stat(filepath.Join(handoff, "app-arch-amd64", "layout")); statErr != nil {
+					t.Fatalf("the admitted source was changed: %v", statErr)
 				}
 			}
 		})
@@ -619,7 +643,19 @@ func releaseJobsBodyFor(t *testing.T, builder string) map[string]any {
 		t.Fatal(err)
 	}
 
+	// The child pipeline as GitLab composes it from both includes, with
+	// every family job "Release: plan" can name.
+	maps.Copy(body, everyReleaseFamily.Jobs())
+
 	return body
+}
+
+// everyReleaseFamily names every family job of the release child.
+var everyReleaseFamily = gitlabpipeline.ReleaseFamilies{
+	Version:  []string{"java", "node", "rust"},
+	Build:    []string{"java", "node", "go", "rust", "android"},
+	Packages: []string{"frontend"},
+	Bases:    []gitlabpipeline.BaseStage{{Flavors: []string{"base"}}, {Flavors: []string{"tools", "debug"}, Parent: "base"}},
 }
 
 // The release's labels input admits key=value lines only, each value a

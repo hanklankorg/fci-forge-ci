@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: The Forge CI Authors
+// SPDX-FileCopyrightText: 2026 Digg - Agency for Digital Government
 // SPDX-License-Identifier: EUPL-1.2 OR GPL-3.0-or-later
 
 package gitlabbehavior
@@ -202,7 +202,7 @@ func documentedIncludes(t *testing.T, root string) []documentedInclude {
 		includes = append(includes, yamlIncludes(t, rel, body, false)...)
 	})
 
-	walkFiles(t, root, "test/live/demos", func(rel string) bool {
+	walkFiles(t, root, "test/live/fixtures/consumers", func(rel string) bool {
 		return isYAML(rel) && (strings.HasSuffix(rel, "/consumer/.gitlab-ci.yml") || strings.Contains(rel, "/consumer/.gitlab/"))
 	}, func(rel string, body []byte) {
 		includes = append(includes, yamlIncludes(t, rel, body, true)...)
