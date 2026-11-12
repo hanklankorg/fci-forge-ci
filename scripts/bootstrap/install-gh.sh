@@ -19,74 +19,74 @@ readonly GH_SHA256_DARWIN_AMD64="2dc7f1fc4761f96732995f6e4f4c6b4d705f2635da41266
 readonly GH_SHA256_DARWIN_ARM64="5416000f5d17580a187339e0c4068a01ca5c87f7d4fe6ca64933696f967bc418"
 
 resolve_gh_dist() {
-	local raw_os raw_arch os="" arch="" dist=""
-	raw_os="${OS:-$(uname -s)}"
-	raw_arch="${ARCH:-$(uname -m)}"
-	os="$(ci_normalize_os "$raw_os")" || true
-	arch="$(ci_normalize_arch "$raw_arch")" || true
+  local raw_os raw_arch os="" arch="" dist=""
+  raw_os="${OS:-$(uname -s)}"
+  raw_arch="${ARCH:-$(uname -m)}"
+  os="$(ci_normalize_os "$raw_os")" || true
+  arch="$(ci_normalize_arch "$raw_arch")" || true
 
-	case "$os/$arch" in
-	linux/amd64) dist="gh_${GH_VERSION#v}_linux_amd64.tar.gz" ;;
-	linux/arm64) dist="gh_${GH_VERSION#v}_linux_arm64.tar.gz" ;;
-	darwin/amd64) dist="gh_${GH_VERSION#v}_macOS_amd64.zip" ;;
-	darwin/arm64) dist="gh_${GH_VERSION#v}_macOS_arm64.zip" ;;
-	esac
+  case "$os/$arch" in
+  linux/amd64) dist="gh_${GH_VERSION#v}_linux_amd64.tar.gz" ;;
+  linux/arm64) dist="gh_${GH_VERSION#v}_linux_arm64.tar.gz" ;;
+  darwin/amd64) dist="gh_${GH_VERSION#v}_macOS_amd64.zip" ;;
+  darwin/arm64) dist="gh_${GH_VERSION#v}_macOS_arm64.zip" ;;
+  esac
 
-	if [[ -z "$dist" ]]; then
-		printf "ERROR: Unsupported gh platform: %s/%s\n" "$raw_os" "$raw_arch" >&2
-		return 1
-	fi
+  if [[ -z "$dist" ]]; then
+    printf "ERROR: Unsupported gh platform: %s/%s\n" "$raw_os" "$raw_arch" >&2
+    return 1
+  fi
 
-	printf '%s' "$dist"
+  printf '%s' "$dist"
 }
 
 resolve_gh_sha256() {
-	case "$1" in
-	gh_2.103.2_linux_amd64.tar.gz) printf '%s' "$GH_SHA256_LINUX_AMD64" ;;
-	gh_2.103.2_linux_arm64.tar.gz) printf '%s' "$GH_SHA256_LINUX_ARM64" ;;
-	gh_2.103.2_macOS_amd64.zip) printf '%s' "$GH_SHA256_DARWIN_AMD64" ;;
-	gh_2.103.2_macOS_arm64.zip) printf '%s' "$GH_SHA256_DARWIN_ARM64" ;;
-	*)
-		printf 'ERROR: no pinned SHA-256 for gh asset %s\n' "$1" >&2
-		return 1
-		;;
-	esac
+  case "$1" in
+  gh_2.103.2_linux_amd64.tar.gz) printf '%s' "$GH_SHA256_LINUX_AMD64" ;;
+  gh_2.103.2_linux_arm64.tar.gz) printf '%s' "$GH_SHA256_LINUX_ARM64" ;;
+  gh_2.103.2_macOS_amd64.zip) printf '%s' "$GH_SHA256_DARWIN_AMD64" ;;
+  gh_2.103.2_macOS_arm64.zip) printf '%s' "$GH_SHA256_DARWIN_ARM64" ;;
+  *)
+    printf 'ERROR: no pinned SHA-256 for gh asset %s\n' "$1" >&2
+    return 1
+    ;;
+  esac
 }
 
 install_gh() {
-	ci_use_installed_pin gh gh "$GH_VERSION" --version && return 0
+  ci_use_installed_pin gh gh "$GH_VERSION" --version && return 0
 
-	local install_dir dist sha256 asset_url archive
-	install_dir="$(ci_install_dir gh)"
-	mkdir -p "$install_dir"
+  local install_dir dist sha256 asset_url archive
+  install_dir="$(ci_install_dir gh)"
+  mkdir -p "$install_dir"
 
-	dist="$(resolve_gh_dist)" || return 1
-	sha256="$(resolve_gh_sha256 "$dist")" || return 1
-	asset_url="https://github.com/cli/cli/releases/download/${GH_VERSION}/${dist}"
-	archive="$install_dir/${dist}"
+  dist="$(resolve_gh_dist)" || return 1
+  sha256="$(resolve_gh_sha256 "$dist")" || return 1
+  asset_url="https://github.com/cli/cli/releases/download/${GH_VERSION}/${dist}"
+  archive="$install_dir/${dist}"
 
-	printf "Installing gh (version: %s)...\n" "$GH_VERSION"
-	if ! ci_download_verified "$asset_url" "$archive" "$sha256"; then
-		printf "ERROR: Failed to download gh from %s\n" "$asset_url" >&2
-		return 1
-	fi
+  printf "Installing gh (version: %s)...\n" "$GH_VERSION"
+  if ! ci_download_verified "$asset_url" "$archive" "$sha256"; then
+    printf "ERROR: Failed to download gh from %s\n" "$asset_url" >&2
+    return 1
+  fi
 
-	local extracted_root
-	case "$dist" in
-	*.zip)
-		unzip -q "$archive" -d "$install_dir"
-		extracted_root="$install_dir/${dist%.zip}"
-		;;
-	*.tar.gz)
-		tar -xzf "$archive" -C "$install_dir"
-		extracted_root="$install_dir/${dist%.tar.gz}"
-		;;
-	esac
-	mv "$extracted_root/bin/gh" "$install_dir/gh"
-	rm -rf "$extracted_root" "$archive"
-	chmod +x "$install_dir/gh"
-	ci_prepend_path "$install_dir"
+  local extracted_root
+  case "$dist" in
+  *.zip)
+    unzip -q "$archive" -d "$install_dir"
+    extracted_root="$install_dir/${dist%.zip}"
+    ;;
+  *.tar.gz)
+    tar -xzf "$archive" -C "$install_dir"
+    extracted_root="$install_dir/${dist%.tar.gz}"
+    ;;
+  esac
+  mv "$extracted_root/bin/gh" "$install_dir/gh"
+  rm -rf "$extracted_root" "$archive"
+  chmod +x "$install_dir/gh"
+  ci_prepend_path "$install_dir"
 
-	ci_require_command gh gh || return 1
-	ci_print_installed "gh" "$(gh --version 2>/dev/null | head -1 | tr -d '\r')"
+  ci_require_command gh gh || return 1
+  ci_print_installed "gh" "$(gh --version 2>/dev/null | head -1 | tr -d '\r')"
 }

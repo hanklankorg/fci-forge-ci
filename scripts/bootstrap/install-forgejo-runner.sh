@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SPDX-FileCopyrightText: The Forge CI Authors
+# SPDX-FileCopyrightText: 2026 Digg - Agency for Digital Government
 # SPDX-License-Identifier: CC0-1.0
 
 # Install the repository-pinned forgejo-runner.
@@ -21,66 +21,66 @@ readonly FORGEJO_RUNNER_SHA256_LINUX_AMD64="fadaec897f5e6641c363f87ecaf75f866f99
 readonly FORGEJO_RUNNER_SHA256_LINUX_ARM64="9d3d462ee83e4e629f959faeacceb20eed2f25290bddea402e65ace46a31afd9"
 
 resolve_forgejo_runner_asset() {
-	local raw_os raw_arch os="" arch="" asset=""
-	raw_os="${OS:-$(uname -s)}"
-	raw_arch="${ARCH:-$(uname -m)}"
-	os="$(ci_normalize_os "$raw_os")" || true
-	arch="$(ci_normalize_arch "$raw_arch")" || true
+  local raw_os raw_arch os="" arch="" asset=""
+  raw_os="${OS:-$(uname -s)}"
+  raw_arch="${ARCH:-$(uname -m)}"
+  os="$(ci_normalize_os "$raw_os")" || true
+  arch="$(ci_normalize_arch "$raw_arch")" || true
 
-	case "$os/$arch" in
-	linux/amd64 | linux/arm64) asset="forgejo-runner-${FORGEJO_RUNNER_VERSION#v}-linux-${arch}" ;;
-	esac
+  case "$os/$arch" in
+  linux/amd64 | linux/arm64) asset="forgejo-runner-${FORGEJO_RUNNER_VERSION#v}-linux-${arch}" ;;
+  esac
 
-	if [[ -z "$asset" ]]; then
-		printf 'ERROR: unsupported forgejo-runner platform: %s/%s\n' "$raw_os" "$raw_arch" >&2
-		return 1
-	fi
+  if [[ -z "$asset" ]]; then
+    printf 'ERROR: unsupported forgejo-runner platform: %s/%s\n' "$raw_os" "$raw_arch" >&2
+    return 1
+  fi
 
-	printf '%s' "$asset"
+  printf '%s' "$asset"
 }
 
 resolve_forgejo_runner_sha256() {
-	case "$1" in
-	forgejo-runner-*-linux-amd64) printf '%s' "$FORGEJO_RUNNER_SHA256_LINUX_AMD64" ;;
-	forgejo-runner-*-linux-arm64) printf '%s' "$FORGEJO_RUNNER_SHA256_LINUX_ARM64" ;;
-	*)
-		printf 'ERROR: no pinned SHA-256 for forgejo-runner asset %s\n' "$1" >&2
-		return 1
-		;;
-	esac
+  case "$1" in
+  forgejo-runner-*-linux-amd64) printf '%s' "$FORGEJO_RUNNER_SHA256_LINUX_AMD64" ;;
+  forgejo-runner-*-linux-arm64) printf '%s' "$FORGEJO_RUNNER_SHA256_LINUX_ARM64" ;;
+  *)
+    printf 'ERROR: no pinned SHA-256 for forgejo-runner asset %s\n' "$1" >&2
+    return 1
+    ;;
+  esac
 }
 
 install_forgejo_runner() {
-	local install_dir asset sha256 url download
+  local install_dir asset sha256 url download
 
-	install_dir="$(ci_install_dir forgejo-runner)"
-	if [[ -L "$install_dir" || (-e "$install_dir" && ! -d "$install_dir") ]]; then
-		printf 'ERROR: forgejo-runner install directory is not a real directory: %s\n' "$install_dir" >&2
-		return 1
-	fi
-	mkdir -p "$install_dir"
-	chmod 0755 "$install_dir"
+  install_dir="$(ci_install_dir forgejo-runner)"
+  if [[ -L "$install_dir" || (-e "$install_dir" && ! -d "$install_dir") ]]; then
+    printf 'ERROR: forgejo-runner install directory is not a real directory: %s\n' "$install_dir" >&2
+    return 1
+  fi
+  mkdir -p "$install_dir"
+  chmod 0755 "$install_dir"
 
-	asset="$(resolve_forgejo_runner_asset)" || return 1
-	sha256="$(resolve_forgejo_runner_sha256 "$asset")" || return 1
+  asset="$(resolve_forgejo_runner_asset)" || return 1
+  sha256="$(resolve_forgejo_runner_sha256 "$asset")" || return 1
 
-	url="https://code.forgejo.org/forgejo/runner/releases/download/${FORGEJO_RUNNER_VERSION}/${asset}"
-	download="$(mktemp "$install_dir/.forgejo-runner-download.XXXXXXXX")"
+  url="https://code.forgejo.org/forgejo/runner/releases/download/${FORGEJO_RUNNER_VERSION}/${asset}"
+  download="$(mktemp "$install_dir/.forgejo-runner-download.XXXXXXXX")"
 
-	printf "Installing forgejo-runner (version: %s)...\n" "${FORGEJO_RUNNER_VERSION}"
-	if ! ci_download_verified "$url" "$download" "$sha256"; then
-		printf 'ERROR: Failed to download forgejo-runner from %s\n' "$url" >&2
-		rm -f "$download"
-		return 1
-	fi
+  printf "Installing forgejo-runner (version: %s)...\n" "${FORGEJO_RUNNER_VERSION}"
+  if ! ci_download_verified "$url" "$download" "$sha256"; then
+    printf 'ERROR: Failed to download forgejo-runner from %s\n' "$url" >&2
+    rm -f "$download"
+    return 1
+  fi
 
-	# The lender runs the binary as another, unprivileged user: world-readable
-	# and executable, like a packaged binary, and owned by whoever installs.
-	install -m 0755 "$download" "$install_dir/forgejo-runner"
-	rm -f "$download"
+  # The lender runs the binary as another, unprivileged user: world-readable
+  # and executable, like a packaged binary, and owned by whoever installs.
+  install -m 0755 "$download" "$install_dir/forgejo-runner"
+  rm -f "$download"
 
-	# The checksum pins the exact release; no version probe is needed.
-	ci_prepend_path "$install_dir"
-	ci_require_command forgejo-runner forgejo-runner || return 1
-	ci_print_installed forgejo-runner "$FORGEJO_RUNNER_VERSION"
+  # The checksum pins the exact release; no version probe is needed.
+  ci_prepend_path "$install_dir"
+  ci_require_command forgejo-runner forgejo-runner || return 1
+  ci_print_installed forgejo-runner "$FORGEJO_RUNNER_VERSION"
 }
