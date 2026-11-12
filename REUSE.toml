@@ -4,213 +4,124 @@
 
 version = 1
 
-# Root dual-license notice (points to LICENSES/); the notice itself is CC0.
-[[annotations]]
-path = "LICENSE"
-SPDX-FileCopyrightText = "2026 Digg - Agency for Digital Government"
-SPDX-License-Identifier = "CC0-1.0"
+# No default: a new file without a header fails `reuse lint` until it is
+# annotated here or given a header. Code files carry their own headers.
 
-# Demo consumers: whole projects `just demo` publishes as they are, some
-# files of which (Java sources, a POM, templates) carry no header.
+# Documentation, CC0-1.0: override because Markdown quotes SPDX snippets.
 [[annotations]]
-path = "test/live/demos/**"
+path = "**/*.md"
 precedence = "override"
 SPDX-FileCopyrightText = "2026 Digg - Agency for Digital Government"
 SPDX-License-Identifier = "CC0-1.0"
 
-# Generated upstream Gradle wrapper retains its Apache license.
+# Root licence notice pointing to LICENSES/, CC0-1.0: override, as it is a
+# licence-text file that names other licences.
+[[annotations]]
+path = "LICENSE"
+precedence = "override"
+SPDX-FileCopyrightText = "2026 Digg - Agency for Digital Government"
+SPDX-License-Identifier = "CC0-1.0"
+
+# Configuration, manifests and lockfiles without comment syntax, CC0-1.0:
+# closest, as these files cannot carry a header. The schema templates are the
+# sources of the generated schemas below.
 [[annotations]]
 path = [
-  "test/live/demos/hello-android/consumer/gradlew",
-  "test/live/demos/hello-android/consumer/gradlew.bat",
-  "test/live/demos/hello-android/consumer/gradle/wrapper/gradle-wrapper.jar",
-  "test/live/demos/hello-gradle/consumer/gradlew",
-  "test/live/demos/hello-gradle/consumer/gradlew.bat",
-  "test/live/demos/hello-gradle/consumer/gradle/wrapper/gradle-wrapper.jar",
+  ".forge-ci/allowed_signers",
+  ".gitignore",
+  "containers/runtime/images.json",
+  "examples/monorepo/Containerfile.multi-artifact",
+  "examples/signing/sigstore-keyless/.forge-ci/allowed_signers.example",
+  "go.mod",
+  "go.sum",
+  "internal/domain/config/artifacts.schema.json.tmpl",
+  "internal/domain/enforcement/policy.json",
+  "internal/domain/imageledger/release-images.schema.json.tmpl",
+  "renovate.json",
+]
+precedence = "closest"
+SPDX-FileCopyrightText = "2026 Digg - Agency for Digital Government"
+SPDX-License-Identifier = "CC0-1.0"
+
+# Generated files, CC0-1.0: closest, as the generators write them without a
+# header. The schemas come from cmd/gen-artifacts-schema and
+# cmd/gen-release-images-schema, the RUN BY table from cmd/gen-runby, and the
+# engine checksums from scripts/ci/engine-binary.sh (the binaries themselves
+# are not tracked).
+[[annotations]]
+path = [
+  ".engine/bin/forge-ci-linux-amd64.sha256",
+  ".engine/bin/forge-ci-linux-arm64.sha256",
+  ".forge-ci/artifacts.schema.json",
+  "docs/schemas/release-images.schema.json",
+  "internal/cli/runby.json",
+]
+precedence = "closest"
+SPDX-FileCopyrightText = "2026 Digg - Agency for Digital Government"
+SPDX-License-Identifier = "CC0-1.0"
+
+# Fixtures and test data, CC0-1.0: closest, as fuzz seeds, golden JSON, sample
+# inputs and consumer projects keep their bytes exact or have no comment
+# syntax. The in-runner probe shell bodies are embedded by test/live/internal/livetest
+# (go:embed), where a header would corrupt the generated probes.
+[[annotations]]
+path = [
+  "examples/base-images/images/base/base.txt",
+  "examples/base-images/images/debug/debug.txt",
+  "examples/base-images/images/tools/tools.txt",
+  "examples/container-snapshot/hello.txt",
+  "internal/domain/build/testdata/**",
+  "internal/domain/pipeline/testdata/**",
+  "internal/domain/provenance/testdata/**",
+  "test/live/internal/livetest/probes/**",
+  "test/live/internal/livetest/testdata/**",
+  "test/live/fixtures/development/rust-development/consumer/**",
+  "test/workflowguard/testdata/**",
+]
+precedence = "closest"
+SPDX-FileCopyrightText = "2026 Digg - Agency for Digital Government"
+SPDX-License-Identifier = "CC0-1.0"
+
+# Demo consumer projects, CC0-1.0: override, as `just demo` publishes each
+# whole project as it is and the Maven recipe overlay copies exactly this
+# metadata into consumers (test/live/internal/livetest/mavenrecipelicenses.go).
+[[annotations]]
+path = "test/live/fixtures/consumers/**"
+precedence = "override"
+SPDX-FileCopyrightText = "2026 Digg - Agency for Digital Government"
+SPDX-License-Identifier = "CC0-1.0"
+
+# Demo source code, EUPL-1.2 OR GPL-3.0-or-later: code is never CC0. Override,
+# because the demos override above would otherwise hide the files' own headers,
+# which state the same terms.
+[[annotations]]
+path = [
+  "test/live/fixtures/consumers/**/*.go",
+  "test/live/fixtures/consumers/**/*.java",
+  "test/live/fixtures/consumers/**/*.kt",
+  "test/live/fixtures/consumers/**/*.rs",
+]
+precedence = "override"
+SPDX-FileCopyrightText = "2026 Digg - Agency for Digital Government"
+SPDX-License-Identifier = "EUPL-1.2 OR GPL-3.0-or-later"
+
+# Vendored Gradle wrapper, Apache-2.0: override, as third-party material
+# keeps its own terms.
+[[annotations]]
+path = [
+  "test/live/fixtures/consumers/hello-android/consumer/gradle/wrapper/gradle-wrapper.jar",
+  "test/live/fixtures/consumers/hello-android/consumer/gradlew",
+  "test/live/fixtures/consumers/hello-android/consumer/gradlew.bat",
+  "test/live/fixtures/consumers/hello-android-library/consumer/gradle/wrapper/gradle-wrapper.jar",
+  "test/live/fixtures/consumers/hello-android-library/consumer/gradlew",
+  "test/live/fixtures/consumers/hello-android-library/consumer/gradlew.bat",
+  "test/live/fixtures/consumers/hello-gradle/consumer/gradle/wrapper/gradle-wrapper.jar",
+  "test/live/fixtures/consumers/hello-gradle/consumer/gradlew",
+  "test/live/fixtures/consumers/hello-gradle/consumer/gradlew.bat",
+  "test/live/fixtures/consumers/hello-gradle-service/consumer/gradle/wrapper/gradle-wrapper.jar",
+  "test/live/fixtures/consumers/hello-gradle-service/consumer/gradlew",
+  "test/live/fixtures/consumers/hello-gradle-service/consumer/gradlew.bat",
 ]
 precedence = "override"
 SPDX-FileCopyrightText = "2015 the original authors; Gradle, Inc."
 SPDX-License-Identifier = "Apache-2.0"
-
-# Markdown documentation.
-[[annotations]]
-path = [
-  "README.md",
-  "CHANGELOG.md",
-  "docs/DEVELOPMENT.md",
-  "docs/admin-policy.md",
-  "docs/artifacts-reference.md",
-  "docs/components.md",
-  "docs/ecosystems.md",
-  "docs/gradle-publishing.md",
-  "docs/multiarch-images.md",
-  "docs/private-dependencies.md",
-  "docs/quickstart-setup-secrets.md",
-  "docs/tutorial-first-pull-request.md",
-  "docs/publishing.md",
-  "docs/reference.md",
-  "docs/sbom.md",
-  "docs/verification.md",
-  "docs/validation-invariants.md",
-  "docs/workflow-design-policy.md",
-  "docs/workflows.md",
-  "AGENTS.md",
-  "docs/live-campaigns.md",
-  "docs/roadmap.md",
-  "internal/livetest/consumerpr.md",
-  "internal/livetest/mavenlibrarydevelopment.md",
-  "internal/livetest/mavenlibraryfixture.md",
-  "internal/livetest/npmapplicationfixture.md",
-  "test/live/cases/npm-rest-service/README.md",
-  "examples/README.md",
-  "examples/container-snapshot/README.md",
-  "examples/container-snapshot/hello.txt",
-  "examples/android-app/README.md",
-  "examples/cargo-app/README.md",
-  "examples/gradle-app/README.md",
-  "examples/maven-app/README.md",
-  "examples/monorepo/README.md",
-  "examples/npm-app/README.md",
-]
-precedence = "override"
-SPDX-FileCopyrightText = "2026 Digg - Agency for Digital Government"
-SPDX-License-Identifier = "CC0-1.0"
-
-[[annotations]]
-path = [
-  "SECURITY.md",
-  "docs/README.md",
-  "docs/adr/*.md",
-  "docs/cli-black-box.md",
-  "docs/cli-reference.md",
-  "docs/flows.md",
-  "docs/forge-migration.md",
-  "docs/failed-release-recovery.md",
-  "docs/github.md",
-  "docs/gitlab.md",
-  "docs/providers.md",
-  "docs/project.md",
-  "docs/runners.md",
-  "docs/runtime-images.md",
-  "docs/scripts.md",
-  "docs/testing.md",
-  "docs/threat-model.md",
-  "examples/go-cli/README.md",
-  "examples/go-service/README.md",
-  "examples/signing/*/README.md",
-]
-precedence = "override"
-SPDX-FileCopyrightText = "2026 Digg - Agency for Digital Government"
-SPDX-License-Identifier = "CC0-1.0"
-
-# Forgejo guide and example documentation.
-[[annotations]]
-path = ["docs/forgejo.md", "examples/forgejo/README.md"]
-precedence = "override"
-SPDX-FileCopyrightText = "2026 Digg - Agency for Digital Government"
-SPDX-License-Identifier = "CC0-1.0"
-
-# The checksums of the engine binary, one per architecture:
-# each one fixed-format line, written by scripts/ci/engine-binary.sh. The
-# binaries themselves are not tracked.
-[[annotations]]
-path = [".engine/bin/forge-ci-linux-amd64.sha256", ".engine/bin/forge-ci-linux-arm64.sha256"]
-SPDX-FileCopyrightText = "2026 Digg - Agency for Digital Government"
-SPDX-License-Identifier = "CC0-1.0"
-
-[[annotations]]
-path = ".forge-ci/allowed_signers"
-SPDX-FileCopyrightText = "2026 Digg - Agency for Digital Government"
-SPDX-License-Identifier = "CC0-1.0"
-
-[[annotations]]
-path = "examples/signing/sigstore-keyless/.forge-ci/allowed_signers.example"
-SPDX-FileCopyrightText = "2026 Digg - Agency for Digital Government"
-SPDX-License-Identifier = "CC0-1.0"
-
-[[annotations]]
-path = "renovate.json"
-SPDX-FileCopyrightText = "2026 Digg - Agency for Digital Government"
-SPDX-License-Identifier = "CC0-1.0"
-
-[[annotations]]
-path = "test/live/cases/rust-development/consumer/**"
-SPDX-FileCopyrightText = "2026 Digg - Agency for Digital Government"
-SPDX-License-Identifier = "CC0-1.0"
-
-[[annotations]]
-path = "containers/runtime/images.json"
-SPDX-FileCopyrightText = "The Forge CI Authors"
-SPDX-License-Identifier = "CC0-1.0"
-
-[[annotations]]
-path = ".github/workflows/generate-changelog.yml"
-SPDX-FileCopyrightText = "2026 Digg - Agency for Digital Government"
-SPDX-License-Identifier = "CC0-1.0"
-
-[[annotations]]
-path = "examples/monorepo/Containerfile.multi-artifact"
-SPDX-FileCopyrightText = "2026 Digg - Agency for Digital Government"
-SPDX-License-Identifier = "CC0-1.0"
-
-# JSON Schema for artifacts.yml — JSON has no comment syntax for an
-# inline SPDX header, so the licensing claim lives here. The .json is
-# generated from the .tmpl by cmd/gen-artifacts-schema.
-[[annotations]]
-path = ".forge-ci/artifacts.schema.json"
-SPDX-FileCopyrightText = "2026 Digg - Agency for Digital Government"
-SPDX-License-Identifier = "CC0-1.0"
-
-[[annotations]]
-path = "internal/domain/config/artifacts.schema.json.tmpl"
-SPDX-FileCopyrightText = "2026 Digg - Agency for Digital Government"
-SPDX-License-Identifier = "CC0-1.0"
-
-[[annotations]]
-path = "internal/domain/enforcement/policy.json"
-SPDX-FileCopyrightText = "2026 Digg - Agency for Digital Government"
-SPDX-License-Identifier = "CC0-1.0"
-
-# Same arrangement for the release-image ledger schema: the .json is
-# generated from the .tmpl by cmd/gen-release-images-schema.
-[[annotations]]
-path = "docs/schemas/release-images.schema.json"
-SPDX-FileCopyrightText = "2026 Digg - Agency for Digital Government"
-SPDX-License-Identifier = "CC0-1.0"
-
-[[annotations]]
-path = "internal/domain/imageledger/release-images.schema.json.tmpl"
-SPDX-FileCopyrightText = "2026 Digg - Agency for Digital Government"
-SPDX-License-Identifier = "CC0-1.0"
-
-[[annotations]]
-path = ".gitignore"
-SPDX-FileCopyrightText = "2026 Digg - Agency for Digital Government"
-SPDX-License-Identifier = "CC0-1.0"
-
-# Go-generated build manifests; no SPDX headers possible.
-[[annotations]]
-path = ["go.mod", "go.sum"]
-SPDX-FileCopyrightText = "2026 Digg - Agency for Digital Government"
-SPDX-License-Identifier = "CC0-1.0"
-
-# Go test fixtures (fuzz seeds, golden JSON, sample inputs). These are
-# inert data, not source — REUSE compliance applies to source.
-[[annotations]]
-path = [
-  "test/workflowguard/testdata/**",
-  "internal/domain/build/testdata/**",
-  "internal/domain/pipeline/testdata/**",
-  "internal/domain/provenance/testdata/**",
-  "internal/domain/security/testdata/**",
-  "internal/livetest/testdata/**",
-]
-SPDX-FileCopyrightText = "2026 Digg - Agency for Digital Government"
-SPDX-License-Identifier = "CC0-1.0"
-
-# In-runner probe shell bodies embedded by internal/livetest (go:embed);
-# headers would corrupt the generated probes, so they are annotated here.
-[[annotations]]
-path = ["internal/livetest/probes/**"]
-SPDX-FileCopyrightText = "2026 Digg - Agency for Digital Government"
-SPDX-License-Identifier = "EUPL-1.2 OR GPL-3.0-or-later"
