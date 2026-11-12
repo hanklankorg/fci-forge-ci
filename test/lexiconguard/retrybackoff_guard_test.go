@@ -8,76 +8,95 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
-	"os"
-	"path/filepath"
+	"slices"
+	"strconv"
 	"testing"
 
 	"github.com/diggsweden/forge-ci/internal/testutil/reporoot"
 	"github.com/stretchr/testify/require"
 )
 
-// TestRetryBackoffIsSingleSourced detects a bounded, structural retry idiom:
-// a loop exits on a nil, short-declared call result, then waits before trying
-// again. The wait's arithmetic spelling is irrelevant, so reordered products,
-// intermediate delay variables and constant waits are covered without flagging
-// Duration conversions.
-// App/adapter retries should use retry.Do/Run instead.
-//
-// This is not a control-flow/type analyzer: delegated waits in helpers,
-// computed function-value aliases, non-nil success predicates and success
-// exits hidden in helpers are outside this rule; direct aliases of a wait,
-// reassigned results and else-branch waits are recognised (see
-// TestRetryWaitGuardSyntax). Canonical calls do not exempt other code in the
-// same file.
+// retryOwner holds the one retry loop; everything else calls retry.Do/Run.
 const retryOwner = "internal/retry/retry.go"
 
+// TestRetryBackoffIsSingleSourced is a lint rule: in a loop body, once an
+// `if x == nil { return }` (or `break`) has run, no later statement or else
+// branch may wait. A wait is time.Sleep, time.After or time.NewTimer under any
+// import name, a local bound to time.Sleep, or a receive from the `.C` of a
+// timer assigned in the loop.
+// That is a hand-written retry, however its delay is computed. Waits inside
+// closures, go and defer statements and nested loops are not judged here.
 func TestRetryBackoffIsSingleSourced(t *testing.T) {
 	t.Parallel()
 
-	root := t.TempDir()
-	poison := "package fixture\nimport clock \"time\"\nfunc f() { for { if err := op(); err == nil { return }; clock.Sleep(delay) } }\n"
-	require.NoError(t, os.WriteFile(filepath.Join(root, "poison.go"), []byte(poison), 0o600))
+	root := reporoot.Path(t)
 
-	// The owner is exempt because it holds the canonical wait; an exemption
-	// for a file that no longer waits would hide nothing and guard nothing.
-	owner, err := parser.ParseFile(token.NewFileSet(), filepath.Join(reporoot.Path(t), retryOwner), nil, 0)
+	var findings []string
+
+	visited, err := reporoot.WalkGoSources(root, func(path, rel string) error {
+		fset := token.NewFileSet()
+
+		file, err := parser.ParseFile(fset, path, nil, 0)
+		if err != nil {
+			return err
+		}
+
+		waits := retryWaits(file)
+
+		// The owner is exempt because it holds the canonical wait; an
+		// exemption for a file that no longer waits guards nothing.
+		if rel == retryOwner {
+			require.NotEmpty(t, waits, "%s holds no retry wait, so its exemption is stale", retryOwner)
+
+			return nil
+		}
+
+		for _, pos := range waits {
+			findings = append(findings, fmt.Sprintf("%s:%d", rel, fset.Position(pos).Line))
+		}
+
+		return nil
+	})
 	require.NoError(t, err)
-	require.NotEmpty(t, retryWaits(owner), "%s holds no retry wait, so its exemption is stale", retryOwner)
+	require.NotZero(t, visited)
+	require.Empty(t, findings, "local retry wait outside internal/retry; use retry.Do/Run")
+}
+
+func TestRetryWaits(t *testing.T) {
+	t.Parallel()
 
 	for _, tc := range []struct {
-		name string
-		root string
-		want []string
+		name    string
+		imports string
+		body    string
+		want    int
 	}{
-		{"repository", reporoot.Path(t), nil},
-		{"poison", root, []string{"poison.go:3"}},
+		{"sleep", `import "time"`, `for n := 1; n < 4; n++ { if err := op(); err == nil { return }; time.Sleep(time.Duration(n) * delay) }`, 1},
+		{"after", `import "time"`, `for { if err := op(); nil == err { break }; <-time.After(delay) }`, 1},
+		{"timer", `import clock "time"`, `for { err := op(); if err == nil { return }; timer := clock.NewTimer(delay); select { case <-timer.C: case <-ctx.Done(): return } }`, 2},
+		{"dot-import", `import . "time"`, `for { if err := op(); err == nil { break }; Sleep(delay) }`, 1},
+		{"alias", `import "time"`, `sleep := time.Sleep; for { if err := op(); err == nil { return }; sleep(delay) }`, 1},
+		{"else-branch", `import "time"`, `for { if err := op(); err == nil { return } else { time.Sleep(delay) } }`, 1},
+		{"predeclared-result", `import "time"`, `var err error; for range 4 { err = op(); if err == nil { return }; time.Sleep(delay) }`, 1},
+		{"timer-made-before-exit", `import "time"`, `for { timer := time.NewTimer(delay); if err := op(); err == nil { return }; <-timer.C }`, 1},
+		{"ticker-outside-loop", `import "time"`, `ticker := time.NewTicker(delay); for { if err := op(); err == nil { return }; <-ticker.C }`, 0},
+		{"canonical", `import "github.com/diggsweden/forge-ci/internal/retry"`, `retry.Run(ctx, nil, 4, delay, op)`, 0},
+		{"pacing", `import "time"`, `for n := range 4 { time.Sleep(time.Duration(n) * delay) }`, 0},
+		{"wait-before-exit", `import "time"`, `for { time.Sleep(delay); if err := op(); err == nil { return } }`, 0},
+		{"no-loop", `import "time"`, `if err := op(); err == nil { return }; time.Sleep(delay)`, 0},
+		{"non-nil-guard", `import "time"`, `for n := range 4 { if n > 2 { return } else { time.Sleep(delay) } }`, 0},
+		{"inert", `import "time"`, "_ = time.Second; for { if err := op(); err == nil { return }; _ = `time.Sleep(delay)` }", 0},
+		{"shadowed-import", `import "time"`, `time := fakeClock(); for { if err := op(); err == nil { return }; time.Sleep(delay) }`, 0},
+		{"not-stdlib", `import "example.invalid/time"`, `for { if err := op(); err == nil { return }; time.Sleep(delay) }`, 0},
+		{"deferred", `import "time"`, `for { if err := op(); err == nil { return }; go time.Sleep(delay); defer time.Sleep(delay); _ = func() { time.Sleep(delay) } }`, 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			var findings []string
-
-			visited, err := reporoot.WalkGoSources(tc.root, func(path, rel string) error {
-				if rel == retryOwner {
-					return nil
-				}
-
-				fset := token.NewFileSet()
-
-				file, err := parser.ParseFile(fset, path, nil, 0)
-				if err != nil {
-					return err
-				}
-
-				for _, pos := range retryWaits(file) {
-					findings = append(findings, fmt.Sprintf("%s:%d", rel, fset.Position(pos).Line))
-				}
-
-				return nil
-			})
+			source := "package fixture\n" + tc.imports + "\nfunc f() {\n" + tc.body + "\n}"
+			file, err := parser.ParseFile(token.NewFileSet(), "fixture.go", source, 0)
 			require.NoError(t, err)
-			require.NotZero(t, visited)
-			require.Equal(t, tc.want, findings, "local retry wait outside internal/retry; use retry.Do/Run")
+			require.Len(t, retryWaits(file), tc.want)
 		})
 	}
 }
@@ -100,24 +119,19 @@ func retryWaits(file *ast.File) []token.Pos {
 		retrying := false
 
 		for _, stmt := range body.List {
-			if guard, ok := stmt.(*ast.IfStmt); ok && nilResultExit(guard, body) {
+			if guard, ok := stmt.(*ast.IfStmt); ok && nilExit(guard) {
 				retrying = true
 
-				// A wait in the guard's else branch is on the retry path just
-				// as much as one after the guard. Written as if/else it reads
-				// naturally and used to be invisible here.
 				if guard.Else != nil {
-					found = append(found, waitsIn(file, guard.Else, body.Pos())...)
+					found = append(found, waitsIn(file, guard.Else, body)...)
 				}
 
 				continue
 			}
 
-			if !retrying {
-				continue
+			if retrying {
+				found = append(found, waitsIn(file, stmt, body)...)
 			}
-
-			found = append(found, waitsIn(file, stmt, body.Pos())...)
 		}
 
 		return true
@@ -126,123 +140,17 @@ func retryWaits(file *ast.File) []token.Pos {
 	return found
 }
 
-// waitsIn collects the retry waits inside one statement, using the same rules
-// as the scan over a loop body's later statements.
-func waitsIn(file *ast.File, stmt ast.Stmt, loopStart token.Pos) []token.Pos {
-	var found []token.Pos
-
-	ast.Inspect(stmt, func(node ast.Node) bool {
-		switch node := node.(type) {
-		case *ast.FuncLit, *ast.GoStmt, *ast.DeferStmt, *ast.ForStmt, *ast.RangeStmt:
-			return false
-		case *ast.CallExpr:
-			if importedFunction(file, node.Fun, "time", "Sleep") || aliasOf(file, node.Fun, "time", "Sleep") {
-				found = append(found, node.Pos())
-			}
-		case *ast.UnaryExpr:
-			if node.Op == token.ARROW && timerReceive(file, node.X, loopStart) {
-				found = append(found, node.Pos())
-			}
-		default:
-		}
-
-		return true
-	})
-
-	return found
-}
-
-// aliasOf resolves a wait function bound to a local first — `sleep :=
-// time.Sleep` and then `sleep(d)`. The binding must be a single assignment from
-// the imported selector itself; anything computed is not followed, because a
-// guess about what a variable holds is worse than declining to say.
-func aliasOf(file *ast.File, fun ast.Expr, pkg, name string) bool {
-	ident, ok := ast.Unparen(fun).(*ast.Ident)
-	if !ok || ident.Obj == nil {
-		return false
-	}
-
-	assignment, ok := ident.Obj.Decl.(*ast.AssignStmt)
-	if !ok || len(assignment.Rhs) != 1 || len(assignment.Lhs) != 1 {
-		return false
-	}
-
-	return importedFunction(file, ast.Unparen(assignment.Rhs[0]), pkg, name)
-}
-
-// resultAssignedFromCallInLoop reports whether the named result is assigned the
-// value of a call somewhere inside this loop. It is what makes a result
-// declared BEFORE the loop — `var err error`, then `err = op()` inside —
-// count as a retry result, which a declaration-site-only rule could not see.
-func resultAssignedFromCallInLoop(body *ast.BlockStmt, result *ast.Ident) bool {
-	assigned := false
-
-	ast.Inspect(body, func(node ast.Node) bool {
-		assignment, ok := node.(*ast.AssignStmt)
-		if !ok || len(assignment.Rhs) != 1 {
-			return true
-		}
-
-		if _, isCall := ast.Unparen(assignment.Rhs[0]).(*ast.CallExpr); !isCall {
-			return true
-		}
-
-		for _, lhs := range assignment.Lhs {
-			if ident, isIdent := ast.Unparen(lhs).(*ast.Ident); isIdent && ident.Obj == result.Obj {
-				assigned = true
-			}
-		}
-
-		return true
-	})
-
-	return assigned
-}
-
-func nilResultExit(guard *ast.IfStmt, body *ast.BlockStmt) bool {
-	loopStart := body.Pos()
-
+// nilExit reports `if x == nil { … return/break … }`, either operand order.
+func nilExit(guard *ast.IfStmt) bool {
 	cond, ok := ast.Unparen(guard.Cond).(*ast.BinaryExpr)
 	if !ok || cond.Op != token.EQL {
 		return false
 	}
 
-	result, leftOK := ast.Unparen(cond.X).(*ast.Ident)
+	left, leftOK := ast.Unparen(cond.X).(*ast.Ident)
+	right, rightOK := ast.Unparen(cond.Y).(*ast.Ident)
 
-	nilID, rightOK := ast.Unparen(cond.Y).(*ast.Ident)
-	if !leftOK || !rightOK {
-		return false
-	}
-
-	if result.Name == "nil" && result.Obj == nil {
-		result, nilID = nilID, result
-	}
-
-	if nilID.Name != "nil" || nilID.Obj != nil || result.Obj == nil {
-		return false
-	}
-
-	switch decl := result.Obj.Decl.(type) {
-	case *ast.AssignStmt:
-		if len(decl.Rhs) != 1 || decl.Pos() < loopStart {
-			// Declared before the loop. It is still a retry result if the loop
-			// reassigns it from a call each turn.
-			if !resultAssignedFromCallInLoop(body, result) {
-				return false
-			}
-
-			break
-		}
-
-		if _, isCall := ast.Unparen(decl.Rhs[0]).(*ast.CallExpr); !isCall {
-			return false
-		}
-	case *ast.ValueSpec:
-		// `var err error` above the loop, assigned inside it.
-		if !resultAssignedFromCallInLoop(body, result) {
-			return false
-		}
-	default:
+	if !leftOK || !rightOK || (left.Name == "nil") == (right.Name == "nil") {
 		return false
 	}
 
@@ -261,25 +169,99 @@ func nilResultExit(guard *ast.IfStmt, body *ast.BlockStmt) bool {
 	return false
 }
 
-func timerReceive(file *ast.File, expr ast.Expr, loopStart token.Pos) bool {
-	expr = ast.Unparen(expr)
-	if sel, ok := expr.(*ast.SelectorExpr); ok && sel.Sel.Name == "C" {
-		id, ok := sel.X.(*ast.Ident)
-		if !ok || id.Obj == nil {
+func waitsIn(file *ast.File, stmt ast.Stmt, loop *ast.BlockStmt) []token.Pos {
+	var found []token.Pos
+
+	ast.Inspect(stmt, func(node ast.Node) bool {
+		switch node := node.(type) {
+		case *ast.FuncLit, *ast.GoStmt, *ast.DeferStmt, *ast.ForStmt, *ast.RangeStmt:
 			return false
+		case *ast.CallExpr:
+			if timeFunction(file, node.Fun, "Sleep", "After", "NewTimer") || sleepAlias(file, node.Fun) {
+				found = append(found, node.Pos())
+			}
+		case *ast.UnaryExpr:
+			if node.Op == token.ARROW && loopTimer(node.X, loop) {
+				found = append(found, node.Pos())
+			}
+		default:
 		}
 
-		assignment, ok := id.Obj.Decl.(*ast.AssignStmt)
-		if !ok || len(assignment.Rhs) != 1 || len(assignment.Lhs) != 1 || assignment.Pos() < loopStart {
-			return false
-		}
+		return true
+	})
 
-		call, ok := ast.Unparen(assignment.Rhs[0]).(*ast.CallExpr)
+	return found
+}
 
-		return ok && importedFunction(file, call.Fun, "time", "NewTimer")
+// loopTimer reports a receive from `t.C` where t is assigned inside the loop,
+// which is how a timer made for this turn's wait is read.
+func loopTimer(expr ast.Expr, loop *ast.BlockStmt) bool {
+	sel, ok := ast.Unparen(expr).(*ast.SelectorExpr)
+	if !ok || sel.Sel.Name != "C" {
+		return false
 	}
 
-	call, ok := expr.(*ast.CallExpr)
+	ident, ok := sel.X.(*ast.Ident)
+	if !ok || ident.Obj == nil {
+		return false
+	}
 
-	return ok && importedFunction(file, call.Fun, "time", "After")
+	assignment, ok := ident.Obj.Decl.(*ast.AssignStmt)
+
+	return ok && assignment.Pos() > loop.Pos() && assignment.End() < loop.End()
+}
+
+// sleepAlias reports a call through a local bound directly to time.Sleep.
+func sleepAlias(file *ast.File, fun ast.Expr) bool {
+	ident, ok := ast.Unparen(fun).(*ast.Ident)
+	if !ok || ident.Obj == nil {
+		return false
+	}
+
+	assignment, ok := ident.Obj.Decl.(*ast.AssignStmt)
+
+	return ok && len(assignment.Rhs) == 1 && timeFunction(file, assignment.Rhs[0], "Sleep")
+}
+
+// timeFunction reports a reference to one of the named functions of the
+// standard time package, under the file's import name for it or through a dot
+// import, and not through a local that shadows that name. Parse with object
+// resolution.
+func timeFunction(file *ast.File, expr ast.Expr, names ...string) bool {
+	var qualifier, name string
+
+	switch fun := ast.Unparen(expr).(type) {
+	case *ast.SelectorExpr:
+		id, ok := fun.X.(*ast.Ident)
+		if !ok || id.Obj != nil {
+			return false
+		}
+
+		qualifier, name = id.Name, fun.Sel.Name
+	case *ast.Ident:
+		if fun.Obj != nil {
+			return false
+		}
+
+		qualifier, name = ".", fun.Name
+	default:
+		return false
+	}
+
+	for _, spec := range file.Imports {
+		if path, err := strconv.Unquote(spec.Path.Value); err != nil || path != "time" {
+			continue
+		}
+
+		local := "time"
+		if spec.Name != nil {
+			local = spec.Name.Name
+		}
+
+		if local == qualifier && slices.Contains(names, name) {
+			return true
+		}
+	}
+
+	return false
 }

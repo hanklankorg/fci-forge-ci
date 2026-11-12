@@ -6,6 +6,15 @@
         "type": "string",
         "default": ""
       },
+      "canonical-builder-image": {
+        "required": true,
+        "type": "string"
+      },
+      "disable-checks": {
+        "required": false,
+        "type": "string",
+        "default": ""
+      },
       "enforce-lint": {
         "required": false,
         "type": "boolean",
@@ -17,9 +26,8 @@
         "default": false
       },
       "forge-ci-binary-ref": {
-        "required": false,
-        "type": "string",
-        "default": ""
+        "required": true,
+        "type": "string"
       },
       "lint-engine": {
         "required": false,
@@ -55,10 +63,19 @@
         "type": "string",
         "default": "secrets,sast"
       },
-      "runtime-image": {
+      "runs-on": {
         "required": false,
         "type": "string",
-        "default": ""
+        "default": "[\"ubuntu-26.04\"]"
+      },
+      "runs-on-darwin-arm64": {
+        "required": false,
+        "type": "string",
+        "default": "[\"macos-26\"]"
+      },
+      "runtime-image": {
+        "required": true,
+        "type": "string"
       }
     },
     "secrets": [
@@ -87,6 +104,25 @@
       "branch": {
         "required": true,
         "type": "string"
+      },
+      "build-runs-on-linux-amd64": {
+        "required": false,
+        "type": "string",
+        "default": "[\"ubuntu-26.04\"]"
+      },
+      "build-runs-on-linux-arm64": {
+        "required": false,
+        "type": "string",
+        "default": "[\"ubuntu-26.04-arm\"]"
+      },
+      "canonical-builder-image": {
+        "required": true,
+        "type": "string"
+      },
+      "cargo-test-selections-json": {
+        "required": false,
+        "type": "string",
+        "default": ""
       },
       "changelog-creator": {
         "required": false,
@@ -134,6 +170,10 @@
         "default": ""
       },
       "forge-ci-binary-ref": {
+        "required": true,
+        "type": "string"
+      },
+      "go-test-selections-json": {
         "required": false,
         "type": "string",
         "default": ""
@@ -202,10 +242,19 @@
         "type": "boolean",
         "default": true
       },
-      "runtime-image": {
+      "runs-on": {
         "required": false,
         "type": "string",
-        "default": ""
+        "default": "[\"ubuntu-26.04\"]"
+      },
+      "runs-on-darwin-arm64": {
+        "required": false,
+        "type": "string",
+        "default": "[\"macos-26\"]"
+      },
+      "runtime-image": {
+        "required": true,
+        "type": "string"
       },
       "runtime-image-android": {
         "required": false,
@@ -251,7 +300,6 @@
       "GOOGLE_PLAY_SERVICE_ACCOUNT_JSON",
       "IOS_SIGNING_CERTIFICATE_BASE64",
       "IOS_SIGNING_CERTIFICATE_PASSPHRASE",
-      "KEYCHAIN_PASSWORD",
       "MAVEN_CENTRAL_PASSWORD",
       "MAVEN_CENTRAL_USERNAME",
       "NPM_TOKEN",
@@ -281,6 +329,20 @@
         "required": true,
         "type": "string"
       },
+      "build-runs-on-linux-amd64": {
+        "required": false,
+        "type": "string",
+        "default": "[\"ubuntu-26.04\"]"
+      },
+      "build-runs-on-linux-arm64": {
+        "required": false,
+        "type": "string",
+        "default": "[\"ubuntu-26.04-arm\"]"
+      },
+      "canonical-builder-image": {
+        "required": true,
+        "type": "string"
+      },
       "container-image-repository": {
         "required": false,
         "type": "string",
@@ -302,9 +364,8 @@
         "default": false
       },
       "forge-ci-binary-ref": {
-        "required": false,
-        "type": "string",
-        "default": ""
+        "required": true,
+        "type": "string"
       },
       "java-version": {
         "required": false,
@@ -336,6 +397,11 @@
         "type": "boolean",
         "default": true
       },
+      "publish-files": {
+        "required": false,
+        "type": "boolean",
+        "default": false
+      },
       "publish-maven-snapshots": {
         "required": false,
         "type": "boolean",
@@ -351,10 +417,19 @@
         "type": "string",
         "default": "ghcr.io"
       },
-      "runtime-image": {
+      "runs-on": {
         "required": false,
         "type": "string",
-        "default": ""
+        "default": "[\"ubuntu-26.04\"]"
+      },
+      "runs-on-darwin-arm64": {
+        "required": false,
+        "type": "string",
+        "default": "[\"macos-26\"]"
+      },
+      "runtime-image": {
+        "required": true,
+        "type": "string"
       },
       "runtime-image-android": {
         "required": false,
@@ -362,9 +437,8 @@
         "default": ""
       },
       "runtime-image-full": {
-        "required": false,
-        "type": "string",
-        "default": ""
+        "required": true,
+        "type": "string"
       },
       "runtime-image-go": {
         "required": false,
@@ -414,7 +488,6 @@
       "ANDROID_KEY_PASSWORD",
       "IOS_SIGNING_CERTIFICATE_BASE64",
       "IOS_SIGNING_CERTIFICATE_PASSPHRASE",
-      "KEYCHAIN_PASSWORD",
       "MAVEN_CENTRAL_PASSWORD",
       "MAVEN_CENTRAL_USERNAME",
       "PROVISIONING_PROFILE_BASE64",

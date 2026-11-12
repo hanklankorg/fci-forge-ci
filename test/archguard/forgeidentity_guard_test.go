@@ -21,7 +21,8 @@ import (
 // The rule is ADR 0004's: application logic asks the provider what it can do,
 // it does not branch on which provider it is. Forge differences live behind the
 // role interfaces, so adding a forge means writing an adapter, not adding a
-// `case` arm across internal/app.
+// `case` arm across internal/app or internal/domain. The domain may branch on
+// a forge only where it presents forge-specific shapes, file by file below.
 //
 // The rule was enforced by searching each file for six literal strings:
 // `case provider.ForgeGitHub`, `== provider.ForgeGitLab`, and four more. That
@@ -46,58 +47,64 @@ import (
 // type-checked — the same bounded approach the credential guard uses — so it
 // follows the provider package under whatever local name a file gives it, and a
 // comment or a string containing the same words is not a comparison.
-func TestAppLayerDoesNotBranchOnForgeIdentity(t *testing.T) {
+func TestAppAndDomainDoNotBranchOnForgeIdentity(t *testing.T) {
 	t.Parallel()
 
 	root := reporoot.Path(t)
-	appDir := filepath.Join(root, "internal", "app")
 
-	var (
-		offenders []string
-		scanned   int
-	)
-
-	err := filepath.WalkDir(appDir, func(path string, entry fs.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-
-		if !isProductGoFile(entry, path) {
-			return nil
-		}
-
-		fset := token.NewFileSet()
-
-		file, parseErr := parser.ParseFile(fset, path, nil, parser.SkipObjectResolution)
-		if parseErr != nil {
-			return fmt.Errorf("parse %s: %w", path, parseErr)
-		}
-
-		scanned++
-
-		rel, _ := filepath.Rel(root, path)
-
-		for _, finding := range forgeIdentityBranches(fset, file) {
-			offenders = append(offenders, filepath.ToSlash(rel)+":"+finding)
-		}
-
-		return nil
-	})
-	if err != nil {
-		t.Fatal(err)
+	// repo-relative path -> why branching on a forge is acceptable there.
+	presentation := map[string]string{
+		"internal/domain/summary/urls.go":        "run/commit URL shapes differ per forge",
+		"internal/domain/consumerinit/layout.go": "a consumer's file layout and an example's placeholder tokens differ per forge",
 	}
 
-	if scanned < 50 {
-		t.Fatalf("scanned %d app files; the walk, not the tree, is what was measured", scanned)
+	var offenders []string
+
+	for _, tree := range []string{"app", "domain"} {
+		scanned := 0
+
+		err := filepath.WalkDir(filepath.Join(root, "internal", tree), func(path string, entry fs.DirEntry, walkErr error) error {
+			if walkErr != nil {
+				return walkErr
+			}
+
+			rel, _ := filepath.Rel(root, path)
+			if _, sanctioned := presentation[filepath.ToSlash(rel)]; sanctioned || !isProductGoFile(entry, path) {
+				return nil
+			}
+
+			fset := token.NewFileSet()
+
+			file, parseErr := parser.ParseFile(fset, path, nil, parser.SkipObjectResolution)
+			if parseErr != nil {
+				return fmt.Errorf("parse %s: %w", path, parseErr)
+			}
+
+			scanned++
+
+			for _, finding := range forgeIdentityBranches(fset, file) {
+				offenders = append(offenders, filepath.ToSlash(rel)+":"+finding)
+			}
+
+			return nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if scanned < 50 {
+			t.Fatalf("scanned %d internal/%s files; the walk, not the tree, is what was measured", scanned, tree)
+		}
 	}
 
 	slices.Sort(offenders)
 
 	if len(offenders) > 0 {
-		t.Errorf("application code branches on a forge's identity:\n  %s\n\n"+
+		t.Errorf("application or domain code branches on a forge's identity:\n  %s\n\n"+
 			"Ask the provider what it can do instead. If the question really is about a forge or an\n"+
 			"instance, put the predicate in internal/domain/provider and call that — see\n"+
-			"provider.ClassifyReleaseWorkflowScope, which is where two of these used to live.",
+			"provider.ClassifyReleaseWorkflowScope, which is where two of these used to live. Forge-specific\n"+
+			"presentation in internal/domain belongs in a file listed with its reason in this test.",
 			strings.Join(offenders, "\n  "))
 	}
 }

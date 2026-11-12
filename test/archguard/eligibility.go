@@ -25,9 +25,8 @@ import (
 // which is the failure this package exists to prevent elsewhere.
 //
 // What "eligible" means beyond this is not free-form either: see
-// TestGuardEligibility_ConstrainedAndGeneratedProductFilesAreDeclared, which
-// holds the build-constrained and generated cases the suffix alone cannot
-// judge.
+// TestGuardEligibility_EveryProductFileIsJudged, which holds the
+// build-constrained and generated cases the suffix alone cannot judge.
 func isProductGoFile(entry fs.DirEntry, path string) bool {
 	if entry.IsDir() {
 		return false

@@ -25,10 +25,8 @@ func layerOf(rel string) string {
 		}
 	}
 
-	for _, prefix := range []string{"testutil", "livetest"} {
-		if rel == prefix || strings.HasPrefix(rel, prefix+"/") {
-			return "test"
-		}
+	if rel == "testutil" || strings.HasPrefix(rel, "testutil/") {
+		return "test"
 	}
 
 	return "utility"
@@ -54,8 +52,8 @@ func TestLayerOf_ClassifiesEveryTreeIntoItsLayer(t *testing.T) {
 		"cli/commands/platform": "cli",
 		"testutil":              "test",
 		"testutil/toolrecorder": "test",
-		"livetest":              "test",
-		"livetest/conformance":  "test",
+		"livetest":              "utility",
+		"livetest/conformance":  "utility",
 		"pathsafe":              "utility",
 		"safeexec":              "utility",
 		"listval":               "utility",

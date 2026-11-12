@@ -9,21 +9,6 @@ import (
 	"testing"
 )
 
-func TestDocumentationBoundary_ParsesOnlyCompleteGuardRows(t *testing.T) {
-	t.Parallel()
-
-	const table = "| Package | Guards | Reads |\n|---|---|---|\n| `test/syncguard` | drift | files |\n| `test/ci2guard` | policy | source |\n"
-
-	names, err := guardPackagesNamedIn("Prose `test/fakeguard`\n\n" + table)
-	require.NoError(t, err)
-	require.Equal(t, []string{"syncguard", "ci2guard"}, names)
-
-	for _, doc := range []string{"`test/syncguard`", strings.Replace(table, "drift", "", 1), table + "| `test/syncguard` | drift | files |\n", table + "\n" + table} {
-		_, err := guardPackagesNamedIn(doc)
-		require.Error(t, err)
-	}
-}
-
 func TestDocumentationBoundary_SectionsAreBidirectional(t *testing.T) {
 	t.Parallel()
 

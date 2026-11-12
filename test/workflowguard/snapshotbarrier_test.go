@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: The Forge CI Authors
+// SPDX-FileCopyrightText: 2026 Digg - Agency for Digital Government
 // SPDX-License-Identifier: EUPL-1.2 OR GPL-3.0-or-later
 
 package workflowguard
@@ -24,7 +24,7 @@ func snapshotBarrierViolations(jobs *yaml.Node) []string {
 	}{
 		{"build-artifacts", "${{ !inputs['use-build-artifacts'] && needs.plan.outputs.artifacts != '[]' }}", []string{"resolve-bootstrap", "plan"}},
 		{"prepare-context", "${{ !cancelled() && needs.plan.result == 'success' && (needs.build-artifacts.result == 'success' || needs.build-artifacts.result == 'skipped') }}", []string{"plan", "build-artifacts"}},
-		{"build", "${{ !failure() && !cancelled() && needs.prepare-context.result == 'success' && needs.plan.outputs.builds != '[]' }}", []string{"plan", "prepare-context"}},
+		{"build", "${{ !failure() && !cancelled() && needs.prepare-context.result == 'success' && needs.plan.outputs.builds != '[]' }}", []string{"resolve-bootstrap", "plan", "prepare-context"}},
 		{"publish", "${{ !failure() && !cancelled() && needs.build.result == 'success' && needs.plan.outputs.images != '[]' }}", []string{"plan", "build"}},
 		{"collect", "${{ !cancelled() && needs.plan.result == 'success' && needs.prepare-context.result == 'success' && ((needs.build.result == 'success' && needs.publish.result == 'success') || (needs.plan.outputs.images == '[]' && needs.build.result == 'skipped' && needs.publish.result == 'skipped')) }}", []string{"plan", "prepare-context", "build", "publish"}},
 	} {
@@ -56,7 +56,7 @@ func TestSnapshotProducerBarriersRejectFailureBypasses(t *testing.T) {
 	body := string(reporoot.ReadFile(t, ".github/workflows/snapshot-images.yml"))
 	for _, tc := range []struct{ name, old, replacement string }{
 		{"valid", "", ""},
-		{"missing context need", "needs: [plan, prepare-context]", "needs: [plan]"},
+		{"missing context need", "needs: [resolve-bootstrap, plan, prepare-context]", "needs: [resolve-bootstrap, plan]"},
 		{"missing producer need", "needs: [plan, build-artifacts]", "needs: [plan]"},
 		{"failed producer", "needs.build-artifacts.result == 'skipped'", "needs.build-artifacts.result == 'failure'"},
 		{"failed context", "needs.prepare-context.result == 'success'", "needs.prepare-context.result != 'cancelled'"},

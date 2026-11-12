@@ -5,8 +5,6 @@ package archguard
 
 import (
 	"context"
-	"go/parser"
-	"go/token"
 	"path/filepath"
 	"testing"
 
@@ -17,27 +15,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestCredentialBoundary_ImportIdentityAndReferences(t *testing.T) {
-	t.Parallel()
-
-	const path = "github.com/diggsweden/forge-ci/internal/runcontext"
-	for _, tc := range []struct {
-		source string
-		want   int
-	}{
-		{`package p; import rc "` + path + `"; var mint = rc.OperatorCredential`, 1},
-		{`package p; import . "` + path + `"; var mint = OperatorCredential`, 1},
-		{`package p; import rc "` + path + `"; import "reflect"; var mint = reflect.ValueOf(rc.OperatorCredential)`, 1},
-		{`package p; import runcontext "` + path + `"; var _ runcontext.Credential; func f(runcontext struct{OperatorCredential func(string)any}) {runcontext.OperatorCredential("x")}`, 0},
-		{`package p; import . "` + path + `"; var _ Credential; func f(){OperatorCredential:=func(string)any{return nil};OperatorCredential("x")}`, 0},
-	} {
-		file, err := parser.ParseFile(token.NewFileSet(), "fixture.go", tc.source, 0)
-		require.NoError(t, err)
-		require.Len(t, operatorCredentialReferences(file), tc.want)
-	}
-}
-
-func TestExecBoundary_MissingProgramsAreUnavailable(t *testing.T) {
+func TestExecBoundary_MissingProgramsAreAMissingPrerequisite(t *testing.T) {
 	t.Parallel()
 	missing := filepath.Join(t.TempDir(), "does-not-exist")
 
@@ -65,7 +43,8 @@ func TestExecBoundary_MissingProgramsAreUnavailable(t *testing.T) {
 		},
 	} {
 		err := call(t.Context())
-		require.ErrorIs(t, err, errs.ErrDependencyUnavailable)
-		require.EqualValues(t, 69, errs.ExitCodeFromError(err))
+		require.ErrorIs(t, err, errs.ErrPrerequisite)
+		require.NotErrorIs(t, err, errs.ErrDependencyUnavailable)
+		require.EqualValues(t, 78, errs.ExitCodeFromError(err))
 	}
 }

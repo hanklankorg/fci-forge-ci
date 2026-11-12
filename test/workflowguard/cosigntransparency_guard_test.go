@@ -22,8 +22,10 @@ var cosignSigningCall = regexp.MustCompile(`forge-ci (release sign|container sig
 // FORGE_CI_COSIGN_TRANSPARENCY. On GitHub, sign.transparency was resolved into
 // the plan but no signing step passed it on, so a release configured with
 // `transparency: none` still wrote every signature to the public Rekor log.
-// A step that pins keyless signing is exempt: a keyless signature always
-// publishes, and the adapter's default is to publish.
+// A step that pins keyless signing takes no choice: a keyless signature always
+// publishes. In Self Runtime Container, which every fork and mirror runs to
+// build its images, such a step is instead skipped when the repository
+// variable of the same name says none.
 func TestCosignSigningStepsCarryTheTransparencyChoice(t *testing.T) {
 	t.Parallel()
 
@@ -46,6 +48,7 @@ func TestCosignSigningStepsCarryTheTransparencyChoice(t *testing.T) {
 			Jobs map[string]struct {
 				Steps []struct {
 					Name string            `yaml:"name"`
+					If   string            `yaml:"if"`
 					Run  string            `yaml:"run"`
 					Env  map[string]string `yaml:"env"`
 				} `yaml:"steps"`
@@ -55,7 +58,16 @@ func TestCosignSigningStepsCarryTheTransparencyChoice(t *testing.T) {
 
 		for jobName, job := range workflow.Jobs {
 			for _, step := range job.Steps {
-				if !cosignSigningCall.MatchString(step.Run) || step.Env["SIGN_METHOD"] == "sigstore" {
+				// A literal gpg method never calls Cosign.
+				if !cosignSigningCall.MatchString(step.Run) || step.Env["SIGN_METHOD"] == "gpg" {
+					continue
+				}
+
+				if step.Env["SIGN_METHOD"] == "sigstore" {
+					if entry.Name() == "self-runtime-container.yml" && step.If != "${{ vars.FORGE_CI_COSIGN_TRANSPARENCY != 'none' }}" {
+						t.Errorf("%s job %q step %q signs keyless whatever FORGE_CI_COSIGN_TRANSPARENCY says", entry.Name(), jobName, step.Name)
+					}
+
 					continue
 				}
 

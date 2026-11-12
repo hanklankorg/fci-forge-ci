@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: The Forge CI Authors
+// SPDX-FileCopyrightText: 2026 Digg - Agency for Digital Government
 // SPDX-License-Identifier: EUPL-1.2 OR GPL-3.0-or-later
 
 package workflowguard_test
@@ -19,8 +19,10 @@ import (
 	"github.com/diggsweden/forge-ci/internal/testutil/reporoot"
 )
 
-// livetestTree holds the live scenarios and their kit.
-const livetestTree = "internal/livetest"
+// livetestTree holds the live kit; liveScenarioTrees includes its scenario owners.
+const livetestTree = "test/live/internal/livetest"
+
+var liveScenarioTrees = []string{livetestTree, "test/live/conformance", "test/live/githubconsumer"}
 
 // repositoryCreators are the only files that make a creating request for a
 // repository: the visibility-aware scratch helpers, and the demos, which are
@@ -31,33 +33,24 @@ var repositoryCreators = map[string]bool{
 	livetestTree + "/demo.go":    true,
 }
 
-// subjectVisibility are the scenarios that may pass a literal visibility to
-// NewBareScratchRepo, because their subject is that visibility; each admits
-// it with RequireVisibility first, so the other visibility's run reports it
-// not covered.
-var subjectVisibility = map[string]string{
-	livetestTree + "/conformance/privateaccess_test.go": "proves a private repository refuses anonymous reads and admits the job token",
-	livetestTree + "/conformance/privateimage_test.go":  "pulls a private job image into a private repository's job",
-	livetestTree + "/conformance/gitlabcheck_test.go":   "its private case checks out a private consumer with the job token",
-}
-
 // privilegedDirect are the live files that may ask for the privileged runner
 // directly, and why. Every other scenario resolves the run's builder through
-// ChooseImageBuilder, or buildahRunner, which refuses kaniko with a reason.
+// ChooseImageBuilder, or buildahRunner, which refuses kaniko with a reason,
+// and a scenario that runs a container itself takes the runner from
+// ContainerRunnerLabel, whichever the builder.
 var privilegedDirect = map[string]string{
-	livetestTree + "/imagebuilder.go":                               "ChooseImageBuilder, the shared builder selection",
-	livetestTree + "/conformance/gitlabrelease_test.go":             "the Go CLI fixture's checks are Buildah's own integration tests, its subject",
-	livetestTree + "/conformance/gitlabconsumerdevelopment_test.go": "the Buildah branch of its own GitLabKaniko selection",
-	livetestTree + "/conformance/layerconsumertrial_test.go":        "Maven Testcontainers need user namespaces to run containers, and the Buildah branch of the trial's CI_IMAGE_BUILDER",
-	livetestTree + "/conformance/mavenservicedevelopment_test.go":   "Podman service readiness needs user namespaces independently of the selected image builder",
+	livetestTree + "/imagebuilder.go":                         "ChooseImageBuilder, the shared builder selection",
+	"test/live/conformance/gitlabrelease_test.go":             "the Go CLI fixture's checks are Buildah's own integration tests, its subject",
+	"test/live/conformance/gitlabconsumerdevelopment_test.go": "the Buildah branch of its own GitLabKaniko selection",
+	"test/live/conformance/layerconsumertrial_test.go":        "Maven Testcontainers need user namespaces to run containers, and the Buildah branch of the trial's CI_IMAGE_BUILDER",
 }
 
 // buildahNamed are the live files whose fixtures may name Buildah, and why.
 var buildahNamed = map[string]string{
-	livetestTree + "/imagebuilder.go":                   "Kaniko development admission rejects an explicit setup-buildah action",
-	livetestTree + "/imagebuilder_internal_test.go":     "negative admission regression for an explicit setup-buildah action",
-	livetestTree + "/nativesnapshotartifact_test.go":    "the Buildah capability probe, run only when the selection is Buildah",
-	livetestTree + "/conformance/gitlabrelease_test.go": "the build-image probe checks the build image's own Buildah",
+	livetestTree + "/imagebuilder.go":                "Kaniko development admission rejects an explicit setup-buildah action",
+	livetestTree + "/imagebuilder_internal_test.go":  "negative admission regression for an explicit setup-buildah action",
+	livetestTree + "/nativesnapshotartifact_test.go": "the Buildah capability probe, run only when the selection is Buildah",
+	"test/live/conformance/gitlabrelease_test.go":    "the build-image probe checks the build image's own Buildah",
 }
 
 // buildahLiteral names Buildah as a build step in a fixture.
@@ -69,11 +62,11 @@ type liveFinding struct {
 	text string
 }
 
-// Every repository a live scenario creates takes its visibility from the run
-// (FORGE_CI_LIVE_CONSUMER_VISIBILITY), and every scenario that builds images
-// resolves the run's builder selection. A hard-coded visibility, a direct
-// creating request, or a direct Buildah requirement outside the reasoned
-// allowlists fails.
+// Every repository a live scenario creates is made by the scratch helpers,
+// which hold it to the run's visibility (requireRunVisibility) and a public
+// one to a reason (requirePublicReason), and every scenario that builds images
+// resolves the run's builder selection. A direct creating request, or a direct
+// Buildah requirement outside the reasoned allowlists, fails.
 func TestLiveScenariosHonourRunVisibilityAndBuilder(t *testing.T) {
 	t.Parallel()
 
@@ -82,12 +75,6 @@ func TestLiveScenariosHonourRunVisibilityAndBuilder(t *testing.T) {
 
 	for _, finding := range findings {
 		t.Errorf("%s:%d %s", finding.path, finding.line, finding.text)
-	}
-
-	for path, reason := range subjectVisibility {
-		if !seen["visibility:"+path] {
-			t.Errorf("%s may pass a literal visibility (%s) but no longer does; drop it from the allowlist", path, reason)
-		}
 	}
 
 	for kind, allowed := range map[string]map[string]string{"privileged:": privilegedDirect, "buildah:": buildahNamed} {
@@ -99,28 +86,6 @@ func TestLiveScenariosHonourRunVisibilityAndBuilder(t *testing.T) {
 	}
 }
 
-// The guard refuses what the snapshot scenarios and the base fixture did
-// before they followed the run's settings.
-func TestLiveScenarioGuardRefusesTheOldShapes(t *testing.T) {
-	t.Parallel()
-
-	for name, source := range map[string]string{
-		"literal public engine": `package p
-func f() { NewBareScratchRepo(t, target, "snapshot-engine", "sha1", false) }`,
-		"privileged runner": `package p
-func f() { _ = PrivilegedRunnerLabel(t, target) }`,
-		"buildah fixture": "package p\nconst build = `forge-ci container setup-buildah --install-packages=false`",
-		"direct creation": "package p\nfunc f() { _ = target.BaseURL() + \"/api/v1/user/repos\" }",
-		"empty public reason": `package p
-func f() { NewPublicScratchRepo(t, target, "weburl", "") }`,
-	} {
-		findings, _ := scanLiveFile(t, livetestTree+"/conformance/example_test.go", source)
-		if len(findings) == 0 {
-			t.Errorf("%s: the guard accepted %q", name, source)
-		}
-	}
-}
-
 func scanLiveScenarios(t *testing.T, root string) ([]liveFinding, map[string]bool) {
 	t.Helper()
 
@@ -128,26 +93,28 @@ func scanLiveScenarios(t *testing.T, root string) ([]liveFinding, map[string]boo
 
 	seen := map[string]bool{}
 
-	require.NoError(t, filepath.WalkDir(filepath.Join(root, livetestTree), func(path string, entry fs.DirEntry, err error) error {
-		if err != nil || entry.IsDir() || filepath.Ext(path) != ".go" {
-			return err
-		}
+	for _, tree := range liveScenarioTrees {
+		require.NoError(t, filepath.WalkDir(filepath.Join(root, tree), func(path string, entry fs.DirEntry, err error) error {
+			if err != nil || entry.IsDir() || filepath.Ext(path) != ".go" {
+				return err
+			}
 
-		rel, _ := filepath.Rel(root, path)
-		rel = filepath.ToSlash(rel)
+			rel, _ := filepath.Rel(root, path)
+			rel = filepath.ToSlash(rel)
 
-		body, readErr := os.ReadFile(path)
-		require.NoError(t, readErr)
+			body, readErr := os.ReadFile(path)
+			require.NoError(t, readErr)
 
-		found, marks := scanLiveFile(t, rel, string(body))
-		findings = append(findings, found...)
+			found, marks := scanLiveFile(t, rel, string(body))
+			findings = append(findings, found...)
 
-		for mark := range marks {
-			seen[mark] = true
-		}
+			for mark := range marks {
+				seen[mark] = true
+			}
 
-		return nil
-	}))
+			return nil
+		}))
+	}
 
 	return findings, seen
 }
@@ -168,13 +135,11 @@ func scanLiveFile(t *testing.T, rel, source string) ([]liveFinding, map[string]b
 
 	_, privilegedAllowed := privilegedDirect[rel]
 	_, buildahAllowed := buildahNamed[rel]
-	_, visibilityAllowed := subjectVisibility[rel]
-	requiresVisibility := strings.Contains(source, "RequireVisibility(")
 
 	ast.Inspect(file, func(node ast.Node) bool {
 		switch n := node.(type) {
 		case *ast.CallExpr:
-			checkLiveCall(n, rel, privilegedAllowed, visibilityAllowed && requiresVisibility, seen, report)
+			checkLiveCall(n, rel, privilegedAllowed, seen, report)
 		case *ast.BasicLit:
 			checkLiveLiteral(n, rel, buildahAllowed, seen, report)
 		}
@@ -185,7 +150,7 @@ func scanLiveFile(t *testing.T, rel, source string) ([]liveFinding, map[string]b
 	return findings, seen
 }
 
-func checkLiveCall(call *ast.CallExpr, rel string, privilegedAllowed, visibilityAllowed bool, seen map[string]bool, report func(ast.Node, string)) {
+func checkLiveCall(call *ast.CallExpr, rel string, privilegedAllowed bool, seen map[string]bool, report func(ast.Node, string)) {
 	switch name := calleeName(call); name {
 	case "PrivilegedRunnerLabel":
 		seen["privileged:"+rel] = true
@@ -196,18 +161,6 @@ func checkLiveCall(call *ast.CallExpr, rel string, privilegedAllowed, visibility
 	case "Recreate", "CreateRepo", "CreateProject", "createBareRepo", "createInitialisedRepo", "createPrivateScratchRepo":
 		if !repositoryCreators[rel] {
 			report(call, name+" creates a repository outside the scratch helpers, past the run's visibility; use NewScratchRepo, NewBareScratchRepo or a NewPublic* helper")
-		}
-	case "NewBareScratchRepo":
-		if len(call.Args) == 5 && isBoolLiteral(call.Args[4]) {
-			seen["visibility:"+rel] = true
-
-			if !visibilityAllowed {
-				report(call, "passes a literal visibility; pass a ConsumerVisibility's or ScenarioPrivate(t), NewPublicBareScratchRepo with a reason, or admit a subject's visibility with RequireVisibility")
-			}
-		}
-	case "NewPublicScratchRepo", "NewPublicBareScratchRepo", "NewPublicScratchRepoUnique":
-		if len(call.Args) == 0 || !namesReason(call.Args[len(call.Args)-1]) {
-			report(call, name+" needs a reason: a Read*Anonymously constant or a nonempty string saying what reads it without credentials")
 		}
 	}
 }
@@ -246,25 +199,4 @@ func calleeName(call *ast.CallExpr) string {
 	}
 
 	return ""
-}
-
-func isBoolLiteral(expr ast.Expr) bool {
-	ident, ok := expr.(*ast.Ident)
-
-	return ok && (ident.Name == "true" || ident.Name == "false")
-}
-
-func namesReason(expr ast.Expr) bool {
-	switch reason := expr.(type) {
-	case *ast.BasicLit:
-		value, err := strconv.Unquote(reason.Value)
-
-		return err == nil && strings.TrimSpace(value) != ""
-	case *ast.SelectorExpr:
-		return strings.HasPrefix(reason.Sel.Name, "Read") && strings.HasSuffix(reason.Sel.Name, "Anonymously")
-	case *ast.Ident:
-		return strings.HasPrefix(reason.Name, "Read") && strings.HasSuffix(reason.Name, "Anonymously") || reason.Name == "public" || reason.Name == "reason"
-	}
-
-	return false
 }

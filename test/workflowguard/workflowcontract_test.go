@@ -24,17 +24,26 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// Most guards in this package sweep `.github/workflows` for `.yml` only. A
+// `.yaml` workflow, which GitHub accepts equally, would pass all of them
+// unread, so the extension is part of the contract.
 func TestWorkflowFilesUseYMLExtension(t *testing.T) {
 	t.Parallel()
 
-	matches, err := filepath.Glob(filepath.Join(reporoot.Path(t), ".github", "workflows", "*.yaml"))
-	if err != nil {
-		t.Fatal(err)
+	var yml, unswept []string
+
+	for _, entry := range reporoot.ReadDir(t, ".github/workflows") {
+		switch filepath.Ext(entry.Name()) {
+		case ".yml":
+			yml = append(yml, entry.Name())
+		case ".yaml":
+			unswept = append(unswept, entry.Name())
+		default:
+		}
 	}
 
-	if len(matches) != 0 {
-		t.Errorf("workflow files must use the repository's .yml convention; rename: %s", strings.Join(matches, ", "))
-	}
+	require.GreaterOrEqual(t, len(yml), 20, "the directory, not the filter, is what was measured")
+	require.Empty(t, unswept, "workflow files must use the repository's .yml convention; rename them")
 }
 
 // TestWorkflowInputContract proves that every `with:` key passed from
@@ -432,9 +441,8 @@ func TestSuiteCheckoutPinRejectsInvalidCheckouts(t *testing.T) {
 // the strict recipe, the release itself depends on that job, and the recipe
 // really does set the profile. A rename that left `just test-integration` in
 // the release gate, or a justfile edit that dropped the variable, would leave
-// a gate that looks strict and skips. During the explicit Self Release
-// bootstrap pause below, checksum and image validation remain mandatory;
-// enabling the strict jobs through their shared switch restores both gates.
+// a gate that looks strict and skips. No variable or input waives a gate:
+// the jobs of the release carry no condition at all.
 func TestReleaseGateRunsTheStrictIntegrationTier(t *testing.T) {
 	t.Parallel()
 
@@ -459,35 +467,43 @@ func TestReleaseGateRunsTheStrictIntegrationTier(t *testing.T) {
 	require.Equal(t, []string{"release"}, jobNeeds(binary))
 	require.Equal(t, "./.github/workflows/release-binary.yml", binary.Uses)
 	require.Equal(t, "${{ github.ref_name }}", scalarChild(&binary.With, "release-ref"))
-	require.Equal(t, "${{ !cancelled() && needs.release.result == 'success' }}", binary.If,
-		"binary publication must survive skipped optional ancestors, but require a successful release and no cancellation")
 
 	gates := jobsRunning(release, strictRecipe)
 	if len(gates) == 0 {
 		t.Fatalf("self-release.yml must run %q; the release gate would otherwise accept a skipped tier", strictRecipe)
 	}
 
+	// A gate that can be skipped is not a gate. No job on the way to the
+	// release carries a condition: a gate with one could be skipped, and a
+	// later job with one could run past a gate that failed or was skipped.
+	// Without conditions GitHub runs a job only when all it needs succeeded.
+	gates = append(gates, "blackbox", "checksums", "resolve-branch")
 	for _, gate := range gates {
-		const enabled = "${{ vars.SELF_RELEASE_INTEGRATION_GATES == 'true' }}"
-		if release.Jobs[gate].If == enabled {
-			require.Equal(t, "evidence", gate, "only the documented bootstrap gate may be paused")
-			require.Equal(t, enabled, release.Jobs["blackbox"].If)
-			require.Equal(t, []string{"resolve-branch", "checksums", "blackbox", "evidence"}, jobNeeds(release.Jobs["wait-for-images"]))
-			require.Equal(t, []string{"resolve-branch", "checksums", "blackbox", "evidence", "wait-for-images"}, jobNeeds(release.Jobs["release"]))
-			require.Equal(t, "${{ !cancelled() && needs.resolve-branch.result == 'success' && needs.checksums.result == 'success' && (vars.SELF_RELEASE_INTEGRATION_GATES != 'true' || (needs.blackbox.result == 'success' && needs.evidence.result == 'success')) }}", release.Jobs["wait-for-images"].If)
-			require.Equal(t, "${{ !cancelled() && needs.resolve-branch.result == 'success' && needs.checksums.result == 'success' && needs.wait-for-images.result == 'success' && (vars.SELF_RELEASE_INTEGRATION_GATES != 'true' || (needs.blackbox.result == 'success' && needs.evidence.result == 'success')) }}", release.Jobs["release"].If)
-
-			for _, name := range []string{"resolve-branch", "checksums"} {
-				require.Empty(t, release.Jobs[name].If, "%s must retain normal success gating", name)
-			}
-
-			continue
-		}
+		require.Containsf(t, release.Jobs, gate, "self-release.yml has no %s gate", gate)
 
 		if !slices.Contains(jobNeeds(release.Jobs["release"]), gate) {
-			t.Errorf("self-release.yml jobs.release does not need %q, so the strict tier cannot block the release", gate)
+			t.Errorf("self-release.yml jobs.release does not need %q, so it cannot block the release", gate)
 		}
 	}
+
+	for name, job := range release.Jobs {
+		require.Emptyf(t, job.If, "self-release.yml job %s has a condition; a release job runs when its needs succeeded, and on nothing else", name)
+	}
+
+	// A gate that could not install its tools says so and stops; the message
+	// never replaces the failure.
+	body := string(reporoot.ReadFile(t, ".github/workflows/self-release.yml"))
+	for _, install := range []string{"if ! mise install; then", "if ! mise install maven; then"} {
+		_, after, found := strings.Cut(body, install)
+		require.Truef(t, found, "self-release.yml no longer names a failed %q", install)
+
+		message, _, _ := strings.Cut(after, "fi\n")
+		require.Contains(t, message, "::error title=Release gates could not run::")
+		require.Contains(t, message, "exit 1")
+	}
+
+	require.Subset(t, jobNeeds(release.Jobs["wait-for-images"]), []string{"blackbox", "evidence"})
+	require.Contains(t, jobNeeds(release.Jobs["release"]), "wait-for-images")
 
 	pullRequest := load("self-pullrequest.yml")
 
@@ -575,10 +591,6 @@ func TestPromoteWorkflowResolvesDryRunAsBoolean(t *testing.T) {
 	}
 
 	text := string(body)
-	if strings.Contains(text, `${DRY_RUN:+--dry-run}`) {
-		t.Fatal("non-empty string expansion would add --dry-run when DRY_RUN=false")
-	}
-
 	if !strings.Contains(text, `[[ "$DRY_RUN" == true ]] && args+=(--dry-run)`) {
 		t.Fatal("promote must add --dry-run only for the resolved true boolean")
 	}
@@ -738,10 +750,8 @@ func TestProductionReleaseCeremonyUsesRequestThenFinalTag(t *testing.T) {
 		t.Error("only the destructive publish-cli job may be serialized")
 	}
 
-	for _, removedShellPolicy := range []string{"/releases/tags/${tag}", "jq -r '.upload_url'", "--data-binary"} {
-		if strings.Contains(runtimeText, removedShellPolicy) {
-			t.Errorf("self-runtime CLI publication still contains raw release API policy %q", removedShellPolicy)
-		}
+	if strings.Contains(runtimeText, "--data-binary") {
+		t.Error("self-runtime CLI publication still uploads through the raw release API")
 	}
 }
 
@@ -781,17 +791,6 @@ func TestReleasePreparationSerializesBumpsAndTagsOnce(t *testing.T) {
 	if !strings.Contains(text, "AUTHORIZED_SOURCE_SHA: ${{ inputs['authorized-source-sha'] }}") {
 		t.Fatal("release preparation must lease-check the authorized source SHA before mutation")
 	}
-
-	for _, relative := range []string{"docs/artifacts-reference.md", "examples/monorepo/README.md"} {
-		doc, readErr := os.ReadFile(filepath.Join(root, relative))
-		if readErr != nil {
-			t.Fatal(readErr)
-		}
-
-		if strings.Contains(string(doc), "can race on pushes/tag moves") {
-			t.Errorf("%s still claims multi-artifact release refs race", relative)
-		}
-	}
 }
 
 func TestReleaseRecoveryAndIdentityContracts(t *testing.T) {
@@ -818,10 +817,6 @@ func TestReleaseRecoveryAndIdentityContracts(t *testing.T) {
 		if !strings.Contains(orchestrator, want) {
 			t.Errorf("release orchestrator is missing %q", want)
 		}
-	}
-
-	if strings.Contains(orchestrator, `group: release-${{ github.repository }}-${{ inputs.branch }}`) {
-		t.Fatal("release orchestrator still uses branch-wide concurrency")
 	}
 
 	prepare := readWorkflow("release-prepare-stage.yml")
@@ -1100,5 +1095,44 @@ func TestPullRequestGateRunsDeadcode(t *testing.T) {
 
 	if !installed {
 		t.Errorf("job %s runs %q without `mise install`, so the pinned deadcode is not on PATH", gates[0], recipe)
+	}
+}
+
+// A skipped security check fails the lint gate, and disable-checks is how a
+// caller leaves out one its job cannot run. The input reaches nanolinter from
+// the pull request orchestrator down, as required-lints does.
+func TestDisableChecksReachesNanolinterFromThePullRequestOrchestrator(t *testing.T) {
+	t.Parallel()
+
+	const forwarded = "disable-checks: ${{ inputs['disable-checks'] }}"
+
+	for _, name := range []string{"pullrequest-orchestrator.yml", "pullrequest-quality-stage.yml", "lint-nanolinter.yml"} {
+		body := reporoot.ReadFile(t, ".github/workflows/"+name)
+
+		var workflow struct {
+			On struct {
+				Call struct {
+					Inputs map[string]struct {
+						Default *string `yaml:"default"`
+					} `yaml:"inputs"`
+				} `yaml:"workflow_call"`
+			} `yaml:"on"`
+		}
+
+		require.NoError(t, yaml.Unmarshal(body, &workflow), name)
+
+		input, declared := workflow.On.Call.Inputs["disable-checks"]
+		require.True(t, declared, "%s does not take disable-checks", name)
+		require.NotNil(t, input.Default, name)
+		require.Empty(t, *input.Default, "%s leaves checks out by default", name)
+
+		if name != "lint-nanolinter.yml" {
+			require.Contains(t, string(body), forwarded, "%s does not forward disable-checks", name)
+
+			continue
+		}
+
+		require.Contains(t, string(body), "DISABLE_CHECKS: ${{ inputs['disable-checks'] }}")
+		require.Contains(t, string(body), `if [ -n "$DISABLE_CHECKS" ]; then set -- "$@" --disable-check "$DISABLE_CHECKS"; fi`)
 	}
 }

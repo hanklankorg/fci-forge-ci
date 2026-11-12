@@ -33,7 +33,9 @@ import (
 // Snapshot handoffs additionally admit a shared input namespace and matrices
 // from the same typed snapshot planner; snapshotlineage_test.go proves those
 // bounded relationships. What is NOT attempted: evaluating format(), input defaults or
-// step outputs. Those would be a reimplementation of the expression language,
+// arbitrary step outputs. A direct original pinned upload artifact-ID output
+// has its own narrow structural proof in exactidlineage_test.go. Other output
+// computations would be a reimplementation of the expression language,
 // and a wrong one would report confident nonsense. A download step this cannot
 // resolve (a run-time name, a pattern, or no name at all, which fetches every
 // artifact of the run) is therefore a finding rather than a silent skip:
@@ -71,6 +73,10 @@ func lineageFindings(workflows map[string]lineageWorkflow) ([]string, int) {
 			names, unresolved := downloadNames(job)
 
 			proven := snapshotLineageProofs(workflow, jobName)
+			for reason := range exactIDLineageProofs(workflow, jobName) {
+				proven[reason] = true
+			}
+
 			for _, reason := range unresolved {
 				if proven[reason] {
 					resolved++
@@ -211,6 +217,8 @@ func downloadNames(job *yaml.Node) ([]string, []string) {
 		switch {
 		case scalarChild(with, "pattern") != "":
 			unresolved = append(unresolved, fmt.Sprintf("pattern %q", scalarChild(with, "pattern")))
+		case scalarChild(with, "artifact-ids") != "":
+			unresolved = append(unresolved, fmt.Sprintf("artifact IDs %q", scalarChild(with, "artifact-ids")))
 		case name == "":
 			unresolved = append(unresolved, "no name, which downloads every artifact of the run")
 		case expressionPattern.MatchString(name):

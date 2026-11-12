@@ -7,167 +7,52 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"slices"
 	"strings"
 	"testing"
 
 	"github.com/diggsweden/forge-ci/internal/testutil/reporoot"
 )
 
-// Three things have to line up for a generated file to stay honest: a generator
-// under cmd/, a just recipe that runs it, and a sync guard that fails when the
-// output drifts. There are three such files today and the mapping is 1:1:1.
-//
-// What is not written down anywhere is the requirement itself. A fourth
-// generator added with a recipe and no guard produces a file that can drift
-// silently forever, and nothing about that is visible in review — the new
-// generator looks exactly like the three that are covered. The same goes for a
-// guard whose refresh advice names a recipe that has since been renamed: the
-// failure message sends the contributor to a command that does not exist, which
-// is worse than no advice, because they will conclude the guard is broken.
-//
-// A registry object tying the four together would be more structure than three
-// entries deserve. What is worth having is the rule, enforced: every generator
-// is reachable, every guard's advice runs, and nothing is orphaned.
-func TestEveryGeneratorHasARecipeAndAGuard(t *testing.T) {
+// TestEveryGeneratorHasARecipeNamedInASyncTest holds each cmd/gen-* generator
+// to two things: a `just gen-*` recipe that runs it, and a sync test whose
+// refresh advice names that recipe. A generator without both produces a
+// committed file that can drift silently, and looks exactly like the covered
+// ones in review.
+func TestEveryGeneratorHasARecipeNamedInASyncTest(t *testing.T) {
 	t.Parallel()
 
-	root := reporoot.Path(t)
 	justfile := string(reporoot.ReadFile(t, "justfile"))
 
-	generators := generatorCommands(t, root)
-	if len(generators) < 3 {
-		t.Fatalf("found %d generators under cmd/; the walk, not the tree, is what was measured", len(generators))
+	var syncTests strings.Builder
+
+	for _, entry := range reporoot.ReadDir(t, "test/syncguard") {
+		if strings.HasSuffix(entry.Name(), "_test.go") && entry.Name() != "generators_guard_test.go" {
+			syncTests.Write(reporoot.ReadFile(t, "test/syncguard/"+entry.Name()))
+		}
 	}
 
-	recipes := justRecipes(justfile)
-	advice := guardRefreshCommands(t, root)
+	generators := 0
 
-	for _, generator := range generators {
-		recipe := strings.TrimPrefix(generator, "gen-")
-
-		body, ok := recipes["gen-"+recipe]
-		if !ok {
-			t.Errorf("cmd/%s has no `just gen-%s` recipe; a generator nobody can run is a file that drifts", generator, recipe)
-
+	for _, entry := range reporoot.ReadDir(t, "cmd") {
+		if !entry.IsDir() || !strings.HasPrefix(entry.Name(), "gen-") {
 			continue
 		}
 
-		if !strings.Contains(body, "./cmd/"+generator) {
-			t.Errorf("`just gen-%s` does not run ./cmd/%s; the recipe and the generator drifted apart", recipe, generator)
+		generators++
+		recipe := entry.Name()
+
+		if !strings.Contains(justfile, "\n"+recipe+":\n    @go run ./cmd/"+recipe+" ") {
+			t.Errorf("cmd/%s has no `just %s` recipe running it; a generator nobody runs is a file that drifts", recipe, recipe)
 		}
 
-		if !advice["just gen-"+recipe] {
-			t.Errorf("no sync guard tells a contributor to run `just gen-%s`; cmd/%s produces a file nothing compares",
-				recipe, generator)
-		}
-	}
-
-	// The other direction: advice that names a recipe which no longer exists
-	// sends a contributor to a command that fails.
-	for command := range advice {
-		recipe := strings.TrimPrefix(command, "just ")
-		if _, ok := recipes[recipe]; !ok {
-			t.Errorf("a sync guard advises %q, but the justfile has no such recipe; the failure message is a dead end", command)
-		}
-	}
-}
-
-// generatorCommands lists the cmd/gen-* directories, which is what a generator
-// is in this repository.
-func generatorCommands(t *testing.T, root string) []string {
-	t.Helper()
-
-	entries, err := os.ReadDir(filepath.Join(root, "cmd"))
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	var found []string
-
-	for _, entry := range entries {
-		if entry.IsDir() && strings.HasPrefix(entry.Name(), "gen-") {
-			found = append(found, entry.Name())
+		if !strings.Contains(syncTests.String(), `"just `+recipe+`"`) {
+			t.Errorf("no sync test tells a contributor to run `just %s`; cmd/%s produces a file nothing compares", recipe, recipe)
 		}
 	}
 
-	slices.Sort(found)
-
-	return found
-}
-
-// justRecipeHeader matches a recipe name at the start of a line, which is how
-// just declares one.
-var justRecipeHeader = regexp.MustCompile(`(?m)^([a-z][a-z0-9-]*)(?: [^:\n]*)?:\s*$`)
-
-// justRecipes maps each recipe name to its indented body.
-func justRecipes(justfile string) map[string]string {
-	found := map[string]string{}
-	lines := strings.Split(justfile, "\n")
-
-	for index, line := range lines {
-		match := justRecipeHeader.FindStringSubmatch(line)
-		if match == nil {
-			continue
-		}
-
-		var body strings.Builder
-
-		for _, next := range lines[index+1:] {
-			if next != "" && !strings.HasPrefix(next, " ") && !strings.HasPrefix(next, "\t") {
-				break
-			}
-
-			body.WriteString(next)
-			body.WriteString("\n")
-		}
-
-		found[match[1]] = body.String()
+	if generators < 3 {
+		t.Fatalf("found %d generators under cmd/; the walk, not the tree, is what was measured", generators)
 	}
-
-	return found
-}
-
-// refreshAdvice matches the second argument of generatedDifference, which is
-// the command a guard tells a contributor to run.
-var refreshAdvice = regexp.MustCompile(`generatedDifference\([^,]+,\s*"([^"]+)"`)
-
-// guardRefreshCommands collects every refresh command the sync guards advise.
-func guardRefreshCommands(t *testing.T, root string) map[string]bool {
-	t.Helper()
-
-	entries, err := os.ReadDir(filepath.Join(root, "test", "syncguard"))
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	found := map[string]bool{}
-
-	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), "_test.go") {
-			continue
-		}
-
-		// contract_boundary_test.go exercises generatedDifference itself with
-		// invented arguments ("just refresh", "docs/example"). Those are
-		// fixtures for the helper, not advice any guard gives.
-		if entry.Name() == "contract_boundary_test.go" {
-			continue
-		}
-
-		body := string(reporoot.ReadFile(t, filepath.Join("test", "syncguard", entry.Name())))
-		for _, match := range refreshAdvice.FindAllStringSubmatch(body, -1) {
-			if strings.HasPrefix(match[1], "just ") {
-				found[match[1]] = true
-			}
-		}
-	}
-
-	if len(found) == 0 {
-		t.Fatal("no refresh advice found in the sync guards; the regexp, not the guards, is what was measured")
-	}
-
-	return found
 }
 
 // TestGeneratedOutputsAreCheckedByTheOfflineSuite closes the other half of the

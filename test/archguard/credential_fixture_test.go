@@ -63,6 +63,29 @@ func TestOperatorCredentialReferences_FindsEverySpellingAndNoOther(t *testing.T)
 			name:   "no reference at all",
 			source: "package owned\n\nimport \"" + runcontext + "\"\n\nvar _ = runcontext.Workspace()\n",
 		},
+		{
+			name:   "a function value, not a call",
+			source: "package owned\n\nimport rc \"" + runcontext + "\"\n\nvar mint = rc.OperatorCredential\n",
+			want:   1,
+		},
+		{
+			name:   "a dot-imported function value",
+			source: "package owned\n\nimport . \"" + runcontext + "\"\n\nvar mint = OperatorCredential\n",
+			want:   1,
+		},
+		{
+			name:   "a function value handed to reflection",
+			source: "package owned\n\nimport rc \"" + runcontext + "\"\nimport \"reflect\"\n\nvar mint = reflect.ValueOf(rc.OperatorCredential)\n",
+			want:   1,
+		},
+		{
+			name:   "a parameter shadowing the import",
+			source: "package owned\n\nimport runcontext \"" + runcontext + "\"\n\nvar _ runcontext.Credential\n\nfunc f(runcontext struct{ OperatorCredential func(string) any }) { runcontext.OperatorCredential(\"x\") }\n",
+		},
+		{
+			name:   "a local shadowing the dot import",
+			source: "package owned\n\nimport . \"" + runcontext + "\"\n\nvar _ Credential\n\nfunc f() { OperatorCredential := func(string) any { return nil }; OperatorCredential(\"x\") }\n",
+		},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
 			t.Parallel()

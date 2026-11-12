@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: The Forge CI Authors
+// SPDX-FileCopyrightText: 2026 Digg - Agency for Digital Government
 // SPDX-License-Identifier: EUPL-1.2 OR GPL-3.0-or-later
 
 package workflowguard
@@ -218,7 +218,7 @@ func TestSnapshotLineageProofsFailClosedOnNamespaceMatrixAndNeedsChanges(t *test
 		{"valid", "", ""},
 		{"other namespace", "name: ${{ inputs['artifact-name'] }}-inputs", "name: ${{ inputs['other-name'] }}-inputs"},
 		{"missing build barrier", "needs: [plan, build]", "needs: [plan]"},
-		{"missing context dependency", "needs: [plan, prepare-context]", "needs: [plan]"},
+		{"missing context dependency", "needs: [resolve-bootstrap, plan, prepare-context]", "needs: [resolve-bootstrap, plan]"},
 		{"missing producer barrier", "needs: [plan, build-artifacts]", "needs: [plan]"},
 		{"other context namespace", "name: ${{ inputs['artifact-name'] }}-context", "name: ${{ inputs['other-name'] }}-context"},
 		{"other producer namespace", "name: ${{ inputs['artifact-name'] }}-dependency-${{ matrix.artifact.name }}", "name: ${{ inputs['other-name'] }}-dependency-${{ matrix.artifact.name }}"},
@@ -251,7 +251,7 @@ func TestSnapshotLineageProofsFailClosedOnNamespaceMatrixAndNeedsChanges(t *test
 			findings, count := lineageFindings(map[string]lineageWorkflow{workflow.name: workflow})
 			if tc.name == "valid" {
 				require.Empty(t, findings)
-				require.Equal(t, 9, count)
+				require.Equal(t, 10, count)
 			} else {
 				require.NotEmpty(t, findings, "an unsupported relationship must remain a lineage finding")
 			}

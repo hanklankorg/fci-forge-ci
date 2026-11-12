@@ -26,17 +26,26 @@ import (
 //
 // What the caller may not be able to see is which of those jobs will hand the
 // image durable write authority. Most container jobs here hold none: they parse
-// a plan, render a summary, build into an artifact. Two do. An adopter pointing
-// `runtime-image` at something they have not reviewed should be told that in
-// those two the image can write to the repository or the package registry, and
-// that no step-level check stands between the two facts.
+// a plan, render a summary, build into an artifact. The ones below do. An
+// adopter pointing `runtime-image` at something they have not reviewed should
+// be told that in those the image can write to the repository or the package
+// registry, or sign with the workflow's OIDC identity, and that no step-level
+// check stands between the two facts.
 //
 // So this guard does not forbid the pattern. It requires the short list to stay
 // short and stay written down.
 func declaredWritingContainerJobs() map[string]string {
 	return map[string]string{
-		"publish-snapshot-npm.yml/build-and-publish": "packages: write",
-		"version-bump.yml/bump-version":              "contents: write",
+		"promote-stage.yml/promote":                     "packages: write",
+		"publish-container.yml/image-evidence":          "packages: write, id-token: write",
+		"publish-container.yml/merge":                   "packages: write, id-token: write",
+		"publish-container.yml/publish-images":          "packages: write",
+		"publish-maven-github.yml/publish-maven-github": "packages: write",
+		"publish-snapshot-npm.yml/build-and-publish":    "packages: write",
+		"release-create-github.yml/sign-release":        "id-token: write",
+		"slsa-attestor.yml/attest":                      "packages: write",
+		"snapshot-images.yml/publish":                   "packages: write",
+		"version-bump.yml/bump-version":                 "contents: write",
 	}
 }
 

@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: The Forge CI Authors
+// SPDX-FileCopyrightText: 2026 Digg - Agency for Digital Government
 // SPDX-License-Identifier: EUPL-1.2 OR GPL-3.0-or-later
 
 package workflowguard_test
@@ -25,11 +25,11 @@ import (
 
 // The trees that ship workflows, actions, templates, release scripts, demos
 // and consumer fixtures.
-var shippedCITrees = []string{".forgejo", ".github", ".gitlab", "templates", "examples", "test/live/demos", "test/live/consumer-fixtures"}
+var shippedCITrees = []string{".forgejo", ".github", ".gitlab", "templates", "examples", "test/live/fixtures"}
 
 // The demos and examples, which a consumer copies: what they hard-wire, the
 // consumer does too.
-var demoTrees = []string{"examples", "test/live/demos"}
+var demoTrees = []string{"examples", "test/live/fixtures/consumers"}
 
 // buildahHardWired names Buildah directly: the Forgejo setup-buildah action,
 // the engine's setup-buildah verb, or the bootstrap installer.
@@ -40,14 +40,11 @@ var buildahHardWired = regexp.MustCompile(`/setup-buildah@|/setup-buildah\b\s*$|
 // selects it, and the paths that are Buildah's by design.
 var buildahAllowed = map[string]string{
 	".forgejo/actions/setup-buildah/action.yml":                   "the Buildah preparation itself",
-	".forgejo/actions/setup-image-builder/action.yml":             "the Forgejo builder selection: prepares Buildah when CI_IMAGE_BUILDER selects it",
-	".forgejo/bin/snapshot-images.sh":                             "snapshot_build, the Forgejo snapshot builder selection",
-	".gitlab/bin/release.sh":                                      "rc_image_builder, the GitLab release's builder selection",
 	".github/workflows/publish-container.yml":                     "the GitHub builder selection prepares Buildah only for its host branch",
 	".github/workflows/snapshot-images.yml":                       "the GitHub builder selection prepares Buildah only for its host branch",
 	".github/workflows/self-release.yml":                          "forge-ci's own release on GitHub's runners, no consumer workflow",
 	".github/workflows/self-runtime-container.yml":                "forge-ci's own runtime images on GitHub's runners, no consumer workflow",
-	"test/live/consumer-fixtures/generic-cli/forgejo-release.yml": "the Go lane's checks are Buildah's own integration tests",
+	"test/live/fixtures/adapters/generic-cli/forgejo-release.yml": "the Go lane's checks are Buildah's own integration tests",
 }
 
 // hardCodedArch is a container step's literal platform or architecture: a

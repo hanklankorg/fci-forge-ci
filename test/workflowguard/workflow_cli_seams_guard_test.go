@@ -6,7 +6,6 @@ package workflowguard
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/diggsweden/forge-ci/internal/testutil/reporoot"
@@ -15,55 +14,44 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-func TestReleaseOrchestratorResolvesForgeCIRefFromCanonicalRemote(t *testing.T) {
-	t.Parallel()
-
-	env := workflowStepEnv(t, "release-orchestrator.yml", "parse-config", "Resolve forge-ci ref to commit SHA")
-	require.Equal(t, canonicalForgeCIRemote, env["REMOTE_URL"])
-	body, err := os.ReadFile(filepath.Join(reporoot.Path(t), ".github", "workflows", "release-orchestrator.yml"))
-	require.NoError(t, err)
-	require.True(t, canonicalResolveStep(body))
-}
-
-// canonicalForgeCIRemote is the repository the bootstrap resolver admitted:
-// repository configuration (a variable an administrator may set) or the
-// repository serving the called workflow, never caller input.
-const canonicalForgeCIRemote = "${{ github.server_url }}/${{ needs.resolve-bootstrap.outputs.forge-ci-repository }}"
-
-func canonicalResolveStep(body []byte) bool {
-	var workflow eventWorkflow
-	if yaml.Unmarshal(body, &workflow) != nil {
-		return false
-	}
-
-	job := workflow.Jobs["parse-config"]
-	for _, step := range job.Steps {
-		if step.Name != "Resolve forge-ci ref to commit SHA" {
-			continue
-		}
-
-		for _, env := range []*yaml.Node{&workflow.Env, &job.Env, &step.Env} {
-			for _, key := range []string{"BASH_ENV", "ENV"} {
-				if value := mappingChild(env, key); value != nil && value.Value != "" {
-					return false
-				}
-			}
-		}
-
-		remote := mappingChild(&step.Env, "REMOTE_URL")
-
-		return remote != nil && remote.Value == canonicalForgeCIRemote && strings.TrimSpace(step.Run) == "forge-ci platform resolve-ref" && step.Shell == ""
-	}
-
-	return false
-}
-
 func TestPublishContainerValidatesNamespaceForSelectedRegistry(t *testing.T) {
 	t.Parallel()
 
 	env := workflowStepEnv(t, "publish-container.yml", "prep", "Validate Image Namespace")
 	require.Equal(t, "${{ inputs.registry }}", env["CONTAINER_REGISTRY"])
 	require.Equal(t, "${{ inputs.registry }}", env["ENFORCE_NAMESPACE_ON"])
+}
+
+// The Maven and Gradle builds upload target/ and build/libs/ below the
+// artifact's working directory. The image build restores each download
+// there and verifies the jars where a Containerfile copies them from.
+func TestPublishContainerRestoresJVMArtifactsWhereTheyWereBuilt(t *testing.T) {
+	t.Parallel()
+
+	publish, err := os.ReadFile(filepath.Join(reporoot.Path(t), ".github", "workflows", "publish-container.yml"))
+	require.NoError(t, err)
+	stage, err := os.ReadFile(filepath.Join(reporoot.Path(t), ".github", "workflows", "release-publish-stage.yml"))
+	require.NoError(t, err)
+
+	for _, build := range []struct{ name, variable, output string }{
+		{"maven", "MAVEN_WORKING_DIRECTORY", "target"},
+		{"gradle", "GRADLE_WORKING_DIRECTORY", "build/libs"},
+	} {
+		require.Contains(t, string(publish), `run: forge-ci artifact download --name "$DOWNLOAD_NAME" --dir "./$`+build.variable+`"`+"\n")
+		require.Contains(t, string(publish), "run: forge-ci container validate artifacts --project-type "+build.name+` --artifact-dir "./$`+build.variable+"/"+build.output+`"`+"\n")
+		require.Contains(t, string(stage), build.name+"-working-directory: ${{ matrix.container."+build.name+"_working_directory || '.' }}\n")
+	}
+
+	// A direct caller chooses both directories: the job refuses one that
+	// leaves the source checkout before anything is unpacked there.
+	require.Contains(t, string(publish), `--context "$BUILD_CONTEXT" --source-dir "$MAVEN_WORKING_DIRECTORY" --source-dir "$GRADLE_WORKING_DIRECTORY"`+"\n")
+
+	// The Gradle layout rests on these two upload patterns: their common
+	// root is the working directory, so the artifact keeps build/libs.
+	gradle, err := os.ReadFile(filepath.Join(reporoot.Path(t), ".github", "workflows", "build-gradle-app.yml"))
+	require.NoError(t, err)
+	require.Contains(t, string(gradle), "${{ inputs['working-directory'] }}/build/libs/*.jar\n")
+	require.Contains(t, string(gradle), "${{ inputs['working-directory'] }}/**/build/libs/*.jar\n")
 }
 
 func workflowStepEnv(t *testing.T, workflowName, jobName, stepName string) map[string]string {

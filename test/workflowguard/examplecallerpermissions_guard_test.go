@@ -23,7 +23,8 @@ import (
 // called job asks for more than the caller granted. So each example caller of
 // a forge-ci workflow must grant at least what that workflow's job tree asks
 // for. The hosted demo of 2026-10-16 found every pull-request example missing
-// actions: read this way.
+// actions: read this way. Nor may an example grant more than forge-ci uses:
+// attestations: write is never asked for.
 
 // permissionCaller is the part of a workflow this guard reads.
 type permissionCaller struct {
@@ -66,6 +67,11 @@ func TestExampleCallersGrantWhatTheCalledWorkflowsAsk(t *testing.T) {
 
 		relative, _ := filepath.Rel(root, path)
 
+		// forge-ci signs with cosign, not the GitHub attestation API.
+		if writesAttestations(body) {
+			violations = append(violations, relative+": grants attestations: write, which no forge-ci workflow uses")
+		}
+
 		for jobName, job := range caller.Jobs {
 			target, found := strings.CutPrefix(job.Uses, forgeCIWorkflowPrefix)
 			if !found {
@@ -88,6 +94,42 @@ func TestExampleCallersGrantWhatTheCalledWorkflowsAsk(t *testing.T) {
 
 	slices.Sort(violations)
 	require.Emptyf(t, violations, "example callers grant less than the called workflows ask; GitHub refuses such a run at startup:\n  %s",
+		strings.Join(violations, "\n  "))
+}
+
+// The same rule holds inside the engine: a job that calls another workflow of
+// this repository caps what that workflow's jobs may ask, whatever the
+// consumer granted above it. GitHub checks every such call before any job
+// starts, a skipped one too.
+func TestInternalCallersGrantWhatTheCalledWorkflowsAsk(t *testing.T) {
+	t.Parallel()
+
+	workflows := loadPermissionWorkflows(t, filepath.Join(reporoot.Path(t), ".github", "workflows"))
+
+	var violations []string
+
+	count := 0
+
+	for name, workflow := range workflows {
+		for jobName, job := range workflow.Jobs {
+			target := internalWorkflowTarget(job.Uses)
+			if target == "" {
+				continue
+			}
+
+			count++
+
+			granted := permissionScopes(job.Permissions, workflow.Permissions)
+			for _, missing := range missingPermissions(requiredPermissions(target, workflows, nil), granted) {
+				violations = append(violations, fmt.Sprintf("%s: job %s calls %s without %s", name, jobName, target, missing))
+			}
+		}
+	}
+
+	require.NotZero(t, count, "no workflow calls another")
+
+	slices.Sort(violations)
+	require.Emptyf(t, violations, "a calling job grants less than the called workflow asks; GitHub refuses such a run at startup:\n  %s",
 		strings.Join(violations, "\n  "))
 }
 

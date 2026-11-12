@@ -36,6 +36,7 @@ func TestEveryCommandGroupHasALiveDisposition(t *testing.T) {
 		"build":     {gap: "DEFERRED: domain/build -> domain/summary -> provider is package-level awareness; native build verbs still need a verb-level parity decision"},
 		"config":    {gap: "DEFERRED: config validation reaches domain/build and provider-backed summary types; no config CLI conformance invocation"},
 		"container": {scenario: "TestLedger_Cleanup_RemovesTheCandidateAndKeepsTheRelease"},
+		"docs":      {gap: "DEFERRED: prints pages embedded at build time; no forge API is involved, unit tests cover the page lookup"},
 		"doctor":    {scenario: "TestJSON_DoctorReport_HasTheSameShapeOnEveryForge"},
 		"initcmd":   {gap: "DEFERRED: init reads a mirror anonymously over git and writes local files; unit tests cover it against the repository's own examples, no forge API is involved"},
 		"lint":      {gap: "DEFERRED: the Git adapter reaches runcontext; no lint CLI conformance invocation, and native linter parity is not established"},
@@ -45,11 +46,12 @@ func TestEveryCommandGroupHasALiveDisposition(t *testing.T) {
 		"publish":   {gap: "OUTSIDE SCANNER: forgepackages_test.go drives in-runner shell probes, not CLI/CLIIn; do not credit shell text or infer coverage of other publish verbs"},
 		"release":   {scenario: "TestRelease_PublishReconcile_RefusesPublishedChanges"},
 		"report":    {gap: "MISSING: report/status imports provider, but adapter capability checks and helper labels are not a report CLI scenario"},
+		"setup":     {gap: "DEFERRED: reads local files and git config and writes the allowed-signers file; no forge API is involved, unit tests cover each step"},
 		"sbom":      {gap: "DEFERRED: cosign -> domain/container -> provider is package-level awareness; no sbom CLI conformance invocation"},
 		"security":  {scenario: "TestDegradation_SARIFUpload_NoticesAndSucceeds"},
 		"toolchain": {gap: "DEFERRED: cienv reaches runcontext; no toolchain CLI conformance invocation, and native installer parity is not established"},
 		"validate":  {scenario: "TestToken_RejectedCredential_FailsTheCommandWithAReason"},
-		"version":   {gap: "MISSING (D179): commit-changelog-release reads runcontext and performs signed Git mutations; JSON version fields are not coverage; a separately authorized live scenario remains unimplemented"},
+		"version":   {scenario: "TestInRunner_VersionCommitsTheChangelogRelease"},
 	}
 
 	root := reporoot.Path(t)
@@ -70,7 +72,7 @@ func TestEveryCommandGroupHasALiveDisposition(t *testing.T) {
 		}
 	}
 
-	scenarios := conformanceFuncs(t, filepath.Join(root, "internal", "livetest", "conformance"))
+	scenarios := conformanceFuncs(t, filepath.Join(root, "test", "live", "conformance"))
 
 	for group, disposition := range liveCoverage {
 		if !groups[group] {
@@ -89,7 +91,7 @@ func TestEveryCommandGroupHasALiveDisposition(t *testing.T) {
 
 		body, ok := scenarios[disposition.scenario]
 		if !ok {
-			t.Errorf("%s: scenario %s is not in internal/livetest/conformance", group, disposition.scenario)
+			t.Errorf("%s: scenario %s is not in test/live/conformance", group, disposition.scenario)
 
 			continue
 		}

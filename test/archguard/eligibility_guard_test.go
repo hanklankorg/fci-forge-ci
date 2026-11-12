@@ -11,275 +11,94 @@ import (
 	"io/fs"
 	"path/filepath"
 	"runtime"
-	"slices"
-	"strconv"
-	"strings"
 	"testing"
 
 	"github.com/diggsweden/forge-ci/internal/testutil/reporoot"
 )
 
-// Every guard in this package selects its input the same way: a `.go` file that
-// is not a `_test.go` file. What that filter actually admits depends on how the
-// guard then reads the file, and the two mechanisms in use disagree.
+// TestGuardEligibility_EveryProductFileIsJudged keeps the guards from quietly
+// covering less of the tree than they appear to.
 //
-// The source-walking guards (credential, exec-wrap, provider-switch) parse
-// with go/parser, which ignores build constraints. They read a
-// `//go:build !linux` file on Linux, including code that never compiles here.
-// The environment guard loads through the compiler's export metadata, which
-// honours build constraints, and so does golangci-lint, which runs the
-// depguard layering rules: the same file is invisible to both. No violations,
-// no diagnostic, a clean pass over nothing.
+// The source-walking guards parse every product file whatever its build
+// constraint. The environment guard and the depguard layer rules load packages
+// for linux and darwin only, so a file neither release build compiles is
+// invisible to both. Such a variant may therefore import nothing at all: with
+// no import it can neither read the environment nor cross a layer.
 //
-// Neither behaviour is wrong on its own, and neither is announced. The failure
-// mode is a guard that quietly stops covering part of the tree. So the
-// constrained files are declared here, one row each, and anything new fails
-// until someone says how the scanners should treat it.
-//
-// buildConstrainedProductFiles is that declaration. Variants outside both
-// released operating systems are the ones the environment guard and depguard
-// cannot see, which is why the eligibility checks below hold them to
-// source-level rules instead.
-func buildConstrainedProductFiles() map[string]string {
-	return map[string]string{
-		"internal/app/platform/stagepublickey_other.go": "!unix",
-		"internal/app/platform/stagepublickey_unix.go":  "unix",
-		"internal/cliio/lock_unix.go":                   "unix",
-		"internal/pathsafe/root_other.go":               "!linux",
-		"internal/safeexec/hardening_linux.go":          "linux",
-		"internal/safeexec/hardening_other.go":          "!linux",
-		"internal/safeexec/processgroup_linux.go":       "linux",
-		"internal/safeexec/processgroup_other.go":       "!linux",
-		"internal/safeexec/swap_linux.go":               "linux",
-		"internal/safeexec/swap_other.go":               "!linux",
-	}
-}
-
-// envReadingSelectors are the direct environment reads the environment guard
-// exists to police. A build-constrained file the guard cannot load must not
-// contain one, because nothing would report it.
-func envReadingSelectors() []string {
-	return []string{"Getenv", "LookupEnv", "Environ", "Setenv", "Unsetenv"}
-}
-
-func TestGuardEligibility_ConstrainedAndGeneratedProductFilesAreDeclared(t *testing.T) {
+// Generated product files are refused too: a guard finding in one is a report
+// against its generator, which no contributor can fix in place.
+func TestGuardEligibility_EveryProductFileIsJudged(t *testing.T) {
 	t.Parallel()
 
-	declared := buildConstrainedProductFiles()
 	root := reporoot.Path(t)
-
-	var (
-		found     = map[string]string{}
-		generated []string
-		scanned   int
-	)
+	scanned, unbuilt := 0, 0
 
 	for _, tree := range []string{"internal", "cmd"} {
-		walkProductGoFiles(t, filepath.Join(root, tree), root, func(rel, source string) {
+		err := filepath.WalkDir(filepath.Join(root, tree), func(path string, entry fs.DirEntry, err error) error {
+			if err != nil || !isProductGoFile(entry, path) {
+				return err
+			}
+
+			file, err := parser.ParseFile(token.NewFileSet(), path, nil, parser.ImportsOnly|parser.ParseComments)
+			if err != nil {
+				return err
+			}
+
 			scanned++
+			rel, _ := filepath.Rel(root, path)
 
-			if tag, ok := buildConstraintOf(t, rel, source); ok {
-				found[rel] = tag
+			if ast.IsGenerated(file) {
+				t.Errorf("%s is generated; point the guards at its template, or exclude it and say so in docs/testing.md", rel)
 			}
 
-			if hasGeneratedMarker(source) {
-				generated = append(generated, rel)
-			}
-		})
-	}
+			if expr := buildConstraint(file); expr != nil && !builtByARelease(expr) {
+				unbuilt++
 
-	if scanned < 200 {
-		t.Fatalf("scanned %d product files; the walk, not the tree, is what was measured", scanned)
-	}
-
-	for rel, tag := range found {
-		want, ok := declared[rel]
-		switch {
-		case !ok:
-			t.Errorf("undeclared build-constrained product file %s (//go:build %s)\n"+
-				"Add it to buildConstrainedProductFiles and decide what each scanner does with it. The "+
-				"source-walking guards will parse it whatever the current build configuration is; the "+
-				"environment guard will not load it at all unless the constraint is satisfied.", rel, tag)
-		case want != tag:
-			t.Errorf("%s now says //go:build %s, declared as %s; re-check which scanners still reach it", rel, tag, want)
-		}
-	}
-
-	for rel := range declared {
-		if _, ok := found[rel]; !ok {
-			t.Errorf("declared build-constrained file %s no longer carries a constraint (or no longer exists); drop the row", rel)
-		}
-	}
-
-	slices.Sort(generated)
-
-	if len(generated) > 0 {
-		t.Errorf("generated product files: %v\n"+
-			"A guard violation inside generated code is a report against the generator, not something a "+
-			"contributor can fix in place. Point the guard at the template, or exclude the output and say so "+
-			"in docs/testing.md.", generated)
-	}
-}
-
-// TestGuardEligibility_UnbuiltVariantsDoNotReadTheEnvironment checks variants
-// outside the Linux and Darwin release builds. The semantic environment guard
-// and lint load both, independent of the machine running this policy test.
-//
-// The rule is deliberately not "widen this list when a variant needs one". If a
-// non-Linux variant genuinely has to read the environment, the fix is to run
-// the environment guard under that GOOS, where it can judge the call properly.
-func TestGuardEligibility_UnbuiltVariantsDoNotReadTheEnvironment(t *testing.T) {
-	t.Parallel()
-
-	root := reporoot.Path(t)
-	checked := 0
-
-	for rel, tag := range buildConstrainedProductFiles() {
-		if satisfiedByReleaseBuilds(t, tag) {
-			continue
-		}
-
-		checked++
-
-		body, err := reporoot.ReadFileAt(root, rel)
-		if err != nil {
-			t.Fatalf("read %s: %v", rel, err)
-		}
-
-		for _, call := range environmentReadsIn(t, rel, string(body)) {
-			t.Errorf("%s reads the environment via %s, but //go:build %s excludes it from the environment "+
-				"guard on linux, so nothing checks that call. Run the guard under a matching GOOS instead of "+
-				"leaving the read unpoliced.", rel, call, tag)
-		}
-	}
-
-	if checked == 0 {
-		t.Fatal("no declared variant is excluded from the Linux reference; this check measured nothing")
-	}
-}
-
-// TestGuardEligibility_UnbuiltVariantsImportNoInternalPackage is the layering
-// half of the same question. The depguard layer rules run inside golangci-lint,
-// including the Linux reference build on every host. An internal import in
-// a variant outside that baseline needs explicit coverage. The pathsafe fallback
-// is cross-linted for Darwin by the mandatory lint prerequisite below.
-func TestGuardEligibility_UnbuiltVariantsImportNoInternalPackage(t *testing.T) {
-	t.Parallel()
-
-	root := reporoot.Path(t)
-	checked := 0
-
-	justfile, err := reporoot.ReadFileAt(root, "justfile")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	for rel, tag := range buildConstrainedProductFiles() {
-		if satisfiedByReleaseBuilds(t, tag) {
-			continue
-		}
-
-		checked++
-
-		if rel == "internal/pathsafe/root_other.go" {
-			if !strings.Contains(string(justfile), "_lint-linux-platform: _lint-darwin-platform") ||
-				!strings.Contains(string(justfile), "GOOS=darwin GOARCH=arm64 golangci-lint run --config development/golangci-lint/golangci.yml ./internal/pathsafe/...") {
-				t.Fatal("pathsafe fallback requires the mandatory Darwin lint prerequisite")
+				for _, spec := range file.Imports {
+					t.Errorf("%s imports %s, but //go:build %s keeps it out of every release build, where the "+
+						"environment guard and depguard look. Lint and guard it under a GOOS that builds it.",
+						rel, spec.Path.Value, expr)
+				}
 			}
 
-			continue
-		}
-
-		file, err := parser.ParseFile(token.NewFileSet(), filepath.Join(root, rel), nil, parser.ImportsOnly)
-		if err != nil {
-			t.Fatalf("parse %s: %v", rel, err)
-		}
-
-		for _, spec := range file.Imports {
-			if path, err := strconv.Unquote(spec.Path.Value); err != nil || strings.HasPrefix(path, internalPrefix) {
-				t.Errorf("%s imports %s, but //go:build %s hides it from the depguard layer rules on linux. "+
-					"Lint it under a matching GOOS instead of leaving the import unjudged.", rel, spec.Path.Value, tag)
-			}
-		}
-	}
-
-	if checked == 0 {
-		t.Fatal("no declared variant is excluded from the Linux reference; this check measured nothing")
-	}
-}
-
-// walkProductGoFiles visits the non-test Go files under dir, which is the
-// selection every guard in this package makes.
-func walkProductGoFiles(t *testing.T, dir, root string, visit func(rel, source string)) {
-	t.Helper()
-
-	if err := filepath.WalkDir(dir, func(path string, entry fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-
-		if !isProductGoFile(entry, path) {
 			return nil
+		})
+		if err != nil {
+			t.Fatal(err)
 		}
+	}
 
-		rel, relErr := filepath.Rel(root, path)
-		if relErr != nil {
-			return relErr
-		}
-
-		body, readErr := reporoot.ReadFileAt(root, rel)
-		if readErr != nil {
-			return readErr
-		}
-
-		visit(filepath.ToSlash(rel), string(body))
-
-		return nil
-	}); err != nil {
-		t.Fatalf("walk %s: %v", dir, err)
+	if scanned < 200 || unbuilt == 0 {
+		t.Fatalf("scanned %d product files, %d outside the release builds; the walk, not the tree, is what was measured", scanned, unbuilt)
 	}
 }
 
-// buildConstraintOf returns the //go:build expression, read from the parsed
-// comment groups above the package clause so a constraint written inside a
-// string, or too late to count, is judged the way the toolchain judges it.
-func buildConstraintOf(t *testing.T, name, source string) (string, bool) {
-	t.Helper()
-
-	file, err := parser.ParseFile(token.NewFileSet(), name, source, parser.ParseComments|parser.SkipObjectResolution)
-	if err != nil {
-		t.Fatalf("parse %s: %v", name, err)
-	}
-
+// buildConstraint returns the //go:build line above the package clause, as the
+// toolchain reads it, or nil.
+func buildConstraint(file *ast.File) constraint.Expr {
 	for _, group := range file.Comments {
 		if group.Pos() > file.Package {
 			break
 		}
 
 		for _, comment := range group.List {
-			if expr, ok := strings.CutPrefix(comment.Text, "//go:build "); ok {
-				return strings.TrimSpace(expr), true
+			if constraint.IsGoBuild(comment.Text) {
+				expr, err := constraint.Parse(comment.Text)
+				if err == nil {
+					return expr
+				}
 			}
 		}
 	}
 
-	return "", false
+	return nil
 }
 
-// satisfiedByReleaseBuilds evaluates constraints for both released operating
-// systems, which the semantic guard and golangci-lint inspect on every host.
-func satisfiedByReleaseBuilds(t *testing.T, expr string) bool {
-	t.Helper()
-
-	parsed, err := constraint.Parse("//go:build " + expr)
-	if err != nil {
-		t.Fatalf("parse constraint %q: %v", expr, err)
-	}
-
+// builtByARelease reports whether linux or darwin, on this architecture,
+// compiles a file with this constraint.
+func builtByARelease(expr constraint.Expr) bool {
 	for _, goos := range []string{"linux", "darwin"} {
-		if parsed.Eval(func(tag string) bool {
-			return tag == goos || tag == runtime.GOARCH || tag == "unix"
-		}) {
+		if expr.Eval(func(tag string) bool { return tag == goos || tag == "unix" || tag == runtime.GOARCH }) {
 			return true
 		}
 	}
@@ -287,61 +106,47 @@ func satisfiedByReleaseBuilds(t *testing.T, expr string) bool {
 	return false
 }
 
-// environmentReadsIn returns the os/syscall environment calls in a file, by
-// selector name. The receiver is checked so a method of the same name on an
-// application type is not mistaken for one.
-func environmentReadsIn(t *testing.T, name, source string) []string {
-	t.Helper()
+func TestBuiltByARelease(t *testing.T) {
+	t.Parallel()
 
-	file, err := parser.ParseFile(token.NewFileSet(), name, source, parser.SkipObjectResolution)
+	for expr, want := range map[string]bool{
+		"linux": true, "!linux": true, "darwin": true, "unix": true, runtime.GOARCH: true,
+		"!unix": false, "linux && plan9": false, "windows": false, "some_tag_nobody_sets": false,
+	} {
+		parsed, err := constraint.Parse("//go:build " + expr)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if got := builtByARelease(parsed); got != want {
+			t.Errorf("%q: built by a release = %v, want %v", expr, got, want)
+		}
+	}
+
+	file, err := parser.ParseFile(token.NewFileSet(), "fixture.go",
+		"// SPDX-License-Identifier: CC0-1.0\n\n//go:build !unix\n\npackage p\n\nvar s = `//go:build linux`\n", parser.ParseComments)
 	if err != nil {
-		t.Fatalf("parse %s: %v", name, err)
+		t.Fatal(err)
 	}
 
-	var reads []string
+	if expr := buildConstraint(file); expr == nil || expr.String() != "!unix" {
+		t.Errorf("buildConstraint = %v, want !unix", expr)
+	}
 
-	ast.Inspect(file, func(node ast.Node) bool {
-		call, ok := node.(*ast.CallExpr)
-		if !ok {
-			return true
+	for path, want := range map[string]bool{"internal/app/x.go": true, "internal/app/x_test.go": false, "internal/app/x.md": false, "internal/app/cargo": false} {
+		if got := isProductGoFile(fixtureDirEntry{}, path); got != want {
+			t.Errorf("isProductGoFile(%q) = %v, want %v", path, got, want)
 		}
+	}
 
-		selector, ok := call.Fun.(*ast.SelectorExpr)
-		if !ok {
-			return true
-		}
-
-		pkg, ok := selector.X.(*ast.Ident)
-		if !ok || (pkg.Name != "os" && pkg.Name != "syscall") {
-			return true
-		}
-
-		if slices.Contains(envReadingSelectors(), selector.Sel.Name) {
-			reads = append(reads, pkg.Name+"."+selector.Sel.Name)
-		}
-
-		return true
-	})
-
-	slices.Sort(reads)
-
-	return reads
+	if isProductGoFile(fixtureDirEntry{dir: true}, "internal/app/x.go") {
+		t.Error("isProductGoFile admitted a directory")
+	}
 }
 
-// hasGeneratedMarker applies the convention cmd/go and every Go tool uses: the
-// marker is a line comment before the package clause matching the fixed form.
-func hasGeneratedMarker(source string) bool {
-	body, _, found := strings.Cut(source, "\npackage ")
-	if !found {
-		return false
-	}
+type fixtureDirEntry struct{ dir bool }
 
-	for line := range strings.SplitSeq(body, "\n") {
-		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "// Code generated ") && strings.HasSuffix(line, " DO NOT EDIT.") {
-			return true
-		}
-	}
-
-	return false
-}
+func (e fixtureDirEntry) Name() string               { return "" }
+func (e fixtureDirEntry) IsDir() bool                { return e.dir }
+func (e fixtureDirEntry) Type() fs.FileMode          { return 0 }
+func (e fixtureDirEntry) Info() (fs.FileInfo, error) { return nil, nil } //nolint:nilnil // fixture; Info is never called.
