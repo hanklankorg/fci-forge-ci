@@ -16,14 +16,22 @@ on:
       snapshot-build-stage-plan-json:
         required: true
         type: string
-      forge-ci-binary-ref:
+      runs-on:
+        description: "JSON array of runner labels for the ordinary jobs, read with fromJSON. Signing, promotion and publication jobs stay on GitHub-hosted runners."
         required: false
-        default: ""
+        default: '["ubuntu-26.04"]'
+        type: string
+      runs-on-darwin-arm64:
+        description: "JSON array of runner labels for the macOS arm64 jobs, read with fromJSON."
+        required: false
+        default: '["macos-26"]'
+        type: string
+      forge-ci-binary-ref:
+        required: true
         type: string
       runtime-image:
         description: "forge-ci runtime image for the summarize job (base is sufficient)"
-        required: false
-        default: ""
+        required: true
         type: string
       runtime-image-java:
         description: "forge-ci runtime image for Maven/Gradle jobs"
@@ -83,9 +91,6 @@ on:
       PROVISIONING_PROFILE_BASE64:
         description: "Base64-encoded provisioning profile"
         required: false
-      KEYCHAIN_PASSWORD:
-        description: "Ephemeral macOS keychain password generated for the build"
-        required: false
       XCCONFIG_BASE64:
         description: "Base64-encoded xcconfig file"
         required: false
@@ -108,6 +113,8 @@ jobs:
     uses: ./.github/workflows/resolve-forge-ci-bootstrap.yml
     with:
       forge-ci-binary-ref: ${{ inputs['forge-ci-binary-ref'] }}
+      images: |
+        runtime-image=${{ inputs['runtime-image'] }}
   maven:
     needs: [resolve-bootstrap]
     name: "Build: ${{ matrix.artifact.name }} (Maven)"
@@ -122,8 +129,9 @@ jobs:
     # build-maven uses only auto-provided GITHUB_TOKEN.
     uses: ./.github/workflows/build-maven.yml
     with:
+      runs-on: ${{ inputs['runs-on'] }}
       enforce-application-tests: ${{ inputs['enforce-application-tests'] }}
-      forge-ci-binary-ref: ${{ needs.resolve-bootstrap.outputs.forge-ci-binary-ref }}
+      forge-ci-binary-ref: ${{ inputs['forge-ci-binary-ref'] }}
       working-directory: ${{ matrix.artifact.working_directory }}
       private-dependencies: ${{ matrix.artifact.maven.private_dependencies || false }}
       settings-path: ${{ matrix.artifact.maven.settings_path || '' }}
@@ -132,7 +140,7 @@ jobs:
       profile: ${{ matrix.artifact.build_type == 'library' && (matrix.artifact.maven.maven_profile || 'central-release') || '' }}
       artifact-name: ${{ matrix.artifact.name }}
       enable-build-sbom: ${{ inputs.sboms != 'none' && contains(matrix.artifact.effective_sboms, 'build') }}
-      runtime-image: ${{ inputs['runtime-image-java'] || needs.resolve-bootstrap.outputs['runtime-image-java'] }}
+      runtime-image: ${{ inputs['runtime-image-java'] }}
   npm:
     needs: [resolve-bootstrap]
     name: "Build: ${{ matrix.artifact.name }} (npm)"
@@ -147,15 +155,16 @@ jobs:
     # build-npm uses only auto-provided GITHUB_TOKEN.
     uses: ./.github/workflows/build-npm.yml
     with:
+      runs-on: ${{ inputs['runs-on'] }}
       enforce-application-tests: ${{ inputs['enforce-application-tests'] }}
-      forge-ci-binary-ref: ${{ needs.resolve-bootstrap.outputs.forge-ci-binary-ref }}
+      forge-ci-binary-ref: ${{ inputs['forge-ci-binary-ref'] }}
       working-directory: ${{ matrix.artifact.working_directory }}
       private-dependencies: ${{ matrix.artifact.npm.private_dependencies || false }}
       dependency-registry: ${{ matrix.artifact.npm.dependency_registry || '' }}
       branch: ${{ fromJson(inputs['snapshot-release-plan-json']).context.release_sha }}
       artifact-name: ${{ matrix.artifact.name }}
       enable-build-sbom: ${{ inputs.sboms != 'none' && contains(matrix.artifact.effective_sboms, 'build') }}
-      runtime-image: ${{ inputs['runtime-image-node'] || needs.resolve-bootstrap.outputs['runtime-image-node'] }}
+      runtime-image: ${{ inputs['runtime-image-node'] }}
       node-version: ${{ matrix.artifact.npm.node_version || '' }}
   gradle:
     needs: [resolve-bootstrap]
@@ -171,8 +180,9 @@ jobs:
     # build-gradle-app uses only auto-provided GITHUB_TOKEN.
     uses: ./.github/workflows/build-gradle-app.yml
     with:
+      runs-on: ${{ inputs['runs-on'] }}
       enforce-application-tests: ${{ inputs['enforce-application-tests'] }}
-      forge-ci-binary-ref: ${{ needs.resolve-bootstrap.outputs.forge-ci-binary-ref }}
+      forge-ci-binary-ref: ${{ inputs['forge-ci-binary-ref'] }}
       publication-artifact-name: ${{ fromJson(inputs['snapshot-build-stage-plan-json']).export_publications && matrix.artifact.publication_artifact_name || '' }}
       snapshot-publication: true
       working-directory: ${{ matrix.artifact.working_directory }}
@@ -181,7 +191,7 @@ jobs:
       artifact-name: ${{ matrix.artifact.name }}
       gradle-tasks: ${{ matrix.artifact.gradle.gradle_tasks }}
       enable-build-sbom: ${{ inputs.sboms != 'none' && contains(matrix.artifact.effective_sboms, 'build') }}
-      runtime-image: ${{ inputs['runtime-image-java'] || needs.resolve-bootstrap.outputs['runtime-image-java'] }}
+      runtime-image: ${{ inputs['runtime-image-java'] }}
   go:
     needs: [resolve-bootstrap]
     name: "Build: ${{ matrix.artifact.name }} (Go)"
@@ -195,8 +205,9 @@ jobs:
     # build-go uses only auto-provided GITHUB_TOKEN.
     uses: ./.github/workflows/build-go.yml
     with:
+      runs-on: ${{ inputs['runs-on'] }}
       enforce-application-tests: ${{ inputs['enforce-application-tests'] }}
-      forge-ci-binary-ref: ${{ needs.resolve-bootstrap.outputs.forge-ci-binary-ref }}
+      forge-ci-binary-ref: ${{ inputs['forge-ci-binary-ref'] }}
       commit: ${{ fromJson(inputs['snapshot-release-plan-json']).context.release_sha }}
       working-directory: ${{ matrix.artifact.working_directory }}
       branch: ${{ fromJson(inputs['snapshot-release-plan-json']).context.release_sha }}
@@ -208,7 +219,7 @@ jobs:
       ldflags: ${{ matrix.artifact.go.ldflags || '' }}
       skip-tests: ${{ matrix.artifact.go.skip_tests || false }}
       enable-build-sbom: ${{ inputs.sboms != 'none' && contains(matrix.artifact.effective_sboms, 'build') }}
-      runtime-image: ${{ inputs['runtime-image-go'] || needs.resolve-bootstrap.outputs['runtime-image-go'] }}
+      runtime-image: ${{ inputs['runtime-image-go'] }}
   gradle-android:
     needs: [resolve-bootstrap]
     name: "Build: ${{ matrix.artifact.name }} (Android)"
@@ -227,8 +238,9 @@ jobs:
       SECRETS_PROPERTIES_BASE64: ${{ secrets.SECRETS_PROPERTIES_BASE64 }}
     uses: ./.github/workflows/build-gradle-android.yml
     with:
+      runs-on: ${{ inputs['runs-on'] }}
       enforce-application-tests: ${{ inputs['enforce-application-tests'] }}
-      forge-ci-binary-ref: ${{ needs.resolve-bootstrap.outputs.forge-ci-binary-ref }}
+      forge-ci-binary-ref: ${{ inputs['forge-ci-binary-ref'] }}
       library: ${{ matrix.artifact.build_type == 'library' }}
       publication-artifact-name: ${{ fromJson(inputs['snapshot-build-stage-plan-json']).export_publications && matrix.artifact.publication_artifact_name || '' }}
       snapshot-publication: true
@@ -239,9 +251,9 @@ jobs:
       build-types: ${{ matrix.artifact.gradle_android.build_types || 'debug,release' }}
       include-aab: ${{ matrix.artifact.gradle_android.include_aab != false }}
       artifact-name: ${{ matrix.artifact.name }}
-      enable-signing: ${{ matrix.artifact.gradle_android.enable_android_signing }}
+      enable-signing: ${{ matrix.artifact.gradle_android.enable_android_signing || false }}
       enable-build-sbom: ${{ inputs.sboms != 'none' && contains(matrix.artifact.effective_sboms, 'build') }}
-      runtime-image: ${{ inputs['runtime-image-android'] || needs.resolve-bootstrap.outputs['runtime-image-android'] }}
+      runtime-image: ${{ inputs['runtime-image-android'] }}
   xcode-ios:
     needs: [resolve-bootstrap]
     name: "Build: ${{ matrix.artifact.name }} (Xcode)"
@@ -256,10 +268,10 @@ jobs:
       IOS_SIGNING_CERTIFICATE_BASE64: ${{ secrets.IOS_SIGNING_CERTIFICATE_BASE64 }}
       IOS_SIGNING_CERTIFICATE_PASSPHRASE: ${{ secrets.IOS_SIGNING_CERTIFICATE_PASSPHRASE }}
       PROVISIONING_PROFILE_BASE64: ${{ secrets.PROVISIONING_PROFILE_BASE64 }}
-      KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
       XCCONFIG_BASE64: ${{ secrets.XCCONFIG_BASE64 }}
     uses: ./.github/workflows/build-xcode-ios.yml
     with:
+      runs-on-darwin-arm64: ${{ inputs['runs-on-darwin-arm64'] }}
       xcode-version: ${{ matrix.artifact.xcode_ios.xcode_version }}
       scheme: ${{ matrix.artifact.xcode_ios.scheme }}
       workspace: ${{ matrix.artifact.xcode_ios.workspace }}
@@ -274,8 +286,7 @@ jobs:
       include-tag: false
       build-number: ${{ matrix.artifact.xcode_ios.build_number }}
       working-directory: ${{ matrix.artifact.working_directory }}
-      macos-version: ${{ matrix.artifact.xcode_ios.macos_version || 'macos-26' }}
-      forge-ci-binary-ref: ${{ needs.resolve-bootstrap.outputs.forge-ci-binary-ref }}
+      forge-ci-binary-ref: ${{ inputs['forge-ci-binary-ref'] }}
   cargo:
     needs: [resolve-bootstrap]
     name: "Build: ${{ matrix.artifact.name }} (Cargo)"
@@ -289,8 +300,9 @@ jobs:
     # build-cargo uses only auto-provided GITHUB_TOKEN.
     uses: ./.github/workflows/build-cargo.yml
     with:
+      runs-on: ${{ inputs['runs-on'] }}
       enforce-application-tests: ${{ inputs['enforce-application-tests'] }}
-      forge-ci-binary-ref: ${{ needs.resolve-bootstrap.outputs.forge-ci-binary-ref }}
+      forge-ci-binary-ref: ${{ inputs['forge-ci-binary-ref'] }}
       commit: ${{ fromJson(inputs['snapshot-release-plan-json']).context.release_sha }}
       working-directory: ${{ matrix.artifact.working_directory }}
       branch: ${{ fromJson(inputs['snapshot-release-plan-json']).context.release_sha }}
@@ -299,7 +311,7 @@ jobs:
       platforms: ${{ matrix.artifact.cargo.platforms || 'linux/amd64' }}
       skip-tests: ${{ matrix.artifact.cargo.skip_tests || false }}
       enable-build-sbom: ${{ inputs.sboms != 'none' && contains(matrix.artifact.effective_sboms, 'build') }}
-      runtime-image: ${{ inputs['runtime-image-rust'] || needs.resolve-bootstrap.outputs['runtime-image-rust'] }}
+      runtime-image: ${{ inputs['runtime-image-rust'] }}
   # Container-first cargo and container-first Go produce nothing at the
   # snapshot build-stage level. Their manifest-derived Build SBOMs and actual
   # compiles (inside the Containerfile) both run in release-snapshot-publish-stage,
@@ -309,9 +321,9 @@ jobs:
     name: Summary
     needs: [resolve-bootstrap, maven, npm, gradle, go, cargo, gradle-android, xcode-ios]
     if: always() && needs.resolve-bootstrap.result == 'success'
-    runs-on: ubuntu-26.04
+    runs-on: ${{ fromJSON(inputs['runs-on']) }}
     container:
-      image: ${{ inputs['runtime-image'] || needs.resolve-bootstrap.outputs['runtime-image'] }}
+      image: ${{ inputs['runtime-image'] }}
     permissions:
       contents: read
     outputs:

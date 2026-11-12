@@ -61,20 +61,23 @@ on:
         required: false
         default: "*.swift"
         type: string
-      macos-version:
-        description: "macOS runner version (macos-13, macos-14, macos-15, macos-26)"
+      runs-on:
+        description: "JSON array of runner labels for the ordinary jobs, read with fromJSON. Signing, promotion and publication jobs stay on GitHub-hosted runners."
         required: false
-        default: "macos-26"
+        default: '["ubuntu-26.04"]'
+        type: string
+      runs-on-darwin-arm64:
+        description: "JSON array of runner labels for the macOS arm64 jobs, read with fromJSON."
+        required: false
+        default: '["macos-26"]'
         type: string
       forge-ci-binary-ref:
-        description: "forge-ci ref/version installed on the macOS runner (default: latest stable release)"
-        required: false
-        default: ""
+        description: "Full approved engine commit; the macOS jobs build forge-ci from the engine checkout at it (canonical delivery serves Linux only)"
+        required: true
         type: string
       runtime-image:
-        description: "forge-ci runtime image used by the Linux summary job. Empty uses the resolved forge-ci version."
-        required: false
-        default: ""
+        description: "forge-ci runtime image used by the Linux summary job, pinned by digest (image@sha256:<64 hex>); the resolver refuses anything else."
+        required: true
         type: string
 permissions:
   contents: read
@@ -85,11 +88,13 @@ jobs:
     uses: ./.github/workflows/resolve-forge-ci-bootstrap.yml
     with:
       forge-ci-binary-ref: ${{ inputs['forge-ci-binary-ref'] }}
+      images: |
+        runtime-image=${{ inputs['runtime-image'] }}
   swift-format-lint:
     needs: [resolve-bootstrap]
     name: Swift Format Lint
     if: ${{ inputs['enable-swiftformat'] }}
-    runs-on: ${{ inputs.macos-version }}
+    runs-on: ${{ fromJSON(inputs['runs-on-darwin-arm64']) }}
     timeout-minutes: 20
     permissions:
       contents: read
@@ -98,21 +103,20 @@ jobs:
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           fetch-depth: 1
-      - name: Checkout forge-ci bootstrap installers
-        id: forge-ci-bootstrap
+      # macOS: canonical delivery builds Linux files only, so this lane builds
+      # forge-ci from the approved engine commit with the engine's own darwin
+      # build action, run from that same checkout.
+      - name: Checkout the approved engine
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           repository: ${{ needs.resolve-bootstrap.outputs.forge-ci-repository }}
-          ref: ${{ needs.resolve-bootstrap.outputs.forge-ci-binary-ref }}
-          path: .github-shared
-          sparse-checkout: scripts/bootstrap
+          ref: ${{ inputs['forge-ci-binary-ref'] }}
+          path: _forge_ci_engine
           persist-credentials: false
-      - name: Install forge-ci binary
-        env:
-          FORGE_CI_BINARY_REF: ${{ needs.resolve-bootstrap.outputs.forge-ci-binary-ref }}
-          FORGE_CI_SOURCE_SHA: ${{ steps.forge-ci-bootstrap.outputs.commit }}
-          FORGE_CI_REPOSITORY: ${{ needs.resolve-bootstrap.outputs.forge-ci-repository }}
-        run: bash .github-shared/scripts/bootstrap/install-forge-ci.sh "$FORGE_CI_BINARY_REF"
+      - name: Build forge-ci for macOS from the approved engine
+        uses: ./_forge_ci_engine/.github/actions/build-darwin-cli
+        with:
+          engine-commit: ${{ inputs['forge-ci-binary-ref'] }}
       - name: Install swift-format
         env:
           SWIFT_FORMAT_VERSION: ${{ inputs['swift-format-version'] }}
@@ -133,7 +137,7 @@ jobs:
     needs: [resolve-bootstrap]
     name: SwiftLint
     if: ${{ inputs['enable-swiftlint'] }}
-    runs-on: ${{ inputs.macos-version }}
+    runs-on: ${{ fromJSON(inputs['runs-on-darwin-arm64']) }}
     timeout-minutes: 20
     permissions:
       contents: read
@@ -142,21 +146,20 @@ jobs:
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           fetch-depth: 1
-      - name: Checkout forge-ci bootstrap installers
-        id: forge-ci-bootstrap
+      # macOS: canonical delivery builds Linux files only, so this lane builds
+      # forge-ci from the approved engine commit with the engine's own darwin
+      # build action, run from that same checkout.
+      - name: Checkout the approved engine
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           repository: ${{ needs.resolve-bootstrap.outputs.forge-ci-repository }}
-          ref: ${{ needs.resolve-bootstrap.outputs.forge-ci-binary-ref }}
-          path: .github-shared
-          sparse-checkout: scripts/bootstrap
+          ref: ${{ inputs['forge-ci-binary-ref'] }}
+          path: _forge_ci_engine
           persist-credentials: false
-      - name: Install forge-ci binary
-        env:
-          FORGE_CI_BINARY_REF: ${{ needs.resolve-bootstrap.outputs.forge-ci-binary-ref }}
-          FORGE_CI_SOURCE_SHA: ${{ steps.forge-ci-bootstrap.outputs.commit }}
-          FORGE_CI_REPOSITORY: ${{ needs.resolve-bootstrap.outputs.forge-ci-repository }}
-        run: bash .github-shared/scripts/bootstrap/install-forge-ci.sh "$FORGE_CI_BINARY_REF"
+      - name: Build forge-ci for macOS from the approved engine
+        uses: ./_forge_ci_engine/.github/actions/build-darwin-cli
+        with:
+          engine-commit: ${{ inputs['forge-ci-binary-ref'] }}
       - name: Install SwiftLint
         run: |
           brew install swiftlint
@@ -169,11 +172,11 @@ jobs:
         run: forge-ci lint swift swiftlint --enforce-lint="$ADMIN_LINT"
   summary:
     name: Lint Summary
-    runs-on: ubuntu-26.04
+    runs-on: ${{ fromJSON(inputs['runs-on']) }}
     needs: [resolve-bootstrap, swift-format-lint, swiftlint]
     if: always() && needs.resolve-bootstrap.result == 'success'
     container:
-      image: ${{ inputs['runtime-image'] || needs.resolve-bootstrap.outputs['runtime-image'] }}
+      image: ${{ inputs['runtime-image'] }}
     steps:
       - name: Aggregate results
         env:

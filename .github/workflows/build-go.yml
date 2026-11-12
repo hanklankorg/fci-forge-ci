@@ -6,12 +6,17 @@
 # Builds artifact-first Go binaries and uploads them for release/container
 # consumption. Output filenames include the platform suffix so GitHub Release
 # assets have unique basenames. Tests remain caller-owned in pull-request
-# quality flows, but this release build can optionally run `go test ./...`
-# unless skip-tests is set.
+# quality flows; release tests are mandatory. An administrator may select safe
+# native targets; skip-tests is always refused.
 name: Build Go
 on:
   workflow_call: # yamllint disable-line rule:truthy
     inputs:
+      test-selection-json:
+        description: "Administrator-owned native Go selection: packages and optional run regexp. Empty retains the legacy default. Never source this from consumer artifacts or dispatch inputs. Selected tests always use race detection and fresh native reports."
+        type: string
+        required: false
+        default: ""
       enforce-application-tests:
         description: "Enforcement setting: false reports recognized test assertion failures without failing; the tests still run. Set it only in the administrator's entry point, since whoever writes this call can pass it; it is the administrator's only where that file is. See docs/admin-policy.md."
         type: boolean
@@ -83,14 +88,17 @@ on:
         default: true
         type: boolean
       runtime-image:
-        description: "forge-ci runtime image carrying Go + cyclonedx-gomod. Empty uses the image of the resolved forge-ci version."
+        description: "forge-ci runtime image carrying Go + cyclonedx-gomod., pinned by digest (image@sha256:<64 hex>); the resolver refuses anything else before the job container starts."
+        required: true
+        type: string
+      runs-on:
+        description: "JSON array of runner labels for the ordinary jobs, read with fromJSON. Signing, promotion and publication jobs stay on GitHub-hosted runners."
         required: false
-        default: ""
+        default: '["ubuntu-26.04"]'
         type: string
       forge-ci-binary-ref:
-        description: "forge-ci release tag or commit whose runtime image the jobs run in; empty resolves the current stable release tag"
-        required: false
-        default: ""
+        description: "Full engine commit (40 hex) the workflow ref names; a tag or branch is refused"
+        required: true
         type: string
 permissions:
   contents: read
@@ -101,13 +109,15 @@ jobs:
     uses: ./.github/workflows/resolve-forge-ci-bootstrap.yml
     with:
       forge-ci-binary-ref: ${{ inputs['forge-ci-binary-ref'] }}
+      images: |
+        runtime-image=${{ inputs['runtime-image'] }}
   build-go:
     needs: [resolve-bootstrap]
     name: Build Go Project
-    runs-on: ubuntu-26.04
+    runs-on: ${{ fromJSON(inputs['runs-on']) }}
     timeout-minutes: 30
     container:
-      image: ${{ inputs['runtime-image'] || needs.resolve-bootstrap.outputs['runtime-image-go'] }}
+      image: ${{ inputs['runtime-image'] }}
     permissions:
       contents: read
     steps:
@@ -154,6 +164,7 @@ jobs:
         # only the platform-transport steps around it (checkout, cache, upload).
         env:
           ADMIN_APPLICATION_TESTS: ${{ inputs['enforce-application-tests'] }}
+          ADMIN_TEST_SELECTION_JSON: ${{ inputs['test-selection-json'] }}
           WORKING_DIRECTORY: ${{ inputs['working-directory'] }}
           ARTIFACT_NAME: ${{ inputs['artifact-name'] }}
           BINARY_NAME: ${{ inputs['binary-name'] }}
@@ -167,7 +178,7 @@ jobs:
           MAIN_PACKAGE: ${{ inputs['main-package'] }}
           SKIP_TESTS: ${{ inputs['skip-tests'] }}
           ENABLE_BUILD_SBOM: ${{ inputs['enable-build-sbom'] }}
-        run: forge-ci build go run --enforce-application-tests="$ADMIN_APPLICATION_TESTS"
+        run: forge-ci build go run --enforce-application-tests="$ADMIN_APPLICATION_TESTS" --test-selection-json="$ADMIN_TEST_SELECTION_JSON"
       - name: Upload Go artifacts
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:

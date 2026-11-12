@@ -51,14 +51,17 @@ on:
         default: "release-changelog"
         type: string
       runtime-image:
-        description: "forge-ci runtime image. Empty uses the image of the resolved forge-ci version."
+        description: "forge-ci runtime image., pinned by digest (image@sha256:<64 hex>); the resolver refuses anything else before the job container starts."
+        required: true
+        type: string
+      runs-on:
+        description: "JSON array of runner labels for the ordinary jobs, read with fromJSON. Signing, promotion and publication jobs stay on GitHub-hosted runners."
         required: false
-        default: ""
+        default: '["ubuntu-26.04"]'
         type: string
       forge-ci-binary-ref:
-        description: "forge-ci release tag or commit whose runtime image the jobs run in; empty resolves the current stable release tag"
-        required: false
-        default: ""
+        description: "Full engine commit (40 hex) the workflow ref names; a tag or branch is refused"
+        required: true
         type: string
 permissions:
   contents: read
@@ -69,13 +72,17 @@ jobs:
     uses: ./.github/workflows/resolve-forge-ci-bootstrap.yml
     with:
       forge-ci-binary-ref: ${{ inputs['forge-ci-binary-ref'] }}
+      images: |
+        runtime-image=${{ inputs['runtime-image'] }}
   generate-changelog:
     needs: [resolve-bootstrap]
     name: Generate
-    runs-on: ubuntu-26.04
+    runs-on: ${{ fromJSON(inputs['runs-on']) }}
     timeout-minutes: 15
+    permissions:
+      contents: read
     container:
-      image: ${{ inputs['runtime-image'] || needs.resolve-bootstrap.outputs['runtime-image'] }}
+      image: ${{ inputs['runtime-image'] }}
     steps:
       - name: Checkout Repository
         env:

@@ -74,14 +74,12 @@ on:
         required: true
         type: string
       runtime-image:
-        description: "forge-ci runtime image carrying JDK + Maven. Empty uses the image of the resolved forge-ci version."
-        required: false
-        default: ""
+        description: "forge-ci runtime image carrying JDK + Maven., pinned by digest (image@sha256:<64 hex>); the resolver refuses anything else before the job container starts."
+        required: true
         type: string
       forge-ci-binary-ref:
-        description: "forge-ci release tag or commit whose runtime image the jobs run in; empty resolves the current stable release tag"
-        required: false
-        default: ""
+        description: "Full engine commit (40 hex) the workflow ref names; a tag or branch is refused"
+        required: true
         type: string
     # All secrets are declared `required: false` so callers using
     # `secrets: inherit` continue to work unchanged. The declarations
@@ -115,13 +113,15 @@ jobs:
     uses: ./.github/workflows/resolve-forge-ci-bootstrap.yml
     with:
       forge-ci-binary-ref: ${{ inputs['forge-ci-binary-ref'] }}
+      images: |
+        runtime-image=${{ inputs['runtime-image'] }}
   publish-maven-central:
     needs: [resolve-bootstrap]
     name: Publish to Maven Central
     runs-on: ubuntu-26.04
     timeout-minutes: 45
     container:
-      image: ${{ inputs['runtime-image'] || needs.resolve-bootstrap.outputs['runtime-image-java'] }}
+      image: ${{ inputs['runtime-image'] }}
     permissions:
       # Maven Central publishes externally to Sonatype. The job reads source and
       # workflow artifacts; package read is for explicitly selected private dependencies.

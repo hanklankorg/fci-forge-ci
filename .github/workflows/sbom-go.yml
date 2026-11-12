@@ -30,14 +30,17 @@ on:
         default: true
         type: boolean
       runtime-image:
-        description: "forge-ci runtime image carrying Go + cyclonedx-gomod. Empty uses the image of the resolved forge-ci version."
+        description: "forge-ci runtime image carrying Go + cyclonedx-gomod., pinned by digest (image@sha256:<64 hex>); the resolver refuses anything else before the job container starts."
+        required: true
+        type: string
+      runs-on:
+        description: "JSON array of runner labels for the ordinary jobs, read with fromJSON. Signing, promotion and publication jobs stay on GitHub-hosted runners."
         required: false
-        default: ""
+        default: '["ubuntu-26.04"]'
         type: string
       forge-ci-binary-ref:
-        description: "forge-ci release tag or commit whose runtime image the jobs run in; empty resolves the current stable release tag"
-        required: false
-        default: ""
+        description: "Full engine commit (40 hex) the workflow ref names; a tag or branch is refused"
+        required: true
         type: string
 permissions:
   contents: read
@@ -48,13 +51,15 @@ jobs:
     uses: ./.github/workflows/resolve-forge-ci-bootstrap.yml
     with:
       forge-ci-binary-ref: ${{ inputs['forge-ci-binary-ref'] }}
+      images: |
+        runtime-image=${{ inputs['runtime-image'] }}
   sbom-go:
     needs: [resolve-bootstrap]
     name: Go SBOM
-    runs-on: ubuntu-26.04
+    runs-on: ${{ fromJSON(inputs['runs-on']) }}
     timeout-minutes: 15
     container:
-      image: ${{ inputs['runtime-image'] || needs.resolve-bootstrap.outputs['runtime-image-go'] }}
+      image: ${{ inputs['runtime-image'] }}
     permissions:
       contents: read
     steps:
