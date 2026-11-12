@@ -18,6 +18,7 @@ package errs
 import (
 	"context"
 	"errors"
+	"io"
 	"io/fs"
 	"net"
 	"net/url"
@@ -67,10 +68,20 @@ var (
 	// to ExitCodeNoPerm (77).
 	ErrPermissionDenied = errors.New("permission denied")
 
-	// ErrDependencyUnavailable marks external-tool failures — required
-	// binary (syft/trivy/gpg/git) missing from PATH or a registry
-	// unreachable. Maps to ExitCodeUnavailable (69).
+	// ErrDependencyUnavailable marks a dependency that could not be
+	// reached: a registry, forge or download host that did not answer, or
+	// answered that it is overloaded or down. It is the one class asking
+	// again may pass, and the one a job is retried on, so nothing permanent
+	// carries it. Maps to ExitCodeUnavailable (69).
 	ErrDependencyUnavailable = errors.New("dependency unavailable")
+
+	// ErrPrerequisite marks a job that lacks what the command needs to
+	// run, or has it set up wrongly: a required binary (syft, trivy, git,
+	// buildah) missing from PATH, a tool that could not complete for a
+	// reason of its own setup, a runner without the expected package
+	// manager. Asking again finds the same job, so it is not unavailable.
+	// Maps to ExitCodeConfiguration (78).
+	ErrPrerequisite = errors.New("prerequisite missing or misconfigured")
 
 	// ErrUnsupported marks features the current platform doesn't
 	// implement (multi-line outputs on GitLab, SLSA off-GitHub).
@@ -112,7 +123,7 @@ const (
 	ExitCodeUsage         ExitCodeType = 2  // CLI misuse / context-cancel
 	ExitCodeDataErr       ExitCodeType = 65 // EX_DATAERR: malformed input
 	ExitCodeNoInput       ExitCodeType = 66 // EX_NOINPUT: missing input file/ref
-	ExitCodeUnavailable   ExitCodeType = 69 // EX_UNAVAILABLE: external dep missing
+	ExitCodeUnavailable   ExitCodeType = 69 // EX_UNAVAILABLE: a dependency could not be reached
 	ExitCodeSoftware      ExitCodeType = 70 // EX_SOFTWARE: internal bug
 	ExitCodeNoPerm        ExitCodeType = 77 // EX_NOPERM: auth / permission
 	ExitCodeConfiguration ExitCodeType = 78 // EX_CONFIG: bad config file
@@ -133,7 +144,10 @@ func FromHTTPStatus(status int) error {
 		return ErrMissingInput
 	case status == 429:
 		return ErrRateLimited
-	case status >= 500:
+	case status == 408, status >= 500:
+		// The engine's own client saw the status itself: the server was
+		// there and could not serve. A child tool's text is held to less
+		// (ToolFailure): of the statuses it prints only a 429 is asked again.
 		return ErrDependencyUnavailable
 	case status >= 400:
 		// Every remaining 4xx — 409 Conflict, 400, 405, 422 — is the request
@@ -182,6 +196,10 @@ func ExitCodeFromError(err error) ExitCodeType {
 		return ExitCodeNoInput
 	case errors.Is(err, ErrDependencyUnavailable), errors.Is(err, ErrRateLimited):
 		return ExitCodeUnavailable
+	case errors.Is(err, ErrPrerequisite):
+		// Permanent like the next one: the job is set up wrongly for the
+		// command, and a retry finds it unchanged.
+		return ExitCodeConfiguration
 	case errors.Is(err, ErrUnsupported):
 		// Permanent, so it must not share a code with the transient two above:
 		// the whole value of the distinction is that a caller can stop retrying.
@@ -211,6 +229,29 @@ func ExitCodeFromError(err error) ExitCodeType {
 	}
 }
 
+// IsTransport reports whether err is a request the network stopped: a name
+// that did not resolve, a connection refused, reset or timed out. A
+// certificate that does not verify, a TLS alert, a malformed URL and an
+// operating-system error are not: the same request fails the same way.
+//
+// A body that ended before its length is a transfer the network cut.
+func IsTransport(err error) bool {
+	return isNetworkError(err) || errors.Is(err, io.ErrUnexpectedEOF)
+}
+
+// RequestFailure is the class of a request that ended in an error and no
+// response: the dependency was unavailable when the network stopped it
+// (IsTransport), and the request failed otherwise. Every adapter that makes
+// its own requests classes such an error here, so only the first is ever
+// asked again.
+func RequestFailure(err error) error {
+	if IsTransport(err) {
+		return ErrDependencyUnavailable
+	}
+
+	return ErrValidation
+}
+
 // isNetworkError reports whether err is (or wraps) a transport-level network
 // failure. net.Error is implemented by *net.OpError and *net.DNSError, and by
 // *url.Error (which also unwraps to the underlying op error), so a single
@@ -218,6 +259,13 @@ func ExitCodeFromError(err error) ExitCodeType {
 // HTTP-based adapter. Timeouts already match the context.DeadlineExceeded case
 // above and land on the same code, so this is purely the non-timeout tail.
 func isNetworkError(err error) bool {
+	// A TLS alert arrives as a net.OpError too. The peer or this client
+	// refused the handshake: a certificate, a protocol version. That is an
+	// answer, and asking again gets the same one.
+	if opErr, ok := errors.AsType[*net.OpError](err); ok && (opErr.Op == "remote error" || opErr.Op == "local error") {
+		return false
+	}
+
 	// *url.Error implements net.Error, but it is also what url.Parse returns
 	// for a malformed URL, before any request is built. That failure is the
 	// caller's input and retrying it cannot succeed, so only a url.Error whose

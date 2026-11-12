@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: The Forge CI Authors
+// SPDX-FileCopyrightText: 2026 Digg - Agency for Digital Government
 // SPDX-License-Identifier: EUPL-1.2 OR GPL-3.0-or-later
 
 package safeexec
@@ -19,7 +19,7 @@ import (
 func ExecutableSHA256(name string) (string, error) {
 	path, err := exec.LookPath(name)
 	if err != nil {
-		return "", fmt.Errorf("find builder executable %q: %w: %w", name, err, errs.ErrDependencyUnavailable)
+		return "", fmt.Errorf("find builder executable %q: %w: %w", name, err, errs.ErrPrerequisite)
 	}
 
 	file, err := os.Open(path) //nolint:gosec // G304: the selected executable path returned by exec.LookPath.

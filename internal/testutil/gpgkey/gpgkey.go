@@ -67,6 +67,7 @@ var agentCleanupMu sync.Mutex
 // Key holds the throwaway key's metadata and the GNUPGHOME it lives in.
 type Key struct {
 	t           *testing.T
+	passphrase  string
 	GNUPGHOME   string
 	Name        string
 	Email       string
@@ -122,7 +123,7 @@ func generate(t *testing.T, passphrase string) *Key {
 	uid := name + " <" + email + ">"
 
 	k := &Key{ //nolint:varnamelen // idiomatic short name for the fixture key.
-		t: t, GNUPGHOME: dir, Name: name, Email: email, UID: uid,
+		t: t, passphrase: passphrase, GNUPGHOME: dir, Name: name, Email: email, UID: uid,
 	}
 	// Registered before any gpg runs, so an agent started by a failed
 	// generation or metadata read is stopped too.
@@ -143,11 +144,18 @@ func generate(t *testing.T, passphrase string) *Key {
 }
 
 // ArmoredPrivateKey returns the ASCII-armored secret key (suitable as
-// the GPG_PRIVATE_KEY input for adapter/gpg.Import).
+// the GPG_PRIVATE_KEY input for adapter/gpg.Import). A protected key is
+// exported protected by its passphrase, which gpg asks for to export it.
 func (k *Key) ArmoredPrivateKey() string {
 	k.t.Helper()
+
+	args := []string{"--homedir", k.GNUPGHOME, "--batch", "--armor"}
+	if k.passphrase != "" {
+		args = append(args, "--pinentry-mode", "loopback", "--passphrase", k.passphrase)
+	}
+
 	//nolint:gosec // test infra; GNUPGHOME is the owned private keyring.
-	cmd := exec.CommandContext(k.t.Context(), "gpg", "--homedir", k.GNUPGHOME, "--batch", "--armor", "--export-secret-keys", k.Fingerprint)
+	cmd := exec.CommandContext(k.t.Context(), "gpg", append(args, "--export-secret-keys", k.Fingerprint)...)
 
 	// Output, not CombinedOutput: gpg writes progress and warnings to stderr,
 	// and this return value is used verbatim as key material. A stderr line in

@@ -176,18 +176,28 @@ func PrimaryFingerprints(armor []byte) ([]string, error) {
 // errs.ErrPermissionDenied so callers can detect verification
 // failures distinct from infrastructure errors.
 func VerifyDetachedArmored(artifact io.Reader, signature io.Reader, pubKeyArmor []byte) error {
+	_, err := VerifyDetachedSigner(artifact, signature, pubKeyArmor)
+
+	return err
+}
+
+// VerifyDetachedSigner is VerifyDetachedArmored for callers that need to
+// know who signed: it returns the entity, among every block of
+// pubKeyArmor, whose key made the signature.
+func VerifyDetachedSigner(artifact io.Reader, signature io.Reader, pubKeyArmor []byte) (*openpgp.Entity, error) {
 	keyring, err := readArmoredKeyRingAll(pubKeyArmor)
 	if err != nil {
-		return fmt.Errorf("parse armored public key: %w: %w", err, errs.ErrMalformedInput)
+		return nil, fmt.Errorf("parse armored public key: %w: %w", err, errs.ErrMalformedInput)
 	}
 
 	if len(keyring) == 0 {
-		return fmt.Errorf("public key armor is empty: %w", errs.ErrMissingInput)
+		return nil, fmt.Errorf("public key armor is empty: %w", errs.ErrMissingInput)
 	}
 
-	if _, err := openpgp.CheckArmoredDetachedSignature(keyring, artifact, signature, nil); err != nil {
-		return fmt.Errorf("verify detached signature: %w: %w", err, errs.ErrPermissionDenied)
+	signer, err := openpgp.CheckArmoredDetachedSignature(keyring, artifact, signature, nil)
+	if err != nil {
+		return nil, fmt.Errorf("verify detached signature: %w: %w", err, errs.ErrPermissionDenied)
 	}
 
-	return nil
+	return signer, nil
 }

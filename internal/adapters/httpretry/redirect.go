@@ -30,7 +30,7 @@ func SameAuthority(client *http.Client, forge string) *http.Client {
 	previous := client.CheckRedirect
 	guarded.CheckRedirect = func(next *http.Request, via []*http.Request) error {
 		if len(via) >= maxRedirects {
-			return fmt.Errorf("%s redirect limit reached: %w", forge, errs.ErrDependencyUnavailable)
+			return fmt.Errorf("%s redirect limit reached: %w", forge, errs.ErrValidation)
 		}
 
 		if previous != nil {

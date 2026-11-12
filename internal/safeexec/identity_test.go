@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: The Forge CI Authors
+// SPDX-FileCopyrightText: 2026 Digg - Agency for Digital Government
 // SPDX-License-Identifier: EUPL-1.2 OR GPL-3.0-or-later
 
 package safeexec_test
@@ -51,7 +51,7 @@ func TestExecutableSHA256_RefusesMissingOrNonExecutableInputs(t *testing.T) {
 
 	for _, path := range []string{filepath.Join(root, "missing"), data, root} {
 		got, err := safeexec.ExecutableSHA256(path)
-		require.ErrorIs(t, err, errs.ErrDependencyUnavailable)
+		require.ErrorIs(t, err, errs.ErrPrerequisite)
 		require.Empty(t, got)
 	}
 }

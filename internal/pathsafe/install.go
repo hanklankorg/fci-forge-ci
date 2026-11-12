@@ -362,5 +362,5 @@ func mkdirPrivate(root *os.Root, prefix string) (string, error) {
 		return name, nil
 	}
 
-	return "", fmt.Errorf("could not allocate private directory: %w", errs.ErrDependencyUnavailable)
+	return "", fmt.Errorf("could not allocate private directory: %w", errs.ErrPrerequisite)
 }

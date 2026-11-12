@@ -8,7 +8,9 @@ package safeexec_test
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"strconv"
 	"strings"
@@ -81,10 +83,12 @@ func TestCommand_CancellationKillsTheProcessGroup(t *testing.T) {
 
 // kill(pid, 0) still succeeds for a zombie until the container's PID 1 reaps
 // it. A zombie cannot execute; cancellation must stop execution, not depend on
-// an unrelated init's reaping schedule. Unknown proc state remains an error.
+// an unrelated init's reaping schedule. A process reaped between the open of
+// its stat file and the read is gone as well: the read then fails with ESRCH,
+// not with a missing file. Unknown proc state remains an error.
 func processExecuting(pid int) (bool, error) {
 	body, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
-	if os.IsNotExist(err) {
+	if errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ESRCH) {
 		return false, nil
 	}
 

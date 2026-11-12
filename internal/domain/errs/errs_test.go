@@ -296,3 +296,31 @@ func TestRuntimeRequired_NamesTheProviderOrNone(t *testing.T) {
 
 	require.Contains(t, errs.RuntimeRequired("x", "gitlab", nil).Error(), "Detected provider: gitlab.")
 }
+
+// A job that lacks a tool lacks it on the next attempt too. Exit 69 is what
+// a job is retried on, so a missing or wrongly set up prerequisite must not
+// carry it: it exits 78 with the other conditions a retry cannot change.
+func TestAMissingPrerequisiteIsNotAnUnavailableDependency(t *testing.T) {
+	t.Parallel()
+
+	err := fmt.Errorf("trivy not found in $PATH: %w", errs.ErrPrerequisite)
+
+	require.Equal(t, errs.ExitCodeConfiguration, errs.ExitCodeFromError(err))
+	require.NotErrorIs(t, err, errs.ErrDependencyUnavailable)
+}
+
+// The engine's own client sees a status itself: a 408, a 429 and a 5xx are
+// worth another attempt, every other refusal is an answer.
+func TestFromHTTPStatusRetriesOnlyAServerThatCouldNotServe(t *testing.T) {
+	t.Parallel()
+
+	for status, want := range map[int]error{
+		408: errs.ErrDependencyUnavailable, 429: errs.ErrRateLimited, 500: errs.ErrDependencyUnavailable,
+		502: errs.ErrDependencyUnavailable, 503: errs.ErrDependencyUnavailable, 504: errs.ErrDependencyUnavailable,
+		400: errs.ErrValidation, 401: errs.ErrPermissionDenied, 403: errs.ErrPermissionDenied, 404: errs.ErrMissingInput, 409: errs.ErrValidation,
+	} {
+		if got := errs.FromHTTPStatus(status); !errors.Is(got, want) {
+			t.Errorf("FromHTTPStatus(%d) = %v, want %v", status, got, want)
+		}
+	}
+}

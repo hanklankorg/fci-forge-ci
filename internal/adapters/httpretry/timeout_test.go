@@ -46,6 +46,16 @@ func TestClientTimeout_ReadsTheEnvironment(t *testing.T) {
 	}
 }
 
+// A Retry-After that MaxDelay would allow but the client deadline would not
+// ends the request at once with the server's class. The deadline is the only
+// bound the wait exceeds, so this pins the deadline cap in the wait limit.
+//
+// The client deadline is an hour, longer than any test binary may run, so
+// http.Client never reports its own timeout here: once its deadline passes it
+// replaces whatever error the transport returned with "Client.Timeout
+// exceeded", and a short deadline made this test race the machine's load. The
+// fake clock keeps a regression fast: without the cap the transport would
+// wait out the two hours instantly and ask again.
 func TestRetryAfterBeyondClientDeadlinePreservesServerClass(t *testing.T) {
 	t.Parallel()
 
@@ -57,12 +67,16 @@ func TestRetryAfterBeyondClientDeadlinePreservesServerClass(t *testing.T) {
 
 			inner := serveInMemory(func(w http.ResponseWriter, _ *http.Request) {
 				attempts.Add(1)
-				w.Header().Set("Retry-After", "3")
+				w.Header().Set("Retry-After", "7200") // two hours
 				w.WriteHeader(status)
 			})
+			clock := newFakeClock()
 			client := &http.Client{
-				Timeout:   50 * time.Millisecond,
-				Transport: httpretry.NewTransport(httpretry.Config{Inner: inner, MaxAttempts: 2, MaxDelay: 5 * time.Second}),
+				Timeout: time.Hour,
+				Transport: httpretry.NewTransport(httpretry.Config{
+					Inner: inner, Clock: clock, MaxAttempts: 2,
+					MaxDelay: 3 * time.Hour, MaxCumulativeDelay: 3 * time.Hour,
+				}),
 			}
 
 			req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, testURL, nil)
@@ -82,6 +96,10 @@ func TestRetryAfterBeyondClientDeadlinePreservesServerClass(t *testing.T) {
 
 			if !errors.Is(err, want) || errors.Is(err, context.DeadlineExceeded) || attempts.Load() != 1 {
 				t.Fatalf("attempts=%d err=%v, want one attempt and %v", attempts.Load(), err, want)
+			}
+
+			if waited := clock.Waited(); len(waited) != 0 {
+				t.Errorf("waited %v, want no wait before giving up", waited)
 			}
 		})
 	}
