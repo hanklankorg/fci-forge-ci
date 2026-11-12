@@ -80,11 +80,12 @@ block = [
 [verify.filters.container]
 exclude = '\.containerignore$'
 
-# Match development/golangci-lint/golangci.yml's bounded five-minute budget for cold-cache analysis.
+# Match development/golangci-lint/golangci.yml's bounded fifteen-minute budget for cold-cache analysis.
 # The wrapper's default 60 seconds otherwise kills it before it can report.
 [linters.go-golangci]
-timeout_secs = 300
+timeout_secs = 900
 
-# Shell sources use tabs; do not depend on the tool's bundled default.
+# Shell sources indent with two spaces; stated so the result does not
+# depend on the tool's bundled default.
 [linters.shell-format.settings]
-"shfmt.indent" = 0
+"shfmt.indent" = 2

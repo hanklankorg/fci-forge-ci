@@ -30,6 +30,11 @@ no_proxy = "{{ get_env(name='no_proxy', default='') }}"
 # Pip/pipx configuration
 PIP_INDEX_URL = "{{ get_env(name='PIP_INDEX_URL', default='') }}"
 
+# golangci-lint caches absolute diagnostic paths, so a cache shared between
+# linked worktrees replays another checkout's findings. Keep it per checkout
+# for a direct nanolinter run too, as the justfile does for recipes.
+GOLANGCI_LINT_CACHE = "{{ get_env(name='GOLANGCI_LINT_CACHE', default=config_root ~ '/.golangci-lint-cache') }}"
+
 [tools]
 # Pin the compiler patch because release binaries include its standard library.
 go = "1.27.3"
