@@ -30,7 +30,8 @@ type inputContract struct {
 // input is a consumer-visible contract change and must be added here.
 func signPublishInputs() map[string]inputContract {
 	return map[string]inputContract{
-		"runner-label":             {required: true},
+		"runs-on":                  {required: true},
+		"signer-runs-on":           {required: true},
 		"release-sha":              {required: true},
 		"release-request-sha":      {required: true},
 		"release-tag":              {required: true},
@@ -41,6 +42,7 @@ func signPublishInputs() map[string]inputContract {
 		"cosign-public-key":        {required: true},
 		"cosign-public-key-sha256": {required: true},
 		"forge-ci-repository":      {value: ""},
+		"artifacts-config":         {value: ""},
 		"artifact-name":            {value: "build-dist"},
 		"artifact-path":            {value: "dist/"},
 		"release-images-path":      {value: ""},
@@ -57,14 +59,14 @@ func signPublishInputs() map[string]inputContract {
 
 // signerJobs run inside the signer image. coordinates stays outside it.
 func signerJobs() []string {
-	return []string{"sign", "promote", "publish", "cleanup"}
+	return []string{"sign", "promote", "publish", "cleanup", "packages"}
 }
 
 // tagVerifyingJobs must re-verify that the release tag still points at the
 // release SHA before they act on it. cleanup is excluded: it deletes candidate
 // tags and verifies the dist digest instead.
 func tagVerifyingJobs() []string {
-	return []string{"sign", "promote", "publish"}
+	return []string{"sign", "promote", "publish", "packages"}
 }
 
 // The reusable workflow's inputs, their required flags, and their defaults are
@@ -135,6 +137,9 @@ func TestSignPublishJobLadder(t *testing.T) {
 		"promote":     {"coordinates", "sign"},
 		"publish":     {"coordinates", "sign", "promote"},
 		"cleanup":     {"coordinates", "publish"},
+		// After the release is published: a package is public only for a
+		// release that is.
+		"packages": {"coordinates", "sign", "publish"},
 	}
 
 	parsed := loadWorkflow(t, signPublishWorkflow)
@@ -158,9 +163,17 @@ func TestSignPublishJobLadder(t *testing.T) {
 			continue
 		}
 
-		if condition := scalarString(mappingValue(target.node, "if")); condition != "" {
-			t.Errorf("job %s is conditional on %q; every stage after coordinates runs unconditionally",
-				name, condition)
+		// The packages job alone has a condition: the sign job's plain
+		// "false" skips it, so a release without distro packages starts no
+		// signer container and maps no token for nothing.
+		wantCondition := ""
+		if name == "packages" {
+			wantCondition = "${{ needs.sign.outputs.distro-packages != 'false' }}"
+		}
+
+		if condition := scalarString(mappingValue(target.node, "if")); condition != wantCondition {
+			t.Errorf("job %s is conditional on %q, want %q; every other stage after coordinates runs unconditionally",
+				name, condition, wantCondition)
 		}
 	}
 }
@@ -168,7 +181,7 @@ func TestSignPublishJobLadder(t *testing.T) {
 // actingCommand matches the engine calls that sign, move or publish release
 // material.
 var actingCommand = regexp.MustCompile(
-	`run_forge_ci (?:release (?:gpg sign-packages|sign|provenance|publish)|container release-images [a-z]+)(?:\s|$)`)
+	`run_forge_ci (?:release (?:gpg sign-packages|sign|provenance|publish)|container release-images [a-z]+|publish forge-packages distro-packages)(?:\s|$)`)
 
 // Each job that acts on the release re-verifies the tag itself, in an
 // unconditional step ahead of its first acting step. Verifying once in an
@@ -271,6 +284,7 @@ func credentialWiring() map[string]string {
 		"REGISTRY_USER":               "inputs['registry-user'] || vars.RELEASE_REGISTRY_USER",
 		"FORGE_CI_PACKAGE_API_TOKEN":  "secrets.RELEASE_REGISTRY_TOKEN",
 		"PUBLISH_RELEASE_TOKEN_INPUT": "secrets.RELEASE_TOKEN",
+		"PACKAGE_TOKEN_INPUT":         "secrets.RELEASE_REGISTRY_TOKEN",
 	}
 }
 
@@ -635,4 +649,159 @@ func equalStrings(got, want []string) bool {
 	}
 
 	return true
+}
+
+// The packages job publishes the signer's hand-off and nothing else: it
+// verifies the signed dist against the digest the sign job emitted before
+// the engine reads a package from it, hands the engine the registry token
+// alone, after unsetting every name the engine could take another token
+// from, and leaves the question of whether the release declares packages to
+// the engine. It runs after the release is published.
+func TestPackagesJobPublishesTheVerifiedSignedHandOff(t *testing.T) {
+	t.Parallel()
+
+	const publish = "run_forge_ci publish forge-packages distro-packages"
+
+	target, ok := loadWorkflow(t, signPublishWorkflow).jobs["packages"]
+	if !ok {
+		t.Fatal("job packages is missing")
+	}
+
+	verified, published := -1, -1
+
+	for index, step := range target.steps() {
+		run := shellCommands(scalarString(mappingValue(step, "run")))
+
+		if verified < 0 && strings.Contains(run, "run_forge_ci release validate-dist") {
+			verified = index
+
+			if digest := scalarString(mappingValue(mappingValue(step, "env"), "EXPECTED_SIGNED_DIGEST")); !strings.Contains(digest, "needs.sign.outputs['signed-dist-digest']") {
+				t.Errorf("the packages job verifies its dist against %q, want the sign job's signed-dist-digest", digest)
+			}
+		}
+
+		if !strings.Contains(run, publish) {
+			continue
+		}
+
+		published = index
+
+		if mappingValue(step, "if") != nil || mappingValue(step, "continue-on-error") != nil {
+			t.Error("the package publish step can be skipped or can fail open")
+		}
+
+		for _, want := range []string{
+			`--manifest "${RELEASE_FILES_MANIFEST:?}"`, `--dist-dir "${DIST_DIR:?}"`,
+			`FORGEJO_TOKEN="${package_token}"`, "FORGE_CI_PROVIDER=forgejo",
+		} {
+			if !strings.Contains(run, want) {
+				t.Errorf("the package publish step does not carry %q", want)
+			}
+		}
+
+		unset := run[strings.Index(run, "unset "):strings.Index(run, "source ")]
+		for _, name := range []string{"FORGEJO_TOKEN", "GITEA_TOKEN", "GITHUB_TOKEN", "PACKAGE_TOKEN_INPUT", "RELEASE_TOKEN", "REGISTRY_TOKEN", "COSIGN_KEY", "GPG_SIGNING_KEY"} {
+			if !strings.Contains(unset, " "+name) {
+				t.Errorf("the package publish step does not unset %s before the engine runs", name)
+			}
+		}
+
+		// The registry is never asked to sign or replace a package.
+		if strings.Contains(run, "sign=") || strings.Contains(run, "curl") || strings.Contains(run, "DELETE") {
+			t.Error("the package publish step does more than run the engine's publisher")
+		}
+	}
+
+	switch {
+	case published < 0:
+		t.Error("the packages job does not run the distro package publisher")
+	case verified < 0 || verified > published:
+		t.Error("the packages job reads the signed dist before it verified its digest")
+	}
+
+	if strings.Contains(strings.Join(allStrings(target.node), "\n"), "artifact-name") {
+		t.Error("the packages job reads the unsigned build artifact; it publishes the signed hand-off")
+	}
+}
+
+// A release that declares distro-packages publishes them after the release
+// is public, so what would stop that is found before: the prepare workflow
+// checks the token before it makes the release commit, and the sign job
+// admits the packages, with --admit, before its first signing step. The
+// packages job starts only on the sign job's word, so a release without the
+// declaration starts no container for it and maps it no secret.
+func TestDistroPackagesAreAdmittedBeforeTheReleaseIsPublic(t *testing.T) {
+	t.Parallel()
+
+	const admit = "run_forge_ci publish forge-packages distro-packages --admit"
+
+	signer := loadWorkflow(t, signPublishWorkflow)
+
+	if condition := scalarString(mappingValue(signer.jobs["packages"].node, "if")); condition != "${{ needs.sign.outputs.distro-packages != 'false' }}" {
+		t.Errorf("the packages job runs on %q, want the sign job's distro-packages output alone", condition)
+	}
+
+	// Fail closed: only "false" skips the job, and the step after its
+	// bootstrap refuses every word but "true", before any step that holds a
+	// secret or runs the engine, so a lost output cannot skip the packages.
+	gate := signer.jobs["packages"].steps()[len(bootstrapSteps())]
+	if scalarString(mappingValue(gate, "name")) != "Require the sign job's word on distro packages" ||
+		scalarString(mappingValue(mappingValue(gate, "env"), "DISTRO_PACKAGES")) != "${{ needs.sign.outputs.distro-packages }}" ||
+		!strings.Contains(scalarString(mappingValue(gate, "run")), `if [ "${DISTRO_PACKAGES}" != true ]; then`) ||
+		!strings.Contains(scalarString(mappingValue(gate, "run")), "exit 1") || mappingValue(gate, "if") != nil {
+		t.Error("the first step after the bootstrap of the packages job must refuse every word of the sign job but true")
+	}
+
+	if output := scalarString(mappingValue(mappingValue(signer.jobs["sign"].node, "outputs"), "distro-packages")); output != "${{ steps.packages.outputs.distro-packages }}" {
+		t.Errorf("the sign job's distro-packages output is %q, want the admission step's", output)
+	}
+
+	admitted, signed := -1, -1
+
+	for index, step := range signer.jobs["sign"].steps() {
+		run := shellCommands(scalarString(mappingValue(step, "run")))
+
+		if signed < 0 && (strings.Contains(run, "run_forge_ci release gpg sign-packages") || strings.Contains(run, "run_forge_ci release sign ")) {
+			signed = index
+		}
+
+		if !strings.Contains(run, admit) {
+			continue
+		}
+
+		admitted = index
+
+		if scalarString(mappingValue(step, "id")) != "packages" || mappingValue(step, "if") != nil || mappingValue(step, "continue-on-error") != nil {
+			t.Error("the admission step is not the unconditional step packages")
+		}
+
+		for _, want := range []string{`--token-configured "${PACKAGE_TOKEN_CONFIGURED:?}"`, `--manifest "${RELEASE_FILES_MANIFEST:?}"`, `--dist-dir "${DIST_DIR:?}"`} {
+			if !strings.Contains(run, want) {
+				t.Errorf("the admission step does not carry %q", want)
+			}
+		}
+
+		if presence := scalarString(mappingValue(mappingValue(step, "env"), "PACKAGE_TOKEN_CONFIGURED")); presence != "${{ secrets.RELEASE_REGISTRY_TOKEN != '' }}" {
+			t.Errorf("the admission step is told %q, want only whether the token is configured", presence)
+		}
+	}
+
+	if admitted < 0 || signed < 0 || admitted > signed {
+		t.Errorf("the sign job admits distro packages at step %d and first signs at step %d; admission must come first", admitted, signed)
+	}
+
+	prepare := loadWorkflow(t, ".forgejo/workflows/prepare-release.yml")
+
+	if !mentions(prepare.jobs["plan"].node, admit) {
+		t.Error("the plan job does not read the distro-packages declaration")
+	}
+
+	first := prepare.jobs["prepare"].steps()[0]
+	check := scalarString(mappingValue(first, "run"))
+
+	if scalarString(mappingValue(mappingValue(first, "env"), "DISTRO_PACKAGES")) != "${{ needs.plan.outputs.distro-packages }}" ||
+		scalarString(mappingValue(mappingValue(first, "env"), "SECRET_RELEASE_REGISTRY_TOKEN")) != "${{ secrets.RELEASE_REGISTRY_TOKEN != '' }}" ||
+		!strings.Contains(check, `[ "${SECRET_RELEASE_REGISTRY_TOKEN}" != true ]`) || !strings.Contains(check, "exit 1") {
+		t.Error("the first step of the prepare job must refuse a declared distro-packages block without the package token")
+	}
 }

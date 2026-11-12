@@ -50,6 +50,11 @@ func secretChannels() []struct {
 			allow: []string{"PUBLISH_RELEASE_TOKEN_INPUT"},
 			deny:  []string{"COSIGN_KEY", "GPG_SIGNING_KEY", "REGISTRY_TOKEN"},
 		},
+		{
+			step:  "Publish distro packages to the package registries",
+			allow: []string{"PACKAGE_TOKEN_INPUT"},
+			deny:  []string{"COSIGN_KEY", "GPG_SIGNING_KEY", "REGISTRY_TOKEN"},
+		},
 	}
 }
 
@@ -201,6 +206,12 @@ jobs:
         env:
           PUBLISH_RELEASE_TOKEN_INPUT: fixture
         run: 'true'
+  packages:
+    steps:
+      - name: Publish distro packages to the package registries
+        env:
+          PACKAGE_TOKEN_INPUT: fixture
+        run: 'true'
 `
 	if err := checkSecretChannels([]byte(baseline)); err != nil {
 		t.Fatalf("valid baseline: %v", err)
@@ -317,4 +328,118 @@ func TestDistroPackageSigningIsConditional(t *testing.T) {
 	if !strings.Contains(condition, "sign-distro-packages") {
 		t.Errorf("step %q has condition %q, want it gated on sign-distro-packages", stepName, condition)
 	}
+}
+
+// The checksums and SBOMs are signed by one of two steps, each holding its
+// own key alone: the Cosign key or the GPG key. Neither holds the registry or
+// the forge token.
+func TestReleaseFileSigningStepsHoldOnlyTheirOwnKey(t *testing.T) {
+	t.Parallel()
+
+	parsed := loadWorkflow(t, signPublishWorkflow)
+
+	for step, channel := range map[string]struct{ allow, deny []string }{
+		"Cosign sign-blob checksums and SBOMs": {
+			allow: []string{"COSIGN_KEY", "COSIGN_PASSWORD"},
+			deny:  []string{"GPG_SIGNING_KEY", "GPG_SIGNING_FINGERPRINT", "GPG_SIGNING_PASSWORD", "REGISTRY_TOKEN", "FORGEJO_TOKEN"},
+		},
+		"GPG-sign checksums and SBOMs": {
+			allow: []string{"GPG_SIGNING_KEY", "GPG_SIGNING_FINGERPRINT", "GPG_SIGNING_PASSWORD"},
+			deny:  []string{"COSIGN_KEY", "COSIGN_PASSWORD", "REGISTRY_TOKEN", "FORGEJO_TOKEN"},
+		},
+	} {
+		keys, found := parsed.stepChannelKeys(step)
+		if !found {
+			t.Errorf("step %q is missing", step)
+
+			continue
+		}
+
+		for _, name := range channel.allow {
+			if !keys[name] {
+				t.Errorf("step %q must receive %s", step, name)
+			}
+		}
+
+		for _, name := range channel.deny {
+			if keys[name] {
+				t.Errorf("step %q must not receive %s", step, name)
+			}
+		}
+	}
+}
+
+// The release files' signing method is read from the declaration before
+// anything is signed, and each signing step runs on its own value of that
+// output: gpg only for a declaration that says sign.method gpg, cosign
+// otherwise. The prepare stage reads the same output from its plan job and
+// checks the GPG secrets before the release commit. The GPG step pins the
+// key to the fingerprint secret.
+func TestReleaseFileSigningFollowsTheDeclaration(t *testing.T) {
+	t.Parallel()
+
+	const (
+		readStep = "Read the release file signing method"
+		gpgStep  = "GPG-sign checksums and SBOMs"
+		output   = "steps.file-signing.outputs.release-file-signing"
+	)
+
+	for path, conditions := range map[string]map[string]string{
+		signPublishWorkflow: {
+			"Cosign sign-blob checksums and SBOMs": "${{ " + output + " == 'cosign' }}",
+			gpgStep:                                "${{ " + output + " == 'gpg' }}",
+		},
+		".forgejo/workflows/prepare-release.yml": {},
+	} {
+		parsed := loadWorkflow(t, path)
+
+		step, found := parsed.findStep(readStep)
+		if !found {
+			t.Errorf("%s has no step %q", path, readStep)
+		} else {
+			requireWalkReaches(t, step, "plan release-file-signing", readStep)
+
+			if scalarString(mappingValue(step, "id")) != "file-signing" {
+				t.Errorf("%s: step %q is not the file-signing step", path, readStep)
+			}
+
+			if scalarString(mappingValue(step, "if")) != "" {
+				t.Errorf("%s: step %q must always run", path, readStep)
+			}
+		}
+
+		for name, want := range conditions {
+			step, found := parsed.findStep(name)
+			if !found {
+				t.Errorf("%s has no step %q", path, name)
+
+				continue
+			}
+
+			if got := scalarString(mappingValue(step, "if")); got != want {
+				t.Errorf("%s: step %q runs if %q, want %q", path, name, got, want)
+			}
+		}
+	}
+
+	prepare := loadWorkflow(t, ".forgejo/workflows/prepare-release.yml")
+
+	if got := scalarString(mappingValue(mappingValue(prepare.jobs["plan"].node, "outputs"), "release-file-signing")); got != "${{ "+output+" }}" {
+		t.Errorf("the plan job's release-file-signing output is %q, want the file-signing step's", got)
+	}
+
+	check, found := prepare.findStep("Check the GPG release file signing secrets")
+	if !found {
+		t.Fatal("prepare-release.yml has no GPG release file secrets check")
+	}
+
+	if got := scalarString(mappingValue(mappingValue(check, "env"), "RELEASE_FILE_SIGNING")); got != "${{ needs.plan.outputs.release-file-signing }}" {
+		t.Errorf("the GPG secrets check reads %q, want the plan job's release-file-signing", got)
+	}
+
+	step, _ := loadWorkflow(t, signPublishWorkflow).findStep(gpgStep)
+	assertOrderedFragments(t, gpgStep, scalarString(mappingValue(step, "run")), []string{
+		"run_forge_ci release sign", "--method gpg", `--fingerprint "${gpg_fingerprint}"`, "--checksums-from-manifest",
+		`--manifest "${RELEASE_FILES_MANIFEST:?}"`, `--dist-dir "${DIST_DIR:?}"`, "--manifest-section sboms",
+	})
 }

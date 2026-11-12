@@ -171,10 +171,12 @@ func TestBuildGoSourceDateEpoch(t *testing.T) {
 }
 
 // fakeGo stands in for the Go toolchain: it logs each command line with the
-// target platform, and writes the file a build names.
+// target platform, names the selected package a command, and writes the file
+// a build names.
 const fakeGo = `#!/usr/bin/env bash
 set -euo pipefail
 printf '%s/%s %s\n' "${GOOS:-}" "${GOARCH:-}" "$*" >>"${FAKE_TOOL_LOG:?}"
+if [ "$1" = list ]; then printf 'main\n'; fi
 if [ "$1" = build ]; then
   while [ "$#" -gt 1 ]; do
     if [ "$1" = -o ]; then mkdir -p "$(dirname "$2")"; printf 'binary for %s/%s\n' "${GOOS}" "${GOARCH}" >"$2"; fi

@@ -43,10 +43,11 @@ const (
 // signing-boundary change and should fail here until it is reviewed.
 func signerWorkflows() map[string]int {
 	return map[string]int{
-		".forgejo/workflows/sign-and-publish-release.yml":      4,
+		".forgejo/workflows/sign-and-publish-release.yml":      5,
 		".forgejo/workflows/sign-container-images.yml":         1,
 		".forgejo/workflows/promote-base-container-images.yml": 1,
 		".forgejo/workflows/verify-base-container-images.yml":  1,
+		".forgejo/workflows/runtime-images.yml":                7,
 	}
 }
 

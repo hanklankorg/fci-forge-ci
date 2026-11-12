@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: The Forge CI Authors
+// SPDX-FileCopyrightText: 2026 Digg - Agency for Digital Government
 //
 // SPDX-License-Identifier: EUPL-1.2 OR GPL-3.0-or-later
 
@@ -23,7 +23,7 @@ func TestRegistrySmokeDirectBuildPreservesTheRetiredActionsContract(t *testing.T
 			name, title, description, image, scan = "Build and push registry smoke base image", "layer-registry-signer-smoke-base", "Disposable base-image acceptance image", "registry.example/owner/base", "trivy-smoke-base-{arch}.json"
 		}
 
-		step := jobStep(t, "internal/livetest/conformance/testdata/layer/registry-signer-smoke.yml", "build", name)
+		step := jobStep(t, "test/live/conformance/testdata/layer/registry-signer-smoke.yml", "build", name)
 		box := newSandbox(t, "registry-smoke")
 		box.write("bin/forge-ci", fakeEngine, 0o700)
 

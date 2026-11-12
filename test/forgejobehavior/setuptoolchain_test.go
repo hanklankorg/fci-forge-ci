@@ -209,7 +209,7 @@ func TestSetupToolchainRetriesTheGoInstall(t *testing.T) {
 shift 2
 printf '%s\n' "$*" >>"`+calls+`"
 if [[ "$*" == "install go" && "$(grep -c -x 'install go' "`+calls+`")" == 1 ]]; then
-  echo 'Failed to install core:go@1.26.6: HTTP timed out' >&2
+  echo 'mise ERROR Failed to install core:go@1.26.6: HTTP timed out after 30s' >&2
   exit 1
 fi
 `, 0o700)
@@ -241,7 +241,7 @@ func TestSetupToolchainRetriesTheRustupToolchainDownload(t *testing.T) {
 shift 2
 printf '%s %s\n' "${MISE_HTTP_TIMEOUT-unset}" "$*" >>"`+calls+`"
 if [[ "$*" == *" rustup "* && "$(grep -c -x -F "120s $*" "`+calls+`")" == 1 ]]; then
-  echo 'error: could not download file: operation timed out' >&2
+  echo "error: could not download file from 'https://static.example/dist/channel-rust-1.90.0.toml.sha256' to '/tmp/channel.toml.sha256': error sending request for url (https://static.example/dist/channel-rust-1.90.0.toml.sha256): operation timed out" >&2
   exit 1
 fi
 if [[ "$*" == *" rustup which cargo" ]]; then

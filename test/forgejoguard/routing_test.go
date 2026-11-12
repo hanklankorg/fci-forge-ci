@@ -5,6 +5,7 @@
 package forgejoguard
 
 import (
+	"maps"
 	"slices"
 	"strings"
 	"testing"
@@ -17,19 +18,31 @@ import (
 // will need is missing.
 
 const (
-	reusableRunner        = "${{ fromJSON(inputs['runner-label']) }}"
+	reusableRunner        = "${{ fromJSON(inputs['runs-on']) }}"
+	signerRunner          = "${{ fromJSON(inputs['signer-runs-on']) }}"
 	repositoryRunner      = "${{ fromJSON(vars.CI_RUNNER_LABEL) }}"
 	repositoryRunnerInput = "${{ vars.CI_RUNNER_LABEL }}"
 	// containerRunner is where a job that builds container images runs: the
 	// repository's second reviewed runner variable when set, because that job
 	// needs user namespaces the plain pool may deny, and the pool otherwise.
 	// runnerlending_test.go holds the converse, that only such a job uses it.
-	containerRunner = "${{ fromJSON(vars.CI_RUNNER_LABEL_CONTAINER || vars.CI_RUNNER_LABEL) }}"
-	// archRunner is where a layer workflow's per-architecture build runs: a
-	// native runner of the architecture, never CPU emulation, so an arm64
-	// build takes the caller's second label.
-	archRunner = "${{ fromJSON(matrix.build.arch == 'arm64' && inputs['runner-label-arm64'] || inputs['runner-label']) }}"
+	containerRunner      = "${{ fromJSON(vars.CI_RUNNER_LABEL_CONTAINER || vars.CI_RUNNER_LABEL) }}"
+	containerRunnerInput = "${{ vars.CI_RUNNER_LABEL_CONTAINER || vars.CI_RUNNER_LABEL }}"
+	// runtimeSmokeRunner picks the input by architecture and never one
+	// input's value in place of another's.
+	runtimeSmokeRunner = "${{ fromJSON(inputs[matrix.arch == 'arm64' && 'runs-on-linux-arm64' || 'runs-on']) }}"
 )
+
+// buildRunners are where a layer workflow's per-architecture build runs: the
+// build input of its own architecture, a native runner and never CPU
+// emulation, with no other input standing in. The snapshot build selects the
+// input by key and names the plain one only for the no-op row of a plan
+// without an image, which has no architecture and never runs.
+var buildRunners = []string{
+	"${{ fromJSON(inputs[matrix.build.arch && format('build-runs-on-linux-{0}', matrix.build.arch) || 'runs-on']) }}",
+	"${{ fromJSON(inputs[format('build-runs-on-linux-{0}', matrix.build.arch)]) }}",
+	"${{ fromJSON(inputs[format('build-runs-on-linux-{0}', matrix.arch)]) }}",
+}
 
 // routingViolation reports how a consumer job leaves the repository's runners:
 // a reusable-workflow call passes the label as input, a container build runs on
@@ -51,13 +64,21 @@ func routingViolation(entry job) string {
 			return "a reusable-workflow caller declares runs-on"
 		}
 
-		want := repositoryRunnerInput
-		if strings.Contains(scalarString(mappingValue(entry.node, "uses")), "/.forgejo/workflows/release-images.yml@") {
-			want = "${{ vars.CI_RUNNER_LABEL_CONTAINER || vars.CI_RUNNER_LABEL }}"
+		uses, with := scalarString(mappingValue(entry.node, "uses")), mappingValue(entry.node, "with")
+
+		want := map[string]string{"runs-on": repositoryRunnerInput}
+		if strings.Contains(uses, "/.forgejo/workflows/release-images.yml@") {
+			want["build-runs-on-linux-amd64"] = containerRunnerInput
 		}
 
-		if got := scalarString(mappingValue(mappingValue(entry.node, "with"), "runner-label")); got != want {
-			return "runner-label is " + got
+		if strings.Contains(uses, "/.forgejo/workflows/sign-and-publish-release.yml@") {
+			want["signer-runs-on"] = repositoryRunnerInput
+		}
+
+		for _, name := range slices.Sorted(maps.Keys(want)) {
+			if got := scalarString(mappingValue(with, name)); got != want[name] {
+				return name + " is " + got
+			}
 		}
 
 		return ""
@@ -70,26 +91,33 @@ func routingViolation(entry job) string {
 	return ""
 }
 
-// Each reusable workflow requires the caller's runner label and runs every job
-// on it, so no job can land on an unreviewed runner. A per-architecture build
-// runs on the caller's arm64 label for arm64, in a workflow that takes one.
+// Each reusable workflow requires the caller's runner input and runs every job
+// on one of the caller's inputs, so no job can land on an unreviewed runner. A
+// per-architecture build runs on the build input of its architecture, and the
+// jobs that read a signing key, and only they, on the signer input.
 func TestReusableWorkflowsRunOnTheCallersRunner(t *testing.T) {
 	t.Parallel()
 
-	for _, path := range layerWorkflows(t) {
+	for _, path := range allWorkflows(t) {
 		root := loadDocument(t, path)
 		inputs := mappingValue(mappingValue(mappingValue(root, "on"), "workflow_call"), "inputs")
 
-		input := mappingValue(inputs, "runner-label")
-		if scalarString(mappingValue(input, "required")) != "true" {
-			t.Errorf("%s does not require the runner-label input", path)
+		if scalarString(mappingValue(mappingValue(inputs, "runs-on"), "required")) != "true" {
+			t.Errorf("%s does not require the runs-on input", path)
 		}
 
-		takesArm64 := mappingValue(inputs, "runner-label-arm64") != nil
-
 		for name, job := range loadWorkflow(t, path).jobs {
-			if got := job.runsOn(); got != reusableRunner && (got != archRunner || !takesArm64) {
-				t.Errorf("%s job %s runs on %q, want %q", path, name, got, reusableRunner)
+			got := job.runsOn()
+			// The key itself, not the test whether it is set.
+			signs := strings.Contains(job.node.String(), "${{ secrets.RELEASE_COSIGN_PRIVATE_KEY }}") || strings.Contains(job.node.String(), "${{ secrets.RELEASE_GPG_PRIVATE_KEY }}")
+
+			switch {
+			case signs != (got == signerRunner):
+				t.Errorf("%s job %s runs on %q; a job runs on the signer input exactly when it reads a signing key", path, name, got)
+			case got == reusableRunner, got == signerRunner, slices.Contains(buildRunners, got):
+			case path == ".forgejo/workflows/runtime-images.yml" && name == "smoke" && got == runtimeSmokeRunner:
+			default:
+				t.Errorf("%s job %s runs on %q, which is no single runner input of the caller", path, name, got)
 			}
 		}
 	}
@@ -137,6 +165,11 @@ func TestConsumerReleaseTemplateSuppliesSetupToolchainInputs(t *testing.T) {
 	}
 
 	for _, kit := range consumerKits() {
+		// A per-project release builds each project in its own image.
+		if kit.perProject {
+			continue
+		}
+
 		calls := 0
 
 		for name, job := range loadWorkflow(t, kit.release()).jobs {
@@ -160,8 +193,8 @@ func TestConsumerReleaseTemplateSuppliesSetupToolchainInputs(t *testing.T) {
 			}
 		}
 
-		if calls == 0 {
-			t.Errorf("%s no longer calls setup-toolchain", kit.release())
+		if (calls == 0) != kit.noToolchain {
+			t.Errorf("%s calls setup-toolchain %d times; a release with a build calls it, and one without does not", kit.release(), calls)
 		}
 	}
 }

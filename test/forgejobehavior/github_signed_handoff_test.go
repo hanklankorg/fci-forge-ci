@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: The Forge CI Authors
+// SPDX-FileCopyrightText: 2026 Digg - Agency for Digital Government
 // SPDX-License-Identifier: EUPL-1.2 OR GPL-3.0-or-later
 
 //go:build linux
@@ -39,8 +39,9 @@ func TestGitHubPublisherReusesDigestBoundSignedPayload(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	signer, publisher := workflow.Jobs["sign-release"], workflow.Jobs["create-release"]
-	if !slices.Contains(publisher.Needs, "sign-release") || publisher.Permissions["id-token"] != "" || publisher.Permissions["contents"] != "read" || signer.Permissions["contents"] != "read" {
+	signer, gpgSigner, publisher := workflow.Jobs["sign-release"], workflow.Jobs["sign-release-gpg"], workflow.Jobs["create-release"]
+	if !slices.Contains(publisher.Needs, "sign-release") || !slices.Contains(publisher.Needs, "sign-release-gpg") || publisher.Permissions["id-token"] != "" ||
+		publisher.Permissions["contents"] != "read" || signer.Permissions["contents"] != "read" || gpgSigner.Permissions["contents"] != "read" || gpgSigner.Permissions["id-token"] != "" {
 		t.Fatal("signing/publication authority is not separated")
 	}
 
@@ -64,32 +65,51 @@ func TestGitHubPublisherReusesDigestBoundSignedPayload(t *testing.T) {
 		}
 
 		for _, value := range step.Env {
+			if value == "${{ secrets.RELEASE_GPG_PUBLIC_KEY }}" {
+				continue // Public-only tag verification is not signing authority.
+			}
+
 			if strings.Contains(value, "secrets.RELEASE_GPG_") || strings.Contains(value, "secrets.RELEASE_COSIGN_") {
 				t.Fatal("publisher receives signing material")
 			}
 		}
 	}
 
-	for _, step := range signer.Steps {
-		for _, value := range step.Env {
-			if strings.Contains(value, "secrets.RELEASE_TOKEN") {
-				t.Fatal("signer receives publication authority")
+	for _, steps := range [][]githubReleaseStep{signer.Steps, gpgSigner.Steps} {
+		for _, step := range steps {
+			for _, value := range step.Env {
+				if strings.Contains(value, "secrets.RELEASE_TOKEN") {
+					t.Fatal("signer receives publication authority")
+				}
 			}
 		}
+	}
+
+	// The GPG signer stages the same payload the same way; the publisher
+	// takes whichever signer ran.
+	for name, outputs := range map[string]map[string]string{"sign-release": signer.Outputs, "sign-release-gpg": gpgSigner.Outputs} {
+		if outputs["digest"] != "${{ steps.signed-state.outputs.digest }}" || outputs["artifact-name"] != "${{ steps.signed-state.outputs.artifact-name }}" {
+			t.Fatalf("%s outputs are not the staged checkpoint", name)
+		}
+	}
+
+	if find(gpgSigner.Steps, "Stage signed release payload").Run != find(signer.Steps, "Stage signed release payload").Run {
+		t.Fatal("the two signers stage different payloads")
 	}
 
 	stage := find(signer.Steps, "Stage signed release payload")
 	verify := find(publisher.Steps, "Verify signed release payload")
 	download := find(publisher.Steps, "Download signed release payload")
-	lease := find(publisher.Steps, "Revalidate release tag before publication")
+	lease := find(publisher.Steps, "Revalidate request authority and final source at private boundary")
 	publish := find(publisher.Steps, "Create GitHub Release")
 
-	if signer.Outputs["digest"] != "${{ steps.signed-state.outputs.digest }}" || verify.Env["EXPECTED_DIGEST"] != "${{ needs.sign-release.outputs.digest }}" || download.Env["DOWNLOAD_NAME"] != "${{ needs.sign-release.outputs.artifact-name }}" ||
+	if verify.Env["EXPECTED_DIGEST"] != "${{ needs.sign-release.outputs.digest || needs.sign-release-gpg.outputs.digest }}" ||
+		download.Env["DOWNLOAD_NAME"] != "${{ needs.sign-release.outputs.artifact-name || needs.sign-release-gpg.outputs.artifact-name }}" ||
 		!strings.Contains(download.Run, `--name "$DOWNLOAD_NAME"`) {
 		t.Fatal("handoff is not bound to signer outputs")
 	}
 
-	if lease.Env["RELEASE_SHA"] != "${{ needs.assemble-release.outputs.release-sha }}" || publish.WorkingDirectory != "signed-release" {
+	if lease.Env["RELEASE_SHA"] != "${{ inputs['checkout-ref'] }}" || lease.Env["RELEASE_REQUEST_SHA"] != "${{ inputs['authorized-source-sha'] }}" || publish.WorkingDirectory != "signed-release" {
 		t.Fatal("publisher is not bound to prepared source and verified payload")
 	}
 

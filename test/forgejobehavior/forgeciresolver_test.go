@@ -53,7 +53,7 @@ run_forge_ci fail
 
 				return nil
 			},
-			status: 69, reason: "checksum is missing or malformed",
+			status: 78, reason: "checksum is missing or malformed",
 		},
 		{
 			name: "refuses a missing checksum file",
@@ -64,7 +64,7 @@ run_forge_ci fail
 
 				return nil
 			},
-			status: 69, reason: "checksum is missing or malformed",
+			status: 78, reason: "checksum is missing or malformed",
 		},
 		{
 			name: "refuses an unpinned override in strict signer mode",
@@ -73,7 +73,7 @@ run_forge_ci fail
 
 				return []string{"FORGE_CI_BIN=" + override, "SIGNER_STRICT=1"}
 			},
-			status: 69, reason: "does not match the recorded pin",
+			status: 1, reason: "does not match the recorded pin",
 		},
 		{
 			name: "runs an unpinned override outside strict mode",
@@ -130,7 +130,7 @@ func TestForgeCIResolverSelectsTheHostArchitecture(t *testing.T) {
 				"PATH="+filepath.Join(box.root, "fake-bin")+":"+os.Getenv("PATH"))
 
 			switch {
-			case arch == "" && (got.status != 69 || got.stdout != "" || !strings.Contains(got.stderr, "this host is '"+machine+"'; use a native host")):
+			case arch == "" && (got.status != 78 || got.stdout != "" || !strings.Contains(got.stderr, "this host is '"+machine+"'; use a native host")):
 				t.Fatalf("status %d stdout %q, want a refusal of %s; stderr %s", got.status, got.stdout, machine, got.stderr)
 			case arch != "" && (got.status != 0 || got.stdout != "ran sign\n"):
 				t.Fatalf("status %d stdout %q, want the %s binary to run; stderr %s", got.status, got.stdout, arch, got.stderr)

@@ -5,7 +5,9 @@
 package forgejoguard
 
 import (
+	"encoding/json"
 	"io/fs"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -31,7 +33,6 @@ const (
 	exampleRepository   = exampleServer + "/owner/delivery.git"
 	exampleSigner       = "forge.example/owner/signer@sha256:9a51d9f761cd269cadb2066710c9d2dd293f4e1020e229ff4f47ee1e6bce6234"
 	validatedRepository = "${{ needs.coordinates.outputs.helpers_repository }}"
-	versionBumpImage    = "${{ needs.coordinates.outputs.version_bump_image }}"
 	builderJobImage     = "${{ needs.coordinates.outputs.builder_job_image }}"
 	helperFallback      = `origin '+refs/heads/*:refs/remotes/origin/*' '+refs/tags/*:refs/tags/*'`
 	helperRemote        = `remote add origin "${FORGE_CI_REPOSITORY_URL:?}"`
@@ -48,13 +49,15 @@ const (
 // variables instead.
 func coordinateWorkflows() map[string]coordinateContract {
 	return map[string]coordinateContract{
-		".forgejo/workflows/prepare-release.yml":               {"forge-ci-sha", 3, false},
-		".forgejo/workflows/sign-and-publish-release.yml":      {"forge-ci-sha", 4, false},
+		".forgejo/workflows/prepare-release.yml":               {"forge-ci-sha", 4, false},
+		".forgejo/workflows/sign-and-publish-release.yml":      {"forge-ci-sha", 5, false},
 		".forgejo/workflows/sign-container-images.yml":         {"forge-ci-sha", 1, false},
 		".forgejo/workflows/promote-base-container-images.yml": {"forge-ci-sha", 1, false},
 		".forgejo/workflows/verify-base-container-images.yml":  {"forge-ci-sha", 1, false},
 		".forgejo/workflows/release-images.yml":                {"forge-ci-sha", 5, true},
-		".forgejo/workflows/snapshot-images.yml":               {"forge-ci-sha", 6, true},
+		".forgejo/workflows/base-images.yml":                   {"forge-ci-sha", 4, true},
+		".forgejo/workflows/snapshot-images.yml":               {"forge-ci-sha", 7, true},
+		".forgejo/workflows/runtime-images.yml":                {"forge-ci-sha", 9, false},
 	}
 }
 
@@ -66,7 +69,7 @@ type coordinateContract struct {
 
 var (
 	// rawCoordinateInput is an unvalidated coordinate, in any spelling.
-	rawCoordinateInput = regexp.MustCompile(`inputs\s*(\.|\[\s*['"])(forge-ci-repository|signer-image)\b`)
+	rawCoordinateInput = regexp.MustCompile(`inputs\s*(\.|\[\s*['"])(forge-ci-repository|signer-image|runtime-image-[a-z]+)\b`)
 	secretsWord        = regexp.MustCompile(`(?i)(^|[^A-Za-z0-9_])secrets([^A-Za-z0-9_]|$)`)
 	fetchMain          = regexp.MustCompile(`fetch .* origin main(\s|$)`)
 	signerPin          = regexp.MustCompile(`@sha256:[0-9a-f]{64}`)
@@ -323,13 +326,10 @@ func assertCoordinateConsumerJob(t *testing.T, relative string, contract coordin
 	// A builder job runs the job image the coordinates job validated, and
 	// holds no secret: it runs the caller's Containerfile.
 	if contract.builder {
-		want := builderJobImage
-		if relative == ".forgejo/workflows/snapshot-images.yml" && name == "produce" {
-			want = "${{ (matrix.artifact.project_type == 'go' && needs.coordinates.outputs.artifact_job_image_go) || ((matrix.artifact.project_type == 'maven' || matrix.artifact.project_type == 'gradle') && needs.coordinates.outputs.artifact_job_image_java) || (matrix.artifact.project_type == 'npm' && needs.coordinates.outputs.artifact_job_image_node) || (matrix.artifact.project_type == 'cargo' && needs.coordinates.outputs.artifact_job_image_rust) || '' }}"
-		}
-
-		if image := target.containerImage(); image != want {
-			t.Errorf("%s: job %s runs container %q, want the validated %q", relative, name, image, want)
+		if axis := snapshotToolchainAxis(relative, name); axis != "" {
+			assertSnapshotProducerImageLookup(t, target.containerImage(), axis)
+		} else if image := target.containerImage(); image != builderJobImage {
+			t.Errorf("%s: job %s runs container %q, want the validated %q", relative, name, image, builderJobImage)
 		}
 
 		if anyString(target.node, secretsWord.MatchString) {
@@ -339,16 +339,34 @@ func assertCoordinateConsumerJob(t *testing.T, relative string, contract coordin
 		return consumer, false
 	}
 
-	// The one container job that is not a signer: prepare-release's version
-	// bump, in the project's own validated build image, which therefore may
-	// not even name a secret.
-	if image := target.containerImage(); image == versionBumpImage {
-		if relative != ".forgejo/workflows/prepare-release.yml" || name != "version-bump" {
-			t.Errorf("%s: job %s runs the version-bump image", relative, name)
+	// Runtime publication has separate native Go and candidate-container jobs.
+	// Neither is a signing boundary; their exact containers and lack of signing
+	// credentials are checked separately, rather than treating them as signers.
+	if relative == ".forgejo/workflows/runtime-images.yml" && (name == "build-cli" || name == "build" || name == "smoke") {
+		want := "${{ needs.coordinates.outputs.go_build_image }}"
+		if name == "build" {
+			want = builderJobImage
 		}
 
+		if name == "smoke" {
+			want = "${{ matrix.ref }}"
+		}
+
+		if image := target.containerImage(); image != want {
+			t.Errorf("%s: job %s runs container %q, want %q", relative, name, image, want)
+		}
+
+		return consumer, false
+	}
+
+	// The one container job that is not a signer: prepare-release's version
+	// jobs, each in its family's validated runtime image, which run the
+	// project's version tool and therefore may not even name a secret.
+	if relative == ".forgejo/workflows/prepare-release.yml" && name == "version" {
+		assertVersionImageLookup(t, target.containerImage())
+
 		if anyString(target.node, secretsWord.MatchString) {
-			t.Errorf("%s: the version-bump job mentions secrets", relative)
+			t.Errorf("%s: the version job mentions secrets", relative)
 		}
 
 		return consumer, false
@@ -359,6 +377,75 @@ func assertCoordinateConsumerJob(t *testing.T, relative string, contract coordin
 	}
 
 	return consumer, true
+}
+
+// A version job's container is its family's validated runtime image, looked
+// up by the matrix row's family as the snapshot producers look theirs up.
+func assertVersionImageLookup(t *testing.T, expression string) {
+	t.Helper()
+
+	const (
+		prefix = "${{ format('{0}', needs.coordinates.outputs[fromJSON('"
+		suffix = "')[matrix.version.family]]) }}"
+	)
+
+	if !strings.HasPrefix(expression, prefix) || !strings.HasSuffix(expression, suffix) {
+		t.Fatalf("version image must directly look up a validated coordinate and format its string value: %s", expression)
+	}
+
+	var keys map[string]string
+	if err := json.Unmarshal([]byte(strings.TrimSuffix(strings.TrimPrefix(expression, prefix), suffix)), &keys); err != nil {
+		t.Fatalf("version image coordinate lookup: %v", err)
+	}
+
+	want := map[string]string{"java": "runtime_image_java", "node": "runtime_image_node", "rust": "runtime_image_rust"}
+	if !maps.Equal(keys, want) {
+		t.Errorf("version image lookup = %v, want %v", keys, want)
+	}
+}
+
+// snapshotToolchainAxis names the matrix axis of a snapshot job that runs the
+// consumer's build in its toolchain image: the image producers and the file
+// outputs. Any other builder job runs the image builder's job image.
+func snapshotToolchainAxis(relative, job string) string {
+	if relative != ".forgejo/workflows/snapshot-images.yml" {
+		return ""
+	}
+
+	return map[string]string{"produce": "artifact", "files": "file"}[job]
+}
+
+// This is a structural scheduling contract, not a Forgejo interpreter test.
+// Runtime expression compatibility must also be checked against the runner.
+func assertSnapshotProducerImageLookup(t *testing.T, expression, axis string) {
+	t.Helper()
+
+	const prefix = "${{ format('{0}', needs.coordinates.outputs[fromJSON('"
+
+	suffix := "')[matrix." + axis + ".project_type]]) }}"
+
+	if !strings.HasPrefix(expression, prefix) || !strings.HasSuffix(expression, suffix) {
+		t.Fatalf("producer image must directly look up a validated coordinate and format its string value: %s", expression)
+	}
+
+	var keys map[string]string
+	if err := json.Unmarshal([]byte(strings.TrimSuffix(strings.TrimPrefix(expression, prefix), suffix)), &keys); err != nil {
+		t.Fatalf("producer image coordinate lookup: %v", err)
+	}
+
+	want := map[string]string{
+		"go": "artifact_job_image_go", "maven": "artifact_job_image_java", "gradle": "artifact_job_image_java",
+		"npm": "artifact_job_image_node", "cargo": "artifact_job_image_rust",
+	}
+	if len(keys) != len(want) {
+		t.Fatalf("producer image lookup has %d entries, want %d", len(keys), len(want))
+	}
+
+	for projectType, coordinate := range want {
+		if keys[projectType] != coordinate {
+			t.Errorf("producer %s image coordinate = %q, want %q", projectType, keys[projectType], coordinate)
+		}
+	}
 }
 
 // Every helper checkout fetches the validated full repository URL, and falls
@@ -429,6 +516,9 @@ func runPreflightWithStderr(t *testing.T, script, repository, signer string, env
 		"SIGNER_IMAGE_INPUT=" + signer,
 		"FORGEJO_OUTPUT=" + output,
 		"TRANSPARENCY_LOG_INPUT=none",
+		"GO_BUILD_IMAGE_INPUT=" + exampleSigner,
+		"PUBLIC_KEY_SHA256=" + strings.Repeat("a", 64),
+		"RUNTIME_ENGINE_SHA=" + strings.Repeat("b", 40),
 	}
 	command.Env = append(command.Env, env...)
 
@@ -481,6 +571,10 @@ func TestCoordinatePreflightResolvesTheHelperRepository(t *testing.T) {
 				wantOutput := "helpers_repository=" + fetched + "\nsigner_image=" + exampleSigner + "\n"
 				if contract.builder {
 					wantOutput = "helpers_repository=" + fetched + "\nbuilder=buildah\nbuilder_job_image=\n"
+				}
+
+				if relative == ".forgejo/workflows/runtime-images.yml" {
+					wantOutput += "go_build_image=" + exampleSigner + "\nbuilder=buildah\nbuilder_job_image=\n"
 				}
 
 				if isSignerWorkflow(relative) {
@@ -595,7 +689,7 @@ func TestLayerPinsNoSignerImage(t *testing.T) {
 
 			// The kaniko bootstrap pins kaniko's own debug image, the one image
 			// no kaniko job can build; it is not a signer image.
-			if isSelfCIWorkflow(filepath.ToSlash(relative)) || filepath.ToSlash(relative) == kanikoJobImageExample {
+			if filepath.ToSlash(relative) == kanikoJobImageExample {
 				return nil
 			}
 

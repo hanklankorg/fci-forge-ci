@@ -86,7 +86,7 @@ func TestVerifyForgejoToken(t *testing.T) {
 		{name: "silent failure has a bounded fallback", mode: "silent",
 			contains: []string{"forge-ci exit 78; no safe diagnostic was emitted"}},
 		{name: "missing binary keeps the resolver diagnostic", mode: "success", realResolver: true,
-			contains: []string{operational + "(forge-ci exit 69): ERROR: forge-ci binary is missing"}},
+			contains: []string{operational + "(forge-ci exit 78): ERROR: forge-ci binary is missing"}},
 		{name: "incompatible binary keeps its exec status", mode: "success", engine: "\x7fELF-invalid\n",
 			contains: []string{operational + "(forge-ci exit 126)"}},
 	} {

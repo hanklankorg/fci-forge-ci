@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: The Forge CI Authors
+# SPDX-FileCopyrightText: 2026 Digg - Agency for Digital Government
 #
 # SPDX-License-Identifier: CC0-1.0
 
@@ -33,13 +33,19 @@ name: Release images (reusable)
 on:
   workflow_call:
     inputs:
-      runner-label:
-        description: JSON array of trusted runner labels; all labels must match (for example '["ci-builder"]'). Every job runs there, and the amd64 builds.
+      runs-on:
+        description: JSON array of trusted runner labels; all labels must match (for example '["ci-builder"]'). The jobs that build no image run there.
         type: string
         required: true
-      runner-label-arm64:
+      build-runs-on-linux-amd64:
         description: >-
-          JSON array of runner labels for the linux/arm64 builds, which run natively and never under CPU emulation. Required when a container builds linux/arm64.
+          JSON array of runner labels for the linux/amd64 image builds: a runner that permits them. Required when a container builds linux/amd64; no other input stands in for it.
+        type: string
+        required: false
+        default: ''
+      build-runs-on-linux-arm64:
+        description: >-
+          JSON array of runner labels for the linux/arm64 image builds, which run natively and never under CPU emulation. Required when a container builds linux/arm64; no other input stands in for it.
         type: string
         required: false
         default: ''
@@ -127,7 +133,7 @@ env:
 jobs:
   coordinates:
     name: "Check: layer and builder coordinates"
-    runs-on: ${{ fromJSON(inputs['runner-label']) }}
+    runs-on: ${{ fromJSON(inputs['runs-on']) }}
     timeout-minutes: 5
     outputs:
       helpers_repository: ${{ steps.validate.outputs.helpers_repository }}
@@ -216,7 +222,7 @@ jobs:
   plan:
     name: "Check: plan"
     needs: coordinates
-    runs-on: ${{ fromJSON(inputs['runner-label']) }}
+    runs-on: ${{ fromJSON(inputs['runs-on']) }}
     timeout-minutes: 10
     outputs:
       builds: ${{ steps.plan.outputs.builds }}
@@ -293,6 +299,9 @@ jobs:
           RELEASE_PLATFORMS: ${{ inputs['release-platforms'] }}
           IMAGE_PLAN_JSON: ${{ inputs['image-plan-json'] }}
           IMAGE_LABELS: ${{ inputs.labels }}
+          RUNS_ON: ${{ inputs['runs-on'] }}
+          BUILD_RUNS_ON_LINUX_AMD64: ${{ inputs['build-runs-on-linux-amd64'] }}
+          BUILD_RUNS_ON_LINUX_ARM64: ${{ inputs['build-runs-on-linux-arm64'] }}
         run: |
           set -euo pipefail
           # shellcheck source=.engine/bin/lib-forge-ci.sh
@@ -311,20 +320,16 @@ jobs:
             "${labels[@]}" \
             --release-tag "${RELEASE_TAG:?}" \
             --release-platforms "${RELEASE_PLATFORMS}" \
+            --runner-input "runs-on=${RUNS_ON}" \
+            --runner-input "build-runs-on-linux-amd64=${BUILD_RUNS_ON_LINUX_AMD64}" \
+            --runner-input "build-runs-on-linux-arm64=${BUILD_RUNS_ON_LINUX_ARM64}" \
             --server-url "${FORGEJO_SERVER:?}" \
             --repository "${FORGEJO_REPO:?}"
-
-      # An arm64 build needs a runner of its own architecture.
-      - name: Require an arm64 runner for arm64 builds
-        if: ${{ contains(steps.plan.outputs.builds, '"arch":"arm64"') && inputs['runner-label-arm64'] == '' }}
-        run: |
-          echo "ERROR: a container builds linux/arm64, so pass runner-label-arm64, the labels of a native arm64 runner; or narrow release-platforms to linux/amd64" >&2
-          exit 1
 
   fetch-inputs:
     name: "Fetch registry inputs: ${{ matrix.build.name }} (${{ matrix.build.arch }})"
     needs: [coordinates, plan]
-    runs-on: ${{ fromJSON(matrix.build.arch == 'arm64' && inputs['runner-label-arm64'] || inputs['runner-label']) }}
+    runs-on: ${{ fromJSON(inputs[format('build-runs-on-linux-{0}', matrix.build.arch)]) }}
     timeout-minutes: 45
     strategy:
       fail-fast: true
@@ -404,7 +409,7 @@ jobs:
     needs: [coordinates, plan, fetch-inputs]
     # Each architecture builds on a runner of its own architecture: a build
     # runs the Containerfile's steps, and none may rely on CPU emulation.
-    runs-on: ${{ fromJSON(matrix.build.arch == 'arm64' && inputs['runner-label-arm64'] || inputs['runner-label']) }}
+    runs-on: ${{ fromJSON(inputs[format('build-runs-on-linux-{0}', matrix.build.arch)]) }}
     # kaniko's job image, validated above; empty for Buildah, which runs in
     # the runner's own environment.
     container: ${{ needs.coordinates.outputs.builder_job_image }}
@@ -630,7 +635,7 @@ jobs:
   publish:
     name: "Publish: ${{ matrix.image.name }}"
     needs: [coordinates, plan, build]
-    runs-on: ${{ fromJSON(inputs['runner-label']) }}
+    runs-on: ${{ fromJSON(inputs['runs-on']) }}
     timeout-minutes: 45
     strategy:
       fail-fast: false
@@ -884,7 +889,7 @@ jobs:
   collect:
     name: Summary
     needs: [coordinates, plan, publish]
-    runs-on: ${{ fromJSON(inputs['runner-label']) }}
+    runs-on: ${{ fromJSON(inputs['runs-on']) }}
     timeout-minutes: 10
     outputs:
       ledger_json: ${{ steps.collect.outputs.ledger-json }}

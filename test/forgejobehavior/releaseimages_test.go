@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: The Forge CI Authors
+// SPDX-FileCopyrightText: 2026 Digg - Agency for Digital Government
 //
 // SPDX-License-Identifier: EUPL-1.2 OR GPL-3.0-or-later
 
@@ -37,7 +37,8 @@ func TestReleaseImageLabelsReachThePlanBeforeAnyBuild(t *testing.T) {
 		"HELPERS_DIR="+box.root, "GITHUB_WORKSPACE="+filepath.Join(box.root, "workspace"),
 		"DECLARATION_FILE=", "IMAGE_REPOSITORY=registry.invalid/org/app", "REGISTRY_USER=org",
 		"RELEASE_TAG=v1.2.3", "RELEASE_PLATFORMS=linux/amd64", "IMAGE_PLAN_JSON=",
-		"FORGEJO_SERVER=https://forgejo.invalid", "FORGEJO_REPO=org/app", "IMAGE_LABELS="+strings.Join(labels, "\n"))
+		"FORGEJO_SERVER=https://forgejo.invalid", "FORGEJO_REPO=org/app", "IMAGE_LABELS="+strings.Join(labels, "\n"),
+		`RUNS_ON=["pool"]`, `BUILD_RUNS_ON_LINUX_AMD64=["builder"]`, "BUILD_RUNS_ON_LINUX_ARM64=")
 
 	if got.status != 0 {
 		t.Fatalf("plan step: status %d: %s", got.status, got.stderr)

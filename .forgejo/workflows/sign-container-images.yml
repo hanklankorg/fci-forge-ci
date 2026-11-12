@@ -13,8 +13,12 @@ name: Sign container images (reusable)
 on:
   workflow_call:
     inputs:
-      runner-label:
+      runs-on:
         description: JSON array of trusted runner labels; all labels must match (for example '["ci-builder"]').
+        type: string
+        required: true
+      signer-runs-on:
+        description: JSON array of labels of the runner the signing job runs on, the one job that holds the signing credentials; it falls back to no other input.
         type: string
         required: true
       forge-ci-repository:
@@ -103,7 +107,7 @@ env:
 jobs:
   coordinates:
     name: Validate helper trust coordinates
-    runs-on: ${{ fromJSON(inputs['runner-label']) }}
+    runs-on: ${{ fromJSON(inputs['runs-on']) }}
     timeout-minutes: 5
     outputs:
       helpers_repository: ${{ steps.validate.outputs.helpers_repository }}
@@ -184,7 +188,7 @@ jobs:
   sign-container-images:
     name: Sign container images
     needs: coordinates
-    runs-on: ${{ fromJSON(inputs['runner-label']) }}
+    runs-on: ${{ fromJSON(inputs['signer-runs-on']) }}
     container:
       image: ${{ needs.coordinates.outputs.signer_image }}
     env:

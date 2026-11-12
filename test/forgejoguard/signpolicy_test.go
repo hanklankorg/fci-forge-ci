@@ -74,6 +74,9 @@ func TestSignPublishJobSecretSets(t *testing.T) {
 		"promote": {"RELEASE_REGISTRY_TOKEN"},
 		"publish": {"RELEASE_TOKEN"},
 		"cleanup": {"RELEASE_REGISTRY_TOKEN"},
+		// The token that writes the owner's packages, and no signing key and
+		// no release token: the job publishes what the signer handed on.
+		"packages": {"RELEASE_REGISTRY_TOKEN"},
 	}
 
 	parsed := loadWorkflow(t, signPublishWorkflowPath)

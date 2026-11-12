@@ -135,7 +135,7 @@ func script(ctx context.Context, root string, arguments ...string) (string, erro
 
 	command.Env = append([]string{}, engineBuildEnv...)
 
-	for _, name := range []string{"PATH", "HOME"} {
+	for _, name := range []string{"PATH", "HOME", "TMPDIR", "GOMAXPROCS", "GOMEMLIMIT"} {
 		if value, set := os.LookupEnv(name); set {
 			command.Env = append(command.Env, name+"="+value)
 		}
@@ -146,6 +146,34 @@ func script(ctx context.Context, root string, arguments ...string) (string, erro
 	}
 
 	return stdout.String(), nil
+}
+
+func TestEngineBuildPreservesResourceControlsNotAmbientBuildFlags(t *testing.T) {
+	root := reporoot.Path(t)
+	scratch := t.TempDir()
+	compiler := filepath.Join(scratch, "go")
+
+	body := "#!/usr/bin/env bash\nset -eu\nif [ \"$1\" = env ]; then\n  printf '%s\\n' '" + pinnedToolchain(t, root) + "'\nelse\n  printf '%s|%s|%s|%s|%s\\n' \"${TMPDIR-}\" \"${GOMAXPROCS-}\" \"${GOFLAGS-}\" \"${GOPROXY-}\" \"${GOMEMLIMIT-}\"\n  printf '%s\\0' \"$@\" >\"$TMPDIR/argv\"\nfi\n"
+	if err := os.WriteFile(compiler, []byte(body), 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	command := exec.CommandContext(t.Context(), "bash", filepath.Join(root, binaryScript), "build", "amd64", filepath.Join(scratch, "binary"))
+	command.Env = append(os.Environ(), "GO="+compiler, "TMPDIR="+scratch, "GOMAXPROCS=2", "GOMEMLIMIT=3GiB", "GOFLAGS=-mod=mod", "GOPROXY=https://invalid.example")
+
+	out, err := command.CombinedOutput()
+	if err != nil {
+		t.Fatalf("resource-control build: %v\n%s", err, out)
+	}
+
+	if want := scratch + "|2||off|3GiB\n"; string(out) != want {
+		t.Fatalf("build environment: got %q, want %q", out, want)
+	}
+
+	argv, err := os.ReadFile(filepath.Join(scratch, "argv"))
+	if err != nil || !strings.Contains(string(argv), "-p\x002\x00") {
+		t.Fatalf("compiler concurrency argv: %q (%v)", argv, err)
+	}
 }
 
 // git returns the trimmed output of a Git command in the repository.
@@ -250,6 +278,11 @@ func TestRecordedEngineChecksumIsABuildOfThisTree(t *testing.T) {
 		evidence.NotProvenf(t, "the local Go toolchain is not the release go.mod pins, so it cannot reproduce the layer binary")
 	}
 
+	inputs, err := script(t.Context(), root, "inputs")
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	for _, arch := range engineArchitectures() {
 		t.Run(arch, func(t *testing.T) {
 			t.Parallel()
@@ -257,8 +290,9 @@ func TestRecordedEngineChecksumIsABuildOfThisTree(t *testing.T) {
 			recorded := recordedChecksum(t, arch)
 			if built := fileSHA256(t, engineBuild(t, arch)); built != recorded {
 				t.Fatalf("%s does not record the build of this tree: recorded %s, built %s.\n"+
-					"A build input changed since it was recorded. Run `just refresh-engine-binary`, or write this line to the file, and commit it:\n%s  bin/forge-ci",
-					trackedChecksum(arch), recorded, built, built)
+					"A build input (%s) changed since it was recorded; docs is embedded, so a docs-only commit counts. "+
+					"Run `just refresh-engine-binary`, or write this line to the file, and commit it:\n%s  bin/forge-ci",
+					trackedChecksum(arch), recorded, built, strings.Join(strings.Fields(inputs), ", "), built)
 			}
 		})
 	}

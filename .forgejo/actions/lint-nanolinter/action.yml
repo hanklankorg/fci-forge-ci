@@ -18,7 +18,7 @@ inputs:
     default: ''
   offline:
     description: >-
-      'true' passes --offline: checks that need the network are skipped and tools use their caches. For a runner or job image without network access, which must then also provide the pinned forge-ci engine through FORGE_CI_BIN.
+      'true' passes --offline: checks that need the network are skipped and tools use their caches. A skipped security check fails the job, once the linter reports skipped checks (Nanolinter 0.8.6 does not): name in disable-checks each one the job cannot run. For a runner or job image without network access, which must then also provide the pinned forge-ci engine through FORGE_CI_BIN.
     required: false
     default: 'false'
   enforce-lint:
@@ -45,37 +45,27 @@ runs:
         LINT_ADMIN_VULNERABILITIES: ${{ inputs.enforce-vulnerabilities }}
       run: |
         set -euo pipefail
-        case "${LINT_OFFLINE}" in
-          true | false) ;;
-          *) echo "ERROR: offline must be true or false" >&2; exit 1 ;;
-        esac
         if ! command -v nanolinter >/dev/null 2>&1; then
           echo "ERROR: nanolinter is not on PATH: run this job in a nanolinter image, or on a runner that provides it" >&2
-          exit 69
-        fi
-        arguments=()
-        if [ -n "${LINT_REQUIRED_LINTS}" ]; then
-          arguments+=(--require "${LINT_REQUIRED_LINTS}")
-        fi
-        if [ -n "${LINT_DISABLE_CHECKS}" ]; then
-          arguments+=(--disable-check "${LINT_DISABLE_CHECKS}")
-        fi
-        if [ "${LINT_OFFLINE}" = true ]; then
-          arguments+=(--offline)
+          exit 78
         fi
         # Read repository files consistently, including Unicode ignore files.
         # The action's own immutable engine owns policy. A consumer PATH or
         # FORGE_CI_BIN replacement cannot select a more permissive engine.
         # shellcheck source=.engine/bin/lib-forge-ci.sh
         source "${GITHUB_ACTION_PATH}/../../../.engine/bin/lib-forge-ci.sh"
-        if [ -z "${FORGE_CI_BIN:-}" ] && ! fetch_forge_ci; then
+        fetched=0
+        if [ -z "${FORGE_CI_BIN:-}" ]; then fetch_forge_ci || fetched=$?; fi
+        if [ "${fetched}" -ne 0 ]; then
           if [ "${LINT_OFFLINE}" = true ]; then
             echo "  offline: true cannot download the engine either: set FORGE_CI_BIN to the pinned forge-ci build (its checksum is verified)" >&2
           fi
-          exit 69
+          exit "${fetched}"
         fi
         SIGNER_STRICT=1 verify_forge_ci
         LANG=C.UTF-8 LC_ALL=C.UTF-8 run_forge_ci policy nanolinter \
           --enforce-lint="${LINT_ADMIN_LINT:?enforce-lint is required}" \
           --enforce-vulnerabilities="${LINT_ADMIN_VULNERABILITIES:?enforce-vulnerabilities is required}" \
-          -- nanolinter verify "${arguments[@]}" --report sarif --out -
+          --required-lints "${LINT_REQUIRED_LINTS}" \
+          --disable-checks "${LINT_DISABLE_CHECKS}" \
+          --offline "${LINT_OFFLINE}"

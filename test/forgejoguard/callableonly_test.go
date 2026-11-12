@@ -34,25 +34,6 @@ func allWorkflows(t *testing.T) []string {
 	return paths
 }
 
-// layerWorkflows excludes only explicitly registered repository self-CI.
-func layerWorkflows(t *testing.T) []string {
-	t.Helper()
-
-	var paths []string
-
-	for _, path := range allWorkflows(t) {
-		if !isSelfCIWorkflow(path) {
-			paths = append(paths, path)
-		}
-	}
-
-	if len(paths) == 0 {
-		t.Fatal("found no reusable Forgejo workflows to inspect")
-	}
-
-	return paths
-}
-
 // callableOnlyViolation reports why a workflow could start without a caller.
 func callableOnlyViolation(data []byte) string {
 	root, err := parseDocument(data)
@@ -73,12 +54,11 @@ func callableOnlyViolation(data []byte) string {
 // Every layer file is a reusable workflow for consumers: it starts only when
 // another workflow calls it, so a push, a pull request or a schedule in this
 // repository starts none of them, and none can reach a signing secret of the
-// hosting organization. Fork self-CI must register its path and events in
-// selfCIEvents, whose contract is checked separately.
+// hosting organization.
 func TestLayerWorkflowsStartOnlyWhenCalled(t *testing.T) {
 	t.Parallel()
 
-	for _, path := range layerWorkflows(t) {
+	for _, path := range allWorkflows(t) {
 		if violation := callableOnlyViolation(reporoot.ReadFile(t, path)); violation != "" {
 			t.Errorf("%s: %s", path, violation)
 		}

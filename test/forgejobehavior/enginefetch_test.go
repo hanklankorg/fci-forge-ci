@@ -250,7 +250,9 @@ func TestSetupForgeCIExposesTheDownloadedBinary(t *testing.T) {
 
 // A download that cannot be had, or is not the recorded bytes, stops the step
 // that asked for it with the address, and puts nothing in place. A missing
-// package also says which workflow publishes it.
+// package also says which workflow publishes it. Only a host that could not
+// be reached exits 69, which a job is retried on: other bytes than the
+// recorded ones exit 1, and an answer or a wrong set-up 78.
 func TestResolverRefusesWhatItCannotVerify(t *testing.T) {
 	t.Parallel()
 
@@ -262,7 +264,16 @@ func TestResolverRefusesWhatItCannotVerify(t *testing.T) {
 		// asked says whether the forge is reached at all.
 		asked bool
 		say   []string
+		// want is the exit status; 78 when zero.
+		want int
 	}{
+		{
+			name: "the forge cannot be reached", status: http.StatusOK, want: 69,
+			env: func(string) []string {
+				return []string{"FORGE_CI_REPOSITORY_URL=https://127.0.0.1:1/acme/delivery.git"}
+			},
+			say: []string{"cannot download the forge-ci binary (curl exit 7)"},
+		},
 		{
 			name: "the package is not published", status: http.StatusNotFound, asked: true,
 			env: func(forge string) []string {
@@ -271,7 +282,7 @@ func TestResolverRefusesWhatItCannotVerify(t *testing.T) {
 			say: []string{"cannot download the forge-ci binary", "/api/packages/acme/generic/forge-ci/", "examples/forgejo/signer-image.yml", "Run it at this commit"},
 		},
 		{
-			name: "the package is other bytes", status: http.StatusOK, asked: true,
+			name: "the package is other bytes", status: http.StatusOK, asked: true, want: 1,
 			body: func(engine string) string { return engine + "# changed in storage\n" },
 			env: func(forge string) []string {
 				return []string{"FORGE_CI_REPOSITORY_URL=" + forge + "/acme/delivery.git"}
@@ -326,8 +337,14 @@ func TestResolverRefusesWhatItCannotVerify(t *testing.T) {
 
 			got := box.run(sourceResolver+"run_forge_ci release sign\n",
 				append(test.env(forge.server.URL), "CURL_CA_BUNDLE="+forge.bundle)...)
-			if got.status != 69 || got.stdout != "" {
-				t.Fatalf("status %d stdout %q, want a refusal with 69; stderr %s", got.status, got.stdout, got.stderr)
+
+			want := test.want
+			if want == 0 {
+				want = 78
+			}
+
+			if got.status != want || got.stdout != "" {
+				t.Fatalf("status %d stdout %q, want a refusal with %d; stderr %s", got.status, got.stdout, want, got.stderr)
 			}
 
 			for _, fragment := range test.say {
@@ -362,7 +379,7 @@ func TestStrictModeDownloadsOnlyInTheFetchStep(t *testing.T) {
 	}
 
 	got := box.run(sourceResolver+"run_forge_ci release sign\n", env...)
-	if got.status != 69 || !strings.Contains(got.stderr, "forge-ci binary is missing") || len(forge.seen()) != 0 {
+	if got.status != 78 || !strings.Contains(got.stderr, "forge-ci binary is missing") || len(forge.seen()) != 0 {
 		t.Fatalf("an engine call in strict mode: status %d, forge asked %q; stderr %s", got.status, forge.seen(), got.stderr)
 	}
 

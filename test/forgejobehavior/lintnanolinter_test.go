@@ -158,7 +158,7 @@ func TestLintNanolinter(t *testing.T) {
 		// The step uses shell builtins only until it calls nanolinter.
 		got := box.run(script, "PATH="+filepath.Join(box.root, "empty"),
 			"LINT_REQUIRED_LINTS=secrets,sast", "LINT_DISABLE_CHECKS=", "LINT_OFFLINE=false")
-		if got.status != 69 || !strings.Contains(got.stderr, "nanolinter is not on PATH") {
+		if got.status != 78 || !strings.Contains(got.stderr, "nanolinter is not on PATH") {
 			t.Fatalf("status %d stderr %q", got.status, got.stderr)
 		}
 	})

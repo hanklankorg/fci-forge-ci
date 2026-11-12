@@ -175,3 +175,56 @@ func TestPublishRelease(t *testing.T) {
 		}
 	}
 }
+
+// The readback step runs the read-only command with one token as
+// FORGEJO_TOKEN and no ambient credential alias: the run's own token for a
+// published release, and the release token, which can see a draft, for one
+// the publication left a draft.
+func TestReadPublishedReleaseBack(t *testing.T) {
+	t.Parallel()
+
+	readback := workflowStep(t, "sign-and-publish-release.yml", "publish", "Read the published release back")
+	if want := map[string]string{
+		"READBACK_TOKEN_INPUT": "${{ inputs['release-draft'] != 'false' && secrets.RELEASE_TOKEN || forgejo.token }}",
+		"RELEASE_DRAFT":        "${{ inputs['release-draft'] }}",
+	}; !maps.Equal(readback.Env, want) {
+		t.Fatalf("readback step env = %q, want %q", readback.Env, want)
+	}
+
+	const token = "run-token-value-DO-NOT-LOG"
+
+	box := newSandbox(t, "sign-and-publish")
+
+	env := installRecordingFakes(box)
+	for _, name := range append(publishReleaseForbidden(), "READBACK_TOKEN_INPUT") {
+		env = append(env, name+"=forbidden-"+strings.ToLower(name))
+	}
+
+	env = append(env,
+		"READBACK_TOKEN_INPUT="+token, "RELEASE_DRAFT=false",
+		"HELPERS_DIR="+box.root, "CONSUMER_WORKSPACE="+t.TempDir(),
+		"FORGEJO_SERVER=https://forgejo.invalid", "FORGEJO_REPO=fixture-user/example",
+		"RELEASE_TAG=v0.0.1", "DIST_DIR=dist", "RELEASE_FILES_MANIFEST=dist/release-files.json",
+	)
+
+	got := box.run(readback.Run, env...)
+	if got.status != 0 || got.stdout+got.stderr != recordingEngineMarker {
+		t.Fatalf("status %d stdout %q stderr %q", got.status, got.stdout, got.stderr)
+	}
+
+	wantArgv := []string{
+		"release", "validate-published", "--tag", "v0.0.1", "--repository", "fixture-user/example",
+		"--draft=false", "--manifest", "dist/release-files.json", "--dist-dir", "dist",
+	}
+	if !slices.Equal(box.argv(), wantArgv) {
+		t.Fatalf("argv = %q", box.argv())
+	}
+
+	recorded := recorded(box)
+	for _, entry := range recorded.envLines {
+		name, value, _ := strings.Cut(entry, "=")
+		if strings.HasPrefix(value, "forbidden-") || strings.Contains(value, token) != (name == "FORGEJO_TOKEN") {
+			t.Errorf("engine environment holds %s", name)
+		}
+	}
+}
