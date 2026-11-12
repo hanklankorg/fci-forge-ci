@@ -98,6 +98,20 @@ func callInputViolations(in IsolationInput, job string, call isolationCall) []va
 		}
 	}
 
+	// A required input without a default that the call leaves out stops the
+	// run on the forge; the check says so before it starts.
+	for _, name := range slices.Sorted(maps.Keys(inputs)) {
+		declaration, _ := inputs[name].(map[string]any)
+		_, defaulted := declaration["default"]
+
+		if _, passed := call.With[name]; declaration["required"] == true && !defaulted && !passed {
+			violations = append(violations, validate.IsolationViolation{
+				Line: 1,
+				Msg:  fmt.Sprintf("job %q leaves out the required input %q of %s", job, name, call.Uses),
+			})
+		}
+	}
+
 	return violations
 }
 

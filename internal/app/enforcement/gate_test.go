@@ -7,7 +7,10 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -103,6 +106,65 @@ func TestLintRunsAndKeepsInfrastructureFailuresBlocking(t *testing.T) {
 	}
 }
 
+// One check's runtime failure fails the command, but only after the findings
+// of the others are written and reported.
+func TestFindingsArePublishedBeforeACheckFailureIsReturned(t *testing.T) {
+	body := `{"version":"2.1.0","runs":[{"tool":{"driver":{"name":"nanolinter"}},"results":[
+{"ruleId":"sast","properties":{"source":"curated","check_id":"sast","class":"security","status":"fail","failure_reason_category":"network"}},
+{"ruleId":"CVE-EXAMPLE","properties":{"source":"curated","check_id":"osv","class":"security","status":"fail"}}]}]}`
+
+	for _, enforced := range []bool{false, true} {
+		sarif := filepath.Join(t.TempDir(), "security.sarif")
+
+		var out bytes.Buffer
+
+		err := nanolinter(t.Context(), enforcement.Policy{EnforceVulnerabilities: enforced}, &runner{status: 1, body: body}, &out, io.Discard, []string{"nanolinter", "verify"}, sarif)
+		if !errors.Is(err, errs.ErrPrerequisite) || errors.Is(err, errs.ErrValidation) != enforced {
+			t.Fatalf("enforced=%t: %v", enforced, err)
+		}
+
+		written, readErr := os.ReadFile(sarif)
+		if readErr != nil || !strings.Contains(string(written), "CVE-EXAMPLE") {
+			t.Fatalf("security SARIF not written: %v\n%s", readErr, written)
+		}
+
+		for _, want := range []string{"vulnerabilities result=findings count=1", "lint result=incomplete count=0", "blocking-count=0 could-not-complete=sast\n"} {
+			if !strings.Contains(out.String(), want) {
+				t.Fatalf("receipt lacks %q:\n%s", want, out.String())
+			}
+		}
+	}
+}
+
+// A security check that was skipped did not find the code clean: the command
+// fails whatever the enforcement, and never prints result=clean for its gate.
+func TestSkippedSecurityCheckIsNeitherCleanNorWaived(t *testing.T) {
+	const document = `{"version":"2.1.0","runs":[{"tool":{"driver":{"name":"nanolinter"}},"results":[{"ruleId":"osv","properties":{"source":"curated","check_id":"osv","class":"security","status":"%s"}}]}]}`
+
+	for _, enforced := range []bool{false, true} {
+		var out bytes.Buffer
+
+		err := nanolinter(t.Context(), enforcement.Policy{EnforceVulnerabilities: enforced}, &runner{body: fmt.Sprintf(document, "skip")}, &out, io.Discard, []string{"nanolinter", "verify"}, "")
+		if !errors.Is(err, errs.ErrPrerequisite) {
+			t.Fatalf("enforced=%t: a skipped scan passed: %v", enforced, err)
+		}
+
+		if !strings.Contains(out.String(), "vulnerabilities result=incomplete count=0") || !strings.Contains(out.String(), "could-not-complete=osv\n") {
+			t.Fatalf("skipped scan not reported as incomplete:\n%s", out.String())
+		}
+
+		out.Reset()
+
+		if err := nanolinter(t.Context(), enforcement.Policy{EnforceVulnerabilities: enforced}, &runner{body: fmt.Sprintf(document, "n/a")}, &out, io.Discard, []string{"nanolinter", "verify"}, ""); err != nil {
+			t.Fatalf("enforced=%t: a check that does not apply failed: %v", enforced, err)
+		}
+
+		if !strings.Contains(out.String(), "vulnerabilities result=not-applicable count=0") || !strings.Contains(out.String(), "not-applicable=osv\n") || !strings.Contains(out.String(), "lint result=clean") {
+			t.Fatalf("inapplicable scan not reported as such:\n%s", out.String())
+		}
+	}
+}
+
 func TestOnlyFreshRecognizedTestFailuresMayContinue(t *testing.T) {
 	for _, test := range []struct {
 		name, body string
@@ -113,7 +175,7 @@ func TestOnlyFreshRecognizedTestFailuresMayContinue(t *testing.T) {
 		{"mixed reactor failure", "Tests run: 4, Failures: 1, Errors: 0, Skipped: 0\n[ERROR] Failed to execute goal org.apache.maven.plugins:maven-surefire-plugin:3.5.4:test on project app: There are test failures.\n[ERROR] Failed to execute goal org.apache.maven.plugins:maven-compiler-plugin:3.14.0:compile on project other: Compilation failure", testExitError(1), false},
 		{"missing socket", "Tests run: 4, Failures: 0, Errors: 1, Skipped: 0", testExitError(1), false},
 		{"no report", "", testExitError(1), false},
-		{"tool missing", "Tests run: 4, Failures: 1, Errors: 0, Skipped: 0", errs.ErrDependencyUnavailable, false},
+		{"tool missing", "Tests run: 4, Failures: 1, Errors: 0, Skipped: 0", errs.ErrPrerequisite, false},
 		{"cancelled", "Tests run: 4, Failures: 1, Errors: 0, Skipped: 0", context.Canceled, false},
 		{"signal", "Tests run: 4, Failures: 1, Errors: 0, Skipped: 0", testExitError(137), false},
 	} {
@@ -258,7 +320,7 @@ func TestFlagReachesTheGateAndItsReceipt(t *testing.T) {
 		t.Fatalf("admin report-only lint still blocked: %v", err)
 	}
 
-	if !strings.Contains(out.String(), "lint result=findings count=3 enforcement=false source=flag\n") {
+	if !strings.Contains(out.String(), "lint result=findings count=3 enforcement=false source=flag blocking-count=3\n") {
 		t.Fatalf("receipt does not show the admin input:\n%s", out.String())
 	}
 
@@ -268,7 +330,7 @@ func TestFlagReachesTheGateAndItsReceipt(t *testing.T) {
 		t.Fatalf("an unset setting lost its report-only default: %v", err)
 	}
 
-	if !strings.Contains(out.String(), "vulnerabilities result=findings count=1 enforcement=false source=embedded-default\n") {
+	if !strings.Contains(out.String(), "vulnerabilities result=findings count=1 enforcement=false source=embedded-default blocking-count=1\n") {
 		t.Fatalf("receipt does not show the default:\n%s", out.String())
 	}
 
@@ -278,6 +340,17 @@ func TestFlagReachesTheGateAndItsReceipt(t *testing.T) {
 
 	if got := AdminArgs(t.Context()); len(got) != 0 {
 		t.Fatalf("no admin input rendered as %v", got)
+	}
+}
+
+func TestFindingsCountsWriteErrorsRemainBlocking(t *testing.T) {
+	for _, enforced := range []string{"false", "true"} {
+		ctx := WithAdmin(t.Context(), enforcement.Admin{enforcement.Vulnerabilities: enforced})
+		for _, eligible := range []int{0, 1} {
+			if err := FindingsCounts(ctx, failedWriter{}, enforcement.Vulnerabilities, 2, eligible); !errors.Is(err, io.ErrClosedPipe) {
+				t.Fatalf("enforced=%s eligible=%d: %v", enforced, eligible, err)
+			}
+		}
 	}
 }
 

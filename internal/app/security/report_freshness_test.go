@@ -119,7 +119,7 @@ func TestContainerFreshness_NoOldEvidenceOrPartialPublication(t *testing.T) {
 			case "no-write":
 				want = errs.ErrMissingInput
 			case "status":
-				want = errs.ErrDependencyUnavailable
+				want = errs.ErrValidation
 			case "tool-error":
 				want = cause
 			case "clean", "clean-empty-array", "clean-named-omitted", "clean-named-null":
@@ -143,11 +143,16 @@ func TestContainerFreshness_NoOldEvidenceOrPartialPublication(t *testing.T) {
 			require.Equal(t, "outside unchanged", string(body))
 
 			for _, path := range []string{raw, sarif, gitlab} {
-				if strings.HasPrefix(mode, "findings") || clean && path == raw {
+				// Clean is a written verdict: its reports exist and hold no finding.
+				if strings.HasPrefix(mode, "findings") || clean {
 					body, readErr := os.ReadFile(path)
 					require.NoError(t, readErr)
 					require.True(t, json.Valid(body))
 					require.NotContains(t, string(body), "OLD-CANARY")
+
+					if clean {
+						require.NotContains(t, string(body), "CVE-")
+					}
 				} else {
 					require.NoFileExists(t, path)
 				}

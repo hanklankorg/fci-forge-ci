@@ -38,9 +38,10 @@ func containerSignatureCmd() *cli.Command {
      --cert-identity-regexp '^https://github\.com/org/' --cert-oidc-issuer https://token.actions.githubusercontent.com`,
 		Flags: []cli.Flag{
 			&cli.StringFlag{
-				Name:    flagMethod,
-				Sources: cli.EnvVars("SIGN_METHOD"),
-				Usage:   "verification method: sigstore or kms. gpg is rejected — OpenPGP cannot verify OCI signatures.",
+				Name:     flagMethod,
+				Sources:  cli.EnvVars("SIGN_METHOD"),
+				Required: true, // no sidecar to detect it from; see above
+				Usage:    "verification method: sigstore or kms. gpg is rejected — OpenPGP cannot verify OCI signatures.",
 			},
 			&cli.StringFlag{
 				Name:    flagCertIdentityRegexp,

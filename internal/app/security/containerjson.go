@@ -4,6 +4,7 @@
 package security
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -68,13 +69,20 @@ func RawContainerScan(ctx context.Context, trivy TrivyOps, sink ci.OutputSink, o
 			return retry.Permanent(fmt.Errorf("remove previous trivy output %s: %w: %w", in.Output, err, errs.ErrValidation))
 		}
 
-		return runRawContainerTrivy(ctx, trivy, out, stderr, RawContainerScanInput{
+		// Only a scan the network stopped is run again: Trivy's own
+		// failure, and a Trivy that cannot start, repeat.
+		err := runRawContainerTrivy(ctx, trivy, out, stderr, RawContainerScanInput{
 			ImageRef: in.ImageRef,
 			Platform: platform,
 			Output:   in.Output,
 			Timeout:  timeoutValue,
 			Scanners: scanners,
 		})
+		if err != nil && !errs.Retriable(err) {
+			return retry.Permanent(err)
+		}
+
+		return err
 	}, retry.OnRetry(func(attempt, total int, _ time.Duration, _ error) {
 		_, _ = fmt.Fprintf(stderr, "Trivy image scan failed (attempt %d/%d) for %s, retrying...\n", attempt, total, platform)
 	}))
@@ -140,7 +148,9 @@ func runRawContainerTrivy(ctx context.Context, trivy TrivyOps, out, stderr io.Wr
 		return fmt.Errorf("resolve %s: %w", in.Output, err)
 	}
 
-	code, err := trivy.RunInherit(ctx, out, stderr,
+	var said bytes.Buffer
+
+	code, err := trivy.RunInherit(ctx, out, io.MultiWriter(stderr, &said),
 		"image",
 		"--timeout", in.Timeout,
 		"--platform", in.Platform,
@@ -151,11 +161,11 @@ func runRawContainerTrivy(ctx context.Context, trivy TrivyOps, out, stderr io.Wr
 		in.ImageRef,
 	)
 	if err != nil {
-		return fmt.Errorf("trivy image %s: %w", in.ImageRef, err)
+		return retry.Permanent(fmt.Errorf("trivy image %s: %w", in.ImageRef, err))
 	}
 
 	if code != 0 {
-		return fmt.Errorf("trivy image %s exited with status %d: %w", in.ImageRef, code, errs.ErrDependencyUnavailable)
+		return fmt.Errorf("trivy image %s exited with status %d: %w", in.ImageRef, code, errs.ToolFailure(errs.TrivyReport(said.String())))
 	}
 
 	return nil
@@ -164,7 +174,7 @@ func runRawContainerTrivy(ctx context.Context, trivy TrivyOps, out, stderr io.Wr
 func validateRawContainerTrivyOutput(path string) error {
 	body, err := os.ReadFile(path) //nolint:gosec // caller-provided report path, same trust as CLI file flags.
 	if errors.Is(err, fs.ErrNotExist) {
-		return fmt.Errorf("trivy reported success but wrote no report to %s: %w", path, errs.ErrDependencyUnavailable)
+		return fmt.Errorf("trivy reported success but wrote no report to %s: %w", path, errs.ErrValidation)
 	}
 
 	if err != nil {

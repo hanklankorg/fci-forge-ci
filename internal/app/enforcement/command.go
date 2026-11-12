@@ -54,7 +54,7 @@ func nanolinter(ctx context.Context, policy enforcement.Policy, runner LintRunne
 	}
 
 	if status != 0 && status != 1 {
-		return fmt.Errorf("lint command could not complete (exit %d): %w", status, errs.ErrDependencyUnavailable)
+		return fmt.Errorf("lint command could not complete (exit %d): %w", status, errs.ErrPrerequisite)
 	}
 
 	if capture.overflow {
@@ -72,11 +72,24 @@ func nanolinter(ctx context.Context, policy enforcement.Policy, runner LintRunne
 		}
 	}
 
-	if status == 1 && report.LintFindings+report.VulnerabilityFindings == 0 {
+	if status == 1 && report.LintFindings+report.VulnerabilityFindings == 0 && report.Unavailable == nil {
 		return fmt.Errorf("nanolinter failed without classified findings: %w", errs.ErrValidation)
 	}
 
-	return errors.Join(FindingsFor(out, policy, enforcement.Lint, report.LintFindings), FindingsFor(out, policy, enforcement.Vulnerabilities, report.VulnerabilityFindings))
+	gate := func(check enforcement.Check, count int) error {
+		decision, err := policy.Decide(check, count)
+		if err != nil {
+			return err
+		}
+
+		outcome, detail := report.Outcome(check)
+
+		return reportOutcome(out, decision, outcome, detail)
+	}
+
+	// Findings are reported and gated first; a check without a verdict then
+	// fails the command whatever the policy says about findings.
+	return errors.Join(gate(enforcement.Lint, report.LintFindings), gate(enforcement.Vulnerabilities, report.VulnerabilityFindings), report.Unavailable)
 }
 
 // boundedCapture keeps one structured report, refusing to grow past 8 MiB.
@@ -172,7 +185,7 @@ func Tests(ctx context.Context, runner LintRunner, out, stderr io.Writer, protoc
 			return fmt.Errorf("%w: %w", commandExitError(status), errs.ErrValidation)
 		}
 
-		return fmt.Errorf("%w: %w", commandExitError(status), errs.ErrDependencyUnavailable)
+		return fmt.Errorf("%w: %w", commandExitError(status), errs.ErrPrerequisite)
 	})
 
 	return err

@@ -4,8 +4,10 @@
 package security
 
 import (
+	"bytes"
 	"cmp"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -98,14 +100,15 @@ func resolveIgnoreFile(named string) (string, error) {
 // ScanContainer orchestrates a container scan in four steps:
 //  1. `trivy image --format json` → private report (trivy does the scan)
 //  2. Parse JSON, count blocking findings (see gateFindings) → fail when non-zero
-//  3. in-process TrivyToSARIF       → SARIFFile (skipped with no findings)
+//  3. in-process TrivyToSARIF       → SARIFFile
 //  4. in-process TrivyToGitLabContainer → GitLabReportFile
 //
 // Trivy itself is invoked with `--exit-code 0` so the failure decision
 // stays inside the Go code (trivy reports, we gate). SARIF + GitLab transforms still run after a failing gate so
 // the Code Scanning tab + GitLab report carry the same findings the
 // pipeline rejected on — making the failure visible in the same places
-// where adopters look for vulnerability detail.
+// where adopters look for vulnerability detail. A report that cannot be
+// written fails the scan, enforcing or not.
 // Configured output files represent this invocation: previous files are retired
 // after preflight; fresh validated reports are installed individually.
 func ScanContainer(
@@ -166,22 +169,26 @@ func ScanContainer(
 	if err := publishScanReport(rawReport, jsonPath); err != nil {
 		return err
 	}
-	// Only a parsed report with no findings is clean; empty bytes are not a scan.
-	if len(findings.Fixable)+len(findings.Unfixed) == 0 {
-		_, _ = fmt.Fprintf(out, "%s No vulnerabilities found at severity %s\n", clicolor.Check(out), severity)
-
-		return appenforcement.Findings(ctx, out, enforcement.Vulnerabilities, 0)
-	}
-
 	// Always derive SARIF + GitLab reports — even when the gate fails,
 	// the artifacts must reach Code Scanning so the failure is visible
-	// in the same places adopters use for vulnerability triage.
-	deriveContainerReports(out, annot, TransformInput{
+	// in the same places adopters use for vulnerability triage. They are
+	// what the step hands on: a report that could not be written fails the
+	// scan after the findings are printed and gated, enforcing or not. A
+	// clean scan writes them too, with no findings: the old reports were
+	// retired, and clean is a verdict the next step must be able to read.
+	reportErr := deriveContainerReports(out, annot, TransformInput{
 		InputPath:    rawReport,
 		OutputPath:   filepath.Join(workDir, "report.sarif"),
 		TrivyVersion: in.TrivyVersion,
 		ImageRef:     in.ImageRef,
 	}, filepath.Join(workDir, "gitlab.json"), sarifPath, gitlabPath)
+
+	// Only a parsed report with no findings is clean; empty bytes are not a scan.
+	if len(findings.Fixable)+len(findings.Unfixed) == 0 {
+		_, _ = fmt.Fprintf(out, "%s No vulnerabilities found at severity %s\n", clicolor.Check(out), severity)
+
+		return errors.Join(appenforcement.FindingsCounts(ctx, out, enforcement.Vulnerabilities, 0, 0), reportErr)
+	}
 
 	blocking, reported := gateFindings(gate, findings)
 	printFindings(out, blocking, reported, threshold, ignoreFile)
@@ -194,7 +201,7 @@ func ScanContainer(
 	if len(blocking) == 0 {
 		_, _ = fmt.Fprintf(out, "%s No blocking vulnerabilities (threshold %s)\n", clicolor.Check(out), threshold)
 
-		return appenforcement.Findings(ctx, out, enforcement.Vulnerabilities, 0)
+		return errors.Join(appenforcement.FindingsCounts(ctx, out, enforcement.Vulnerabilities, len(blocking)+len(reported), len(blocking)), reportErr)
 	}
 
 	msg := fmt.Sprintf("Found %d blocking container %s (threshold %s)", len(blocking),
@@ -203,15 +210,15 @@ func ScanContainer(
 	_, _ = fmt.Fprintln(out, "Next: update the affected dependency or pinned base image, rebuild, and rerun the scan before publishing or promoting.")
 	_, _ = fmt.Fprintf(out, "If a fix cannot be deployed, request a reviewed CVE-specific exception in %s with a reason and expiry; the admin policy decides whether these findings block.\n", cmp.Or(ignoreFile, defaultIgnoreFile))
 
-	if err := appenforcement.Findings(ctx, out, enforcement.Vulnerabilities, len(blocking)); err != nil {
+	if err := appenforcement.FindingsCounts(ctx, out, enforcement.Vulnerabilities, len(blocking)+len(reported), len(blocking)); err != nil {
 		annot.Errorf("%s", msg)
 
-		return fmt.Errorf("%s: %w", msg, err)
+		return errors.Join(fmt.Errorf("%s: %w", msg, err), reportErr)
 	}
 
 	annot.Warningf("%s; reported under non-enforcing admin policy", msg)
 
-	return nil
+	return reportErr
 }
 
 // gateFindings splits the findings the gate blocks on from those it only
@@ -302,8 +309,14 @@ func plural(count int, one, many string) string {
 	return many
 }
 
+// containerScanTimeout is Trivy's limit for the gate's scan. It covers the
+// download of Trivy's databases as well, which alone can outlast Trivy's own
+// default of five minutes; the image evidence scan allows the same.
+const containerScanTimeout = "30m"
+
 // runTrivyContainerScan invokes `trivy image --format json` against
-// the image ref and writes the JSON output to jsonPath.
+// the image ref and writes the JSON output to jsonPath. It scans for
+// vulnerabilities only, the one result the gate and its reports read.
 // `--exit-code 0` keeps the scan-gate decision inside the Go code. Trivy
 // runs outside the caller's directory, so every path is made absolute.
 func runTrivyContainerScan(ctx context.Context, trivy TrivyOps, out, stderr io.Writer, jsonPath, severity, ignoreFile string, in ScanContainerInput) error {
@@ -320,6 +333,9 @@ func runTrivyContainerScan(ctx context.Context, trivy TrivyOps, out, stderr io.W
 		"--output", jsonPath,
 		"--severity", severity,
 		"--pkg-types", "os,library",
+		"--scanners", "vuln",
+		"--skip-version-check",
+		"--timeout", containerScanTimeout,
 		"--exit-code", "0",
 	}
 	if ignoreFile != "" {
@@ -336,13 +352,15 @@ func runTrivyContainerScan(ctx context.Context, trivy TrivyOps, out, stderr io.W
 		args = append(args, in.ImageRef)
 	}
 
-	code, err := trivy.RunInherit(ctx, out, stderr, args...)
+	var said bytes.Buffer
+
+	code, err := trivy.RunInherit(ctx, out, io.MultiWriter(stderr, &said), args...)
 	if err != nil {
 		return fmt.Errorf("trivy image: %w", err)
 	}
 
 	if code != 0 {
-		return fmt.Errorf("trivy image exited with status %d: %w", code, errs.ErrDependencyUnavailable)
+		return fmt.Errorf("trivy image exited with status %d: %w", code, errs.ToolFailure(errs.TrivyReport(said.String())))
 	}
 
 	return nil
@@ -384,16 +402,20 @@ func loadContainerFindings(jsonPath string) (security.TrivyFindings, error) {
 }
 
 // deriveContainerReports derives the SARIF + GitLab container-scanning
-// reports from the trivy JSON. Both transforms are best-effort: if
-// either fails, the gate still fires below but the artifacts may be
-// incomplete. annot.Warningf surfaces the failure.
-func deriveContainerReports(out io.Writer, annot output.Annotator, in TransformInput, gitlabPath, sarifDestination, gitlabDestination string) {
+// reports from the trivy JSON. One failing does not stop the other; each
+// failure is annotated and returned, since the caller's later steps upload
+// these files and nothing else as the evidence of the scan.
+func deriveContainerReports(out io.Writer, annot output.Annotator, in TransformInput, gitlabPath, sarifDestination, gitlabDestination string) error {
 	_, _ = fmt.Fprintln(out, "Converting JSON to SARIF...")
 
-	if err := TrivyToSARIF(in); err != nil {
-		annot.Warningf("convert to SARIF failed: %v", err)
-	} else if err := publishScanReport(in.OutputPath, sarifDestination); err != nil {
-		annot.Warningf("publish SARIF failed: %v", err)
+	sarifErr := TrivyToSARIF(in)
+	if sarifErr == nil {
+		sarifErr = publishScanReport(in.OutputPath, sarifDestination)
+	}
+
+	if sarifErr != nil {
+		sarifErr = fmt.Errorf("write the SARIF scan report %s: %w", sarifDestination, sarifErr)
+		annot.Errorf("%v", sarifErr)
 	}
 
 	_, _ = fmt.Fprintln(out, "Generating GitLab container-scanning report...")
@@ -401,9 +423,15 @@ func deriveContainerReports(out io.Writer, annot output.Annotator, in TransformI
 	gitlabIn := in
 	gitlabIn.OutputPath = gitlabPath
 
-	if _, err := TrivyToGitLabContainer(gitlabIn); err != nil {
-		annot.Warningf("TrivyToGitLabContainer: %v", err)
-	} else if err := publishScanReport(gitlabPath, gitlabDestination); err != nil {
-		annot.Warningf("publish GitLab container report failed: %v", err)
+	_, gitlabErr := TrivyToGitLabContainer(gitlabIn)
+	if gitlabErr == nil {
+		gitlabErr = publishScanReport(gitlabPath, gitlabDestination)
 	}
+
+	if gitlabErr != nil {
+		gitlabErr = fmt.Errorf("write the GitLab container-scanning report %s: %w", gitlabDestination, gitlabErr)
+		annot.Errorf("%v", gitlabErr)
+	}
+
+	return errors.Join(sarifErr, gitlabErr)
 }

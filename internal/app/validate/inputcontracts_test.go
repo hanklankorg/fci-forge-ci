@@ -63,6 +63,12 @@ func TestIsolationChecksInputsAgainstTheSuppliedLayer(t *testing.T) {
 		{name: "ambiguous ref refused", want: "no supported pinned", edit: func(tree fstest.MapFS) {
 			tree["caller/release.yml"].Data = []byte(strings.ReplaceAll(caller, "actions/tool@", "actions/tool@main@"))
 		}},
+		{name: "required workflow input left out", want: `leaves out the required input "runner"`, edit: func(tree fstest.MapFS) {
+			tree["layer/.forgejo/workflows/prepare.yml"].Data = []byte("on:\n  workflow_call:\n    inputs: {version: {type: string}, runner: {type: string, required: true}}\n")
+		}},
+		{name: "required input with a default may be left out", edit: func(tree fstest.MapFS) {
+			tree["layer/.forgejo/workflows/prepare.yml"].Data = []byte("on:\n  workflow_call:\n    inputs: {version: {type: string}, runner: {type: string, required: true, default: pool}}\n")
+		}},
 		{name: "inputless workflow", edit: func(tree fstest.MapFS) {
 			tree["caller/release.yml"].Data = []byte(strings.ReplaceAll(caller, "    with: {version: v1.2.3}\n", ""))
 			tree["layer/.forgejo/workflows/prepare.yml"].Data = []byte("on:\n  workflow_call:\n")

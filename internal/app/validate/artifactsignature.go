@@ -238,7 +238,7 @@ func verifyCosign(ctx context.Context, verifier cosignBlobVerifier, in domainrel
 	}
 
 	if err := verifier.VerifyBlob(ctx, in, errOut); err != nil {
-		if errors.Is(err, errs.ErrDependencyUnavailable) || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		if errors.Is(err, errs.ErrDependencyUnavailable) || errors.Is(err, errs.ErrPrerequisite) || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			return fmt.Errorf("artifact cosign verification failed: %w", err)
 		}
 

@@ -32,12 +32,21 @@ type fakeRawContainerScanTrivy struct {
 	noWrite bool
 	// cancel runs after each call, so a test can cancel between attempts.
 	cancel func()
+	// said is what a failing run writes to stderr.
+	said string
 }
 
-func (f *fakeRawContainerScanTrivy) RunInherit(_ context.Context, _, _ io.Writer, args ...string) (int, error) {
+// trivyOffline is how Trivy ends when it cannot reach its database.
+const trivyOffline = "FATAL\tFatal error\trun error: init error: DB error: failed to download vulnerability DB: Get \"https://mirror.example/v2/\": dial tcp: lookup mirror.example: no such host\n"
+
+func (f *fakeRawContainerScanTrivy) RunInherit(_ context.Context, _, stderr io.Writer, args ...string) (int, error) {
 	f.args = append(f.args, append([]string{}, args...))
 	if f.cancel != nil {
 		defer f.cancel()
+	}
+
+	if f.noWrite || f.failCount > 0 {
+		_, _ = io.WriteString(stderr, f.said)
 	}
 
 	if f.noWrite {
@@ -99,7 +108,7 @@ func TestRawContainerScan_RunsTrivyValidatesJSONAndWritesOutput(t *testing.T) {
 func TestRawContainerScan_RetriesFailedTrivy(t *testing.T) {
 	t.Parallel()
 
-	trivy := &fakeRawContainerScanTrivy{failCount: 1}
+	trivy := &fakeRawContainerScanTrivy{failCount: 1, said: trivyOffline}
 	if err := appsecurity.RawContainerScan(context.Background(), trivy, nil, io.Discard, io.Discard, appsecurity.RawContainerScanInput{
 		ImageRef:   "image",
 		Output:     filepath.Join(t.TempDir(), "trivy.json"),
@@ -218,7 +227,8 @@ func TestRawContainerScan_OnlyAFreshReportCounts(t *testing.T) {
 		var out bytes.Buffer
 
 		err := appsecurity.RawContainerScan(t.Context(), trivy, sink, &out, &out, appsecurity.RawContainerScanInput{ImageRef: "image", Output: output, Attempts: 1})
-		require.ErrorIs(t, err, errs.ErrDependencyUnavailable)
+		require.ErrorIs(t, err, errs.ErrValidation)
+		require.NotErrorIs(t, err, errs.ErrDependencyUnavailable)
 		require.Len(t, trivy.args, 1)
 		require.Empty(t, sink.Keys())
 		require.NotContains(t, out.String(), "succeeded")
@@ -254,7 +264,7 @@ func TestRawContainerScan_FailuresPublishNothing(t *testing.T) {
 		t.Parallel()
 
 		sink := fakeoutputsink.New(t)
-		trivy := &fakeRawContainerScanTrivy{failCount: 5}
+		trivy := &fakeRawContainerScanTrivy{failCount: 5, said: trivyOffline}
 
 		var stderr bytes.Buffer
 
@@ -265,7 +275,27 @@ func TestRawContainerScan_FailuresPublishNothing(t *testing.T) {
 		require.Contains(t, err.Error(), "exited with status 1")
 		require.Len(t, trivy.args, 2)
 		require.Empty(t, sink.Keys())
-		require.Equal(t, "Trivy image scan failed (attempt 1/2) for linux/amd64, retrying...\n", stderr.String())
+		require.Equal(t, trivyOffline+"Trivy image scan failed (attempt 1/2) for linux/amd64, retrying...\n"+trivyOffline, stderr.String())
+	})
+
+	// Only the network is worth another attempt: a scan Trivy itself
+	// fails is its own failure, returned from the first attempt.
+	t.Run("a failure that is not the network", func(t *testing.T) {
+		t.Parallel()
+
+		sink := fakeoutputsink.New(t)
+		trivy := &fakeRawContainerScanTrivy{failCount: 5, said: "FATAL\tFatal error\trun error: image scan error: unable to find the specified image\n"}
+
+		var stderr bytes.Buffer
+
+		err := appsecurity.RawContainerScan(t.Context(), trivy, sink, io.Discard, &stderr, appsecurity.RawContainerScanInput{
+			ImageRef: "image", Output: filepath.Join(t.TempDir(), "trivy.json"), Attempts: 3, RetryDelay: time.Nanosecond,
+		})
+		require.ErrorIs(t, err, errs.ErrValidation)
+		require.NotErrorIs(t, err, errs.ErrDependencyUnavailable)
+		require.Len(t, trivy.args, 1)
+		require.Empty(t, sink.Keys())
+		require.NotContains(t, stderr.String(), "retrying")
 	})
 
 	t.Run("cancelled between attempts", func(t *testing.T) {
@@ -273,7 +303,7 @@ func TestRawContainerScan_FailuresPublishNothing(t *testing.T) {
 
 		ctx, cancel := context.WithCancel(t.Context())
 		sink := fakeoutputsink.New(t)
-		trivy := &fakeRawContainerScanTrivy{failCount: 5, cancel: cancel}
+		trivy := &fakeRawContainerScanTrivy{failCount: 5, cancel: cancel, said: trivyOffline}
 
 		err := appsecurity.RawContainerScan(ctx, trivy, sink, io.Discard, io.Discard, appsecurity.RawContainerScanInput{
 			ImageRef: "image", Output: filepath.Join(t.TempDir(), "trivy.json"), Attempts: 3, RetryDelay: time.Hour,
