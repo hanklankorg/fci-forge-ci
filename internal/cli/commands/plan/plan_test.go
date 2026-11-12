@@ -110,7 +110,8 @@ func TestReleaseCmd_UsesConfigPlanAndEmitsTypedPlans(t *testing.T) {
 	env.Setenv("CHANGELOG_CREATOR", "git-cliff")
 
 	cmd := plancmd.New()
-	if err := cmd.Run(context.Background(), []string{"plan", "release"}); err != nil {
+	if err := cmd.Run(context.Background(), []string{"plan", "release",
+		"--runner-input", `build-runs-on-linux-amd64=["amd64"]`, "--runner-input", `build-runs-on-linux-arm64=["arm64"]`}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -432,4 +433,89 @@ func mustConfigPlanJSON(t *testing.T, plan pipeline.ConfigPlan) string {
 	}
 
 	return string(b)
+}
+
+// plan release reads each --runner-input whole, commas and all, against the
+// detected forge, and refuses a planned platform whose input has no value.
+func TestPlanRelease_RefusesAPlatformWithoutARunnerInput(t *testing.T) {
+	env := testenv.New(t)
+
+	path := env.Path("artifacts.yml")
+
+	declaration := "artifacts:\n  - name: svc\n    project-type: go\n    config:\n      build-mode: container-first\n" +
+		"containers:\n  - name: api\n    from: [svc]\n    platforms: linux/amd64,linux/arm64\n    enable-slsa: false\n"
+	if err := os.WriteFile(path, []byte(declaration), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+
+	producer := cli.New(cli.BuildInfo{})
+	producer.Writer, producer.ErrWriter = &stdout, &stderr
+
+	if err := producer.Run(t.Context(), []string{"forge-ci", "--provider", "local", "--runner", "local", "--json", "config", "parse-artifacts", "--file", path}); err != nil {
+		t.Fatal(err)
+	}
+
+	var configOutput map[string]string
+	if err := json.Unmarshal(stdout.Bytes(), &configOutput); err != nil {
+		t.Fatal(err)
+	}
+
+	env.Setenv("CONFIG_PLAN_JSON", configOutput["config-plan-json"])
+
+	run := func(command, forge string, inputs ...string) error {
+		stdout.Reset()
+
+		consumer := cli.New(cli.BuildInfo{})
+		consumer.Writer, consumer.ErrWriter = &stdout, &stderr
+
+		args := make([]string, 0, 16+2*len(inputs))
+		args = append(args, "forge-ci", "--provider", forge, "--runner", "local", "--json", "plan", command, "--branch", "main")
+
+		if command == "release" {
+			args = append(args, "--tag", "v1.2.3", "--repository-visibility", "public", "--release-sboms", "none")
+		} else {
+			args = append(args, "--sboms", "none")
+		}
+
+		for _, input := range inputs {
+			args = append(args, "--runner-input", input)
+		}
+
+		return consumer.Run(t.Context(), args)
+	}
+
+	for _, command := range []string{"release", "snapshot-release"} {
+		for _, forge := range []string{"forgejo", "github"} {
+			t.Run(command+"/"+forge, func(t *testing.T) {
+				for _, missing := range []string{"", "build-runs-on-linux-arm64=", "build-runs-on-linux-arm64=[]"} {
+					inputs := []string{`build-runs-on-linux-amd64=["self-hosted","amd64"]`, `runs-on=["ordinary","arm64"]`}
+					if missing != "" {
+						inputs = append(inputs, missing)
+					}
+
+					err := run(command, forge, inputs...)
+					if !errors.Is(err, errs.ErrUsage) || !strings.Contains(err.Error(), forge+" runner input build-runs-on-linux-arm64 has no value") {
+						t.Fatalf("err = %v, want the arm64 refusal", err)
+					}
+
+					if stdout.Len() != 0 {
+						t.Fatalf("refused plan emitted outputs: %s", stdout.String())
+					}
+				}
+
+				// A release plan is never made unchecked on a forge; a
+				// snapshot-release plan still is when the layer passes none.
+				if err := run(command, forge); (command == "release") != errors.Is(err, errs.ErrUsage) ||
+					(command == "release" && !strings.Contains(err.Error(), "a release plan needs the layer's runner inputs")) {
+					t.Fatalf("no runner input: err = %v", err)
+				}
+
+				if err := run(command, forge, `build-runs-on-linux-amd64=["self-hosted","amd64"]`, `build-runs-on-linux-arm64=["self-hosted","arm64"]`); err != nil {
+					t.Fatalf("both runners passed: %v", err)
+				}
+			})
+		}
+	}
 }

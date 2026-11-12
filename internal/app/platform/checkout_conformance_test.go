@@ -32,7 +32,7 @@ import (
 // server, so the forge URL is rewritten to that repository with a transient
 // insteadOf entry, and GIT_ALLOW_PROTOCOL=file makes any unrewritten URL a
 // refusal rather than a network attempt. Real-forge checkout belongs to the
-// separately authorized live tier (internal/livetest/conformance).
+// separately authorized live tier (test/live/conformance).
 const (
 	conformanceServer  = "https://forge.invalid"
 	conformanceRepo    = "owner/app"

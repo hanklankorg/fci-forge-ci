@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -23,6 +24,7 @@ import (
 	"github.com/diggsweden/forge-ci/internal/domain/pipeline"
 	"github.com/diggsweden/forge-ci/internal/domain/projecttype"
 	"github.com/diggsweden/forge-ci/internal/domain/repository"
+	"github.com/diggsweden/forge-ci/internal/domain/runners"
 	domainsummary "github.com/diggsweden/forge-ci/internal/domain/summary"
 )
 
@@ -66,23 +68,34 @@ func EmitConfigPlan(
 // loadConfigPlan reads, validates and derives artifacts.yml into the typed
 // plan every consumer of the declaration reads.
 func loadConfigPlan(in EmitConfigPlanInput, annot output.Annotator) (pipeline.ConfigPlan, error) {
-	if in.Path == "" {
-		return pipeline.ConfigPlan{}, fmt.Errorf("artifacts.yml path is required: pass --file <path> or set $ARTIFACTS_CONFIG: %w", errs.ErrUsage)
-	}
-
-	cfg, err := loadConfig(in, annot)
+	cfg, err := loadPlannableConfig(in, annot)
 	if err != nil {
 		return pipeline.ConfigPlan{}, err
 	}
 
+	return pipeline.NewConfigPlan(cfg), nil
+}
+
+// loadPlannableConfig reads, validates and derives artifacts.yml, the
+// declaration a plan is made from.
+func loadPlannableConfig(in EmitConfigPlanInput, annot output.Annotator) (*config.Config, error) {
+	if in.Path == "" {
+		return nil, fmt.Errorf("artifacts.yml path is required: pass --file <path> or set $ARTIFACTS_CONFIG: %w", errs.ErrUsage)
+	}
+
+	cfg, err := loadConfig(in, annot)
+	if err != nil {
+		return nil, err
+	}
+
 	if len(cfg.Artifacts) == 0 && len(cfg.Containers) == 0 {
-		return pipeline.ConfigPlan{}, fmt.Errorf("no artifacts or containers found in %s: %w", in.Path, errs.ErrInvalidConfig)
+		return nil, fmt.Errorf("no artifacts or containers found in %s: %w", in.Path, errs.ErrInvalidConfig)
 	}
 
 	if err := config.Validate(cfg); err != nil {
 		// No extra ErrInvalidConfig wrap: ValidationError already unwraps to
 		// it, and double-wrapping printed "invalid configuration" twice.
-		return pipeline.ConfigPlan{}, err
+		return nil, err
 	}
 
 	for _, w := range config.Warnings(cfg) {
@@ -90,10 +103,10 @@ func loadConfigPlan(in EmitConfigPlanInput, annot output.Annotator) (pipeline.Co
 	}
 
 	if err := config.Derive(cfg); err != nil {
-		return pipeline.ConfigPlan{}, err
+		return nil, err
 	}
 
-	return pipeline.NewConfigPlan(cfg), nil
+	return cfg, nil
 }
 
 // EmitReleaseImagesPlanInput drives `container release-images plan`.
@@ -107,6 +120,9 @@ type EmitReleaseImagesPlanInput struct {
 	// ResolvedPlan is optional consumer-owned policy, in the same output shape
 	// as the declarative planner. It is admitted before emitting any outputs.
 	ResolvedPlan string
+	// Runners is the runner inputs the forge layer passed; a build of a
+	// platform whose input has no value is refused. Nil is not checked.
+	Runners *runners.Inputs
 }
 
 // EmitReleaseImagesPlan writes the release-images build and publication
@@ -144,7 +160,16 @@ func ResolveReleaseImagesPlan(in EmitReleaseImagesPlanInput, annot output.Annota
 }
 
 func resolveReleaseImagesPlan(in EmitReleaseImagesPlanInput, annot output.Annotator) (pipeline.ReleaseImagesPlan, error) {
-	return planReleaseImages(in, annot)
+	plan, err := planReleaseImages(in, annot)
+	if err != nil {
+		return pipeline.ReleaseImagesPlan{}, err
+	}
+
+	if err := in.Runners.Admit(plan.RunnerNeeds()); err != nil {
+		return pipeline.ReleaseImagesPlan{}, err
+	}
+
+	return plan, nil
 }
 
 func planReleaseImages(in EmitReleaseImagesPlanInput, annot output.Annotator) (pipeline.ReleaseImagesPlan, error) {
@@ -277,15 +302,40 @@ func loadConfig(in EmitConfigPlanInput, annot output.Annotator) (*config.Config,
 	return cfg, nil
 }
 
+// readArtifactsFile reads the declaration. The plan it decides must be the
+// file the repository holds, so a relative path, which is what every release
+// workflow passes, is read inside the working directory: a symbolic link
+// above it that leads out, or a declaration that is itself a link, is
+// refused. An absolute path is a file the operator named outright, read at
+// its own directory with the same refusal of a link.
 func readArtifactsFile(in EmitConfigPlanInput) ([]byte, error) {
 	if in.FS == nil {
-		return cliio.ReadFile(in.Path)
+		if in.Path == cliio.StdSentinel {
+			return cliio.ReadFile(in.Path)
+		}
+
+		dir, name := ".", in.Path
+		if filepath.IsAbs(in.Path) {
+			dir, name = filepath.Split(in.Path)
+		}
+
+		root, err := os.OpenRoot(dir)
+		if err != nil {
+			return nil, err
+		}
+		defer func() { _ = root.Close() }()
+
+		return cliio.ReadFileInRootNoFollow(root, name)
 	}
 	// An in-memory fs.FS doesn't carry stdin semantics; only honour
 	// the "-" sentinel when reading from the real filesystem above.
 	path := filepath.ToSlash(filepath.Clean(in.Path))
 	path = strings.TrimPrefix(path, "./")
 	path = strings.TrimPrefix(path, "/")
+
+	if info, err := fs.Lstat(in.FS, path); err == nil && info.Mode()&fs.ModeSymlink != 0 {
+		return nil, fmt.Errorf("%q is a symbolic link, not a regular input file: %w", in.Path, errs.ErrMissingInput)
+	}
 
 	return fs.ReadFile(in.FS, path)
 }
@@ -344,4 +394,47 @@ func joinProjectTypes(types []projecttype.Type) string {
 	}
 
 	return strings.Join(parts, ", ")
+}
+
+// ReleaseStagePlans are the prepare and build stage plans of a release whose
+// policy decides signing and publication, from its declaration alone.
+type ReleaseStagePlans struct {
+	Prepare pipeline.ReleasePrepareStagePlan
+	Build   pipeline.ReleaseBuildStagePlan
+	// DistroPackages is the declaration's resolved distro-packages block,
+	// nil without one: each forge's plan admits or refuses it.
+	DistroPackages *config.DistroPackages
+	// Sign is the declaration's sign block as written, empty without one:
+	// each forge's plan says how its release signs in its place.
+	Sign config.SignConfig
+}
+
+// LoadReleaseStagePlans plans the version bump and the builds of the
+// declaration at in.Path, as `plan release` does for the same declaration.
+// Without the file, and with absentIsEmpty, the release has neither: a
+// repository without a declaration builds with its build commands alone.
+func LoadReleaseStagePlans(in EmitConfigPlanInput, annot output.Annotator, absentIsEmpty bool) (ReleaseStagePlans, error) {
+	if _, err := readArtifactsFile(in); errors.Is(err, fs.ErrNotExist) {
+		if !absentIsEmpty {
+			return ReleaseStagePlans{}, fmt.Errorf("%s does not exist: %w", in.Path, errs.ErrMissingInput)
+		}
+
+		prepare, build := pipeline.UndeclaredReleaseStagePlans()
+
+		return ReleaseStagePlans{Prepare: prepare, Build: build}, nil
+	}
+
+	cfg, err := loadPlannableConfig(in, annot)
+	if err != nil {
+		return ReleaseStagePlans{}, err
+	}
+
+	plan := pipeline.NewConfigPlan(cfg)
+
+	prepare, build, err := pipeline.NewPolicyReleaseStagePlans(plan)
+	if err != nil {
+		return ReleaseStagePlans{}, err
+	}
+
+	return ReleaseStagePlans{Prepare: prepare, Build: build, DistroPackages: plan.DistroPackages, Sign: cfg.Sign}, nil
 }

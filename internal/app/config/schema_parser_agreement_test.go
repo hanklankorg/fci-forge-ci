@@ -115,6 +115,8 @@ func TestSchemaAndParserAgree(t *testing.T) {
 		{name: "an unknown SBOM token", want: bothReject, body: base + "    sboms: build,bogus\n", why: "rendered SBOM pattern"},
 		{name: "an unknown git-signing method", want: bothReject, body: base + "git-signing:\n  method: x509\n", why: "rendered git-signing enum"},
 		{name: "kms without a public log", want: bothAccept, body: base + "sign:\n  method: kms\n  key: awskms:///alias/release\n  transparency: none\n", why: "the one method that may sign without Rekor"},
+		{name: "gpg files beside cosign images", want: bothAccept, body: base + "sign:\n  method: sigstore\n  files-method: gpg\n", why: "the one split of files and images a declaration may state"},
+		{name: "a cosign method for files", want: bothReject, body: base + "sign:\n  method: kms\n  key: awskms:///alias/release\n  files-method: sigstore\n", why: "only gpg may sign files apart from the images"},
 		{name: "npmjs on an npm artifact", want: schemaAcceptsParserRejects, body: "artifacts:\n  - name: app\n    project-type: npm\n    publish-to: [npmjs]\n", why: "DECLARED ASYMMETRY. npmjs is a reserved target name; which project types a target supports is a runtime rule."},
 		{name: "maven-central for an application", want: schemaAcceptsParserRejects, body: base + "    build-type: application\n    publish-to: [maven-central]\n", why: "DECLARED ASYMMETRY. A target's build-type requirement is a cross-field rule."},
 	}
@@ -129,6 +131,7 @@ func TestSchemaAndParserAgree(t *testing.T) {
 		"gpg with an issuer":          "  method: gpg\n  oidc-issuer: https://issuer.example\n",
 		"gpg with transparency":       "  method: gpg\n  transparency: none\n",
 		"sigstore without public log": "  method: sigstore\n  transparency: none\n",
+		"gpg files beside gpg":        "  files-method: gpg\n",
 	}
 	rows := append(make([]row, 0, len(stated)+len(supported)+len(signing)), stated...)
 
