@@ -31,7 +31,8 @@ must be hosted on the consumer's GitLab instance and selected by full commit SHA
 ## Verification
 
 `test/forgejoguard`, `test/forgejobehavior`, and `test/gitlabbehavior` cover the
-delivery contracts and shell behavior. `internal/livetest` exercises real
+delivery contracts and shell behavior. The live kit (now at
+`test/live/internal/livetest`) exercises real
 provider/runner behavior through the guarded disposable-lab launcher.
 
 See [Forgejo](../forgejo.md), [GitLab](../gitlab.md), and

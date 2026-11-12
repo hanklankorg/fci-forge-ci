@@ -117,8 +117,9 @@ Shell supports image-build and plain-runner bootstrap plus CI/live tooling;
 
 - use `set -euo pipefail`
 - keep scripts single-purpose
-- prefer helper functions plus `main()`
 - keep side effects explicit
+- leave planning, validation, policy and result interpretation to Go; shell
+  keeps build and exec glue
 - add targeted Go black-box tests when practical
 
 ## Anchor Rules
@@ -252,13 +253,8 @@ Checkout boundary:
 
 ## Validation Expectations
 
-For workflow refactors, run at least:
-
-- `actionlint .github/workflows/*.yml`
-- YAML parsing of all workflows
-- reusable-workflow input compatibility checks
-- `bash -n` for touched bootstrap scripts
-- relevant Go tests when binary behavior is added or changed
+[DEVELOPMENT.md](DEVELOPMENT.md#workflow-refactor-checklist) lists the checks
+to run after a workflow change.
 
 ## Stop Rule
 

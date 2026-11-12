@@ -1,10 +1,32 @@
 # Development Guide
 
-`internal/pathsafe` uses search-only ancestor handles on Linux, so opening a
-workspace does not require directory-read access to `/` or unrelated parents.
-Only the destination requires read access for `os.Root` operations. User-placed
-symlinks remain refused; root-owned operating-system layout links retain their
-existing ownership and parent-permission checks.
+## Project identity
+
+| Surface | Name |
+|---|---|
+| Engine repository and executable | `forge-ci` |
+| Engine Go module | `github.com/diggsweden/forge-ci` |
+| External black-box suite repository | `forge-ci-blackbox-tests` |
+| External black-box suite Go module | `github.com/diggsweden/forge-ci-blackbox-tests` |
+| Configuration and build metadata directory | `.forge-ci` |
+| Product environment prefix | `FORGE_CI_*` |
+| Engine binary under test | `FORGE_CI_TEST_BINARY` |
+| Workflow input prefix | `forge-ci-*` |
+| Linux engine delivery | `canonical-cli-bootstrap.yml` and `consume-canonical-cli` |
+| macOS engine build | `build-darwin-cli` |
+| Layer setup action | `setup-forge-ci` |
+| Layer binary checksums | `.engine/bin/forge-ci-linux-amd64.sha256`, `.engine/bin/forge-ci-linux-arm64.sha256` |
+| Package and image prefix | `forge-ci` |
+| Development branch | `main` |
+| Placeholder release in examples and snippets | `v0.90.0` |
+| Rolling prerelease channel | `v0.90.0-pre` |
+
+The Go module has no major-version suffix. Project-owned headers and REUSE
+metadata use `2026 Digg - Agency for Digital Government`; third-party licence
+notices keep their own attribution.
+
+The engine's own workflows pin the black-box suite by a reviewed commit and
+select the candidate binary with `FORGE_CI_TEST_BINARY`.
 
 ## Source checkout
 
@@ -12,12 +34,8 @@ Use a reviewed checkout of the revision you want to build. [`go.mod`](../go.mod)
 requires only published modules, among them
 `codefloe.com/itiquette/forge-lab-contract`, so a checkout builds from the
 module proxy and needs no sibling directory or `replace` directive. Install the
-CLI from the forge-ci checkout using the pinned toolchain, and check that it
-runs:
-
-If the pinned Go toolchain is not installed yet, follow the Linux or macOS
-prerequisites below first. Building the CLI is independent of publishing the
-workflow/runtime artifacts required by consumers.
+pinned Go toolchain first (see the Linux or macOS prerequisites below). Then
+install the CLI from the forge-ci checkout and check that it runs:
 
 ```bash
 mise exec -- go install ./cmd/forge-ci
@@ -36,32 +54,8 @@ copy examples from your local checkout. For pre-release workflow evaluation,
 follow [Branch Testing](runtime-images.md#branch-testing) with the reviewed
 pre-release images, rather than substituting a moving ref into production.
 
-`forge-ci init <mirror URL> --dry-run` uses that same remote-release source and
-temporary storage, but renders a proposal without writing project files.
-Initializer unit tests inject an inert remote and use temporary project trees
-to check generation parity, conflicts, and unchanged files; they need no provider.
-
-The bootstrap installer fetches a detached Git checkout for a branch or full
-40-character SHA-1 or 64-character SHA-256 commit ID
-`forge-ci-binary-ref` and builds from that source, logging the resolved commit;
-release tags install the signed archive instead. Self Release passes the commit
-named by its release-request tag, so advancing the branch cannot change its CLI.
-PR and snapshot orchestrators resolve source branches once for all host jobs;
-standalone host jobs bind the build to their bootstrap checkout using
-`FORGE_CI_SOURCE_SHA`. Release-tag inputs retain signed release-asset installation.
-Use the complete commit ID rather than an abbreviated hash. Git source installs
-select the repository's SHA-1 or SHA-256 object format before fetching.
-`local`/`.` builds use the working copy and reject `FORGE_CI_SOURCE_SHA`; to build
-a bound revision, pass its commit ID instead. Relative `FORGE_CI_INSTALL_DIR`
-values are resolved against the invoking working directory.
-An omitted binary ref resolves the current published stable release to its
-concrete tag once. GitHub orchestrators, and the reusable workflows a caller
-can also use on its own, use that tag for default runtime images as well,
-under the namespace of the repository serving them; explicit image overrides
-take precedence. Self Release's explicit
-request commit never takes this default-discovery path.
-See
-[CLI binary channels](runtime-images.md#cli-binary-channels).
+The GitHub workflows build the engine from the full 40-character commit in
+`forge-ci-binary-ref`; [Engine delivery](engine-delivery.md) describes how.
 
 ## Prerequisites - Linux
 
@@ -168,24 +162,8 @@ for other tests. Keep the normal macOS utility path for native Go tests so
 GNU tools do not hide portability defects. `xmllint` comes from `libxml2`.
 Install success or a focused test is not a passing `just verify`.
 
-`lint`, `lint-go` and `lint-go-golangci` also check the Linux build on a
-non-Linux host, so platform-specific imports still reach depguard. The semantic
-environment guard inspects Linux and the native build through compiler metadata.
-Neither operation executes cross-compiled code; native runtime checks remain
-separate.
-
-GitLab's provider-free structural renderer lives in
-`internal/testutil/gitlabrender`. Both component behavior tests and the live
-harness's offline demo tests use it. It interpolates typed inputs, expands this
-checkout's component definitions and release children, resolves inheritance, and
-checks images, runnable jobs, stages and needs. The demo matrix covers both image
-builders and each native MR/release event the demo serves; documented/example
-inputs render through the same checker after replacing marked placeholders with
-inert fixtures. This is structural evidence, not GitLab CI lint, remote pin or
-authorization proof, or evaluation of variable-dependent runtime rules.
-
 Container and VM runtime evidence must match the execution host: run AMD64
-jobs on AMD64 hosts, and ARM64 jobs on ARM64 hosts, including this Mac.
+jobs on AMD64 hosts, and ARM64 jobs on ARM64 hosts, such as an ARM64 Mac.
 Cross-compilation is separate from execution. Linux-only integration requires
 a native Linux environment; the external suite's strict profile is a Linux gate.
 
@@ -223,25 +201,19 @@ the recipe also explicitly disables signing, which snapshot mode alone does not.
 `just clean` removes `bin/` and `dist/` before asking whether to clear caches.
 Declining keeps the caches only. `clean-caches` clears the configured Go
 module/build/test/fuzz caches, shared across checkouts by default, and the
-configured golangci-lint cache. Just defaults that cache to
-`.golangci-lint-cache/` in each checkout so linked worktrees do not replay
+configured golangci-lint cache. Just and the `.mise.toml` environment default
+that cache to `.golangci-lint-cache/` in each checkout so linked worktrees do not replay
 each other's diagnostic paths. `GOLANGCI_LINT_CACHE` overrides the location.
 
 ### Known lint gaps
 
 The pinned nanolinter 0.8.6 drives two tools with flags they no longer
-take, and both checks report rather than block until its next release:
+take, so both checks report rather than block:
 
 - Commits: it passes gommitlint `--gommitconfig`, which gommitlint 0.93
   calls `--config`. Run `gommitlint validate --base-branch main` instead.
 - SAST: it passes opengrep `--no-secrets-validation`, which opengrep
   removed in 1.27.1. Run `opengrep scan --config p/default .` instead.
-
-In a linked worktree under the checkout's ignored `.claude/` directory,
-osv-scanner reads the main checkout's `.gitignore`, ignores the whole
-worktree and reports "No package sources found", which fails the blocking
-OSV check. Run `osv-scanner scan source --recursive --no-ignore .` in the
-worktree, or put worktrees outside the checkout.
 
 ## Local verification tools
 
@@ -334,46 +306,38 @@ and name the fix when it fails. The full rule, including why `platform` is an
 adapter and why pure OpenPGP verification lives in `internal/pgp` rather than
 an exempt adapter, is in [ADR 0004](adr/0004-package-layering.md).
 
-## Input-policy decisions
+### Changing a command, a flag or help text
 
-### Optional distro-package signing
+The CLI's text is generated into files the tests hold to the code. After a
+change to a command, a flag, help text or a workflow step that runs the
+binary, run in this order:
 
-`release gpg sign-packages` signs the `.deb`, `.rpm` and `.apk` files present in
-its directory. Zero matches are valid; required key inputs, import and fingerprint
-validation still run. The Forgejo/GitLab `sign-distro-packages` toggle enables this
-operation, not a promise that the build produces distro packages.
+```bash
+just generate              # docs/cli-reference.md, the schemas, internal/cli/runby.json
+just test-unit
+just test-smoke            # drives the built binary; the pull-request workflow runs it
+just refresh-engine-binary # last: the binary embeds the generated reference
+```
 
-Keep this contract. A consumer that promises particular packages must check its
-expected outputs at the build/assembly boundary, before handing them to signing.
-Do not infer output cardinality from the signing toggle or add a second generic
-expectation schema without a concrete consumer requirement. Artifact integrity
-and build-output completeness are different checks.
+Commit the generated files and the two `.engine/bin/*.sha256` lines with the
+change. A guide edit under `docs/` needs only the last step.
 
-### Context-specific path checks
+## Path checks
 
-Keep `pathsafe.Relative` as the shared lexical primitive. Artifact extraction,
-configuration validation, working-directory admission, attachment globs and
-signer-metadata removal retain their caller-specific checks, errors and filesystem
-operations. Lexical validation cannot replace confinement through `os.Root`.
-
-Go and Cargo compilation open the real `dist` directory before removing their
-selected platform outputs. A linked output directory is refused, including an
-alias elsewhere in the same checkout. `just clean-build` accepts only the default
-checkout-owned `bin/` and `dist/`; custom build directories remain caller-managed.
-Its isolated regression is `bash scripts/ci/test-clean-build.sh` and is included
-in `just test-unit`.
-
-`pathsafe.ArtifactStaging` restores replaced files on installation failure. If
-restoration also fails, the error names the retained `.forge-ci-artifact-backup-*`
-directory. Inspect and recover those files before retrying; `Close` removes only
-the incoming stage, never an incomplete rollback's backup.
-
-Do not merge these contracts just because their guards look similar. For example,
-attachment assembly currently rejects any `..` substring, whereas upload checks
-parent components; `artifact..tgz` therefore has different acceptance between
-those commands. Preserve compatibility unless a specific use case warrants a
-deliberate change and behavior tests. There is no general path-policy framework
-or source-pattern guard to add.
+- `release gpg sign-packages` signs the `.deb`, `.rpm` and `.apk` files in its
+  directory, and zero matches are valid. A consumer that promises packages
+  checks its outputs at the build boundary, before signing.
+- `pathsafe.Relative` is the shared lexical primitive; each caller (artifact
+  extraction, configuration, working directories, attachment globs, signer
+  metadata) keeps its own checks and confines file access through `os.Root`.
+  On Linux `internal/pathsafe` opens ancestors search-only, so only the
+  destination needs read access. User-placed symlinks are refused.
+- Go and Cargo builds refuse a linked `dist` directory. `just clean-build`
+  accepts only the default `bin/` and `dist/`; its regression,
+  `bash scripts/ci/test-clean-build.sh`, is part of `just test-unit`.
+- When `pathsafe.ArtifactStaging` cannot restore replaced files, the error
+  names the kept `.forge-ci-artifact-backup-*` directory; recover from it
+  before retrying.
 
 ## Error classification
 
@@ -391,7 +355,7 @@ without re-classifying.**
 |---|---|---|
 | Reading an operator-supplied file | `cliio.ReadFile` | Maps absent → `ErrMissingInput` (66), unreadable → `ErrPermissionDenied` (77), a directory → `ErrMissingInput`, and bounds the read |
 | Reading below an already checked root | `cliio.ReadFileInRoot` | Preserves the same file-type and size bounds without reopening through the ambient filesystem |
-| Running an external binary | `safeexec.WrapError` | A non-exit failure is the tool never having run, so `ErrDependencyUnavailable` (69), *"x not found in $PATH"*, not a crash |
+| Running an external binary | `safeexec.WrapError` | A non-exit failure is the tool never having run, so `ErrPrerequisite` (78), *"x not found in $PATH"*, not a crash and not an outage a retry could pass |
 | An HTTP response | `errs.FromHTTPStatus` | 4xx is the request being refused, not an outage |
 | Parsing operator or tool data | `ErrInvalidConfig` (78) / `ErrMalformedInput` (65) | *Their* config vs *some tool's* output |
 
@@ -406,34 +370,11 @@ Two rules follow from it:
   error, they must agree. Comparing `Value == ""` while the layer below trims
   meant `--sboms ""` and `--sboms "   "` exited differently.
 
-`container ledger merge` classifies a missing local input path as
-`ErrMissingInput` (66), including a path disappearing during discovery. This
-classification belongs at the local-input boundary; network failures still map
-to dependency unavailable (69).
-
-Plan lookup and merging share `planfile.Decode`: plan and scope containers must
-be JSON objects, and JSON number spellings are retained without float64 conversion.
-`plan write` stores the whitespace-normalized command scope it validated.
-
-The [Git credential contract](providers.md#git-operation-credentials) owns
-file/stdin inputs, CR/LF handling, precedence and issuing-server scope.
-Default keyless verification identity follows the execution runner,
-independently of the forge selected for API operations.
-
-Repository sync guards read governed inputs with `reporoot.ReadFile` and
-`reporoot.ReadDir`, rejecting symlink components instead of following them.
-Generated-file failures report bounded difference context, sizes, hashes and the
-refresh command. Artifact vocabulary checks use named documentation blocks;
-mentions elsewhere in prose cannot satisfy them.
-
-The shell-source guard discovers `.sh`, `.bash`, `.sh.tmpl`, and extensionless
-files with a supported `sh`/`bash` shebang. It skips Git metadata, dependency and
-build-output directories. Embedded workflow/Go/just recipes are separate scopes;
-the existing printf rule is a lexical alarm, not a complete shell parser.
-
 Note the sentinels are project-chosen, not BSD `sysexits` throughout:
-`ErrUsage` is **2** (POSIX CLI convention), not 64. `errs.ExitCodeConstants`
-and its test are the reference.
+`ErrUsage` is **2** (POSIX CLI convention), not 64.
+`TestExitCodeConstants_AlignToBSDSysexits` in `internal/domain/errs` pins the
+codes; [the exit-code contract](cli-black-box.md#exit-code-contract-asserted-throughout)
+lists them.
 
 `test/archguard` enforces the exec-adapter half at test time. The rest is
 enforced by tests asserting the sentinel: `errors.Is(err, errs.ErrX)`, never
@@ -441,51 +382,16 @@ a bare `err != nil`, which passes whatever the classification turns into.
 
 ## Test discipline
 
-Tests provide evidence for the behavior they exercise. Keep them reproducible
-and account for missing coverage through the policies below:
-
-- **No flaky tests.** A failure is either a real bug or a missing test
-  guarantee; "just re-run it" is not an acceptable fix. Quarantine the
-  test (`t.Skip("…tracking <issue>")`) until it is fixed or deleted:
-  never leave a `// flaky` comment behind a green build.
-- **Time is injected.** Anywhere a test output depends on the wall clock,
-  the production code takes a `now func() time.Time` (see
-  `internal/app/summary/*.go`, `internal/app/build/go.go::resolveBuildDate`).
-  Tests pass `fixedNow()`. When `SOURCE_DATE_EPOCH` is set, the same
-  injection point honours it, making reproducible-build callers and tests
-  share the same code path. Security reports
-  (`internal/app/security/trivy.go::reportTimestamp`) take no clock; their
-  tests pin the timestamp with `SOURCE_DATE_EPOCH`. Every reader parses the
-  variable with `domain/build.ParseSourceDateEpoch`. For the Go build and the
-  security reports a value that is set but unusable is a usage error, never a
-  fallback to the wall clock.
-- **Per-test filesystem state.** `testfs.NewReal(t)` returns a fresh
-  `t.TempDir()`-rooted workspace per test. No `os.Chdir` outside the
-  helper. No state survives between tests in the same package.
-- **Account for missing external tools.** Integration tests use
-  `evidence.RequireTool(t, "cargo")` (or the tool they need). Absence is tallied
-  and skipped in the default profile, but fails in the strict profile. A tool
-  that is present and fails or hangs is a failure, not a skip. Follow
-  [Skipped evidence is accounted for](testing.md#skipped-evidence-is-accounted-for)
-  for the helper and `TestMain` wiring.
-- **`t.Parallel()` is the default**, both for unit and integration tests.
-  Anything that can't run in parallel needs an explanatory comment.
-
-Pipeline-level determinism is documented in `docs/verification.md#deterministic-pipeline`.
+[Testing conventions](testing.md) holds the test rules, among them
+[the rules every test follows](testing.md#rules-every-test-follows).
 
 ## Workflow Refactor Checklist
 
-When changing workflows or workflow-facing binary behavior:
-
-1. Keep public workflow contracts stable unless the change is explicitly versioned.
-2. Follow `docs/workflow-design-policy.md` for workflow structure and binary
-   command rules.
-3. Run `actionlint .github/workflows/*.yml`.
-4. Parse workflow YAML and check reusable-workflow input compatibility.
-5. Run `bash -n` for touched bootstrap scripts.
-6. Add or update Go tests for behavior changes. For standalone shell
-   scripts, keep `bash -n`, `shellcheck`, and targeted Go black-box tests
-   next to the scripts when needed.
+When changing workflows or workflow-facing binary behaviour, follow
+[workflow-design-policy.md](workflow-design-policy.md), keep public workflow
+contracts stable unless the change is versioned, and run `just lint-actions`,
+`just test-unit` (which runs `TestWorkflowInputContract`) and `bash -n` on
+touched bootstrap scripts. Add or update Go tests for behaviour changes.
 
 For a change under `.forgejo/`, or to a verb a Forgejo workflow or action
 calls, run `just test-forgejo` as well: it holds the layer's structure and runs
@@ -513,8 +419,10 @@ It refuses a toolchain other than the Go release `go.mod` pins, builds the
 CLI of your tree for both architectures as
 [`scripts/ci/engine-binary.sh`](../scripts/ci/engine-binary.sh) defines
 (cross-compiled, so any host records both), and records the digests. Run it after a change to a build input (`cmd/`,
-`internal/`, `go.mod`, `go.sum`); a change to documentation, workflows or
-tests names the same binary and needs nothing.
+`internal/`, `docs/`, `go.mod`, `go.sum`): the binary embeds the user-facing
+pages under `docs/` for `forge-ci docs`, so a guide edit changes it too. Run it
+last, after `just generate`, since the generated CLI reference is one of those
+pages. A change to workflows or tests names the same binary and needs nothing.
 
 Before pushing, verify the lines are fresh with a read-only check that builds
 both architectures and compares, without writing anything:
@@ -567,22 +475,9 @@ Do not hand-edit the files, and do not build the binary any other way.
 
 ## Branch Testing Reusable Workflows
 
-The [runtime-image branch-testing guide](runtime-images.md#branch-testing) owns
-the producer prerequisites, publication eligibility and caller examples.
-Coordinate a reviewed workflow commit, published runtime images and a matching
-plain-runner CLI ref. A workflow branch alone does not change its runtime-image
-defaults or make the CLI revision installable.
-
-GitHub resolves nested reusable workflows that use
-`uses: ./.github/workflows/<name>.yml` from the same commit as the workflow that
-called them. Those local nested calls are safe for branch testing and do not need
-an explicit `@<ref>`.
-
-Manual merged-image publication requires the configured prerelease branch;
-`publish=true` on another branch does not establish that the required tags were
-published. Confirm the published images before selecting consumer pins. Commit
-refs select source; image digests select exact content. The linked guide
-describes both boundaries.
+[Branch testing](runtime-images.md#branch-testing) describes how to test
+reusable workflows from a branch: a reviewed workflow commit, published
+runtime images and a matching CLI ref.
 
 ## Forks and Other Branches
 
@@ -622,7 +517,9 @@ are internal-use only.
 3. **CI does the rest.** The tag push triggers `self-runtime-container.yml`
    (builds runtime images, 30-60 min) and `self-release.yml` (runs black-box
    tests, evidence gates, waits for images, creates the final `vX.Y.Z` tag,
-   builds signed CLI archives, publishes the GitHub release).
+   builds signed CLI archives, publishes the GitHub release). The black-box
+   and evidence gates always run; a gate that fails skips the release, and
+   no repository variable waives one.
 
 For recovery from a failed release, see
 [Failed Release Recovery](failed-release-recovery.md).
