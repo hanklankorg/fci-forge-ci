@@ -76,4 +76,4 @@ ba = "ba"
 [files]
 # Workflows of other repositories, copied as they were so the consumer-trial
 # planner is tested on what real consumers write. Their wording is theirs.
-extend-exclude = ["internal/livetest/testdata/consumer/"]
+extend-exclude = ["test/live/internal/livetest/testdata/consumer/"]

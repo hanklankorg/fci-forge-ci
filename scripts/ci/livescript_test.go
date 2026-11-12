@@ -6,19 +6,17 @@ package ci
 import (
 	"context"
 	"errors"
-	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"slices"
-	"strconv"
 	"strings"
 	"syscall"
 	"testing"
 	"time"
 
 	"github.com/diggsweden/forge-ci/internal/domain/container"
-	"github.com/diggsweden/forge-ci/internal/livetest"
 	"github.com/diggsweden/forge-ci/internal/retry"
 	"github.com/diggsweden/forge-ci/internal/testutil/reporoot"
 	"github.com/diggsweden/forge-ci/internal/testutil/testenv"
@@ -27,8 +25,9 @@ import (
 // These tests drive run-live-tests.sh offline: a fake go on PATH records its
 // argv and environment and plays the preflight/build roles and emits a compiled
 // suite with a configurable exit status. Fake host tools stand in for
-// the pinned toolchain. No lab, network or real go toolchain is touched. What
-// the real preflight prints and refuses is tested in internal/livetest. Plain
+// the pinned toolchain. No lab or network is touched; the classifier cases build
+// the maintained preflight CLI offline with real Go before installing fake PATH.
+// What preflight prints and refuses is tested in test/live/internal/livetest. Plain
 // argument and tool-check flow is left to shellcheck and to reading the script;
 // these tests pin what a reader cannot see: the redacted log, the suite status
 // surviving the tee, the pruning and the run lock.
@@ -51,7 +50,7 @@ env)
 run)
   if [[ "${3:-}" == classify-run ]]; then
     if [[ -n "${FAKE_REAL_CLASSIFIER:-}" ]]; then
-      exec "$FAKE_REAL_CLASSIFIER" -test.run '^TestLiveClassifierProcessFixture$' -- "$4" "$5"
+      exec "$FAKE_REAL_CLASSIFIER" classify-run "$4" "$5"
     fi
     case "$4" in
       0) printf '%s\n' "${FAKE_LIVE_CLASSIFICATION:-0 passed}" ;;
@@ -60,6 +59,22 @@ run)
     esac
   elif [[ "${3:-}" == runner-arch ]]; then
     printf '%s\n' arm64
+  elif [[ "${3:-}" == prepared-source ]]; then
+    [[ -z "${FAKE_PREPARED_REFUSES:-}" ]] || exit 2
+  elif [[ "${3:-}" == provider-account ]]; then
+    printf '%s\n' "${FAKE_LAB_ACCOUNT:-forgeci}"
+  elif [[ "${3:-}" == focused-rows ]]; then
+    # go run gives a refusal of the program status 1, whatever its own.
+    [[ -z "${FAKE_FOCUSED_ROWS_REFUSED:-}" ]] || { printf 'focused-rows: the run pattern selects no row\n' >&2; exit 1; }
+    # The rows of the full run set, where a test gives them apart.
+    if [[ "${FORGE_CI_LIVE_SET:-}" == full && -n "${FAKE_FOCUSED_ROWS_FULL:-}" ]]; then printf '%s\n' "$FAKE_FOCUSED_ROWS_FULL"; exit 0; fi
+    [[ -z "${FAKE_FOCUSED_ROWS:-}" ]] || printf '%s\n' "$FAKE_FOCUSED_ROWS"
+  elif [[ "${3:-}" == focused-scenarios ]]; then
+    printf '%s\n' "${FAKE_FOCUSED_SCENARIOS:-}"
+  elif [[ "${3:-}" == focused-skip ]]; then
+    printf '%s\n' "${FAKE_FOCUSED_SKIP:-}"
+  elif [[ "${3:-}" == rerun-rows ]]; then
+    [[ -z "${FAKE_REAL_CLASSIFIER:-}" ]] || exec "$FAKE_REAL_CLASSIFIER" rerun-rows "$4"
   else
     printf '%s\n' "$FAKE_PREFLIGHT_REPORT"
   fi
@@ -346,7 +361,7 @@ const fakePreflightReport = "live preflight: 2 provider(s), generation fake-gene
 const fakeSuiteOutput = "=== RUN TestFake\ntoken glpat-ABCDEFGHIJKLMNOPQRSTUVWX\nAuthorization: Bearer abc.def\ntoken\x1b[0;m=inert-ansi-secret\n--- PASS: TestFake\nok\tfake\t0.01s" // gitleaks:allow -- synthetic redaction canaries.
 
 // hostToolsPreflight is the launcher's Go check of the host tools.
-const hostToolsPreflight = "run ./internal/livetest/preflight host-tools"
+const hostToolsPreflight = "run ./test/live/internal/livetest/preflight host-tools"
 
 // requireGoCalls requires preflight, the host-tool preflight, the runner
 // architecture, four product builds, test compilation, package discovery and
@@ -360,26 +375,26 @@ func requireGoCalls(t *testing.T, calls []string, wantTest string) {
 
 	calls = append(calls[:1:1], calls[2:]...)
 
-	if len(calls) != 10 || calls[0] != "run ./internal/livetest/preflight" ||
-		calls[1] != "run ./internal/livetest/preflight runner-arch" || calls[8] != wantTest {
+	if len(calls) != 10 || calls[0] != "run ./test/live/internal/livetest/preflight" ||
+		calls[1] != "run ./test/live/internal/livetest/preflight runner-arch" || calls[8] != wantTest {
 		t.Fatalf("go calls:\n%s", strings.Join(calls, "\n"))
 	}
 
-	if !strings.HasPrefix(calls[9], "run ./internal/livetest/preflight classify-run 0 ") {
+	if !strings.HasPrefix(calls[9], "run ./test/live/internal/livetest/preflight classify-run 0 ") {
 		t.Fatalf("missing Go result classification: %v", calls[9])
 	}
 
 	if !strings.HasPrefix(calls[6], "test -c -tags=live -buildvcs=false -o ") ||
-		!strings.HasSuffix(calls[6], "/tests/ ./internal/livetest/...") ||
-		!strings.HasPrefix(calls[7], "list -tags=live -f ") || !strings.HasSuffix(calls[7], " ./internal/livetest/...") {
+		!strings.HasSuffix(calls[6], "/tests/ ./test/live/internal/livetest/... ./test/live/conformance ./test/live/githubconsumer") ||
+		!strings.HasPrefix(calls[7], "list -tags=live -f ") || !strings.HasSuffix(calls[7], " ./test/live/internal/livetest/... ./test/live/conformance ./test/live/githubconsumer") {
 		t.Fatalf("test compilation/discovery calls: %v", calls[6:8])
 	}
 
 	for index, target := range []string{
 		"forge-ci-host ./cmd/forge-ci",
 		"forge-ci-runner ./cmd/forge-ci",
-		"credential-proxy ./internal/livetest/credentialproxy",
-		"probe-json ./internal/livetest/probejson",
+		"credential-proxy ./test/live/internal/livetest/credentialproxy",
+		"probe-json ./test/live/internal/livetest/probejson",
 	} {
 		if call := calls[2+index]; !strings.HasPrefix(call, "build -trimpath -buildvcs=false -o ") || !strings.HasSuffix(call, "/"+target) {
 			t.Fatalf("build call %d: %q", index, call)
@@ -495,36 +510,36 @@ func TestRunLiveTests_ReportsARunInWhichNothingRanAsSkipped(t *testing.T) {
 	}
 }
 
-// Use the real Go classifier behind the launcher's inert preflight collaborator.
-// Only the test data below contains scenario markers; this fixture is not a live
-// scenario and must never register itself.
-func TestLiveClassifierProcessFixture(t *testing.T) {
-	if os.Getenv("FAKE_REAL_CLASSIFIER") == "" {
-		return
-	}
+// buildLiveClassifier builds the maintained command once per parent test, before
+// newLiveRun installs the launcher's inert Go collaborator. Only classify-run is
+// invoked: no default preflight, target contract or provider is involved.
+func buildLiveClassifier(t *testing.T) string {
+	t.Helper()
 
-	status, err := strconv.Atoi(os.Args[len(os.Args)-2])
+	goBin, err := exec.LookPath("go")
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	log, err := os.Open(os.Args[len(os.Args)-1])
-	if err != nil {
-		t.Fatal(err)
+	output := filepath.Join(t.TempDir(), "preflight")
+
+	ctx, cancel := context.WithTimeout(t.Context(), liveCommandBound)
+	defer cancel()
+
+	command := exec.CommandContext(ctx, goBin, "build", "-buildvcs=false", "-o", output, "./test/live/internal/livetest/preflight")
+	command.Dir = reporoot.Path(t)
+
+	command.Env = append(os.Environ(), "GOTOOLCHAIN=local", "GOPROXY=off", "GOSUMDB=off")
+	if body, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("build offline classifier: %v\n%s", err, body)
 	}
 
-	result, err := livetest.ClassifyLiveRun(log, status)
-	_ = log.Close()
-
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	fmt.Printf("%d %s\n", result.ExitCode, result.Verdict)
-	os.Exit(0)
+	return output
 }
 
 func TestRunLiveTests_RealClassifierRequiresRegisteredScenario(t *testing.T) {
+	classifier := buildLiveClassifier(t)
+
 	for _, tc := range []struct {
 		name, output string
 		want         int
@@ -538,7 +553,7 @@ func TestRunLiveTests_RealClassifierRequiresRegisteredScenario(t *testing.T) {
 		{"missing RUN", "FORGE_CI_LIVE_SCENARIO TestTrial\n--- PASS: TestTrial (0s)", 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			run := newLiveRun(t, "FAKE_REAL_CLASSIFIER="+os.Args[0], "FAKE_GO_TEST_OUTPUT="+tc.output)
+			run := newLiveRun(t, "FAKE_REAL_CLASSIFIER="+classifier, "FAKE_GO_TEST_OUTPUT="+tc.output)
 
 			stdout, stderr, status := run.exec(t, "focused", "TestTrial|TestOffline")
 			if status != tc.want {
@@ -558,8 +573,9 @@ func TestRunLiveTests_RealClassifierRequiresRegisteredScenario(t *testing.T) {
 }
 
 func TestRunLiveTests_RealClassifierSeparatesPackages(t *testing.T) {
+	classifier := buildLiveClassifier(t)
 	first, second := t.TempDir(), t.TempDir()
-	run := newLiveRun(t, "FAKE_REAL_CLASSIFIER="+os.Args[0], "FAKE_GO_PACKAGE="+first+"\n"+second,
+	run := newLiveRun(t, "FAKE_REAL_CLASSIFIER="+classifier, "FAKE_GO_PACKAGE="+first+"\n"+second,
 		"FAKE_GO_TEST_OUTPUT==== RUN   TestTrial\nFORGE_CI_LIVE_SCENARIO TestTrial\n--- SKIP: TestTrial (0s)",
 		"FAKE_GO_SECOND_PACKAGE="+second, "FAKE_GO_SECOND_OUTPUT==== RUN   TestTrial\n--- PASS: TestTrial (0s)")
 
@@ -575,6 +591,307 @@ func TestRunLiveTests_RealClassifierSeparatesPackages(t *testing.T) {
 			t.Fatalf("missing boundaries for %s:\n%s", pkg, log)
 		}
 	}
+}
+
+// fakeRowSuite is a compiled suite of two packages: the first has the table
+// test TestTrial, whose row two runs into the binary's time limit while the
+// others pass, and the second has another test.
+const fakeRowSuite = `#!/usr/bin/env bash
+set -euo pipefail
+if [[ "$1" == -test.list ]]; then
+  if [[ "$PWD" == "$FAKE_GO_SECOND_PACKAGE" ]]; then printf 'TestElsewhere\n'; else printf 'TestTrial\n'; fi
+  exit 0
+fi
+printf 'suite %s %s\n' "${PWD##*/}" "$*" >>"$FAKE_GO_ARGV"
+case "$*" in
+*-test.skip*) printf 'testing: warning: no tests to run\nPASS\n' ;;
+*two*)
+  printf '=== RUN   TestTrial\nFORGE_CI_LIVE_SCENARIO TestTrial\n=== RUN   TestTrial/two\npanic: test timed out after 3h0m0s\n'
+  exit 2
+  ;;
+*) printf '=== RUN   TestTrial\nFORGE_CI_LIVE_SCENARIO TestTrial\n=== RUN   TestTrial/row\n=== RUN   TestTrial/row/private\n        --- PASS: TestTrial/row/private (1.00s)\n    --- PASS: TestTrial/row (1.00s)\n--- PASS: TestTrial (1.00s)\nPASS\n' ;;
+esac
+`
+
+// A focused run on a prepared directory runs each table row its pattern
+// selects as a process of its own, in the package whose binary has the
+// row's test, then whatever else the pattern selects in every package. A
+// row that runs into the time limit costs that row: the rows after it run,
+// each prints its line when it ends, and the run fails. A row whose test no
+// binary has fails the run too.
+func TestRunLiveTests_RunsEachSelectedRowAsItsOwnProcess(t *testing.T) {
+	classifier := buildLiveClassifier(t)
+	packages := filepath.Join(t.TempDir(), "packages")
+	first, second := filepath.Join(packages, "first"), filepath.Join(packages, "second")
+
+	for _, dir := range []string{first, second} {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	rowRun := func(rows ...string) (liveRun, string, int) {
+		run := newLiveRun(t, "FAKE_REAL_CLASSIFIER="+classifier, "FORGE_CI_LIVE_PREPARED=/prepared/dir", "FAKE_GO_PACKAGE="+first+"\n"+second,
+			"FAKE_GO_SECOND_PACKAGE="+second, "FAKE_FOCUSED_ROWS="+strings.Join(rows, "\n"), "FAKE_GO_SUITE="+fakeRowSuite)
+
+		stdout, stderr, status := run.exec(t, "focused", "TestTrial")
+
+		return run, stdout + stderr, status
+	}
+
+	rows := []string{"^TestTrial$/^one$", "^TestTrial$/^two$", "^TestTrial$/^three$"}
+
+	run, output, status := rowRun(rows...)
+	if status != 2 || !strings.Contains(output, "Live result: failed\n") {
+		t.Fatalf("status %d\n%s", status, output)
+	}
+
+	const flags = " -test.paniconexit0 -test.count=1 -test.timeout=3h -test.v -test.run "
+
+	want := []string{"suite first" + flags + rows[0], "suite first" + flags + rows[1], "suite first" + flags + rows[2],
+		"suite first" + flags + "TestTrial -test.skip ^TestTrial$", "suite second" + flags + "TestTrial -test.skip ^TestTrial$"}
+	if suites := slices.DeleteFunc(run.goCalls(t), func(call string) bool { return !strings.HasPrefix(call, "suite ") }); !slices.Equal(suites, want) {
+		t.Errorf("the suite ran as\n%s\nwant\n%s", strings.Join(suites, "\n"), strings.Join(want, "\n"))
+	}
+
+	ended := regexp.MustCompile(`(?m)^FORGE_CI_LIVE_ROW (\S+) \d+m\d\ds (.*)$`).FindAllStringSubmatch(output, -1)
+	if len(ended) != 3 || ended[0][1] != "passed" || ended[1][1] != "failed" || ended[2][1] != "passed" ||
+		ended[0][2] != rows[0] || ended[1][2] != rows[1] || ended[2][2] != rows[2] {
+		t.Errorf("the rows ended as %v\n%s", ended, output)
+	}
+
+	if _, output, status := rowRun(rows[0], "^TestNowhere$/^one$"); status != 1 || !strings.Contains(output, "live: 1 of 2 selected rows ran") {
+		t.Errorf("a row whose test no binary has: status %d\n%s", status, output)
+	}
+}
+
+// A run set below the full one runs its own rows, and beside them only what
+// Go says the set runs, with every test of the tables kept out: a test whose
+// rows are all outside the set would otherwise run whole there. When Go says
+// nothing, the rows are the whole run.
+func TestRunLiveTests_ARunSetLeavesTheTestsOfItsOtherRowsOut(t *testing.T) {
+	packages := filepath.Join(t.TempDir(), "packages")
+	first, second := filepath.Join(packages, "first"), filepath.Join(packages, "second")
+
+	for _, dir := range []string{first, second} {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	const (
+		row   = "^TestTrial$/^one$"
+		flags = " -test.paniconexit0 -test.count=1 -test.timeout=3h -test.v -test.run "
+	)
+
+	for others, want := range map[string][]string{
+		"^TestScenario$": {"suite first" + flags + row, "suite first" + flags + "^TestScenario$ -test.skip ^TestTrial$|^TestElsewhere$",
+			"suite second" + flags + "^TestScenario$ -test.skip ^TestTrial$|^TestElsewhere$"},
+		"": {"suite first" + flags + row},
+	} {
+		run := newLiveRun(t, "FORGE_CI_LIVE_PREPARED=/prepared/dir", "FORGE_CI_LIVE_SET=small", "FAKE_GO_PACKAGE="+first+"\n"+second,
+			"FAKE_GO_SECOND_PACKAGE="+second, "FAKE_FOCUSED_ROWS="+row, "FAKE_FOCUSED_ROWS_FULL="+row+"\n^TestElsewhere$/^two$",
+			"FAKE_FOCUSED_SCENARIOS="+others, "FAKE_GO_SUITE="+fakeRowSuite)
+
+		stdout, stderr, status := run.exec(t, "focused", "Test")
+		if status != 0 {
+			t.Fatalf("others %q: status %d\n%s%s", others, status, stdout, stderr)
+		}
+
+		if suites := slices.DeleteFunc(run.goCalls(t), func(call string) bool { return !strings.HasPrefix(call, "suite ") }); !slices.Equal(suites, want) {
+			t.Errorf("others %q: the suite ran as\n%s\nwant\n%s", others, strings.Join(suites, "\n"), strings.Join(want, "\n"))
+		}
+
+		if _, log := run.logFile(t); !strings.Contains(log, "forge_ci_live_set=small\n") {
+			t.Errorf("the log's header does not record the run set:\n%s", log)
+		}
+	}
+}
+
+// A delta run of the full set runs what the pattern matches beside its rows
+// less the tables' tests and the scenarios Go says its set after ran, and
+// its header records the set after.
+func TestRunLiveTests_ADeltaRunSkipsWhatItsSetAfterRan(t *testing.T) {
+	first := filepath.Join(t.TempDir(), "packages", "first")
+	if err := os.MkdirAll(first, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	const (
+		row   = "^TestTrial$/^one$"
+		flags = " -test.paniconexit0 -test.count=1 -test.timeout=3h -test.v -test.run "
+	)
+
+	run := newLiveRun(t, "FORGE_CI_LIVE_PREPARED=/prepared/dir", "FORGE_CI_LIVE_SET=full", "FORGE_CI_LIVE_AFTER=medium",
+		"FAKE_GO_PACKAGE="+first, "FAKE_GO_SECOND_PACKAGE=", "FAKE_FOCUSED_ROWS="+row,
+		"FAKE_FOCUSED_SCENARIOS=Test", "FAKE_FOCUSED_SKIP=^TestLane$", "FAKE_GO_SUITE="+fakeRowSuite)
+
+	stdout, stderr, status := run.exec(t, "focused", "Test")
+	if status != 0 {
+		t.Fatalf("status %d\n%s%s", status, stdout, stderr)
+	}
+
+	want := []string{"suite first" + flags + row, "suite first" + flags + "Test -test.skip ^TestTrial$|^TestLane$"}
+	if suites := slices.DeleteFunc(run.goCalls(t), func(call string) bool { return !strings.HasPrefix(call, "suite ") }); !slices.Equal(suites, want) {
+		t.Errorf("the suite ran as\n%s\nwant\n%s", strings.Join(suites, "\n"), strings.Join(want, "\n"))
+	}
+
+	if _, log := run.logFile(t); !strings.Contains(log, "forge_ci_live_set=full\nforge_ci_live_after=medium\n") {
+		t.Errorf("the log's header does not record the delta:\n%s", log)
+	}
+}
+
+// fakeRerunSuite is a compiled suite whose rows end by their names. A row
+// "flaky" fails its first process on a dependency the engine could not reach
+// and passes its second, "down" fails every process so, "defect" fails on
+// another engine error, "limit" runs into the time limit after the same
+// error, "spoof" fails with the phrase where a program of the job printed it
+// and the engine's line in the output of a command of the harness, and any
+// other row passes. Each process records where
+// it would keep its job logs.
+const fakeRerunSuite = `#!/usr/bin/env bash
+set -euo pipefail
+if [[ "$1" == -test.list ]]; then printf 'TestTrial\n'; exit 0; fi
+printf 'suite %s\njob-logs %s\n' "$*" "$FORGE_CI_LIVE_SNAPSHOT_EVIDENCE_DIR" >>"$FAKE_GO_ARGV"
+begin() { printf '=== RUN   TestTrial\nFORGE_CI_LIVE_SCENARIO TestTrial\n=== RUN   TestTrial/row\n=== RUN   TestTrial/row/private\n'; }
+trace() {
+  printf '    layer_test.go:210: failure   job "Build: image"\n    layer_test.go:226: job "Build: image" log (tail):\n        %s\n        %s\n' "$1" "${2:-exitcode '69': failure}"
+  printf 'FORGE_CI_LIVE_CONCLUSION TestTrial/row/private\n    layer_test.go:321: run 7 of release.yml ended "failure", want success\n'
+}
+ended() { printf '        --- %s: TestTrial/row/private (1.00s)\n    --- %s: TestTrial/row (1.00s)\n--- %s: TestTrial (1.00s)\n%s\n' "$1" "$1" "$1" "$1"; }
+unreached='2026-11-11T12:23:38.9347345Z Error: download t.tar.gz: dial tcp: lookup github.com on 10.201.0.1:53: i/o timeout: dependency unavailable'
+case "$*" in
+*-test.skip*) printf 'testing: warning: no tests to run\nPASS\n'; exit 0 ;;
+*flaky*)
+  seen=0
+  while IFS= read -r call; do [[ "$call" != suite*flaky* ]] || seen=$((seen + 1)); done <"$FAKE_GO_ARGV"
+  begin
+  if [[ "$seen" -gt 1 ]]; then ended PASS; exit 0; fi
+  trace "$unreached"
+  ;;
+*down*) begin; trace "$unreached" ;;
+*defect*) begin; trace 'Error: artifact build-dist not found' "exitcode '1': failure" ;;
+*limit*) begin; trace "$unreached"; printf '        --- FAIL: TestTrial/row/private (1.00s)\n=== RUN   TestTrial/row/public\npanic: test timed out after 3h0m0s\n'; exit 2 ;;
+*spoof*) begin; trace '[INFO] the mirror said: dependency unavailable'; printf '    trial_test.go:70: git push:\n        %s\n' "$unreached" ;;
+*) begin; ended PASS; exit 0 ;;
+esac
+ended FAIL
+exit 1
+`
+
+// A row that failed on an unavailable dependency alone runs again once, after
+// the run's other rows and the rest of the selection, in the same invocation.
+// Its rerun is the row's result: the run passes when it does, with both
+// attempts in the log and in verdict.json and the rerun's job logs in a
+// directory of their own. Nothing else runs again: not a row that failed on
+// something else, ran into the time limit or only printed the phrase, and
+// not a rerun that failed.
+func TestRunLiveTests_RerunsARowThatFailedOnAnUnavailableDependencyOnce(t *testing.T) {
+	classifier := buildLiveClassifier(t)
+
+	const flags = "suite -test.paniconexit0 -test.count=1 -test.timeout=3h -test.v -test.run "
+
+	row := func(name string) string { return "^TestTrial$/^" + name + "$" }
+	rest := flags + "TestTrial -test.skip ^TestTrial$"
+
+	for _, tc := range []struct {
+		name   string
+		rows   []string
+		status int
+		result string
+		reruns []string
+		ended  []string
+	}{
+		{"the rerun passes", []string{"flaky", "one"}, 0, "Live result: passed: 1 row(s) on a rerun after an unavailable dependency; verdict.json has both attempts\n",
+			[]string{"flaky"}, []string{"failed flaky", "passed one", "passed flaky"}},
+		{"the rerun fails", []string{"down", "one"}, 1, "Live result: failed\n", []string{"down"}, []string{"failed down", "passed one", "failed down"}},
+		{"only the unavailable row", []string{"defect", "limit", "spoof", "flaky"}, 1, "Live result: failed\n",
+			[]string{"flaky"}, []string{"failed defect", "failed limit", "failed spoof", "failed flaky", "passed flaky"}},
+		{"no row failed", []string{"one", "two"}, 0, "Live result: passed\n", nil, []string{"passed one", "passed two"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rows := make([]string, 0, len(tc.rows))
+			want := make([]string, 0, len(tc.rows)+1+len(tc.reruns))
+
+			for _, name := range tc.rows {
+				rows = append(rows, row(name))
+				want = append(want, flags+row(name))
+			}
+
+			want = append(want, rest)
+			for _, name := range tc.reruns {
+				want = append(want, flags+row(name))
+			}
+
+			run := newLiveRun(t, "FAKE_REAL_CLASSIFIER="+classifier, "FORGE_CI_LIVE_PREPARED=/prepared/dir",
+				"FAKE_FOCUSED_ROWS="+strings.Join(rows, "\n"), "FAKE_GO_SUITE="+fakeRerunSuite)
+
+			stdout, stderr, status := run.exec(t, "focused", "TestTrial")
+			if output := stdout + stderr; status != tc.status || !strings.Contains(output, tc.result) {
+				t.Fatalf("status %d, want %d and %q\n%s", status, tc.status, tc.result, output)
+			}
+
+			calls := run.goCalls(t)
+			if suites := slices.DeleteFunc(slices.Clone(calls), func(call string) bool { return !strings.HasPrefix(call, "suite ") }); !slices.Equal(suites, want) {
+				t.Errorf("the suite ran as\n%s\nwant\n%s", strings.Join(suites, "\n"), strings.Join(want, "\n"))
+			}
+
+			logPath, log := run.logFile(t)
+
+			matches := regexp.MustCompile(`(?m)^FORGE_CI_LIVE_ROW (\S+) \d+m\d\ds \^TestTrial\$/\^(\w+)\$$`).FindAllStringSubmatch(log, -1)
+			ended := make([]string, 0, len(matches))
+
+			for _, match := range matches {
+				ended = append(ended, match[1]+" "+match[2])
+			}
+
+			if !slices.Equal(ended, tc.ended) {
+				t.Errorf("the rows ended as %q, want %q", ended, tc.ended)
+			}
+
+			// A rerun, and nothing else, is marked and keeps its job logs apart.
+			jobLogs := filepath.Join(filepath.Dir(logPath), "job-logs")
+			if got := strings.Count(strings.Join(calls, "\n")+"\n", "job-logs "+filepath.Join(jobLogs, "rerun")+"\n"); got != len(tc.reruns) {
+				t.Errorf("%d processes kept their job logs in rerun/, want %d\n%s", got, len(tc.reruns), strings.Join(calls, "\n"))
+			}
+
+			if got := strings.Count(log, "\nFORGE_CI_LIVE_RERUN "); got != len(tc.reruns) {
+				t.Errorf("%d rerun marks in the log, want %d", got, len(tc.reruns))
+			}
+
+			// The operator is told why a row runs again, before it does.
+			for _, name := range tc.reruns {
+				if why := "\nLive cause: " + row(name) + ": infrastructure: name resolution (github.com); the row failed and runs again once\n" + "FORGE_CI_LIVE_PACKAGE_BEGIN "; !strings.Contains(log, why) {
+					t.Errorf("the log lacks %q", why)
+				}
+			}
+
+			verdict, err := os.ReadFile(filepath.Join(filepath.Dir(logPath), "verdict.json"))
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if got := strings.Count(string(verdict), `"cause": "infrastructure: name resolution (github.com)"`); len(tc.reruns) == 0 && (got != 0 || strings.Contains(string(verdict), `"reruns"`)) ||
+				len(tc.reruns) != 0 && (!strings.Contains(string(verdict), `"reruns"`) || !strings.Contains(string(verdict), `"row": "`+row(tc.reruns[0])+`"`) || got == 0) {
+				t.Errorf("verdict.json:\n%s", verdict)
+			}
+		})
+	}
+}
+
+// A pattern the row selection refuses is a usage error: nothing is built,
+// no lock is taken and no evidence is written.
+func TestRunLiveTests_ARefusedPatternIsAUsageError(t *testing.T) {
+	t.Parallel()
+
+	run := newLiveRun(t, "FORGE_CI_LIVE_PREPARED=/prepared/dir", "FAKE_FOCUSED_ROWS_REFUSED=1")
+
+	stdout, stderr, status := run.exec(t, "focused", "^TestTrial$/^no-such-lane$")
+	if status != 2 || !strings.Contains(stderr, "selects no row") {
+		t.Fatalf("status %d\nstdout:\n%s\nstderr:\n%s", status, stdout, stderr)
+	}
+
+	requireNoEvidence(t, run)
 }
 
 func TestRunLiveTests_PrunesOnlyOldRunDirectories(t *testing.T) {
@@ -643,11 +960,48 @@ func TestRunLiveTests_RefusesWhileAnotherRunHoldsTheLock(t *testing.T) {
 		t.Fatalf("stderr does not name the held lock:\n%s", stderr)
 	}
 
-	if calls := run.goCalls(t); len(calls) != 2 || calls[0] != "run ./internal/livetest/preflight" || calls[1] != hostToolsPreflight {
+	if calls := run.goCalls(t); len(calls) != 2 || calls[0] != "run ./test/live/internal/livetest/preflight" || calls[1] != hostToolsPreflight {
 		t.Fatalf("expected only the preflight calls, got %v", calls)
 	}
 
 	requireNoEvidence(t, run)
+}
+
+// A preflight writes nothing to the lab, so it runs beside a run that holds
+// the lock, and its log says it was a preflight.
+func TestRunLiveTests_PreflightRunsBesideAHeldLock(t *testing.T) {
+	t.Parallel()
+	run := newLiveRun(t, "FORGE_CI_LIVE_PREFLIGHT=1")
+
+	lockDir := filepath.Join(run.stateHome, "forge-ci")
+	if err := os.MkdirAll(lockDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	held, err := os.OpenFile(filepath.Join(lockDir, "live.lock"), os.O_CREATE|os.O_WRONLY, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Cleanup(func() { _ = held.Close() })
+
+	if err := syscall.Flock(int(held.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		t.Fatal(err)
+	}
+
+	stdout, stderr, status := run.exec(t, "full")
+	if status != 0 || !strings.Contains(stdout, "live: preflight: each scenario stops at its admission") {
+		t.Fatalf("status %d\nstdout:\n%s\nstderr:\n%s", status, stdout, stderr)
+	}
+
+	if _, log := run.logFile(t); !strings.Contains(log, "\npreflight=1\n") {
+		t.Fatalf("the log header does not mark the preflight:\n%s", log)
+	}
+
+	invalid := newLiveRun(t, "FORGE_CI_LIVE_PREFLIGHT=yes")
+	if _, stderr, status := invalid.exec(t, "full"); status != 2 || !strings.Contains(stderr, "FORGE_CI_LIVE_PREFLIGHT must be 1 or unset") {
+		t.Fatalf("an invalid preflight setting ran: %d, %s", status, stderr)
+	}
 }
 
 func TestRunLiveTests_ProviderLanesOverlapAndConflictingScopesRefuse(t *testing.T) {
@@ -711,15 +1065,16 @@ func TestRunLiveTests_ProviderLanesOverlapAndConflictingScopesRefuse(t *testing.
 		t.Fatalf("first provider lane did not reach its held scenario: %v\n%s\n%s", err, out.String(), errOut.String())
 	}
 
-	for _, scope := range []string{"gitlab", "forgejo", "all"} {
-		second := newLiveRun(t, "FORGE_CI_LIVE_PROVIDER="+scope, "FAKE_GO_TEST_OUTPUT="+fakeSuiteOutput,
+	// Another provider overlaps, and so does the same provider as another
+	// lab account; the same account and an all-provider run are refused.
+	for _, lane := range []struct {
+		scope, account string
+		want           int
+	}{{"gitlab", "forgeci", 0}, {"forgejo", "forgeci2", 0}, {"forgejo", "forgeci", 2}, {"all", "forgeci", 2}} {
+		scope, want := lane.scope, lane.want
+		second := newLiveRun(t, "FORGE_CI_LIVE_PROVIDER="+scope, "FAKE_LAB_ACCOUNT="+lane.account, "FAKE_GO_TEST_OUTPUT="+fakeSuiteOutput,
 			"XDG_STATE_HOME="+first.stateHome)
 		stdout, stderr, status := second.exec(t, "focused", "TestFake")
-
-		want := 2
-		if scope == "gitlab" {
-			want = 0
-		}
 
 		if status != want {
 			t.Fatalf("scope %s while Forgejo is active: status=%d, want=%d\n%s\n%s", scope, status, want, stdout, stderr)
@@ -755,54 +1110,28 @@ func awaitHeldLane(ctx context.Context, exited <-chan struct{}, ready string) er
 	}, retry.WithBackoff(retry.Constant))
 }
 
-func TestRunLiveTests_ScopedLaneRespectsLegacyExclusiveLock(t *testing.T) {
-	for _, scope := range []string{"forgejo", "gitlab"} {
-		t.Run(scope, func(t *testing.T) {
-			run := newLiveRun(t, "FORGE_CI_LIVE_PROVIDER="+scope)
-
-			dir := filepath.Join(run.stateHome, "forge-ci")
-			if err := os.MkdirAll(dir, 0o700); err != nil {
-				t.Fatal(err)
-			}
-
-			held, err := os.OpenFile(filepath.Join(dir, "live.lock"), os.O_CREATE|os.O_WRONLY, 0o600)
-			if err != nil {
-				t.Fatal(err)
-			}
-
-			defer func() { _ = held.Close() }()
-
-			if err := syscall.Flock(int(held.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
-				t.Fatal(err)
-			}
-
-			_, stderr, status := run.exec(t, "focused", "TestFake")
-			if status != 2 || !strings.Contains(stderr, "another live run holds") {
-				t.Fatalf("legacy lock bypassed: %d, %s", status, stderr)
-			}
-
-			requireNoEvidence(t, run)
-		})
-	}
-}
-
-// verdict.json records the consumer inputs livetest.LiveRunInputs names, and
-// the log's header those its loop names: the two lists must stay one, so the
-// verdict never takes an input the log's header would not show.
-func TestRunLiveTests_HeaderInputsAreTheVerdictsInputs(t *testing.T) {
+// A run that takes prepared images hands the prepared directory, its own
+// commit and its working-tree state to the Go preflight, and builds and runs
+// nothing when that refuses: the images are of one commit.
+func TestRunLiveTests_RunsNothingOnAPreparedDirectoryOfAnotherCommit(t *testing.T) {
 	t.Parallel()
+	run := newLiveRun(t, "FORGE_CI_LIVE_PREPARED=/prepared/dir", "FAKE_PREPARED_REFUSES=1", "FAKE_GO_TEST_OUTPUT="+fakeSuiteOutput)
 
-	script := string(reporoot.ReadFile(t, "scripts/ci/run-live-tests.sh"))
-
-	_, loop, found := strings.Cut(script, "\tfor input in ")
-	loop, _, ended := strings.Cut(loop, "; do")
-
-	if !found || !ended {
-		t.Fatal("run-live-tests.sh has no header input loop")
+	stdout, stderr, status := run.exec(t, "focused", "TestFake")
+	if status != 2 {
+		t.Fatalf("status %d\nstdout:\n%s\nstderr:\n%s", status, stdout, stderr)
 	}
 
-	logged := strings.Fields(strings.ReplaceAll(loop, "\\\n", " "))
-	if !slices.Equal(logged, livetest.LiveRunInputs) {
-		t.Fatalf("the header logs %v, verdict.json records %v", logged, livetest.LiveRunInputs)
+	calls := run.goCalls(t)
+	prepared := regexp.MustCompile(`^run ./test/live/internal/livetest/preflight prepared-source /prepared/dir [0-9a-f]{40}( |$)`)
+
+	if !slices.ContainsFunc(calls, prepared.MatchString) {
+		t.Errorf("the preflight was not given the directory and the commit:\n%s", strings.Join(calls, "\n"))
+	}
+
+	if slices.ContainsFunc(calls, func(call string) bool {
+		return strings.HasPrefix(call, "build") || strings.HasPrefix(call, "test") || strings.HasPrefix(call, "suite")
+	}) {
+		t.Errorf("the refused run built or ran something:\n%s", strings.Join(calls, "\n"))
 	}
 }

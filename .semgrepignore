@@ -19,4 +19,4 @@ examples/
 # Live workflow fixtures pin PIN_FORGE_CI_SHA, which Layer.Render replaces
 # with the exact served commit and refuses if any placeholder survives.
 # They are test inputs, not workflows a forge can run as committed.
-internal/livetest/conformance/testdata/layer/
+test/live/conformance/testdata/layer/

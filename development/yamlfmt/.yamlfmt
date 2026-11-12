@@ -11,8 +11,8 @@
 
 # Go text/template inputs; the harness validates the rendered workflows.
 exclude:
-  - internal/livetest/testdata/maven-service-development.yml
-  - internal/livetest/testdata/npm-application-development.yml
+  - test/live/internal/livetest/testdata/service-development.yml.tmpl
+  - test/live/internal/livetest/testdata/npm-application-development.yml.tmpl
 
 formatter:
   type: basic
