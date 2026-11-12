@@ -234,3 +234,22 @@ func TestResolveForgeRegistries_RefuseARepositoryWithoutOwnerOrName(t *testing.T
 		}
 	}
 }
+
+// The Debian, RPM and Alpine registries are paths of the owner's package
+// root, and the token is the one this server issued.
+func TestResolveForgeDistroRegistry_Forgejo(t *testing.T) {
+	t.Parallel()
+
+	p := &forgejo.Provider{Env: func(k string) string {
+		return map[string]string{"FORGEJO_SERVER_URL": "https://forge.example/", "FORGEJO_REPOSITORY": "owner/repo", "FORGEJO_TOKEN": "ft"}[k]
+	}}
+
+	reg, err := p.ResolveForgeDistroRegistry()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if reg != (provider.ForgeDistroRegistry{URL: "https://forge.example/api/packages/owner", Token: "ft"}) {
+		t.Errorf("registry = %+v", reg)
+	}
+}

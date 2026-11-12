@@ -17,10 +17,10 @@ func TestNewConfigPlan_GroupsArtifactsAndDefaultsContainers(t *testing.T) {
 
 	cfg := &config.Config{
 		Artifacts: []config.Artifact{
-			{Name: "app", ProjectType: projecttype.Maven, BuildType: config.BuildTypeApplication, PublishTo: []config.PublishTarget{config.PublishForgePackages}},
+			{Name: "app", ProjectType: projecttype.Maven, WorkingDirectory: "services/app", BuildType: config.BuildTypeApplication, PublishTo: []config.PublishTarget{config.PublishForgePackages}},
 			{Name: "lib", ProjectType: projecttype.Maven, BuildType: config.BuildTypeLibrary, PublishTo: []config.PublishTarget{config.PublishForgePackages, config.PublishMavenCentral}},
 			{Name: "pkg", ProjectType: projecttype.NPM, PublishTo: []config.PublishTarget{config.PublishForgePackages, config.PublishNPMJS}, NPM: &config.NPMConfig{Tag: "release-{version}"}},
-			{Name: "jvm-app", ProjectType: projecttype.Gradle},
+			{Name: "jvm-app", ProjectType: projecttype.Gradle, WorkingDirectory: "services/jvm-app"},
 			{Name: "go-cli", ProjectType: projecttype.Go, Go: &config.GoConfig{BuildMode: config.GoBuildModeArtifactFirst}},
 			{Name: "go-service", ProjectType: projecttype.Go, Go: &config.GoConfig{BuildMode: config.GoBuildModeContainerFirst}},
 		},
@@ -96,12 +96,26 @@ func TestNewConfigPlan_GroupsArtifactsAndDefaultsContainers(t *testing.T) {
 		t.Errorf("maven artifact name = %q", plannedContainer.MavenArtifactName)
 	}
 
+	// The image build restores the artifact where it was built.
+	if plannedContainer.MavenWorkingDirectory != "services/app" {
+		t.Errorf("maven working directory = %q", plannedContainer.MavenWorkingDirectory)
+	}
+
+	// What the planner writes, the consuming job's validation admits.
+	if err := pipeline.ValidateConfigPlan(plan); err != nil {
+		t.Errorf("the planner's own plan is refused: %v", err)
+	}
+
 	if plannedContainer.NPMArtifactName != "pkg-build-artifacts" {
 		t.Errorf("npm artifact name = %q", plannedContainer.NPMArtifactName)
 	}
 
 	if plannedContainer.GradleArtifactName != "jvm-app-build-artifacts" {
 		t.Errorf("gradle artifact name = %q", plannedContainer.GradleArtifactName)
+	}
+
+	if plannedContainer.GradleWorkingDirectory != "services/jvm-app" {
+		t.Errorf("gradle working directory = %q", plannedContainer.GradleWorkingDirectory)
 	}
 
 	// Per-container gates default true when artifacts.yml doesn't set them.

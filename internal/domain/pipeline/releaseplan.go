@@ -12,7 +12,10 @@ import (
 	"github.com/diggsweden/forge-ci/internal/domain/config"
 	domaincontainer "github.com/diggsweden/forge-ci/internal/domain/container"
 	"github.com/diggsweden/forge-ci/internal/domain/errs"
+	"github.com/diggsweden/forge-ci/internal/domain/projecttype"
+	"github.com/diggsweden/forge-ci/internal/domain/provider"
 	domainrelease "github.com/diggsweden/forge-ci/internal/domain/release"
+	"github.com/diggsweden/forge-ci/internal/domain/runners"
 	"github.com/diggsweden/forge-ci/internal/listval"
 	"github.com/diggsweden/forge-ci/internal/pathsafe"
 )
@@ -42,6 +45,10 @@ type ReleasePlanInput struct {
 	// ReleasePlatforms is RELEASE_PLATFORMS, the subset of each container's
 	// declared platforms this run builds. Empty plans every declared platform.
 	ReleasePlatforms string
+	// Runners is the runner inputs the forge layer passed. The plan is
+	// refused when a platform it builds, or its Xcode jobs, has none; nil, a
+	// layer that passes none, is not checked.
+	Runners *runners.Inputs
 }
 
 // ReleasePlan is the top-level typed contract for production release setup.
@@ -263,6 +270,14 @@ func NewReleasePlan(in ReleasePlanInput) (ReleasePlan, error) {
 
 	in.ConfigPlan = narrowed
 
+	if err := RefuseDistroPackages(narrowed.DistroPackages, "GitHub", "GitHub Packages has no Debian, RPM or Alpine registry"); err != nil {
+		return ReleasePlan{}, err
+	}
+
+	if err := in.Runners.Admit(releaseRunnerNeeds(narrowed)); err != nil {
+		return ReleasePlan{}, err
+	}
+
 	if err := domainrelease.ValidateTransparencyConsent(in.RepositoryVisibility, in.ConfigPlan.Sign.Transparency, in.ConfigPlan.Sign.TransparencyExplicit, in.ReleaseSignArtifacts); err != nil {
 		return ReleasePlan{}, err
 	}
@@ -340,6 +355,104 @@ func validateContainerSigning(plan ConfigPlan, policy ReleasePolicy) error {
 	return nil
 }
 
+// VersionBumpRuns is the version-bump rule every forge's release shares: the
+// release commit bumps the planned projects when the release renders the
+// changelog that commit carries, unless the caller skips the bump.
+func VersionBumpRuns(rendersChangelog, skipBump bool) bool {
+	return rendersChangelog && !skipBump
+}
+
+// NewPolicyReleaseStagePlans returns the prepare and build stage plans of a
+// declaration for a release whose policy, not artifacts.yml, decides signing
+// and publication: the GitLab release component's and Forgejo's
+// prepare-release.yml. The stages are the ones NewReleasePlan derives from the
+// same declaration. Both releases render their changelog with either renderer
+// and have no skip, so they bump.
+func NewPolicyReleaseStagePlans(configPlan ConfigPlan) (ReleasePrepareStagePlan, ReleaseBuildStagePlan, error) {
+	if err := ValidateConfigPlan(configPlan); err != nil {
+		return ReleasePrepareStagePlan{}, ReleaseBuildStagePlan{}, err
+	}
+
+	policy := ReleasePolicy{RunVersionBump: VersionBumpRuns(true, false)}
+
+	return newReleasePrepareStagePlan(configPlan, policy, ""), newReleaseBuildStagePlan(configPlan), nil
+}
+
+// ReleaseSigningWarnings says how the forge's release signs when the
+// declaration asks for signing that release does not use, and is empty when
+// it signs as declared. It warns about a sign.method, a sign.files-method or
+// a sign.key the release does not use, naming the key that signs instead,
+// and about any sign.transparency, which the release's transparency-log
+// input decides instead. One declaration often serves several forges, so
+// these are warnings, never a refusal. sign is the block as written: a
+// declaration without a method is signed as the release signs by default,
+// and has no warning.
+func ReleaseSigningWarnings(sign config.SignConfig, forge provider.ForgeAPI) []string {
+	methods := provider.ReleaseSignMethods(forge)
+	if methods == nil {
+		return nil
+	}
+
+	var warnings []string
+	if warning := releaseKeyWarning(sign, forge, methods); warning != "" {
+		warnings = append(warnings, warning)
+	}
+
+	if sign.Transparency != "" {
+		warnings = append(warnings, fmt.Sprintf(
+			"sign.transparency %s is not used by the %s release; its transparency-log input decides whether Cosign signatures are written to the public transparency log, and is none by default",
+			sign.Transparency, forge))
+	}
+
+	return warnings
+}
+
+// releaseKeyWarning names the key that signs the release files when the
+// declaration asks for a method or key the release does not use.
+func releaseKeyWarning(sign config.SignConfig, forge provider.ForgeAPI, methods []domainrelease.SignMethod) string {
+	const cosignKey = "the Cosign key (RELEASE_COSIGN_PRIVATE_KEY)"
+
+	signedWith := "release files are signed with " + cosignKey
+	if sign.DeclaresGPG() && slices.Contains(methods, domainrelease.SignMethodGPG) {
+		signedWith = "release files are signed with GPG (RELEASE_GPG_PRIVATE_KEY), and the provenance, evidence and images with " + cosignKey
+	}
+
+	if sign.Method != "" && !slices.Contains(methods, sign.Method) {
+		return fmt.Sprintf("sign.method %s is not available on the %s release; %s", sign.Method, forge, signedWith)
+	}
+
+	if sign.FilesMethod != "" && !slices.Contains(methods, sign.FilesMethod) {
+		return fmt.Sprintf("sign.files-method %s is not available on the %s release; %s", sign.FilesMethod, forge, signedWith)
+	}
+
+	if sign.Key != "" && sign.Key != config.CosignKeyEnvRef {
+		return fmt.Sprintf("sign.key %q is not used by the %s release; %s, sign.key %s",
+			sign.Key, forge, signedWith, config.CosignKeyEnvRef)
+	}
+
+	return ""
+}
+
+// RefuseDistroPackages refuses the distro-packages block for a release whose
+// forge has no registry to publish the packages to, before anything is
+// built: the release would otherwise publish without the packages the
+// declaration asks for. reason says what the forge lacks.
+func RefuseDistroPackages(declared *config.DistroPackages, forge, reason string) error {
+	if declared == nil {
+		return nil
+	}
+
+	return fmt.Errorf(
+		"distro-packages is published by the Forgejo release only; %s, so the %s release cannot publish .deb, .rpm and .apk files to a registry: remove distro-packages (the packages stay release files): %w",
+		reason, forge, errs.ErrUnsupported)
+}
+
+// UndeclaredReleaseStagePlans are the stage plans of a release without a
+// declaration: no project to bump and none to build.
+func UndeclaredReleaseStagePlans() (ReleasePrepareStagePlan, ReleaseBuildStagePlan) {
+	return newReleasePrepareStagePlan(ConfigPlan{}, ReleasePolicy{}, ""), newReleaseBuildStagePlan(ConfigPlan{})
+}
+
 // newReleasePrepareStagePlan builds the standalone release prepare-stage plan.
 func newReleasePrepareStagePlan(configPlan ConfigPlan, policy ReleasePolicy, filePattern string) ReleasePrepareStagePlan {
 	return ReleasePrepareStagePlan{
@@ -369,6 +482,43 @@ func newReleaseBuildStagePlan(configPlan ConfigPlan) ReleaseBuildStagePlan {
 			Cargo:         newTargetPlan(artifacts.CargoArtifactFirst),
 		},
 	}
+}
+
+// VersionFamily is a toolchain family whose native version tool prepares a
+// share of a release's version bump in a key-free job of its own, in the
+// family's runtime image, and the project type that tool bumps.
+type VersionFamily struct {
+	Family      string           `json:"family"`
+	ProjectType projecttype.Type `json:"project-type"`
+}
+
+// versionFamilies are the families with a native version tool, in the order
+// every forge lists them. The other types' version files are text, which the
+// release commit's job writes itself.
+var versionFamilies = []VersionFamily{
+	{Family: "java", ProjectType: projecttype.Maven},
+	{Family: "node", ProjectType: projecttype.NPM},
+	{Family: "rust", ProjectType: projecttype.Cargo},
+}
+
+// VersionFamilies are the families whose native version tools the planned
+// bump runs, each once, in family order; none when the plan bumps nothing.
+func (p ReleasePrepareStagePlan) VersionFamilies() []VersionFamily {
+	if !p.Targets.VersionBump.Runs {
+		return nil
+	}
+
+	var out []VersionFamily
+
+	for _, family := range versionFamilies {
+		if slices.ContainsFunc(p.Targets.VersionBump.Items, func(item PlannedArtifact) bool {
+			return item.ProjectType == family.ProjectType
+		}) {
+			out = append(out, family)
+		}
+	}
+
+	return out
 }
 
 // newReleasePublishStagePlan builds the standalone release publish-stage plan.
@@ -504,7 +654,7 @@ func selectReleasePlatforms(plan ConfigPlan, selection string) (ConfigPlan, erro
 	containers := slices.Clone(plan.Containers.All)
 
 	for i := range containers {
-		declared := splitPlatforms(containers[i].Platforms)
+		declared := listval.Tokens(containers[i].Platforms)
 		if len(declared) == 0 {
 			continue
 		}

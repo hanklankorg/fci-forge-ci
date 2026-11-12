@@ -28,7 +28,7 @@ func PublishStagePipeline(plan pipeline.ReleasePublishStagePlan, opts BuildPipel
 
 	stage := opts.Stage
 	if stage == "" {
-		stage = "publish"
+		stage = stagePublish
 	}
 
 	out := ChildPipeline{Stages: []string{stage}}
@@ -65,7 +65,7 @@ func PublishStagePipeline(plan pipeline.ReleasePublishStagePlan, opts BuildPipel
 		{name: "go-container-first", component: componentPublishContainer, planned: targetPlanned(tgt.GoContainerFirst)},
 	} {
 		if unsupported.planned {
-			return ChildPipeline{}, unsupportedTarget("publish", unsupported.name, unsupported.component)
+			return ChildPipeline{}, unsupportedTarget(stagePublish, unsupported.name, unsupported.component)
 		}
 	}
 
@@ -135,10 +135,6 @@ func representableAppStoreItems(items []pipeline.PlannedArtifact) error {
 
 		if artifact.XcodeIOS.SubmitForReview {
 			return fmt.Errorf("GitLab publish target apple-appstore cannot represent submit-for-review: %w", errs.ErrUnsupported)
-		}
-
-		if artifact.XcodeIOS.MacOSVersion != "" {
-			return fmt.Errorf("GitLab publish target apple-appstore cannot translate macos-version %q to a GitLab runner image: %w", artifact.XcodeIOS.MacOSVersion, errs.ErrUnsupported)
 		}
 	}
 

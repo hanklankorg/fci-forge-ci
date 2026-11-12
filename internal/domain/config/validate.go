@@ -14,6 +14,7 @@ import (
 	domaincontainer "github.com/diggsweden/forge-ci/internal/domain/container"
 	"github.com/diggsweden/forge-ci/internal/domain/errs"
 	"github.com/diggsweden/forge-ci/internal/domain/projecttype"
+	"github.com/diggsweden/forge-ci/internal/listval"
 )
 
 // buildSecretNamePattern is the env-var identifier shape:
@@ -52,7 +53,6 @@ var forgeCIReservedSecretNames = map[string]bool{
 	"IOS_SIGNING_CERTIFICATE_BASE64":           true,
 	"IOS_SIGNING_CERTIFICATE_PASSPHRASE":       true,
 	"PROVISIONING_PROFILE_BASE64":              true,
-	"KEYCHAIN_PASSWORD":                        true,
 	"XCCONFIG_BASE64":                          true,
 	"APP_STORE_CONNECT_API_KEY_ID":             true,
 	"APP_STORE_CONNECT_ISSUER_ID":              true,
@@ -185,6 +185,10 @@ func Validate(cfg *Config) error {
 	}
 
 	if err := cfg.GitSigning.Validate(); err != nil {
+		violations = append(violations, err.Error())
+	}
+
+	if err := cfg.DistroPackages.Validate(); err != nil {
 		violations = append(violations, err.Error())
 	}
 
@@ -455,7 +459,8 @@ func validateCargoBuildMode(a Artifact) []string {
 }
 
 // validateContainer enforces container-level invariants: name present,
-// every From entry resolves to a known artifact, and at most one
+// a declared platforms names a platform, every From entry resolves to a
+// known artifact, and at most one
 // artifact-first dep per compiled-native ecosystem (publish-container.yml
 // carries exactly one *-artifact-name slot per language, so two
 // artifact-first deps from the same ecosystem would collide).
@@ -503,6 +508,12 @@ func validateContainer(ct Container, artifactNames map[string]bool, artifactByNa
 			"container %q references multiple artifact-first Cargo artifacts %v; only one Cargo build artifact can be downloaded per container",
 			ct.Name, artifactFirstCargoDeps,
 		))
+	}
+
+	// An omitted platforms builds linux/amd64; a value made only of
+	// separators, such as ",", names no platform and would plan no build.
+	if ct.Platforms != "" && len(listval.Tokens(ct.Platforms)) == 0 {
+		v = append(v, fmt.Sprintf("container %q platforms %q names no platform; list one, e.g. linux/amd64, or omit it for linux/amd64", ct.Name, ct.Platforms))
 	}
 
 	v = append(v, validateBuildArgs(ct)...)

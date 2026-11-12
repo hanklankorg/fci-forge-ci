@@ -179,6 +179,90 @@ func TestBuildStagePipeline_MavenBuildTypeDefaultFromYAML(t *testing.T) {
 	require.Empty(t, plan.Artifacts.Maven[0].BuildType, "build defaults must not normalize the plan's omitted field")
 }
 
+// Private dependency access reaches a build component only from an artifact
+// that declares it. An undeclared artifact renders none of the private inputs,
+// even when it names a registry; its Maven settings path is not one of them
+// and is rendered either way. No declaration puts a credential in the
+// generated pipeline.
+func TestBuildStagePipeline_PrivateDependencyInputsOnlyWhenDeclared(t *testing.T) {
+	t.Parallel()
+
+	cfg, err := config.Parse([]byte(`artifacts:
+  - name: maven-public
+    project-type: maven
+    config:
+      settings-path: .forge-ci/maven/settings.xml
+  - name: maven-private
+    project-type: maven
+    config:
+      private-dependencies: true
+      settings-path: .forge-ci/maven/settings.xml
+  - name: npm-public
+    project-type: npm
+    config:
+      dependency-registry: https://npm.example/private
+  - name: npm-private
+    project-type: npm
+    config:
+      private-dependencies: true
+      dependency-registry: https://npm.example/private
+  - name: gradle-public
+    project-type: gradle
+  - name: gradle-private
+    project-type: gradle
+    config:
+      private-dependencies: true
+`))
+	require.NoError(t, err)
+	require.NoError(t, config.Validate(cfg))
+	require.NoError(t, config.Derive(cfg))
+	plan := pipeline.NewConfigPlan(cfg)
+	child, err := gitlabpipeline.BuildStagePipeline(pipeline.ReleaseBuildStagePlan{
+		Stage: "build",
+		Targets: pipeline.ReleaseBuildTargets{
+			Maven:  runningTarget(plan.Artifacts.Maven...),
+			NPM:    runningTarget(plan.Artifacts.NPM...),
+			Gradle: runningTarget(plan.Artifacts.Gradle...),
+		},
+	}, gitlabpipeline.BuildPipelineOptions{
+		ComponentBase: "$CI_SERVER_FQDN/diggsweden/forge-ci",
+		RuntimeImages: testRuntimeImages,
+		ComponentRef:  "1.0.0",
+	})
+	require.NoError(t, err)
+	require.Len(t, child.Include, 6)
+
+	inputs := map[string]map[string]any{}
+	for _, include := range child.Include {
+		inputs[include.Inputs["job-name"].(string)] = include.Inputs
+	}
+
+	for job, want := range map[string]map[string]any{
+		"build-maven-maven-public":    {"settings-path": ".forge-ci/maven/settings.xml"},
+		"build-maven-maven-private":   {"private-dependencies": true, "settings-path": ".forge-ci/maven/settings.xml"},
+		"build-npm-npm-public":        {},
+		"build-npm-npm-private":       {"private-dependencies": true, "dependency-registry": "https://npm.example/private"},
+		"build-gradle-gradle-public":  {},
+		"build-gradle-gradle-private": {"private-dependencies": true},
+	} {
+		require.Contains(t, inputs, job)
+
+		for _, key := range []string{"private-dependencies", "dependency-registry", "settings-path"} {
+			value, declared := inputs[job][key]
+			require.Equal(t, want[key], value, "%s %s", job, key)
+
+			_, wanted := want[key]
+			require.Equal(t, wanted, declared, "%s %s must be rendered only when declared", job, key)
+		}
+	}
+
+	body, err := child.Marshal()
+	require.NoError(t, err)
+	require.Equal(t, 3, strings.Count(string(body), "private-dependencies: true"))
+	require.NotContains(t, string(body), "private-dependencies: false")
+	require.NotContains(t, strings.ToUpper(string(body)), "TOKEN")
+}
+
 // TestBuildStagePipeline_RefusesUnrepresentableBuildSettings covers every
 // setting the Catalog's build-go and build-cargo components cannot express.
 //

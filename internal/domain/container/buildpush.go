@@ -21,3 +21,15 @@ type BuildPushManifestBuildRequest struct {
 	Labels          []string
 	Context         string
 }
+
+// The registry transport of an image build is retried: a build fails on
+// its base image when the resolver stops answering for a couple of minutes,
+// and the builders' defaults give up sooner (Buildah after three retries one,
+// two and four seconds apart, kaniko at once). Buildah takes both values, as
+// --retry and --retry-delay, for the pulls and pushes of a build; kaniko
+// takes the count, as --image-download-retry, for fetching a base image, and
+// waits one second doubled each time. Neither retries a build step.
+const (
+	RegistryRetries    = 5
+	RegistryRetryDelay = "15s"
+)

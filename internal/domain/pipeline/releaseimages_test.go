@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: The Forge CI Authors
+// SPDX-FileCopyrightText: 2026 Digg - Agency for Digital Government
 // SPDX-License-Identifier: EUPL-1.2 OR GPL-3.0-or-later
 
 package pipeline_test
@@ -73,6 +73,29 @@ func TestPlanReleaseImages_PublishesTagVariantsOfOneRepository(t *testing.T) {
 	first := plan.Builds[0]
 	if first.Arch != "arm64" || first.Platform != "linux/arm64" || first.ContainerFile != "Containerfile.alpine" || first.Context != "." || first.BuildArgs != "A=one\nB=two" || first.CandidateTag != "staging-v1.2.3" {
 		t.Fatalf("first build = %+v", first)
+	}
+}
+
+// A declared platforms is one list however it is separated, as on every
+// other route that reads it.
+func TestPlanReleaseImages_ReadsThePlatformsAsOneList(t *testing.T) {
+	t.Parallel()
+
+	for platforms, want := range map[string]string{
+		"":                         "amd64",
+		"linux/amd64,linux/arm64":  "amd64\narm64",
+		"linux/amd64 linux/arm64":  "amd64\narm64",
+		"linux/amd64, linux/arm64": "amd64\narm64",
+	} {
+		containers := "  - name: app\n"
+		if platforms != "" {
+			containers += "    platforms: " + platforms + "\n"
+		}
+
+		plan, err := pipeline.PlanReleaseImages(plannedContainers(t, containers), releaseImagesInput())
+		if err != nil || plan.Images[0].Archs != want {
+			t.Errorf("platforms %q: plan = %+v, err = %v, want archs %q", platforms, plan.Images, err, want)
+		}
 	}
 }
 

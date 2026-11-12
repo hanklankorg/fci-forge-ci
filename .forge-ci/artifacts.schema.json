@@ -20,9 +20,40 @@
       "items": { "$ref": "#/$defs/container" }
     },
     "sign": { "$ref": "#/$defs/sign" },
-    "git-signing": { "$ref": "#/$defs/git-signing" }
+    "git-signing": { "$ref": "#/$defs/git-signing" },
+    "distro-packages": { "$ref": "#/$defs/distro-packages" }
   },
   "$defs": {
+    "distro-packages": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "The presence of this block publishes every .deb, .rpm and .apk file of the release to the forge's own Debian, RPM and Alpine package registries, beside the release; an empty block publishes with the default places. The published file is the release's file, unchanged. Supported by the Forgejo release; the GitLab and GitHub releases refuse it. See https://github.com/diggsweden/forge-ci/blob/main/docs/artifacts-reference.md#distro-packages-section.",
+      "properties": {
+        "debian": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "distribution": { "type": "string", "pattern": "^[a-z0-9]+([._-][a-z0-9]+)*$", "maxLength": 64, "description": "Distribution .deb files are published under. Default: stable." },
+            "component": { "type": "string", "pattern": "^[a-z0-9]+([._-][a-z0-9]+)*$", "maxLength": 64, "description": "Component .deb files are published under. Default: main." }
+          }
+        },
+        "rpm": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "group": { "type": "string", "pattern": "^[a-z0-9]+([._-][a-z0-9]+)*(/[a-z0-9]+([._-][a-z0-9]+)*)*$", "maxLength": 128, "description": "Group, the repository of the RPM registry, .rpm files are published to; steps joined by a slash, as in rocky/el9. Default: stable." }
+          }
+        },
+        "alpine": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "branch": { "type": "string", "pattern": "^[a-z0-9]+([._-][a-z0-9]+)*$", "maxLength": 64, "description": "Branch .apk files are published under. Default: stable." },
+            "repository": { "type": "string", "pattern": "^[a-z0-9]+([._-][a-z0-9]+)*$", "maxLength": 64, "description": "Repository .apk files are published under. Default: main." }
+          }
+        }
+      }
+    },
     "git-signing": {
       "type": "object",
       "additionalProperties": false,
@@ -44,6 +75,11 @@
           "type": "string",
           "enum": ["gpg", "sigstore", "kms"],
           "description": "gpg (default; uses $GPG_PRIVATE_KEY), sigstore (keyless cosign + OIDC), or kms (cosign + key)."
+        },
+        "files-method": {
+          "type": "string",
+          "enum": ["gpg"],
+          "description": "Sign the release files with gpg while method (sigstore or kms) signs the container images. Omitted, method signs both. Supported by the GitHub release; the GitLab and Forgejo releases refuse it."
         },
         "key": {
           "type": "string",

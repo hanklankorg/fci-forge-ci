@@ -136,6 +136,10 @@ type Config struct {
 	// GitSigning selects how the release commit and tag are signed
 	// (git objects), independent of Sign. Empty defaults to gpg.
 	GitSigning GitSigningConfig `yaml:"git-signing,omitempty"`
+
+	// DistroPackages publishes the release's .deb, .rpm and .apk files to
+	// the forge's package registries. Nil publishes none there.
+	DistroPackages *DistroPackages `yaml:"distro-packages,omitempty"`
 }
 
 // Artifact is one entry under the top-level `artifacts:` list. It is the

@@ -4,6 +4,7 @@
 package provider
 
 import (
+	"context"
 	"fmt"
 	"strings"
 )
@@ -67,6 +68,67 @@ type ForgeNPMRegistry struct {
 // ForgeNPMRegistryResolver is the npm sibling of ForgeMavenRegistryResolver.
 type ForgeNPMRegistryResolver interface {
 	ResolveForgeNPMRegistry() (ForgeNPMRegistry, error)
+}
+
+// DistroPackageFormat is a distribution package format a forge has a
+// registry for.
+type DistroPackageFormat string
+
+// The formats, named as the registries are.
+const (
+	DistroPackageDebian DistroPackageFormat = "debian"
+	DistroPackageRPM    DistroPackageFormat = "rpm"
+	DistroPackageAlpine DistroPackageFormat = "alpine"
+)
+
+// ForgeDistroRegistry is the resolved root of the forge's distribution
+// package registries, which the Debian, RPM and Alpine registries are paths
+// of, and the token that may write the owner's packages.
+type ForgeDistroRegistry struct {
+	URL   string
+	Token string
+}
+
+// ForgeDistroRegistryResolver is the provider role of a forge with native
+// Debian, RPM and Alpine registries. Forgejo has them; a forge without them
+// does not implement the role.
+type ForgeDistroRegistryResolver interface {
+	ResolveForgeDistroRegistry() (ForgeDistroRegistry, error)
+}
+
+// DistroPackage is one package file of a release and its place in a
+// registry. Place is the format's address: distribution and component for
+// Debian, the group for RPM, branch and repository for Alpine. Name,
+// Version and Architecture are the package's own, read from an Alpine
+// package, whose registry is read back by them; the other two registries
+// are read back by digest.
+type DistroPackage struct {
+	Format DistroPackageFormat
+	Path   string
+	Size   int64
+	SHA256 string
+	Place  []string
+
+	Name, Version, Architecture string
+}
+
+// DistroListing is what a registry serves at a package's place.
+type DistroListing int
+
+// DistroOtherContent is reported only by a registry that is read back by
+// the package's name: one read back by digest cannot tell another content
+// of the version from a version that is not listed.
+const (
+	DistroNotListed DistroListing = iota
+	DistroListed
+	DistroOtherContent
+)
+
+// ForgeProjectVerifier is a forge that addresses its package registry by a
+// value a project can set: before publishing it verifies, with the job's
+// own identity, that the address is the project the job runs in.
+type ForgeProjectVerifier interface {
+	VerifyForgeProject(ctx context.Context) error
 }
 
 // RenderNPMRC renders an .npmrc authenticating to this registry. The token is

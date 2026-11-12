@@ -5,6 +5,8 @@ package gitlab_test
 
 import (
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/diggsweden/forge-ci/internal/adapters/gitlab"
@@ -126,5 +128,75 @@ func TestResolveForgeRegistries_GitLab_EmptyTokenPassesThrough(t *testing.T) {
 
 	if want := (provider.ForgeNPMRegistry{Registry: "https://gl.example.com/api/v4/projects/42/packages/npm/"}); npm != want {
 		t.Errorf("npm = %+v, want %+v", npm, want)
+	}
+}
+
+// The release's package credential outranks the job token, which a hardened
+// project gives no package write; the project ID is a number and nothing a
+// variable could turn into another path of the API.
+func TestResolveForgeNPMRegistry_GitLab_ReleaseCredentialAndProjectID(t *testing.T) {
+	t.Parallel()
+
+	env := map[string]string{
+		"CI_API_V4_URL": "https://gl.example.com/api/v4", "CI_PROJECT_ID": "42",
+		"CI_JOB_TOKEN": "job", "RELEASE_PACKAGE_TOKEN": "release",
+	}
+	gitlabProvider := &gitlab.Provider{Env: func(k string) string { return env[k] }}
+
+	npm, err := gitlabProvider.ResolveForgeNPMRegistry()
+	if err != nil || npm.Token != "release" {
+		t.Fatalf("npm = (%+v, %v), want the release package token", npm, err)
+	}
+
+	for _, id := range []string{"42/../7", "7?x", "group%2Fproject", "-1", "042", "4 2"} {
+		env := map[string]string{"CI_API_V4_URL": "https://gl.example.com/api/v4", "CI_PROJECT_ID": id, "CI_JOB_TOKEN": "job"}
+		gitlabProvider := &gitlab.Provider{Env: func(k string) string { return env[k] }}
+
+		if npm, err := gitlabProvider.ResolveForgeNPMRegistry(); !errors.Is(err, errs.ErrUsage) || npm != (provider.ForgeNPMRegistry{}) {
+			t.Errorf("project ID %q: npm = (%+v, %v), want the zero registry and ErrUsage", id, npm, err)
+		}
+
+		if _, err := gitlabProvider.ResolveForgeMavenRegistry(); !errors.Is(err, errs.ErrUsage) {
+			t.Errorf("project ID %q: maven error = %v, want ErrUsage", id, err)
+		}
+	}
+}
+
+// CI_PROJECT_ID is the registry a package goes to, and a project variable
+// outranks it: the job's own token says which project the job runs in.
+func TestVerifyForgeProject_GitLab(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name, projectID, token, body string
+		status                       int
+		want                         error
+	}{
+		{"the job's project", "42", "job", `{"pipeline":{"project_id":42}}`, http.StatusOK, nil},
+		{"another project", "7", "job", `{"pipeline":{"project_id":42}}`, http.StatusOK, errs.ErrValidation},
+		{"no project in the job", "42", "job", `{"pipeline":{}}`, http.StatusOK, errs.ErrMalformedInput},
+		{"a refused token", "42", "job", `{}`, http.StatusUnauthorized, errs.ErrPermissionDenied},
+		{"no token", "42", "", `{"pipeline":{"project_id":42}}`, http.StatusOK, errs.ErrUsage},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/api/v4/job" || r.Header.Get("JOB-TOKEN") != "job" {
+					t.Errorf("request %s with JOB-TOKEN %q", r.URL.Path, r.Header.Get("JOB-TOKEN"))
+				}
+
+				w.WriteHeader(tc.status)
+				_, _ = w.Write([]byte(tc.body))
+			}))
+			defer server.Close()
+
+			env := map[string]string{"CI_API_V4_URL": server.URL + "/api/v4", "CI_PROJECT_ID": tc.projectID, "CI_JOB_TOKEN": tc.token}
+			gitlabProvider := &gitlab.Provider{Env: func(k string) string { return env[k] }, HTTPClient: server.Client()}
+
+			if err := gitlabProvider.VerifyForgeProject(t.Context()); !errors.Is(err, tc.want) {
+				t.Errorf("error = %v, want %v", err, tc.want)
+			}
+		})
 	}
 }

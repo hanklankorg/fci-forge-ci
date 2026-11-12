@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: The Forge CI Authors
+// SPDX-FileCopyrightText: 2026 Digg - Agency for Digital Government
 // SPDX-License-Identifier: EUPL-1.2 OR GPL-3.0-or-later
 
 package pipeline
@@ -16,6 +16,7 @@ import (
 	"github.com/diggsweden/forge-ci/internal/domain/errs"
 	"github.com/diggsweden/forge-ci/internal/domain/security"
 	"github.com/diggsweden/forge-ci/internal/domain/version"
+	"github.com/diggsweden/forge-ci/internal/listval"
 )
 
 // ReleaseImagesInput is what the release-images plan needs beyond the
@@ -155,7 +156,7 @@ func planReleaseImage(container PlannedContainer, in ReleaseImagesInput) (Releas
 		return ReleaseImage{}, nil, err
 	}
 
-	platforms, err := domaincontainer.SelectPlatforms(splitPlatforms(container.Platforms), in.ReleasePlatforms)
+	platforms, err := domaincontainer.SelectPlatforms(listval.Tokens(container.Platforms), in.ReleasePlatforms)
 	if err != nil {
 		return ReleaseImage{}, nil, fmt.Errorf("container %q: %w", container.Name, err)
 	}
@@ -237,18 +238,6 @@ func supportedByReleaseImages(container PlannedContainer) error {
 	}
 
 	return nil
-}
-
-func splitPlatforms(declared string) []string {
-	var platforms []string
-
-	for platform := range strings.SplitSeq(declared, ",") {
-		if platform = strings.TrimSpace(platform); platform != "" {
-			platforms = append(platforms, platform)
-		}
-	}
-
-	return platforms
 }
 
 // releaseImagesScanThreshold reports whether a declared scan-severity is the

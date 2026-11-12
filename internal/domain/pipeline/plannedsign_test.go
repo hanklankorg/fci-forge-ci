@@ -20,22 +20,43 @@ func TestPlanSign_PrecomputedFlags(t *testing.T) {
 	tests := []struct {
 		name            string
 		method          domainrelease.SignMethod
+		filesMethod     domainrelease.SignMethod
+		image           bool
 		idToken         bool
 		importsGPG      bool
 		signsContainers bool
+		egress          bool
 	}{
-		{"empty defaults to gpg", "", false, true, false},
-		{"gpg", domainrelease.SignMethodGPG, false, true, false},
-		{"sigstore", domainrelease.SignMethodSigstore, true, false, true},
-		{"kms", domainrelease.SignMethodKMS, false, false, true},
+		{"empty defaults to gpg", "", "", false, false, true, false, false},
+		{"gpg", domainrelease.SignMethodGPG, "", false, false, true, false, false},
+		{"sigstore", domainrelease.SignMethodSigstore, "", false, true, false, true, true},
+		{"kms", domainrelease.SignMethodKMS, "", false, false, false, true, true},
+		// The files' gpg key is imported; the images keep the cosign method.
+		{"gpg files beside sigstore images", domainrelease.SignMethodSigstore, domainrelease.SignMethodGPG, true, true, true, true, true},
+		{"gpg files beside kms images", domainrelease.SignMethodKMS, domainrelease.SignMethodGPG, true, false, true, true, true},
+		// Without an image the cosign method signs nothing: no token, no egress.
+		{"gpg files and no image", domainrelease.SignMethodSigstore, domainrelease.SignMethodGPG, false, false, true, true, false},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			plan := pipeline.NewConfigPlan(&config.Config{Sign: config.SignConfig{Method: tc.method}})
+			cfg := &config.Config{Sign: config.SignConfig{Method: tc.method, FilesMethod: tc.filesMethod}}
+			if tc.image {
+				cfg.Containers = []config.Container{{Name: "image"}}
+			}
+
+			plan := pipeline.NewConfigPlan(cfg)
 			got := plan.Sign
+
+			if got.FilesMethod != tc.filesMethod {
+				t.Errorf("FilesMethod = %q, want %q", got.FilesMethod, tc.filesMethod)
+			}
+
+			if got.RequiresSigstoreEgress != tc.egress {
+				t.Errorf("RequiresSigstoreEgress = %v, want %v", got.RequiresSigstoreEgress, tc.egress)
+			}
 
 			if got.RequiresIDToken != tc.idToken {
 				t.Errorf("RequiresIDToken = %v, want %v", got.RequiresIDToken, tc.idToken)

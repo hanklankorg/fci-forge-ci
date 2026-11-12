@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: The Forge CI Authors
+// SPDX-FileCopyrightText: 2026 Digg - Agency for Digital Government
 // SPDX-License-Identifier: EUPL-1.2 OR GPL-3.0-or-later
 
 package release_test
@@ -123,7 +123,7 @@ func TestSetupGitLabEnvironmentScopesAndRegistryPreflight(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	for _, item := range release.KeyReleaseSetup("gitlab", true, release.SetupRequired, release.SetupRequired) {
+	for _, item := range release.KeyReleaseSetup("gitlab", true, release.SetupRequired, release.SetupUnused, release.SetupRequired) {
 		if !strings.Contains(string(shell), item.Name) && !strings.Contains(string(body), item.Name) {
 			t.Fatalf("modeled GitLab credential disappeared: %s", item.Name)
 		}

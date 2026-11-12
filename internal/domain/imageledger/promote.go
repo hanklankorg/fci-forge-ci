@@ -32,7 +32,7 @@ type Registry interface {
 // It is required only for cross-repository / cross-registry promotion: a
 // same-repo moving tag shares the digest-addressed signature, but a
 // different repo or registry does not, so the signature must travel with
-// the image (cosign copy). A nil copier means cross-repo promotion is not
+// the image. A nil copier means cross-repo promotion is not
 // configured and must be refused rather than silently dropping the sig.
 type SignatureCopier interface {
 	CopyWithSignatures(ctx context.Context, source, dest string) error
@@ -240,7 +240,7 @@ func copyToDest(ctx context.Context, reg Registry, sigCopier SignatureCopier, so
 
 	if sigCopier == nil {
 		return fmt.Errorf(
-			"cross-repository promotion %s -> %s requires signature portability (cosign copy); none configured: %w",
+			"cross-repository promotion %s -> %s requires a signature copier; none configured: %w",
 			source, dest, errs.ErrUsage,
 		)
 	}

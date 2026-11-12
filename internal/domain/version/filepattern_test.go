@@ -15,7 +15,7 @@ func TestFilePattern_KnownTypes(t *testing.T) {
 
 	cases := map[projecttype.Type]string{
 		projecttype.Maven:         "CHANGELOG.md :(glob)**/pom.xml",
-		projecttype.NPM:           "CHANGELOG.md package.json package-lock.json",
+		projecttype.NPM:           "CHANGELOG.md package.json package-lock.json npm-shrinkwrap.json",
 		projecttype.Gradle:        "CHANGELOG.md gradle.properties build.gradle.kts settings.gradle.kts build.gradle settings.gradle",
 		projecttype.GradleAndroid: "CHANGELOG.md gradle.properties build.gradle.kts settings.gradle.kts build.gradle settings.gradle",
 		projecttype.XcodeIOS:      "CHANGELOG.md versions.xcconfig :(glob)**/*.xcconfig",

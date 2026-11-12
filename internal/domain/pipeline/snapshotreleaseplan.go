@@ -11,6 +11,7 @@ import (
 	"github.com/diggsweden/forge-ci/internal/domain/config"
 	"github.com/diggsweden/forge-ci/internal/domain/errs"
 	"github.com/diggsweden/forge-ci/internal/domain/projecttype"
+	"github.com/diggsweden/forge-ci/internal/domain/runners"
 )
 
 // SnapshotReleasePlanVersion is the current snapshot-release plan contract version.
@@ -18,6 +19,7 @@ const SnapshotReleasePlanVersion = 1
 
 // SnapshotReleasePlanInput contains workflow inputs plus the parsed config plan.
 type SnapshotReleasePlanInput struct {
+	Runners               *runners.Inputs
 	ConfigPlan            ConfigPlan
 	ProjectType           projecttype.Type
 	Branch                string
@@ -140,6 +142,10 @@ type TargetPlan[T any] struct {
 // and workflow inputs.
 func NewSnapshotReleasePlan(in SnapshotReleasePlanInput) (SnapshotReleasePlan, error) {
 	if err := ValidateConfigPlan(in.ConfigPlan); err != nil {
+		return SnapshotReleasePlan{}, err
+	}
+
+	if err := in.Runners.Admit(releaseRunnerNeeds(in.ConfigPlan)); err != nil {
 		return SnapshotReleasePlan{}, err
 	}
 

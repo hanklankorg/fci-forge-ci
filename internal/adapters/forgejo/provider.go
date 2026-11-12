@@ -210,9 +210,13 @@ func classifyErr(resp *gitea.Response, err error) error {
 		return nil
 	}
 
-	cls := errs.ErrDependencyUnavailable
+	// Without a response only a request the network stopped is the
+	// forge being unavailable; with one, the status decides.
+	cls := errs.RequestFailure(err)
 
 	if resp != nil && resp.Response != nil {
+		cls = errs.ErrValidation
+
 		if mapped := errs.FromHTTPStatus(resp.StatusCode); mapped != nil {
 			cls = mapped
 		}
@@ -227,6 +231,7 @@ var (
 	_ provider.Provider                = (*Provider)(nil)
 	_ provider.RepoMetadataFetcher     = (*Provider)(nil)
 	_ provider.TokenValidator          = (*Provider)(nil)
+	_ provider.BranchHeadResolver      = (*Provider)(nil)
 	_ provider.ReleaseCreator          = (*Provider)(nil)
 	_ provider.ReleasePublisher        = (*Provider)(nil)
 	_ provider.ReleaseAssetUploader    = (*Provider)(nil)

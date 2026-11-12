@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: The Forge CI Authors
+// SPDX-FileCopyrightText: 2026 Digg - Agency for Digital Government
 // SPDX-License-Identifier: EUPL-1.2 OR GPL-3.0-or-later
 
 package doctor
@@ -91,7 +91,7 @@ func Requirements(root, repo, commit string) RequirementsReport {
 				continue
 			}
 
-			report.inspect(root, repo, commit, setupGitLab, ".gitlab-ci.yml", component, yamlChild(include, "inputs"), nil)
+			report.inspect(root, repo, commit, setupGitLab, ".gitlab-ci.yml", component, yamlChild(include, "inputs"), nil, nil)
 		}
 	}
 
@@ -298,6 +298,16 @@ func FormatRequirements(out io.Writer, report RequirementsReport) {
 			}
 
 			_, _ = fmt.Fprintf(out, "  %-15s %s ← %s\n", item.State, item.Name, item.Source)
+
+			// What the credential is for and what it must be allowed to do
+			// are what a person creating it needs; they were JSON-only.
+			if item.Purpose != "" {
+				_, _ = fmt.Fprintf(out, "  %-15s   for: %s\n", "", item.Purpose)
+			}
+
+			if item.Authority != "" {
+				_, _ = fmt.Fprintf(out, "  %-15s   needs: %s\n", "", item.Authority)
+			}
 		}
 
 		for _, item := range call.Settings {
@@ -314,8 +324,9 @@ func FormatRequirements(out io.Writer, report RequirementsReport) {
 	}
 
 	_, _ = fmt.Fprintln(out, "Scope:", report.Scope)
-	_, _ = fmt.Fprintln(out, "Details (purpose, issuer, scope and unused settings): --json doctor --requirements")
-	_, _ = fmt.Fprintln(out, "Next: review docs/setup-requirements.md and caller mappings before configuring credentials. Reference guidance is not proof of the pinned workflow's requirements or remote readiness.")
+	_, _ = fmt.Fprintln(out, "Details (job scope and unused settings): forge-ci doctor --requirements --json")
+	_, _ = fmt.Fprintln(out, "Next: create the credentials listed above; forge-ci setup secrets prints the command that stores each one. "+
+		"Reference guidance is not proof of the pinned workflow's requirements or remote readiness; see forge-ci docs setup-requirements.")
 }
 
 func (report *RequirementsReport) scanActions(root, repo, commit string) {
@@ -354,7 +365,7 @@ func (report *RequirementsReport) scanActions(root, repo, commit string) {
 					continue
 				}
 
-				report.inspect(root, repo, commit, forge, rel, uses, yamlChild(job, "with"), yamlChild(job, "secrets"))
+				report.inspect(root, repo, commit, forge, rel, uses, yamlChild(job, "with"), yamlChild(job, "secrets"), jobs)
 			}
 		}
 	}

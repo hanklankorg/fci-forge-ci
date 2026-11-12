@@ -13,6 +13,8 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/diggsweden/forge-ci/internal/docslink"
 )
 
 // ForgeAPI identifies the forge whose API the binary talks to: the server
@@ -54,7 +56,7 @@ func (p ForgeAPI) IsValid() bool {
 func (p ForgeAPI) TroubleshootingGuide() string {
 	switch p {
 	case ForgeGitHub, ForgeGitLab, ForgeForgejo:
-		return "https://github.com/diggsweden/forge-ci/blob/main/docs/" + string(p) + ".md#troubleshooting"
+		return docslink.URL(string(p) + ".md#troubleshooting")
 	case ForgeLocal:
 		return ""
 	default:
@@ -277,6 +279,8 @@ type WebURLBuilder interface {
 	// ReleaseWebURL links to the page for one release. server is the forge
 	// root without a trailing slash; repo is the canonical "owner/name".
 	ReleaseWebURL(server, repo, version string) string
+	// ReleaseDownloadURLPrefix is the public directory for named release assets.
+	ReleaseDownloadURLPrefix(server, repo, version string) string
 
 	// PackagesWebURL links to the packages page for a repository.
 	PackagesWebURL(server, repo string) string
@@ -574,15 +578,35 @@ type ListedRelease struct {
 	Assets    []ListedAsset
 }
 
-// ListedAsset is one file attached to a release. Size is zero where the forge
-// does not report it (GitLab's release links).
+// ListedAsset is one file attached to a release.
 type ListedAsset struct {
 	ID   int64
 	Name string
 	Size int64
+	// SizeUnknown is set where the forge reports no size (GitLab's release
+	// links); Size then says nothing. Elsewhere a Size of zero is an empty
+	// file.
+	SizeUnknown bool
+	// Digest is the content digest the forge reports for the file, as
+	// "sha256:<hex>" (GitHub's asset digest). It is empty where the forge
+	// reports none: Forgejo's attachments and GitLab's release links.
+	Digest string
+	// DigestExpected is set where the forge computes a digest for every
+	// file at upload (GitHub), so an empty Digest there is a fault and not
+	// the forge's way.
+	DigestExpected bool
 	// URL is where the file is served from; GitLab finds the project upload a
 	// link points at through it.
 	URL string
+}
+
+// ReleaseReader reads the one release of a tag with the files attached to
+// it, and no other release. It only reads, so a command that compares a
+// release with its plan asks for this role and not for one that can change
+// the release. Implemented by github, gitlab and forgejo.
+type ReleaseReader interface {
+	// ReadRelease returns nil when the token sees no release for tag.
+	ReadRelease(ctx context.Context, repo, tag string) (*ListedRelease, error)
 }
 
 // ReleaseAssetPruner lists a repository's releases and deletes single files

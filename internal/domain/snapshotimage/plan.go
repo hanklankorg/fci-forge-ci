@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: The Forge CI Authors
+// SPDX-FileCopyrightText: 2026 Digg - Agency for Digital Government
 // SPDX-License-Identifier: EUPL-1.2 OR GPL-3.0-or-later
 
 // Package snapshotimage defines the provider-neutral snapshot image handoff.
@@ -16,47 +16,51 @@ import (
 	"github.com/diggsweden/forge-ci/internal/domain/git"
 	"github.com/diggsweden/forge-ci/internal/domain/pipeline"
 	"github.com/diggsweden/forge-ci/internal/domain/projecttype"
+	"github.com/diggsweden/forge-ci/internal/domain/runners"
 	"github.com/diggsweden/forge-ci/internal/domain/security"
 	"github.com/diggsweden/forge-ci/internal/domain/version"
 	"github.com/diggsweden/forge-ci/internal/pathsafe"
 )
 
 var (
-	errSourceIdentity         = errors.New("snapshot source requires an exact commit and logical branch")
-	errBaseRepository         = errors.New("snapshot requires a full base OCI repository")
-	errUnsupportedContainer   = errors.New("snapshot build secrets, extraction and OCI provenance are unsupported")
-	errInvalidTag             = errors.New("invalid snapshot tag")
-	errMissingDependency      = errors.New("missing dependency")
-	errNoBuiltArtifact        = errors.New("has no supported built artifact")
-	errUnsupportedDependency  = errors.New("is unsupported")
-	errSharedDestination      = errors.New("snapshot inputs must have distinct destinations")
-	errPlanIdentity           = errors.New("invalid snapshot plan identity")
-	errDisabledPlanHasWork    = errors.New("disabled snapshot plan has work")
-	errEnabledPlanEmpty       = errors.New("enabled snapshot plan has no images or postfix tag")
-	errTagOmitsCommit         = errors.New("snapshot tag omits source commit")
-	errTagDiffers             = errors.New("snapshot tag differs from logical branch or source commit")
-	errImageTagDiffers        = errors.New("tag differs from frozen base, suffix or branch")
-	errInvalidImage           = errors.New("invalid or duplicate snapshot image")
-	errConflictingDestination = errors.New("conflicting snapshot image destination")
-	errNonNativePlatform      = errors.New("snapshot requires native linux/amd64 or linux/arm64")
-	errDuplicatePlatform      = errors.New("duplicate snapshot platform")
-	errUnsupportedSeverity    = errors.New("unsupported snapshot scan severity")
-	errUnscannedImage         = errors.New("snapshot plan publishes an image without its scan")
-	errInvalidBuild           = errors.New("invalid or duplicate snapshot build")
-	errInvalidDependency      = errors.New("invalid snapshot artifact dependency")
-	errReservedDestination    = errors.New("reserved snapshot artifact destination")
-	errMissingNativeBuilds    = errors.New("snapshot plan omits native builds")
-	errUnplannedImage         = errors.New("unplanned snapshot image")
-	errReceiptCount           = errors.New("snapshot receipts must cover exactly all planned images")
-	errDuplicateReceipt       = errors.New("duplicate snapshot receipt")
-	errReceiptIdentityDiffers = errors.New("snapshot receipt identity differs from plan")
+	errSourceIdentity          = errors.New("snapshot source requires an exact commit and logical branch")
+	errBaseRepository          = errors.New("snapshot requires a full base OCI repository")
+	errUnsupportedContainer    = errors.New("declares build-secrets, and a snapshot builds branch code without secrets; set publish-containers to false for this snapshot, or snapshot a declaration without this container")
+	errInvalidTag              = errors.New("invalid snapshot tag")
+	errMissingDependency       = errors.New("missing dependency")
+	errNoBuiltArtifact         = errors.New("has no supported built artifact")
+	errUnsupportedDependency   = errors.New("is unsupported")
+	errSharedDestination       = errors.New("snapshot inputs must have distinct destinations")
+	errNPMPackagesShareContext = errors.New("would both be laid over the build context root; an image takes one npm package")
+	errPlanIdentity            = errors.New("invalid snapshot plan identity")
+	errDisabledPlanHasWork     = errors.New("disabled snapshot plan has work")
+	errEnabledPlanEmpty        = errors.New("enabled snapshot plan has no images or postfix tag")
+	errTagOmitsCommit          = errors.New("snapshot tag omits source commit")
+	errTagDiffers              = errors.New("snapshot tag differs from logical branch or source commit")
+	errImageTagDiffers         = errors.New("tag differs from frozen base, suffix or branch")
+	errInvalidImage            = errors.New("invalid or duplicate snapshot image")
+	errConflictingDestination  = errors.New("conflicting snapshot image destination")
+	errNonNativePlatform       = errors.New("snapshot requires native linux/amd64 or linux/arm64")
+	errDuplicatePlatform       = errors.New("duplicate snapshot platform")
+	errUnsupportedSeverity     = errors.New("unsupported snapshot scan severity")
+	errUnscannedImage          = errors.New("snapshot plan publishes an image without its scan")
+	errInvalidBuild            = errors.New("invalid or duplicate snapshot build")
+	errInvalidDependency       = errors.New("invalid snapshot artifact dependency")
+	errReservedDestination     = errors.New("reserved snapshot artifact destination")
+	errMissingNativeBuilds     = errors.New("snapshot plan omits native builds")
+	errUnplannedImage          = errors.New("unplanned snapshot image")
+	errReceiptCount            = errors.New("snapshot receipts must cover exactly all planned images")
+	errDuplicateReceipt        = errors.New("duplicate snapshot receipt")
+	errReceiptIdentityDiffers  = errors.New("snapshot receipt identity differs from plan")
 )
 
 // Version is the snapshot plan and receipt schema version.
 const Version = 1
 
-// Plan is the frozen snapshot image handoff: the images, native builds and
-// artifact producers one snapshot run publishes.
+// Plan is the frozen snapshot handoff: the images, native builds and artifact
+// producers one snapshot run publishes, and the file outputs it keeps.
+// Enabled reports whether images are published; Files are planned on their
+// own, so a project without a container can still have file outputs.
 type Plan struct {
 	Version         int                        `json:"version"`
 	Enabled         bool                       `json:"enabled"`
@@ -68,6 +72,9 @@ type Plan struct {
 	Tag             string                     `json:"tag"`
 	Builds          []Build                    `json:"builds"`
 	Images          []Image                    `json:"images"`
+	// Files are the artifacts whose built files the snapshot keeps as run
+	// artifacts, each built on its own with every declared platform.
+	Files []pipeline.PlannedArtifact `json:"files,omitempty"`
 }
 
 // Dependency is a built artifact a native build needs at a given destination.
@@ -76,6 +83,17 @@ type Dependency struct {
 	ArtifactName string           `json:"artifact_name"`
 	Destination  string           `json:"destination"`
 	ProjectType  projecttype.Type `json:"project_type"`
+}
+
+// RunnerNeeds is the image build runner each planned build runs on.
+func (plan Plan) RunnerNeeds() []runners.Need {
+	needs := make([]runners.Need, 0, len(plan.Builds))
+
+	for _, build := range plan.Builds {
+		needs = append(needs, runners.Need{Role: runners.Build, Platform: "linux/" + build.Arch, Jobs: "image builds"})
+	}
+
+	return needs
 }
 
 // Build is one native per-architecture image build.
@@ -111,7 +129,8 @@ type Image struct {
 type Input struct {
 	SourceSHA, SourceBranch, Tag, ImageRepository string
 	SourceDateEpoch                               string
-	Publish                                       bool
+	// Publish enables the declared images, PublishFiles the file outputs.
+	Publish, PublishFiles bool
 }
 
 // New consumes the existing typed config plan, with snapshot-specific evidence
@@ -123,6 +142,17 @@ func New(cfg pipeline.ConfigPlan, in Input) (Plan, error) {
 	plan.SourceDateEpoch = in.SourceDateEpoch
 	if !git.ValidCommitSHA(in.SourceSHA) || strings.TrimSpace(in.SourceBranch) == "" {
 		return plan, errSourceIdentity
+	}
+
+	if in.PublishFiles {
+		files, err := fileOutputs(cfg)
+		if err != nil {
+			return plan, err
+		}
+
+		if len(files) > 0 {
+			plan.Files = files
+		}
 	}
 
 	if !plan.Enabled {
@@ -161,9 +191,11 @@ func New(cfg pipeline.ConfigPlan, in Input) (Plan, error) {
 }
 
 // planContainer resolves one configured container into its snapshot image and
-// one native build per platform.
+// one native build per platform. A declared binary extraction is a release's
+// output, its binaries a release's assets: a snapshot publishes the runtime
+// image alone, so it builds the container and extracts nothing.
 func planContainer(cfg pipeline.ConfigPlan, in Input, baseVersion string, ctr pipeline.PlannedContainer) (Image, []Build, error) {
-	if len(ctr.BuildSecrets) > 0 || ctr.ExtractBinaryTarget != "" || len(ctr.ExtractBinaryNames) > 0 || len(ctr.ExtractBinaryPaths) > 0 || ctr.EnableSLSA {
+	if len(ctr.BuildSecrets) > 0 {
 		return Image{}, nil, fmt.Errorf("container %s: %w", ctr.Name, errUnsupportedContainer)
 	}
 
@@ -252,18 +284,8 @@ func dependencies(cfg pipeline.ConfigPlan, ctr pipeline.PlannedContainer) ([]Dep
 			return nil, fmt.Errorf("container %s: dependency %s %w", ctr.Name, name, errNoBuiltArtifact)
 		}
 
-		var dest string
-
-		switch artifact.ProjectType {
-		case projecttype.Go, projecttype.Cargo:
-			dest = filepath.Join(ctr.Context, "dist")
-		case projecttype.Maven:
-			dest = filepath.Join(artifact.WorkingDirectory, "target")
-		case projecttype.Gradle:
-			dest = filepath.Join(artifact.WorkingDirectory, "build/libs")
-		case projecttype.NPM:
-			dest = ArtifactDestination(artifact, ctr.Context)
-		default:
+		dest := ArtifactDestination(artifact, ctr.Context)
+		if dest == "" {
 			return nil, fmt.Errorf("container %s: snapshot dependency type %s %w", ctr.Name, artifact.ProjectType, errUnsupportedDependency)
 		}
 
@@ -275,7 +297,30 @@ func dependencies(cfg pipeline.ConfigPlan, ctr pipeline.PlannedContainer) ([]Dep
 		out = append(out, Dependency{Name: name, ArtifactName: artifact.BuildArtifactName, Destination: dest, ProjectType: artifact.ProjectType})
 	}
 
+	if err := requireOneNPMPackage(out); err != nil {
+		return nil, fmt.Errorf("container %s: %w", ctr.Name, err)
+	}
+
 	return out, nil
+}
+
+// requireOneNPMPackage refuses two npm packages in one image: the build lays
+// each verified package over the context root, and every package carries a
+// package.json, so two would overwrite each other there.
+func requireOneNPMPackage(deps []Dependency) error {
+	names := []string{}
+
+	for _, dep := range deps {
+		if dep.ProjectType == projecttype.NPM {
+			names = append(names, dep.Name)
+		}
+	}
+
+	if len(names) > 1 {
+		return fmt.Errorf("npm packages %s %w", strings.Join(names, " and "), errNPMPackagesShareContext)
+	}
+
+	return nil
 }
 
 func plainName(s string) bool {
@@ -286,6 +331,10 @@ func plainName(s string) bool {
 func (p Plan) Validate() error {
 	if p.Version != Version || !git.ValidCommitSHA(p.SourceSHA) || !git.ValidRefName("refs/heads/"+p.SourceBranch) {
 		return errPlanIdentity
+	}
+
+	if err := p.validateFiles(); err != nil {
+		return err
 	}
 
 	if !p.Enabled {
@@ -374,7 +423,17 @@ func (p Plan) validateTag() (string, error) {
 		return "", errEnabledPlanEmpty
 	}
 
-	stem := strings.TrimSuffix(p.Tag, "-snapshot")
+	return p.tagCommit()
+}
+
+// tagCommit checks the postfix tag against the plan's frozen base version,
+// branch and source, and returns the short source commit it carries. Images
+// are tagged with it and file outputs are named from it.
+func (p Plan) tagCommit() (string, error) {
+	stem, ok := strings.CutSuffix(p.Tag, "-snapshot")
+	if !ok {
+		return "", errTagDiffers
+	}
 
 	_, after, ok := strings.CutLast(stem, "-")
 	if !ok {

@@ -74,6 +74,18 @@ func (p *Provider) ResolveForgeMavenRegistry() (provider.ForgeMavenRegistry, err
 	}, nil
 }
 
+// ResolveForgeDistroRegistry implements provider.ForgeDistroRegistryResolver:
+// <server>/api/packages/<owner>, which the Debian, RPM and Alpine registries
+// of the owner are paths of.
+func (p *Provider) ResolveForgeDistroRegistry() (provider.ForgeDistroRegistry, error) {
+	reg, err := p.resolveRegistry("distribution package")
+	if err != nil {
+		return provider.ForgeDistroRegistry{}, err
+	}
+
+	return provider.ForgeDistroRegistry{URL: strings.TrimSuffix(reg.url(""), "/"), Token: reg.token}, nil
+}
+
 // ResolveForgeNPMRegistry implements provider.ForgeNPMRegistryResolver for the
 // Forgejo/Gitea npm registry: <server>/api/packages/<owner>/npm/, scoped to the
 // owner, with a path-scoped _authToken.

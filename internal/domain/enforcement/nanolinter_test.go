@@ -6,6 +6,8 @@ package enforcement
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/diggsweden/forge-ci/internal/domain/errs"
@@ -66,10 +68,63 @@ func TestNanolinterOperationalFailureCannotBecomeFindings(t *testing.T) {
 		`"failure_reason_category":"internal_failure"`,
 		`"failure_reason_category":"tool_missing"`,
 	} {
-		body := `{"version":"2.1.0","runs":[{"tool":{"driver":{"name":"nanolinter"}},"results":[{"ruleId":"sast","properties":{"source":"curated","check_id":"sast","class":"security","status":"fail",` + properties + `}}]}]}`
-		if _, err := ParseNanolinter([]byte(body)); !errors.Is(err, errs.ErrDependencyUnavailable) {
-			t.Fatalf("operational failure was eligible for a policy waiver: %s: %v", properties, err)
+		body := `{"version":"2.1.0","runs":[{"tool":{"driver":{"name":"nanolinter"}},"results":[
+{"ruleId":"sast","properties":{"source":"curated","check_id":"sast","class":"security","status":"fail",` + properties + `}},
+{"ruleId":"CVE-EXAMPLE","properties":{"source":"curated","check_id":"osv","class":"security","status":"fail"}}]}]}`
+
+		report, err := ParseNanolinter([]byte(body))
+		if err != nil || !errors.Is(report.Unavailable, errs.ErrPrerequisite) || report.LintFindings != 0 {
+			t.Fatalf("operational failure was eligible for a policy waiver: %s: %+v %v", properties, report, err)
 		}
+
+		// The failed check must not hide what the other check found.
+		if report.VulnerabilityFindings != 1 || !strings.Contains(string(report.SecuritySARIF), "CVE-EXAMPLE") {
+			t.Fatalf("findings lost behind another check's failure: %s: %+v", properties, report)
+		}
+
+		if outcome, detail := report.Outcome(Lint); outcome != "incomplete" || detail != "could-not-complete=sast" {
+			t.Fatalf("failed check reads as %q %q", outcome, detail)
+		}
+
+		if outcome, detail := report.Outcome(Vulnerabilities); outcome != "" || detail != "" {
+			t.Fatalf("complete gate reads as %q %q", outcome, detail)
+		}
+	}
+}
+
+// A repository with only a Containerfile has nothing for the iac check to
+// scan. That is not a check that could not complete: reported n/a it passes
+// and is listed, and only a check reported skip fails the report. Nanolinter
+// 0.8.6 writes no row for either, which reads as a report without them.
+func TestNanolinterNothingToScanIsNotACheckThatCouldNotComplete(t *testing.T) {
+	const iac = `{"ruleId":"iac","properties":{"source":"curated","check_id":"iac","class":"security","status":"%s"}}`
+
+	for _, test := range []struct {
+		name, rows      string
+		unavailable     bool
+		outcome, detail string
+	}{
+		{"no row, as Nanolinter 0.8.6 reports it", "", false, "", ""},
+		{"nothing to scan", fmt.Sprintf(iac, "n/a"), false, "not-applicable", "not-applicable=iac"},
+		{"the scanner could not run", fmt.Sprintf(iac, "skip"), true, "incomplete", "could-not-complete=iac"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			report, err := ParseNanolinter([]byte(`{"version":"2.1.0","runs":[{"tool":{"driver":{"name":"nanolinter"}},"results":[` + test.rows + `]}]}`))
+			if err != nil || report.LintFindings+report.VulnerabilityFindings != 0 {
+				t.Fatalf("report=%+v err=%v", report, err)
+			}
+
+			if errors.Is(report.Unavailable, errs.ErrPrerequisite) != test.unavailable {
+				t.Fatalf("unavailable=%v", report.Unavailable)
+			}
+
+			// iac is a security check outside the two lists: both gates own it.
+			for _, gate := range []Check{Lint, Vulnerabilities} {
+				if outcome, detail := report.Outcome(gate); outcome != test.outcome || detail != test.detail {
+					t.Errorf("%s reads as %q %q", gate, outcome, detail)
+				}
+			}
+		})
 	}
 }
 
@@ -111,5 +166,33 @@ func TestTestArgumentOptOutSpellingsAreRefused(t *testing.T) {
 		if err := GradleTestArguments(args); !errors.Is(err, errs.ErrUsage) {
 			t.Errorf("accepted %v: %v", args, err)
 		}
+	}
+}
+
+// Two conditions the rule above turns on. A skipped check that is not a
+// security check fails nothing, and a gate where one scan ran is not
+// "not-applicable" for another that does not apply.
+func TestNanolinterSkipAndNotApplicableAreScopedToTheirGate(t *testing.T) {
+	const row = `{"ruleId":"%[1]s","properties":{"source":"curated","check_id":"%[1]s","class":"%[2]s","status":"%[3]s"}}`
+
+	parse := func(rows string) NanolinterReport {
+		t.Helper()
+
+		report, err := ParseNanolinter([]byte(`{"version":"2.1.0","runs":[{"tool":{"driver":{"name":"nanolinter"}},"results":[` + rows + `]}]}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		return report
+	}
+
+	formatter := parse(fmt.Sprintf(row, "format", "formatter", "skip"))
+	if outcome, detail := formatter.Outcome(Lint); formatter.Unavailable != nil || outcome != "" || detail != "" {
+		t.Errorf("a skipped formatter reads as %q %q, unavailable=%v", outcome, detail, formatter.Unavailable)
+	}
+
+	scanned := parse(fmt.Sprintf(row, "osv", "security", "n/a") + "," + fmt.Sprintf(row, "trivy-fs", "security", "pass"))
+	if outcome, detail := scanned.Outcome(Vulnerabilities); outcome != "" || detail != "not-applicable=osv" {
+		t.Errorf("a gate whose other scan ran reads as %q %q", outcome, detail)
 	}
 }

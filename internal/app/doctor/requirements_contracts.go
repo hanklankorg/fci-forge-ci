@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: The Forge CI Authors
+// SPDX-FileCopyrightText: 2026 Digg - Agency for Digital Government
 // SPDX-License-Identifier: EUPL-1.2 OR GPL-3.0-or-later
 
 package doctor
@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/diggsweden/forge-ci/internal/domain/config"
@@ -16,7 +17,9 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-func (report *RequirementsReport) inspect(root, repo, commit, forge, file string, ref, inputs, secrets *yaml.Node) {
+// inspect reports one call. jobs are the calling workflow's, which a Forgejo
+// signing call's artifacts-config may name a prepare job of; nil for GitLab.
+func (report *RequirementsReport) inspect(root, repo, commit, forge, file string, ref, inputs, secrets, jobs *yaml.Node) {
 	where := fmt.Sprintf("%q:%d", file, ref.Line)
 	raw := setupScalar(ref)
 	// Ordinary build/check components do not make a release inventory incomplete.
@@ -38,7 +41,7 @@ func (report *RequirementsReport) inspect(root, repo, commit, forge, file string
 	if domaingit.ValidCommitSHA(commit) && commit == revision {
 		contract = "revision-matched reference rules; remote readiness not checked"
 	} else {
-		report.unknown(where + ": pinned contract not verified; rows below are this CLI's reference guidance, not authoritative requirements for that revision")
+		report.unknown(where + ": pinned contract not verified; the rows listed for it are this CLI's reference guidance, not authoritative requirements for that revision")
 	}
 
 	call := SetupCall{Location: where, Forge: forge, Workflow: name, Revision: revision, Contract: contract, Requirements: []SetupItem{}, Settings: []SetupSetting{}}
@@ -54,11 +57,12 @@ func (report *RequirementsReport) inspect(root, repo, commit, forge, file string
 		if setupScalar(yamlChild(inputs, "forge-ci-binary-ref")) != revision {
 			call.Contract = "reference guidance from this CLI; runtime engine override unverified"
 
-			report.unknown(where + ": forge-ci-binary-ref is absent, resolves a stable release, or selects another/unresolved runtime engine; its contract is not verified")
+			report.unknown(where + ": forge-ci-binary-ref is absent or names another engine than this CLI's revision; its contract is not verified")
 		}
 
 		requirements = report.githubRequirements(root, inputs, &call)
 	} else {
+		files := report.releaseFileSigning(root, setupPreparedArtifactsConfig(inputs, jobs), &call)
 		prepare := name == setupPrepareWorkflow || forge == setupGitLab
 
 		images := release.SetupConditional // Sign/publish discovers images in a runtime ledger.
@@ -67,10 +71,10 @@ func (report *RequirementsReport) inspect(root, repo, commit, forge, file string
 		}
 
 		if forge == setupGitLab {
-			images = release.SetupRequired
-		} // Registry access preflight always runs.
+			images = gitlabRegistryState(inputs)
+		}
 
-		requirements = release.KeyReleaseSetup(forge, prepare, setupChoice(inputs, "sign-distro-packages", true), images)
+		requirements = release.KeyReleaseSetup(forge, prepare, setupChoice(inputs, "sign-distro-packages", true), files, images)
 		report.keySettings(&call, inputs, prepare)
 	}
 
@@ -92,7 +96,7 @@ func (report *RequirementsReport) keySettings(call *SetupCall, inputs *yaml.Node
 	report.setting(call, inputs, "signer-image", "Reviewed digest-pinned image; publication and pull access are not checked")
 
 	if call.Forge == setupForgejo {
-		report.setting(call, inputs, "runner-label", "JSON array of trusted runner labels")
+		report.setting(call, inputs, "runs-on", "JSON array of trusted runner labels")
 		report.setting(call, inputs, "forge-ci-sha", "Exact helper checkout revision; must match the workflow pin")
 		report.forgejoRepositorySetting(call, inputs)
 
@@ -102,13 +106,13 @@ func (report *RequirementsReport) keySettings(call *SetupCall, inputs *yaml.Node
 			report.unknown(call.Location + ": forge-ci-sha must match the literal uses revision")
 		}
 	} else {
-		for _, name := range []string{"forge-ci-repository", "server-url", "registry", "consumer-project", "publication-project", "publication-image-repository", "job-image", "build-image", "request-allowed-signers"} {
+		for _, name := range []string{"forge-ci-repository", "server-url", "registry", "consumer-project", "publication-project", "publication-image-repository", "job-image", "request-allowed-signers"} {
 			report.setting(call, inputs, name, "Reviewed GitLab release input; see docs/gitlab.md")
 		}
 
 		call.Settings = append(call.Settings,
 			SetupSetting{"COSIGN_PUBLIC_KEY", "project variable, scope *", "Public PEM matching the reviewed digest"},
-			SetupSetting{"RELEASE_REGISTRY_USER", "protected project variable, scope release/registry/*", "Publication registry identity; registry preflight requires the token even for archive-only releases"},
+			SetupSetting{"RELEASE_REGISTRY_USER", "protected project variable, scope release/registry/*", "Publication registry identity; needed with RELEASE_REGISTRY_TOKEN only when release-images or base-stages publishes images"},
 		)
 	}
 
@@ -143,6 +147,91 @@ func (report *RequirementsReport) forgejoRepositorySetting(call *SetupCall, inpu
 	report.setting(call, inputs, "forge-ci-repository", "Helper repository matching the workflow's uses coordinate; empty uses vars.FORGE_CI_REPOSITORY")
 }
 
+// gitlabRegistryState follows the rules of the GitLab release's registry
+// access check: it runs when release-images is true or base-stages names a
+// stage, and every job that uses the registry token runs only then.
+func gitlabRegistryState(inputs *yaml.Node) release.SetupState {
+	images := setupChoice(inputs, "release-images", false)
+
+	bases := release.SetupUnused
+	if stages := setupScalar(yamlChild(inputs, "base-stages")); strings.Contains(stages, "$") {
+		bases = release.SetupConditional
+	} else if stages != "" {
+		bases = release.SetupRequired
+	}
+
+	switch {
+	case images == release.SetupRequired || bases == release.SetupRequired:
+		return release.SetupRequired
+	case images == release.SetupConditional || bases == release.SetupConditional:
+		return release.SetupConditional
+	default:
+		return release.SetupUnused
+	}
+}
+
+// setupNeedsArtifactsConfig is how a Forgejo signing call names its
+// declaration: the prepare job's artifacts-config output.
+var setupNeedsArtifactsConfig = regexp.MustCompile(`^\$\{\{\s*needs\.([A-Za-z0-9_-]+)\.outputs\.artifacts-config\s*\}\}$`)
+
+// setupPreparedArtifactsConfig follows a Forgejo call's artifacts-config,
+// when it is a prepare-release.yml job's output, to that job's inputs: the
+// output is the input, validated. Any other input, and a GitLab call's, is
+// the call's own.
+func setupPreparedArtifactsConfig(inputs, jobs *yaml.Node) *yaml.Node {
+	match := setupNeedsArtifactsConfig.FindStringSubmatch(setupScalar(yamlChild(inputs, "artifacts-config")))
+	if match == nil {
+		return inputs
+	}
+
+	prepare := yamlChild(jobs, match[1])
+	if _, workflow, _ := strings.Cut(setupScalar(yamlChild(prepare, "uses")), "/.forgejo/workflows/"); !strings.HasPrefix(workflow, setupPrepareWorkflow+"@") {
+		return inputs
+	}
+
+	return yamlChild(prepare, "with")
+}
+
+// setupDefaultArtifactsConfig is the declaration a release reads when the
+// call names none.
+const setupDefaultArtifactsConfig = ".forge-ci/artifacts.yml"
+
+// releaseFileSigning is the GPG demand of the declaration a Forgejo or GitLab
+// release signs its checksums and SBOMs by: sign.method gpg or
+// sign.files-method gpg needs the GPG key, its passphrase and its
+// fingerprint. Any other declaration, and none, signs them with the Cosign
+// key.
+func (report *RequirementsReport) releaseFileSigning(root string, inputs *yaml.Node, call *SetupCall) release.SetupState {
+	path := setupScalar(yamlChild(inputs, "artifacts-config"))
+	if path == "" {
+		path = setupDefaultArtifactsConfig
+	}
+
+	// Only repository-local literal paths; never evaluate a workflow expression.
+	if !filepath.IsLocal(path) || strings.Contains(path, "$") {
+		report.unknown(call.Location + ": artifacts-config is not a literal repository-local path; GPG release file signing remains conditional")
+
+		return release.SetupConditional
+	}
+
+	if _, err := os.Lstat(filepath.Join(root, path)); os.IsNotExist(err) {
+		return release.SetupUnused
+	}
+
+	if report.read(root, path) == nil {
+		return release.SetupConditional
+	}
+
+	cfg, checks, parsed := loadDoctorConfig(root, filepath.Join(root, path), false)
+	if !parsed || CountFailures(checks) > 0 || cfg == nil {
+		report.unknown(call.Location + ": artifact configuration could not be resolved; GPG release file signing remains conditional")
+
+		return release.SetupConditional
+	}
+
+	return setupState(cfg.Sign.DeclaresGPG())
+}
+
 func setupState(required bool) release.SetupState {
 	if required {
 		return release.SetupRequired
@@ -154,7 +243,7 @@ func setupState(required bool) release.SetupState {
 func (report *RequirementsReport) githubRequirements(root string, inputs *yaml.Node, call *SetupCall) []release.SetupRequirement {
 	gpg, gpgPublic, ssh, cosign, maven := release.SetupConditional, release.SetupConditional, release.SetupConditional, release.SetupConditional, release.SetupConditional
 
-	path := ".forge-ci/artifacts.yml"
+	path := setupDefaultArtifactsConfig
 	if n := yamlChild(inputs, "artifacts-config"); n != nil {
 		path = setupScalar(n)
 	}
@@ -171,7 +260,7 @@ func (report *RequirementsReport) githubRequirements(root string, inputs *yaml.N
 		return release.GitHubReleaseSetup(gpg, gpgPublic, ssh, cosign, maven, release.SetupConditional)
 	}
 
-	cfg, checks, parsed := loadDoctorConfig(root, filepath.Join(root, path), path == ".forge-ci/artifacts.yml")
+	cfg, checks, parsed := loadDoctorConfig(root, filepath.Join(root, path), path == setupDefaultArtifactsConfig)
 	if !parsed || CountFailures(checks) > 0 || cfg == nil {
 		report.unknown(call.Location + ": artifact configuration could not be resolved; signing/publishing requirements remain conditional")
 

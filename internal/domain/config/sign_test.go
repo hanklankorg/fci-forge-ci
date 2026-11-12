@@ -23,6 +23,27 @@ func TestSignConfig_EmptyDefaultsToGPG(t *testing.T) {
 	}
 }
 
+// gpg is the effective method of an empty block, but only a declaration that
+// names it signs release files with GPG on Forgejo.
+func TestSignConfig_DeclaresGPG(t *testing.T) {
+	t.Parallel()
+
+	for _, test := range []struct {
+		name string
+		in   config.SignConfig
+		want bool
+	}{
+		{"no method named", config.SignConfig{}, false},
+		{"method gpg", config.SignConfig{Method: domainrelease.SignMethodGPG}, true},
+		{"cosign key", config.SignConfig{Method: domainrelease.SignMethodKMS, Key: config.CosignKeyEnvRef}, false},
+		{"keyless", config.SignConfig{Method: domainrelease.SignMethodSigstore}, false},
+	} {
+		if got := test.in.DeclaresGPG(); got != test.want {
+			t.Errorf("%s: DeclaresGPG() = %t, want %t", test.name, got, test.want)
+		}
+	}
+}
+
 func TestSignConfig_Validate_HappyPaths(t *testing.T) {
 	t.Parallel()
 
@@ -41,6 +62,8 @@ func TestSignConfig_Validate_HappyPaths(t *testing.T) {
 		{"kms azurekms", config.SignConfig{Method: domainrelease.SignMethodKMS, Key: "azurekms://vault.azure.net/keys/k/v"}},
 		{"kms pkcs11", config.SignConfig{Method: domainrelease.SignMethodKMS, Key: "pkcs11:object=hsm-key"}},
 		{"kms file (local dev)", config.SignConfig{Method: domainrelease.SignMethodKMS, Key: "file:./signing.key"}},
+		{"gpg files beside sigstore images", config.SignConfig{Method: domainrelease.SignMethodSigstore, FilesMethod: domainrelease.SignMethodGPG}},
+		{"gpg files beside kms images", config.SignConfig{Method: domainrelease.SignMethodKMS, Key: config.CosignKeyEnvRef, FilesMethod: domainrelease.SignMethodGPG}},
 	}
 
 	for _, c := range cases {
@@ -67,6 +90,10 @@ func TestSignConfig_Validate_RejectsBadFieldCombinations(t *testing.T) {
 		{"kms missing key", config.SignConfig{Method: domainrelease.SignMethodKMS}},
 		{"kms with issuer", config.SignConfig{Method: domainrelease.SignMethodKMS, Key: "awskms:///alias/X", OIDCIssuer: "https://x"}},
 		{"unknown method", config.SignConfig{Method: "openssl"}},
+		{"files method beside the gpg default", config.SignConfig{FilesMethod: domainrelease.SignMethodGPG}},
+		{"files method beside explicit gpg", config.SignConfig{Method: domainrelease.SignMethodGPG, FilesMethod: domainrelease.SignMethodGPG}},
+		{"a second cosign method for files", config.SignConfig{Method: domainrelease.SignMethodKMS, Key: "awskms:///alias/X", FilesMethod: domainrelease.SignMethodSigstore}},
+		{"unknown files method", config.SignConfig{Method: domainrelease.SignMethodSigstore, FilesMethod: "openssl"}},
 	}
 
 	for _, cfg := range cases {

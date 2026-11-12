@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: The Forge CI Authors
+// SPDX-FileCopyrightText: 2026 Digg - Agency for Digital Government
 // SPDX-License-Identifier: EUPL-1.2 OR GPL-3.0-or-later
 
 package snapshotimage
@@ -41,8 +41,12 @@ const DefaultDownloadDir = "_snapshot-downloads"
 // ProducerManifest is the file name of a snapshot producer's artifact receipt.
 const ProducerManifest = "snapshot-artifact.json"
 
-// ArtifactDestination returns where a planned artifact is placed relative to
-// the container build context, or an empty string for unsupported types.
+// ArtifactDestination returns where a planned artifact's verified files are
+// placed, or an empty string for unsupported types. Go, Cargo, Maven and
+// Gradle land where their release builds leave the same files, so one
+// Containerfile serves release and snapshot. An npm package is verified under
+// an isolated directory of the context and, right before the build, laid over
+// the context root, where the release image jobs lay the unpacked package.
 func ArtifactDestination(a pipeline.PlannedArtifact, containerContext string) string {
 	switch a.ProjectType {
 	case projecttype.Go, projecttype.Cargo:
@@ -90,11 +94,21 @@ func (p Plan) ArtifactPlatforms(name string) []string {
 	return out
 }
 
+// requireSourceDateEpoch refuses a plan whose producers would build without
+// the frozen source timestamp.
+func (p Plan) requireSourceDateEpoch() error {
+	epoch, err := strconv.ParseInt(p.SourceDateEpoch, 10, 64)
+	if err != nil || epoch < 0 {
+		return errUnfrozenSourceDateEpoch
+	}
+
+	return nil
+}
+
 func (p Plan) validateArtifacts() error {
 	if len(p.Artifacts) > 0 {
-		epoch, err := strconv.ParseInt(p.SourceDateEpoch, 10, 64)
-		if err != nil || epoch < 0 {
-			return errUnfrozenSourceDateEpoch
+		if err := p.requireSourceDateEpoch(); err != nil {
+			return err
 		}
 	}
 
@@ -113,6 +127,10 @@ func (p Plan) validateArtifacts() error {
 	for _, build := range p.Builds {
 		if err := validateBuildDependencies(build, byName, needed); err != nil {
 			return err
+		}
+
+		if err := requireOneNPMPackage(build.RequiredArtifacts); err != nil {
+			return fmt.Errorf("snapshot build %s: %w", build.Name, err)
 		}
 	}
 
@@ -161,13 +179,9 @@ func validateProducer(artifact pipeline.PlannedArtifact, byName map[string]pipel
 		return fmt.Errorf("snapshot producer %s %w", artifact.Name, errDisagreesTypedConfig)
 	}
 
-	switch artifact.ProjectType {
-	case projecttype.Go, projecttype.Cargo, projecttype.Maven, projecttype.Gradle, projecttype.NPM:
-	default:
-		return fmt.Errorf("%w %s", errUnsupportedProducerType, artifact.ProjectType)
-	}
+	_, err = ToolchainFamily(artifact.ProjectType)
 
-	return nil
+	return err
 }
 
 // validateEcosystemConfig rejects a producer carrying configuration for an

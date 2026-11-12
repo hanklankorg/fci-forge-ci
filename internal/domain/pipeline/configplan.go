@@ -7,6 +7,7 @@ package pipeline
 import (
 	"cmp"
 	"maps"
+	"path"
 	"slices"
 
 	"github.com/diggsweden/forge-ci/internal/domain/build"
@@ -32,6 +33,9 @@ type ConfigPlan struct {
 	FallbackProjectType     projecttype.Type  `json:"fallback_project_type,omitempty"`
 	Sign                    PlannedSign       `json:"sign"`
 	GitSigning              PlannedGitSigning `json:"git_signing"`
+	// DistroPackages is the distro-packages block with every place resolved
+	// to its default. Absent, the release publishes no package to a registry.
+	DistroPackages *config.DistroPackages `json:"distro_packages,omitempty"`
 }
 
 // PlannedSign is the resolved signing-backend choice. Always present in
@@ -41,19 +45,26 @@ type ConfigPlan struct {
 // for the orchestrator workflow's `permissions:` decision — keyless
 // Sigstore is the only method that needs id-token: write.
 type PlannedSign struct {
-	Method     domainrelease.SignMethod `json:"method"`
-	Key        string                   `json:"key,omitempty"`
-	OIDCIssuer string                   `json:"oidc_issuer,omitempty"`
+	Method domainrelease.SignMethod `json:"method"`
+	// FilesMethod is sign.files-method as declared: gpg when the release
+	// files are signed with OpenPGP and Method signs the images alone, empty
+	// when Method signs both.
+	FilesMethod domainrelease.SignMethod `json:"files_method,omitempty"`
+	Key         string                   `json:"key,omitempty"`
+	OIDCIssuer  string                   `json:"oidc_issuer,omitempty"`
 	// RequiresIDToken: keyless Sigstore is the only method needing
-	// `id-token: write`.
+	// `id-token: write`, and only while it signs something: with FilesMethod
+	// and no container it signs nothing.
 	RequiresIDToken bool `json:"requires_id_token"`
-	// ImportsGPGKey is true only for gpg, so the release workflow gates the
-	// "import GPG key" step on this precomputed flag instead of comparing the
-	// method string in YAML.
+	// ImportsGPGKey is true when the release files are signed with gpg, by
+	// Method or by FilesMethod, so the release workflow gates the "import GPG
+	// key" step on this precomputed flag instead of comparing the method
+	// string in YAML.
 	ImportsGPGKey bool `json:"imports_gpg_key"`
 	// SignsContainers is true for the cosign-based methods (sigstore, kms),
 	// which can sign OCI manifests; gpg cannot. The container publish stage
 	// gates image signing/attestation on this instead of `method != 'gpg'`.
+	// It follows Method alone: FilesMethod never signs an image.
 	SignsContainers bool `json:"signs_containers"`
 	// UsesKeySecret is true for kms with exactly config.CosignKeyEnvRef:
 	// the signing steps then receive the Cosign key and its passphrase as
@@ -170,11 +181,17 @@ type PlannedContainer struct {
 	GoArtifactName              string             `json:"go_artifact_name,omitempty"`
 	CargoArtifactName           string             `json:"cargo_artifact_name,omitempty"`
 	MavenArtifactName           string             `json:"maven_artifact_name,omitempty"`
-	NPMArtifactName             string             `json:"npm_artifact_name,omitempty"`
-	GradleArtifactName          string             `json:"gradle_artifact_name,omitempty"`
-	ExtractBinaryTarget         string             `json:"extract_binary_target,omitempty"`
-	ExtractBinaryNames          []string           `json:"extract_binary_names,omitempty"`
-	ExtractBinaryPaths          []string           `json:"extract_binary_paths,omitempty"`
+	// MavenWorkingDirectory and GradleWorkingDirectory are where that
+	// artifact was built, when not the repository root: the image build
+	// restores it there, so a Containerfile copies from the same path on
+	// every forge.
+	MavenWorkingDirectory  string   `json:"maven_working_directory,omitempty"`
+	NPMArtifactName        string   `json:"npm_artifact_name,omitempty"`
+	GradleArtifactName     string   `json:"gradle_artifact_name,omitempty"`
+	GradleWorkingDirectory string   `json:"gradle_working_directory,omitempty"`
+	ExtractBinaryTarget    string   `json:"extract_binary_target,omitempty"`
+	ExtractBinaryNames     []string `json:"extract_binary_names,omitempty"`
+	ExtractBinaryPaths     []string `json:"extract_binary_paths,omitempty"`
 }
 
 // NewConfigPlan builds a plan from an already validated and derived config.
@@ -195,8 +212,9 @@ func NewConfigPlan(cfg *config.Config) ConfigPlan {
 		},
 		AnyRequireAuthorization: config.AnyRequireAuthorization(cfg.Artifacts),
 		PipelineSBOMs:           config.PipelineSBOMs(cfg.Artifacts),
-		Sign:                    planSign(cfg.Sign),
+		Sign:                    planSign(cfg.Sign, len(containers) > 0),
 		GitSigning:              planGitSigning(cfg.GitSigning),
+		DistroPackages:          cfg.DistroPackages.Resolved(),
 	}
 	if len(artifacts) > 0 {
 		plan.FallbackProjectType = artifacts[0].ProjectType
@@ -258,9 +276,14 @@ func planGitSigning(signing config.GitSigningConfig) PlannedGitSigning {
 // Transparency is resolved only for the cosign methods and left empty
 // for gpg, which never runs cosign — carrying a transparency value there
 // would imply a choice that has no effect.
-func planSign(sign config.SignConfig) PlannedSign {
+//
+// With FilesMethod the cosign method signs the images alone, so a
+// declaration without a container signs nothing with Cosign: it needs no
+// id-token, no Cosign key secret and no Sigstore endpoint.
+func planSign(sign config.SignConfig, hasContainers bool) PlannedSign {
 	method := sign.EffectiveMethod()
 	signsWithCosign := method == domainrelease.SignMethodSigstore || method == domainrelease.SignMethodKMS
+	cosignRuns := signsWithCosign && (sign.FilesMethod == "" || hasContainers)
 
 	var transparency domainrelease.Transparency
 	if signsWithCosign {
@@ -269,18 +292,19 @@ func planSign(sign config.SignConfig) PlannedSign {
 
 	return PlannedSign{
 		Method:               method,
+		FilesMethod:          sign.FilesMethod,
 		Key:                  sign.Key,
 		OIDCIssuer:           sign.OIDCIssuer,
-		RequiresIDToken:      method == domainrelease.SignMethodSigstore,
-		ImportsGPGKey:        method == domainrelease.SignMethodGPG,
+		RequiresIDToken:      cosignRuns && method == domainrelease.SignMethodSigstore,
+		ImportsGPGKey:        sign.EffectiveFilesMethod() == domainrelease.SignMethodGPG,
 		SignsContainers:      signsWithCosign,
-		UsesKeySecret:        method == domainrelease.SignMethodKMS && sign.Key == config.CosignKeyEnvRef,
+		UsesKeySecret:        cosignRuns && method == domainrelease.SignMethodKMS && sign.Key == config.CosignKeyEnvRef,
 		Transparency:         transparency,
 		TransparencyExplicit: sign.Transparency != "",
 		// Keyless always reaches Sigstore (Fulcio + Rekor + TUF). kms
 		// reaches it only to publish. gpg never does.
-		RequiresSigstoreEgress: method == domainrelease.SignMethodSigstore ||
-			(method == domainrelease.SignMethodKMS && transparency.PublishesToLog()),
+		RequiresSigstoreEgress: cosignRuns && (method == domainrelease.SignMethodSigstore ||
+			(method == domainrelease.SignMethodKMS && transparency.PublishesToLog())),
 	}
 }
 
@@ -351,47 +375,68 @@ func planContainers(artifacts []config.Artifact, containers []config.Container) 
 			GoArtifactName:              c.GoArtifactName,
 			CargoArtifactName:           c.CargoArtifactName,
 		}
-		for _, dep := range c.From {
-			a, ok := byName[dep] //nolint:varnamelen // idiomatic short name (testing/http/io conventions).
-			if !ok {
-				continue
-			}
-
-			switch a.ProjectType {
-			case projecttype.Maven:
-				if pc.MavenArtifactName == "" {
-					pc.MavenArtifactName = buildArtifactName(a)
-				}
-			case projecttype.NPM:
-				if pc.NPMArtifactName == "" {
-					pc.NPMArtifactName = buildArtifactName(a)
-				}
-			case projecttype.Gradle:
-				if pc.GradleArtifactName == "" {
-					pc.GradleArtifactName = buildArtifactName(a)
-				}
-			default:
-				// Other types (Go, Cargo, Python, GradleAndroid, XcodeIOS,
-				// Meta, Auto, Unknown) don't contribute to the container's
-				// build-artifact-name slots — they're handled elsewhere
-				// in the plan (Go via GoArtifactName, etc.).
-			}
-		}
-
-		if c.Extract != nil && c.Extract.Binary != nil {
-			pc.ExtractBinaryTarget = c.Extract.Binary.Target
-			pc.ExtractBinaryNames = slices.Clone(c.Extract.Binary.Names)
-
-			pc.ExtractBinaryPaths = slices.Clone(c.Extract.Binary.Paths)
-			if len(pc.ExtractBinaryPaths) != 0 {
-				pc.ExtractBinaryNames, _ = domaincontainer.ImageFileNames(pc.ExtractBinaryPaths) // Config validation already checked these paths.
-			}
-		}
+		pc.takeBuildArtifactNames(c.From, byName)
+		pc.takeExtractedBinary(c.Extract)
 
 		out = append(out, pc)
 	}
 
 	return out
+}
+
+// takeBuildArtifactNames names the build artifact of each ecosystem the
+// container is built from: the first declared artifact of that ecosystem
+// among from, and for Maven its working directory too. Other project types
+// fill no slot here; Go and Cargo are named by the container itself.
+func (pc *PlannedContainer) takeBuildArtifactNames(from []string, byName map[string]config.Artifact) {
+	for _, dep := range from {
+		artifact, ok := byName[dep]
+		if !ok {
+			continue
+		}
+
+		switch artifact.ProjectType {
+		case projecttype.Maven:
+			if pc.MavenArtifactName == "" {
+				pc.MavenArtifactName = buildArtifactName(artifact)
+				if dir := path.Clean(artifact.WorkingDirectory); dir != "." {
+					pc.MavenWorkingDirectory = dir
+				}
+			}
+		case projecttype.NPM:
+			if pc.NPMArtifactName == "" {
+				pc.NPMArtifactName = buildArtifactName(artifact)
+			}
+		case projecttype.Gradle:
+			if pc.GradleArtifactName == "" {
+				pc.GradleArtifactName = buildArtifactName(artifact)
+				if dir := path.Clean(artifact.WorkingDirectory); dir != "." {
+					pc.GradleWorkingDirectory = dir
+				}
+			}
+		default:
+			// Other types (Go, Cargo, Python, GradleAndroid, XcodeIOS,
+			// Meta, Auto, Unknown) don't contribute to the container's
+			// build-artifact-name slots — they're handled elsewhere
+			// in the plan (Go via GoArtifactName, etc.).
+		}
+	}
+}
+
+// takeExtractedBinary plans the binaries the container's build extracts
+// from its image, named by the declaration or after the declared paths.
+func (pc *PlannedContainer) takeExtractedBinary(extract *config.ContainerExtract) {
+	if extract == nil || extract.Binary == nil {
+		return
+	}
+
+	pc.ExtractBinaryTarget = extract.Binary.Target
+	pc.ExtractBinaryNames = slices.Clone(extract.Binary.Names)
+
+	pc.ExtractBinaryPaths = slices.Clone(extract.Binary.Paths)
+	if len(pc.ExtractBinaryPaths) != 0 {
+		pc.ExtractBinaryNames, _ = domaincontainer.ImageFileNames(pc.ExtractBinaryPaths) // Config validation already checked these paths.
+	}
 }
 
 func buildArtifactName(art config.Artifact) string {

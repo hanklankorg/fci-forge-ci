@@ -50,8 +50,8 @@ func ValidateConfigPlan(plan ConfigPlan) error { //nolint:cyclop // bounded, ind
 		source := config.Artifact{
 			BuildType: artifact.BuildType,
 			Name:      artifact.Name, ProjectType: artifact.ProjectType, SBOMs: artifact.SBOMs,
-			PublishTo: artifact.PublishTo,
-			Go:        artifact.Go, Cargo: artifact.Cargo, GradleAndroid: artifact.GradleAndroid, XcodeIOS: artifact.XcodeIOS,
+			PublishTo: artifact.PublishTo, WorkingDirectory: artifact.WorkingDirectory,
+			Go: artifact.Go, Cargo: artifact.Cargo, GradleAndroid: artifact.GradleAndroid, XcodeIOS: artifact.XcodeIOS,
 		}
 		if artifact.GoBuildMode != config.GoArtifactBuildMode(source) || artifact.CargoBuildMode != config.CargoArtifactBuildMode(source) {
 			return fmt.Errorf("config-plan artifacts.all[%d] has inconsistent build modes: %w", index, errs.ErrInvalidConfig)
@@ -129,7 +129,7 @@ func validatePlannedNPMTag(artifact PlannedArtifact) error {
 }
 
 func validateConfigSigning(plan ConfigPlan) error {
-	sign := config.SignConfig{Method: plan.Sign.Method, Key: plan.Sign.Key, OIDCIssuer: plan.Sign.OIDCIssuer, Transparency: plan.Sign.Transparency}
+	sign := config.SignConfig{Method: plan.Sign.Method, FilesMethod: plan.Sign.FilesMethod, Key: plan.Sign.Key, OIDCIssuer: plan.Sign.OIDCIssuer, Transparency: plan.Sign.Transparency}
 	if !plan.Sign.TransparencyExplicit {
 		sign.Transparency = ""
 	}
@@ -138,7 +138,7 @@ func validateConfigSigning(plan ConfigPlan) error {
 		return err
 	}
 
-	if plan.Sign != planSign(sign) {
+	if plan.Sign != planSign(sign, plan.Containers.HasContainers) {
 		return fmt.Errorf("config-plan sign has inconsistent resolved fields: %w", errs.ErrInvalidConfig)
 	}
 
@@ -149,6 +149,25 @@ func validateConfigSigning(plan ConfigPlan) error {
 
 	if plan.GitSigning != planGitSigning(gitSigning) {
 		return fmt.Errorf("config-plan git_signing has inconsistent resolved fields: %w", errs.ErrInvalidConfig)
+	}
+
+	return validateDistroPackages(plan.DistroPackages)
+}
+
+// validateDistroPackages holds the planned block to the declaration's rules
+// and to its resolved form: a publisher reads every place from the plan and
+// applies no default of its own.
+func validateDistroPackages(planned *config.DistroPackages) error {
+	if planned == nil {
+		return nil
+	}
+
+	if err := planned.Validate(); err != nil {
+		return err
+	}
+
+	if resolved := planned.Resolved(); planned.Debian != resolved.Debian || planned.RPM != resolved.RPM || planned.Alpine != resolved.Alpine {
+		return fmt.Errorf("config-plan distro_packages has unresolved places: %w", errs.ErrInvalidConfig)
 	}
 
 	return nil
@@ -235,8 +254,10 @@ func validateContainerExecution(containers []PlannedContainer, artifacts []confi
 			{"go_artifact_name", container.GoArtifactName, want.GoArtifactName},
 			{"cargo_artifact_name", container.CargoArtifactName, want.CargoArtifactName},
 			{"maven_artifact_name", container.MavenArtifactName, want.MavenArtifactName},
+			{"maven_working_directory", container.MavenWorkingDirectory, want.MavenWorkingDirectory},
 			{"npm_artifact_name", container.NPMArtifactName, want.NPMArtifactName},
 			{"gradle_artifact_name", container.GradleArtifactName, want.GradleArtifactName},
+			{"gradle_working_directory", container.GradleWorkingDirectory, want.GradleWorkingDirectory},
 		} {
 			if slot.got != slot.want {
 				return fmt.Errorf("config-plan containers.all[%d].%s disagrees with from: %w", index, slot.field, errs.ErrInvalidConfig)

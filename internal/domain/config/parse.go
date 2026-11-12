@@ -80,6 +80,10 @@ func Parse(data []byte) (*Config, error) {
 		return nil, invalidConfig(err, "config: trailing YAML document in artifacts.yml")
 	}
 
+	if err := checkDistroPackagesDocument(data); err != nil {
+		return nil, err
+	}
+
 	return &cfg, nil
 }
 

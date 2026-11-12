@@ -47,3 +47,37 @@ func TestReleaseRetention_ListsAndDeletesAttachments(t *testing.T) {
 	require.NoError(t, forgejoProvider.DeleteReleaseAsset(t.Context(), "examplescope/repo", releases[0], releases[0].Assets[0]))
 	require.Equal(t, "DELETE /api/v1/repos/examplescope/repo/releases/99/assets/1", calls[len(calls)-1])
 }
+
+// The readback asks for one tag and that release's attachments; a tag
+// without a release is none, not an error. A size of zero is reported as one.
+func TestReadRelease_ReadsOnlyTheTaggedRelease(t *testing.T) {
+	t.Parallel()
+
+	var calls []string
+
+	forgejoProvider := newProvider(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		calls = append(calls, request.Method+" "+request.URL.Path)
+
+		switch request.URL.Path {
+		case "/api/v1/repos/examplescope/repo/releases/tags/v1.2.3":
+			_, _ = response.Write([]byte(`{"id":99,"tag_name":"v1.2.3","draft":true}`))
+		case "/api/v1/repos/examplescope/repo/releases/99/assets":
+			_, _ = response.Write([]byte(`[{"id":1,"name":"app.tar.gz","size":0}]`))
+		default:
+			http.Error(response, "not found", http.StatusNotFound)
+		}
+	}))
+
+	release, err := forgejoProvider.ReadRelease(t.Context(), "examplescope/repo", "v1.2.3")
+	require.NoError(t, err)
+	require.Equal(t, &provider.ListedRelease{
+		ID: 99, Tag: "v1.2.3", Draft: true, Created: release.Created, Assets: []provider.ListedAsset{{ID: 1, Name: "app.tar.gz"}},
+	}, release)
+	require.Equal(t, []string{
+		"GET /api/v1/repos/examplescope/repo/releases/tags/v1.2.3", "GET /api/v1/repos/examplescope/repo/releases/99/assets",
+	}, calls)
+
+	release, err = forgejoProvider.ReadRelease(t.Context(), "examplescope/repo", "v9.9.9")
+	require.NoError(t, err)
+	require.Nil(t, release)
+}

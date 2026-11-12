@@ -680,6 +680,31 @@ func TestValidate_RejectsDuplicateContainerNames(t *testing.T) {
 	}
 }
 
+// An omitted platforms defaults to linux/amd64; a value made only of
+// separators names no platform, and every plan would build nothing for it.
+func TestValidate_ContainerPlatformsNamesAPlatform(t *testing.T) {
+	t.Parallel()
+
+	for platforms, valid := range map[string]bool{
+		"":                        true,
+		"linux/amd64,linux/arm64": true,
+		",":                       false,
+		" ":                       false,
+		" , ,":                    false,
+	} {
+		cfg := &config.Config{Containers: []config.Container{{Name: "app", Platforms: platforms}}}
+
+		err := config.Validate(cfg)
+		if valid && err != nil {
+			t.Errorf("platforms %q: err = %v, want valid", platforms, err)
+		}
+
+		if !valid && (!errors.Is(err, errs.ErrInvalidConfig) || !strings.Contains(fmt.Sprint(err), "names no platform")) {
+			t.Errorf("platforms %q: err = %v, want ErrInvalidConfig naming no platform", platforms, err)
+		}
+	}
+}
+
 func TestValidateAndDerive_RejectBuildArgsDelimiters(t *testing.T) {
 	t.Parallel()
 
@@ -786,7 +811,6 @@ func TestValidate_EveryReservedSecretNameIsRefused(t *testing.T) {
 		"IOS_SIGNING_CERTIFICATE_BASE64",
 		"IOS_SIGNING_CERTIFICATE_PASSPHRASE",
 		"PROVISIONING_PROFILE_BASE64",
-		"KEYCHAIN_PASSWORD",
 		"XCCONFIG_BASE64",
 		"APP_STORE_CONNECT_API_KEY_ID",
 		"APP_STORE_CONNECT_ISSUER_ID",

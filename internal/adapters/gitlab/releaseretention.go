@@ -6,6 +6,7 @@ package gitlab
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/url"
 	"regexp"
@@ -17,7 +18,10 @@ import (
 	"github.com/diggsweden/forge-ci/internal/domain/provider"
 )
 
-var _ provider.ReleaseAssetPruner = (*Provider)(nil)
+var (
+	_ provider.ReleaseAssetPruner = (*Provider)(nil)
+	_ provider.ReleaseReader      = (*Provider)(nil)
+)
 
 type gitlabListedRelease struct {
 	TagName   string    `json:"tag_name"`
@@ -93,15 +97,59 @@ func (p *Provider) listedReleasesPage(ctx context.Context, endpoint string, batc
 			return nil, err
 		}
 
-		entry := provider.ListedRelease{Tag: release.TagName, Created: release.CreatedAt}
-		for _, link := range links {
-			entry.Assets = append(entry.Assets, provider.ListedAsset{ID: int64(link.ID), Name: link.Name, URL: link.URL})
-		}
-
-		listed = append(listed, entry)
+		listed = append(listed, listedRelease(release, links))
 	}
 
 	return listed, nil
+}
+
+// ReadRelease reads the release of tag with its asset links. GitLab keys a
+// release by its tag, so there is one or none.
+func (p *Provider) ReadRelease(ctx context.Context, repo, tag string) (*provider.ListedRelease, error) {
+	if _, err := p.ParseRepository(repo); err != nil {
+		return nil, err
+	}
+
+	apiBase, headers := p.apiContext()
+	endpoint := projectEndpoint(apiBase, repo) + "/releases/" + url.PathEscape(tag)
+
+	body, err := getJSON(ctx, p.HTTPClient, endpoint, headers)
+	if err != nil {
+		if errors.Is(err, errs.ErrMissingInput) {
+			return nil, nil //nolint:nilnil // no release for the tag is an answer, not an error.
+		}
+
+		return nil, fmt.Errorf("gitlab read release %s: %w", tag, err)
+	}
+
+	var release gitlabListedRelease
+	if err = json.Unmarshal(body, &release); err != nil {
+		return nil, fmt.Errorf("gitlab parse release %s: %w: %w", tag, err, errs.ErrMalformedInput)
+	}
+
+	if release.TagName != tag {
+		return nil, fmt.Errorf("gitlab read release %s: the answer is release %q: %w", tag, release.TagName, errs.ErrMalformedInput)
+	}
+
+	links, err := p.listReleaseLinks(ctx, endpoint+"/assets/links", tag, headers)
+	if err != nil {
+		return nil, err
+	}
+
+	entry := listedRelease(release, links)
+
+	return &entry, nil
+}
+
+// listedRelease is a release with its links as files. GitLab reports no size
+// for a link.
+func listedRelease(release gitlabListedRelease, links []gitlabReleaseLink) provider.ListedRelease {
+	entry := provider.ListedRelease{Tag: release.TagName, Created: release.CreatedAt}
+	for _, link := range links {
+		entry.Assets = append(entry.Assets, provider.ListedAsset{ID: int64(link.ID), Name: link.Name, URL: link.URL, SizeUnknown: true})
+	}
+
+	return entry
 }
 
 // DeleteReleaseAsset deletes the project upload the link points at, then the

@@ -6,6 +6,7 @@ package config
 import (
 	_ "embed"
 	"regexp"
+	"strconv"
 	"strings"
 
 	domainrelease "github.com/diggsweden/forge-ci/internal/domain/release"
@@ -36,6 +37,10 @@ func RenderArtifactsJSONSchema() string {
 		"{{GIT_SIGN_METHODS}}", enumJSON(ValidGitSignMethods),
 		"{{SBOM_PATTERN}}", sbomsPattern(),
 		"{{KMS_KEY_PATTERN}}", kmsKeyPattern(),
+		"{{DISTRO_PACKAGE_NAME_PATTERN}}", "^"+DistroPackageNamePattern+"$",
+		"{{DISTRO_PACKAGE_GROUP_PATTERN}}", "^"+DistroPackageGroupPattern()+"$",
+		"{{DISTRO_PACKAGE_NAME_MAX_LENGTH}}", strconv.Itoa(DistroPackageNameMaxLength),
+		"{{DISTRO_PACKAGE_GROUP_MAX_LENGTH}}", strconv.Itoa(DistroPackageGroupMaxLength),
 	).Replace(artifactsSchemaTemplate)
 }
 

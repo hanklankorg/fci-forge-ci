@@ -430,8 +430,8 @@ func TestDownloadRunArtifact_BoundsTokenlessRedirectCount(t *testing.T) {
 	t.Cleanup(blob.Close)
 
 	err := downloadRuntimeContentURL(t, blob.URL+"/loop", blob.Client())
-	if !errors.Is(err, errs.ErrDependencyUnavailable) {
-		t.Fatalf("redirect loop error = %v, want ErrDependencyUnavailable", err)
+	if !errors.Is(err, errs.ErrValidation) {
+		t.Fatalf("redirect loop error = %v, want ErrValidation", err)
 	}
 
 	mu.Lock()

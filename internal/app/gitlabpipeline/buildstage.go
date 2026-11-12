@@ -106,7 +106,7 @@ func BuildStagePipeline(plan pipeline.ReleaseBuildStagePlan, opts BuildPipelineO
 
 	stage := opts.Stage
 	if stage == "" {
-		stage = "build"
+		stage = stageBuild
 	}
 
 	out := ChildPipeline{Stages: []string{stage}}
@@ -117,25 +117,7 @@ func BuildStagePipeline(plan pipeline.ReleaseBuildStagePlan, opts BuildPipelineO
 
 	var missingImage error
 
-	for _, include := range []struct {
-		component string
-		target    pipeline.TargetPlan[pipeline.PlannedArtifact]
-		binaries  bool
-		family    string
-		image     string
-		inputs    func(pipeline.PlannedArtifact, map[string]any) map[string]any
-	}{
-		{"build-maven", tgt.Maven, false, "java", images.Java, mavenBuildInputs},
-		{"build-npm", tgt.NPM, false, "node", images.Node, npmBuildInputs},
-		{"build-gradle", tgt.Gradle, false, "java", images.Java, func(artifact pipeline.PlannedArtifact, inputs map[string]any) map[string]any {
-			return gradleBuildInputs(artifact, inputs, opts.Version)
-		}},
-		{"build-gradle-android", tgt.GradleAndroid, false, "android", images.Android, func(artifact pipeline.PlannedArtifact, inputs map[string]any) map[string]any {
-			return gradleAndroidBuildInputs(artifact, inputs, opts.Version)
-		}},
-		{"build-go", tgt.Go, true, "go", images.Go, goBuildInputs},
-		{"build-cargo", tgt.Cargo, true, "rust", images.Rust, cargoBuildInputs},
-	} {
+	for _, include := range buildFamilies(tgt, images, opts.Version) {
 		err := addTargetIncludes(&out, include.component, include.target, opts, artifactName, include.binaries, include.binaries, func(artifact pipeline.PlannedArtifact) map[string]any {
 			return include.inputs(artifact, map[string]any{
 				"working-directory": dirOrDot(artifact.WorkingDirectory),
@@ -163,6 +145,45 @@ func BuildStagePipeline(plan pipeline.ReleaseBuildStagePlan, opts BuildPipelineO
 	return out, nil
 }
 
+// buildFamily is one target of the release build stage: the Catalog
+// component that builds it, the toolchain family whose runtime image it runs
+// in, and the component's per-item inputs.
+type buildFamily struct {
+	component string
+	target    pipeline.TargetPlan[pipeline.PlannedArtifact]
+	binaries  bool
+	family    string
+	image     string
+	inputs    func(pipeline.PlannedArtifact, map[string]any) map[string]any
+}
+
+// buildFamilies is every build-stage target in the order the components are
+// included, with the runtime image of its family. It is the one mapping of
+// targets to families, for the gate's components and the release's jobs.
+func buildFamilies(tgt pipeline.ReleaseBuildTargets, images RuntimeImages, version string) []buildFamily {
+	return []buildFamily{
+		{"build-maven", tgt.Maven, false, familyJava, images.Java, mavenBuildInputs},
+		{"build-npm", tgt.NPM, false, familyNode, images.Node, npmBuildInputs},
+		{"build-gradle", tgt.Gradle, false, familyJava, images.Java, func(artifact pipeline.PlannedArtifact, inputs map[string]any) map[string]any {
+			return gradleBuildInputs(artifact, inputs, version)
+		}},
+		{"build-gradle-android", tgt.GradleAndroid, false, familyAndroid, images.Android, func(artifact pipeline.PlannedArtifact, inputs map[string]any) map[string]any {
+			return gradleAndroidBuildInputs(artifact, inputs, version)
+		}},
+		{"build-go", tgt.Go, true, familyGo, images.Go, goBuildInputs},
+		{"build-cargo", tgt.Cargo, true, familyRust, images.Rust, cargoBuildInputs},
+	}
+}
+
+// The toolchain families, each one runtime image.
+const (
+	familyJava    = "java"
+	familyNode    = "node"
+	familyGo      = "go"
+	familyRust    = "rust"
+	familyAndroid = "android"
+)
+
 // validateBuildStageTargets refuses targets the Catalog components cannot
 // express before any include is rendered.
 func validateBuildStageTargets(tgt pipeline.ReleaseBuildTargets, version string) error {
@@ -184,7 +205,7 @@ func validateBuildStageTargets(tgt pipeline.ReleaseBuildTargets, version string)
 	}
 
 	if targetPlanned(tgt.XcodeIOS) {
-		return unsupportedTarget("build", "xcode-ios", "build-xcode-ios")
+		return unsupportedTarget(stageBuild, "xcode-ios", "build-xcode-ios")
 	}
 
 	if err := validateGoTargetRepresentable(tgt.Go); err != nil {
@@ -355,7 +376,7 @@ func addTargetIncludes[T any](
 
 		inputs := map[string]any{
 			"job-name": jobName,
-			"stage":    out.Stages[0],
+			keyStage:   out.Stages[0],
 		}
 
 		if includeArtifactName {

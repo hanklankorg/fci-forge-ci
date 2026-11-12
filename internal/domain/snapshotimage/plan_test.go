@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: The Forge CI Authors
+// SPDX-FileCopyrightText: 2026 Digg - Agency for Digital Government
 // SPDX-License-Identifier: EUPL-1.2 OR GPL-3.0-or-later
 
 package snapshotimage_test
@@ -57,6 +57,33 @@ func TestEveryPlannedImageIsScanned(t *testing.T) {
 
 	plan.Images[0].Scan = false
 	require.ErrorContains(t, plan.Validate(), "without its scan")
+}
+
+// A declared binary extraction is a release's output: the snapshot builds the
+// runtime image of the container and extracts nothing. Build secrets, which
+// the build itself would need, stay refused.
+func TestExtractionBuildsTheRuntimeImageAndSecretsAreRefused(t *testing.T) {
+	tag, err := version.ComposeSnapshotContainerTag("1.2.3", "manual-branch", "aaaaaaa")
+	require.NoError(t, err)
+
+	plan := func(ctr pipeline.PlannedContainer) (snapshotimage.Plan, error) {
+		ctr.Name, ctr.ContainerFile, ctr.Context, ctr.Platforms = "app", "Containerfile", ".", "linux/amd64"
+
+		return snapshotimage.New(pipeline.ConfigPlan{Containers: pipeline.ContainerSets{All: []pipeline.PlannedContainer{ctr}}}, snapshotimage.Input{SourceSHA: strings.Repeat("a", 40), SourceBranch: "manual-branch", Tag: tag, ImageRepository: "registry.example/team/app", Publish: true})
+	}
+
+	for _, ctr := range []pipeline.PlannedContainer{
+		{Target: "runtime", ExtractBinaryTarget: "export-binary", ExtractBinaryNames: []string{"app"}},
+		{Target: "runtime", ExtractBinaryPaths: []string{"/usr/local/bin/app"}},
+	} {
+		p, err := plan(ctr)
+		require.NoError(t, err)
+		require.Len(t, p.Builds, 1)
+		require.Equal(t, "runtime", p.Builds[0].Target)
+	}
+
+	_, err = plan(pipeline.PlannedContainer{BuildSecrets: []string{"TOKEN"}})
+	require.ErrorContains(t, err, "declares build-secrets, and a snapshot builds branch code without secrets; set publish-containers to false")
 }
 
 // The snapshot plan reads scan-severity with the scan's own parser and records

@@ -29,8 +29,10 @@ import (
 
 	appconfig "github.com/diggsweden/forge-ci/internal/app/config"
 	appvalidate "github.com/diggsweden/forge-ci/internal/app/validate"
+	"github.com/diggsweden/forge-ci/internal/docslink"
 	"github.com/diggsweden/forge-ci/internal/domain/config"
 	"github.com/diggsweden/forge-ci/internal/domain/errs"
+	"github.com/diggsweden/forge-ci/internal/domain/pipeline"
 	"github.com/diggsweden/forge-ci/internal/domain/provider"
 	domainrelease "github.com/diggsweden/forge-ci/internal/domain/release"
 )
@@ -45,6 +47,8 @@ const (
 	//nolint:gosec // G101 false positive: this is a human-readable check name; the word "token" refers to the GHA OIDC id-token permission, not a credential literal.
 	checkWorkflowIDToken      = "workflow id-token permission"
 	checkWorkflowsPinReusable = "workflows pin forge-ci to a tag"
+	checkConfigAutoDerives    = "configuration auto-derives"
+	checkSignBlockValid       = "sign block valid"
 )
 
 // Severity categorises a Check result.
@@ -107,6 +111,12 @@ func Run(in Input) ([]Check, error) {
 		root = wd
 	}
 
+	// A mistyped --root must not read as a repository without Forge CI files:
+	// every check would fail and send the person to init.
+	if info, err := os.Stat(root); err != nil || !info.IsDir() {
+		return nil, fmt.Errorf("doctor: repository root %s is not a directory; pass the repository's top directory to --root: %w", root, errs.ErrMissingInput)
+	}
+
 	artifactsPath := in.ArtifactsPath
 	if artifactsPath == "" {
 		artifactsPath = filepath.Join(root, ".forge-ci", "artifacts.yml")
@@ -125,7 +135,16 @@ func Run(in Input) ([]Check, error) {
 		repoSlug = deriveSelfRepoSlug()
 	}
 
+	checks = append(checks, checkAdminPolicyResolves(os.Environ()), checkCIWorkflowsPresent(root))
+	if c, ok := checkPlaceholdersFilled(root, artifactsPath); ok {
+		checks = append(checks, c)
+	}
+
 	checks = append(checks, checkWorkflowVersionRefs(root, repoSlug))
+	if c, ok := checkRequestSignatureVerified(root); ok {
+		checks = append(checks, c)
+	}
+
 	if c, ok := checkGitLabComponentJobNames(root, repoSlug); ok {
 		checks = append(checks, c)
 	}
@@ -135,7 +154,8 @@ func Run(in Input) ([]Check, error) {
 	}
 
 	checks = append(checks,
-		checkSignBlock(cfg.Sign),
+		checkSignBlock(cfg.Sign, in.ForgeAPI),
+		checkArtifactPathsExist(root, cfg.Artifacts),
 		checkAllowedSignersIfRequired(root, cfg.Artifacts),
 		checkWorkflowPermissions(root, cfg.Sign, in.ForgeAPI),
 	)
@@ -176,7 +196,7 @@ func loadDoctorConfig(root, artifactsPath string, allowAutoDerive bool) (*config
 			cfg, deriveErr := appconfig.AutoDeriveConfig(nil, root)
 			if deriveErr != nil {
 				return nil, []Check{checkArtifactsExists(artifactsPath), {
-					Name:        "configuration auto-derives",
+					Name:        checkConfigAutoDerives,
 					Severity:    SeverityFail,
 					Message:     deriveErr.Error(),
 					Remediation: "add a recognised manifest at the repository root, or run `forge-ci init <forge-ci URL> --dry-run` to preview an artifacts.yml",
@@ -188,17 +208,17 @@ func loadDoctorConfig(root, artifactsPath string, allowAutoDerive bool) (*config
 					Name:        "auto-derived configuration validates",
 					Severity:    SeverityFail,
 					Message:     err.Error(),
-					Remediation: "create .forge-ci/artifacts.yml explicitly; see https://github.com/diggsweden/forge-ci/blob/main/docs/artifacts-reference.md",
+					Remediation: "create .forge-ci/artifacts.yml explicitly; " + docslink.See("artifacts-reference.md"),
 				}}, true
 			}
 
 			artifact := cfg.Artifacts[0]
 
 			return cfg, []Check{{
-				Name:     checkArtifactsYMLPresent,
+				Name:     checkConfigAutoDerives,
 				Severity: SeverityOK,
-				Message: fmt.Sprintf("%s not present; auto-derived %s artifact %q from the root manifest",
-					artifactsPath, artifact.ProjectType, artifact.Name),
+				Message: fmt.Sprintf("no %s; using the %s artifact %q derived from the root manifest (write the file to configure more)",
+					relTo(root, artifactsPath), artifact.ProjectType, artifact.Name),
 			}}, true
 		}
 	}
@@ -231,7 +251,7 @@ func signMethodRecommendation(cfg *config.Config, keylessAvailable bool) (Check,
 		Severity: SeverityOK,
 		Message: "sign.method=gpg, but this forge supports keyless (sigstore) signing — " +
 			"keyless needs no key on the runner. Consider sign.method: sigstore " +
-			"(see https://github.com/diggsweden/forge-ci/blob/main/docs/verification.md#choosing-a-method); keep gpg if you later publish to a PGP-native registry.",
+			"(" + docslink.See("verification.md#choosing-a-method") + "); keep gpg if you later publish to a PGP-native registry.",
 	}, true
 }
 
@@ -243,18 +263,20 @@ func checkGitSigningSSHAllowlist(root string, cfg *config.Config) (Check, bool) 
 		return Check{}, false
 	}
 
-	name := "ssh git-signing allowlist"
+	name := CheckSSHAllowlist
 	allowedSigners := filepath.Join(root, ".forge-ci", "allowed_signers")
 
 	if !regularFileExists(allowedSigners) {
 		return Check{
-			Name:     name,
+			Name: name,
+			// A warning: only the release reads the allowlist, so a pull
+			// request passes without it. setup status keeps it as a step.
 			Severity: SeverityWarn,
 			Message: "git-signing.method=ssh, but .forge-ci/allowed_signers is missing — " +
-				"SSH-signed release tags/commits need a trusted-key entry in it",
-			Remediation: "commit .forge-ci/allowed_signers with the release signing public key " +
-				"and a principal identifying its signer; " +
-				"see https://github.com/diggsweden/forge-ci/blob/main/docs/verification.md#release-authorisation",
+				"the release refuses a release-request tag whose signer is not listed there",
+			Remediation: "add the release bot's key and the key of each person who requests releases: " +
+				"`forge-ci setup signer --principal <email> --public-key <key>.pub`, then commit .forge-ci/allowed_signers; " +
+				docslink.See("verification.md#release-authorisation"),
 		}, true
 	}
 
@@ -265,7 +287,7 @@ func checkGitSigningSSHAllowlist(root string, cfg *config.Config) (Check, bool) 
 			Message:  fmt.Sprintf(".forge-ci/allowed_signers failed entry/key checks: %v", err),
 			Remediation: "fix the entries above — each line must be " +
 				"'principal [options] key-type base64-key'; " +
-				"see https://github.com/diggsweden/forge-ci/blob/main/docs/verification.md#release-authorisation",
+				docslink.See("verification.md#release-authorisation"),
 		}, true
 	}
 
@@ -355,6 +377,9 @@ type Environment struct {
 	ForgeAPI     string                `json:"forge_api"` // e.g. "forgejo"
 	Runner       string                `json:"runner"`    // provider.RunnerKind string, e.g. "github" / "forgejo"
 	Capabilities provider.Capabilities `json:"capabilities"`
+	// Enforcement is what the effective administrator policy blocks, as
+	// enforcement.Summary words it; empty when it was not resolved.
+	Enforcement string `json:"enforcement,omitempty"`
 }
 
 // FormatEnvironment writes the resolved-runtime + capability matrix
@@ -369,6 +394,10 @@ func FormatEnvironment(out io.Writer, env Environment) {
 	_, _ = fmt.Fprintf(out, "Environment:\n")
 	_, _ = fmt.Fprintf(out, "  provider (forge API): %s (%s)\n", env.Provider, env.ForgeAPI)
 	_, _ = fmt.Fprintf(out, "  runner conventions:   %s\n", env.Runner)
+
+	if env.Enforcement != "" {
+		_, _ = fmt.Fprintf(out, "  enforcement:          %s\n", env.Enforcement)
+	}
 
 	if env.ForgeAPI == provider.ForgeLocal.String() {
 		_, _ = fmt.Fprintf(out, "  not in a CI job; capability table skipped, pass --provider github to see it\n")
@@ -475,31 +504,54 @@ func parseArtifacts(path string) (*config.Config, Check, bool) {
 			Name:        "artifacts.yml validates",
 			Severity:    SeverityFail,
 			Message:     err.Error(),
-			Remediation: "see https://github.com/diggsweden/forge-ci/blob/main/docs/artifacts-reference.md for the per-field schema",
+			Remediation: docslink.See("artifacts-reference.md") + " for the per-field schema",
 		}, true
 	}
 
 	return cfg, Check{
 		Name:     "artifacts.yml parses + validates",
 		Severity: SeverityOK,
-		Message:  fmt.Sprintf("%d artifact(s), %d container(s), sign.method=%s", len(cfg.Artifacts), len(cfg.Containers), cfg.Sign.EffectiveMethod()),
+		Message:  fmt.Sprintf("%d artifact(s), %d container(s), sign.%s", len(cfg.Artifacts), len(cfg.Containers), signMethods(cfg.Sign)),
 	}, true
 }
 
-func checkSignBlock(sign config.SignConfig) Check {
+// signMethods names the declared signing: the method, and the files' own
+// method when the declaration sets one.
+func signMethods(sign config.SignConfig) string {
+	methods := "method=" + string(sign.EffectiveMethod())
+	if sign.FilesMethod != "" {
+		methods += ", files-method=" + string(sign.FilesMethod)
+	}
+
+	return methods
+}
+
+// checkSignBlock validates the sign block. A sign.method, sign.files-method,
+// sign.key or sign.transparency the forge's release does not use is the
+// release plan's warning, and doctor warns the same way.
+func checkSignBlock(sign config.SignConfig, forge provider.ForgeAPI) Check {
 	if err := sign.Validate(); err != nil {
 		return Check{
-			Name:        "sign block valid",
+			Name:        checkSignBlockValid,
 			Severity:    SeverityFail,
 			Message:     err.Error(),
-			Remediation: "see https://github.com/diggsweden/forge-ci/blob/main/docs/verification.md#signing-methods-for-release-artifacts for the per-method invariants",
+			Remediation: docslink.See("verification.md#signing-methods-for-release-artifacts") + " for the per-method invariants",
+		}
+	}
+
+	if warnings := pipeline.ReleaseSigningWarnings(sign, forge); len(warnings) > 0 {
+		return Check{
+			Name:        checkSignBlockValid,
+			Severity:    SeverityWarn,
+			Message:     strings.Join(warnings, "; "),
+			Remediation: docslink.See("verification.md#signing-methods-for-release-artifacts") + " for which release signs with which method",
 		}
 	}
 
 	return Check{
-		Name:     "sign block valid",
+		Name:     checkSignBlockValid,
 		Severity: SeverityOK,
-		Message:  fmt.Sprintf("method=%s", sign.EffectiveMethod()),
+		Message:  signMethods(sign),
 	}
 }
 
@@ -536,7 +588,8 @@ func checkAllowedSignersIfRequired(root string, artifacts []config.Artifact) Che
 			Severity: SeverityFail,
 			Message:  "release authorization is required but neither .forge-ci/allowed_signers nor allowed_gpg_keys.asc exists",
 			Remediation: "commit .forge-ci/allowed_signers (SSH OpenSSH format) and/or " +
-				".forge-ci/allowed_gpg_keys.asc (armored GPG public keys of authorised signers); see https://github.com/diggsweden/forge-ci/blob/main/docs/verification.md#release-authorisation",
+				".forge-ci/allowed_gpg_keys.asc (armored GPG public keys of authorised signers); add an SSH key with " +
+				"`forge-ci setup signer`; " + docslink.See("verification.md#release-authorisation"),
 		}
 	}
 
@@ -562,7 +615,7 @@ func checkAllowedSignersIfRequired(root string, artifacts []config.Artifact) Che
 				len(formatErrs), strings.Join(formatErrs, "; ")),
 			Remediation: "fix the entries above — SSH: 'principal [options] key-type base64-key'; " +
 				"GPG: complete armor blocks containing public keys; " +
-				"see https://github.com/diggsweden/forge-ci/blob/main/docs/verification.md#release-authorisation",
+				docslink.See("verification.md#release-authorisation"),
 		}
 	}
 

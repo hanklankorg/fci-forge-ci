@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: The Forge CI Authors
+// SPDX-FileCopyrightText: 2026 Digg - Agency for Digital Government
 // SPDX-License-Identifier: EUPL-1.2 OR GPL-3.0-or-later
 
 package doctor_test
@@ -86,14 +86,141 @@ func TestSetupAllThreeDeliveryLayers(t *testing.T) {
 				if setupItem(t, report, "RELEASE_TOKEN").Scope != "release/publish" {
 					t.Fatal("wrong GitLab environment scope")
 				}
-
-				if setupItem(t, report, "RELEASE_REGISTRY_TOKEN").State != release.SetupRequired {
-					t.Fatal("GitLab registry preflight is unconditional")
-				}
 			}
 
 			if forge == "github" && setupItem(t, report, "GITHUB_TOKEN").State != release.SetupAutomatic {
 				t.Fatal("automatic token treated as user secret")
+			}
+		})
+	}
+}
+
+// The GitLab release needs its registry token only where the registry
+// access check runs: with release-images or a base-stages graph.
+func TestSetupGitLabRegistryTokenFollowsImagePublication(t *testing.T) {
+	t.Parallel()
+
+	for inputs, want := range map[string]release.SetupState{
+		"":                                      release.SetupUnused,
+		"release-images: false":                 release.SetupUnused,
+		"base-stages: ''":                       release.SetupUnused,
+		"release-images: true":                  release.SetupRequired,
+		"base-stages: tools":                    release.SetupRequired,
+		"release-images: $IMAGES":               release.SetupConditional,
+		"base-stages: $STAGES":                  release.SetupConditional,
+		"release-images: true, base-stages: $S": release.SetupRequired,
+	} {
+		t.Run(inputs, func(t *testing.T) {
+			t.Parallel()
+			root := t.TempDir()
+			setupFile(t, root, ".gitlab-ci.yml", "include:\n  - component: gitlab.example/owner/engine/release@"+setupCommit+"\n    inputs: {sign-distro-packages: false, "+inputs+"}\n")
+
+			report := doctor.Requirements(root, "owner/engine", setupCommit)
+			if got := setupItem(t, report, "RELEASE_REGISTRY_TOKEN").State; got != want {
+				t.Fatalf("RELEASE_REGISTRY_TOKEN is %s, want %s", got, want)
+			}
+		})
+	}
+}
+
+// A Forgejo declaration that says sign.method gpg or sign.files-method gpg
+// signs its release files with the GPG key, pinned by its fingerprint, even
+// without distro packages.
+// One without a method, whose effective method is gpg, signs them with the
+// Cosign key and needs no GPG secret. The signing call names the declaration
+// by the prepare job's output, which is that job's input.
+func TestSetupForgejoGPGReleaseFileSigning(t *testing.T) {
+	t.Parallel()
+
+	for _, test := range []struct {
+		name, input, sign string
+		want              release.SetupState
+	}{
+		{name: "gpg declaration", input: "      artifacts-config: .forge-ci/release.yml\n", sign: "sign:\n  method: gpg\n", want: release.SetupRequired},
+		{name: "gpg default declaration", sign: "sign:\n  method: gpg\n", want: release.SetupRequired},
+		{name: "no method named", want: release.SetupUnused},
+		{name: "cosign key", sign: "sign:\n  method: kms\n  key: env://COSIGN_KEY\n", want: release.SetupUnused},
+		{name: "gpg files beside the cosign key", sign: "sign:\n  method: kms\n  key: env://COSIGN_KEY\n  files-method: gpg\n", want: release.SetupRequired},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			root := t.TempDir()
+			declaration := ".forge-ci/artifacts.yml"
+
+			if test.input != "" {
+				declaration = ".forge-ci/release.yml"
+			}
+
+			setupFile(t, root, declaration, "artifacts:\n  - name: app\n    project-type: maven\n"+test.sign)
+			setupFile(t, root, ".forgejo/workflows/release.yml", "jobs:\n"+
+				"  prepare:\n    uses: owner/engine/.forgejo/workflows/prepare-release.yml@"+setupCommit+"\n    with:\n      forge-ci-sha: "+setupCommit+"\n      sign-distro-packages: false\n"+test.input+
+				"  sign:\n    uses: owner/engine/.forgejo/workflows/sign-and-publish-release.yml@"+setupCommit+"\n    with:\n      forge-ci-sha: "+setupCommit+"\n      sign-distro-packages: false\n      artifacts-config: ${{ needs.prepare.outputs.artifacts-config }}\n")
+
+			report := doctor.Requirements(root, "owner/engine", setupCommit)
+			if len(report.Calls) != 2 {
+				t.Fatalf("calls = %+v, want prepare and sign", report.Calls)
+			}
+
+			for _, call := range report.Calls {
+				for _, item := range call.Requirements {
+					if strings.HasPrefix(item.Name, "RELEASE_GPG_") && item.State != test.want {
+						t.Errorf("%s: %s is %s, want %s", call.Workflow, item.Name, item.State, test.want)
+					}
+				}
+			}
+
+			for _, unknown := range report.Unknowns {
+				if strings.Contains(unknown, "artifacts-config") || strings.Contains(unknown, "GPG release file signing") {
+					t.Errorf("unresolved declaration: %s", unknown)
+				}
+			}
+		})
+	}
+}
+
+// The GitLab release signs its release files as the Forgejo release does:
+// with the GPG key for a declaration that says sign.method gpg or
+// sign.files-method gpg, also without distro packages, and with the Cosign
+// key for any other. The component's artifacts-config names the declaration.
+func TestSetupGitLabGPGReleaseFileSigning(t *testing.T) {
+	t.Parallel()
+
+	for _, test := range []struct {
+		name, input, sign string
+		want              release.SetupState
+	}{
+		{name: "gpg declaration", input: ", artifacts-config: .forge-ci/release.yml", sign: "sign:\n  method: gpg\n", want: release.SetupRequired},
+		{name: "gpg default declaration", sign: "sign:\n  method: gpg\n", want: release.SetupRequired},
+		{name: "no method named", want: release.SetupUnused},
+		{name: "cosign key", sign: "sign:\n  method: kms\n  key: env://COSIGN_KEY\n", want: release.SetupUnused},
+		{name: "gpg files beside the cosign key", sign: "sign:\n  method: kms\n  key: env://COSIGN_KEY\n  files-method: gpg\n", want: release.SetupRequired},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			root := t.TempDir()
+			declaration := ".forge-ci/artifacts.yml"
+
+			if test.input != "" {
+				declaration = ".forge-ci/release.yml"
+			}
+
+			setupFile(t, root, declaration, "artifacts:\n  - name: app\n    project-type: maven\n"+test.sign)
+			setupFile(t, root, ".gitlab-ci.yml", "include:\n  - component: gitlab.example/owner/engine/release@"+setupCommit+
+				"\n    inputs: {sign-distro-packages: false"+test.input+"}\n")
+
+			report := doctor.Requirements(root, "owner/engine", setupCommit)
+			for _, name := range []string{"RELEASE_GPG_PRIVATE_KEY", "RELEASE_GPG_PASSPHRASE", "RELEASE_GPG_FINGERPRINT"} {
+				if got := setupItem(t, report, name).State; got != test.want {
+					t.Errorf("%s is %s, want %s", name, got, test.want)
+				}
+			}
+
+			for _, unknown := range report.Unknowns {
+				if strings.Contains(unknown, "artifacts-config") || strings.Contains(unknown, "GPG release file signing") {
+					t.Errorf("unresolved declaration: %s", unknown)
+				}
 			}
 		})
 	}

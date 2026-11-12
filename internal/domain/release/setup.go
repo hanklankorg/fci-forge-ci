@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: The Forge CI Authors
+// SPDX-FileCopyrightText: 2026 Digg - Agency for Digital Government
 // SPDX-License-Identifier: EUPL-1.2 OR GPL-3.0-or-later
 
 package release
@@ -44,25 +44,46 @@ type SetupRequirement struct {
 }
 
 // KeyReleaseSetup describes the key-based Forgejo and GitLab delivery layers.
-// Their artifact signing contract is independent of GitHub's artifacts.yml.
-func KeyReleaseSetup(forge string, prepare bool, distro, images SetupState) []SetupRequirement {
-	signingScope, apiScope, registryScope := "signing jobs", "publication job", "image signing/promotion/cleanup jobs"
+// The GPG key, its passphrase and its fingerprint sign distro packages and
+// the release files of a declaration that says sign.method gpg.
+func KeyReleaseSetup(forge string, prepare bool, distro, files, images SetupState) []SetupRequirement {
+	gpg := strongerSetup(distro, files)
+
+	// The Forgejo release alone publishes distro packages, with the registry
+	// token, when artifacts.yml declares distro-packages.
+	signingScope, apiScope, registryScope := "signing jobs", "publication job", "image signing/promotion/cleanup jobs, and the packages job"
+	registryPurpose := "Publish/sign/promote images; cleanup rights depend on registry. Publish declared distro-packages"
+
 	if forge == "gitlab" {
 		signingScope, apiScope, registryScope = "release/registry/signing", "release/publish", "release/registry/*"
+		registryPurpose = "Publish/sign/promote images; cleanup rights depend on registry"
 	}
 
 	items := []SetupRequirement{
 		{"RELEASE_TOKEN", SetupRequired, "Create releases and upload assets", "Source forge API; repository write access", apiScope},
 		{"RELEASE_COSIGN_PRIVATE_KEY", SetupRequired, "Sign release artifacts", "Organization key matching the reviewed Cosign public key", signingScope},
 		{"RELEASE_COSIGN_PASSPHRASE", SetupRequired, "Unlock the Cosign key", setupKeyPassphrase, signingScope},
-		{"RELEASE_GPG_PRIVATE_KEY", distro, "Sign distro packages", "Organization package-signing key", signingScope},
-		{"RELEASE_GPG_PASSPHRASE", distro, "Unlock the GPG key", setupKeyPassphrase, signingScope},
-		{"RELEASE_GPG_FINGERPRINT", distro, "Select GPG key (public fingerprint through a secret input)", "Full primary fingerprint", signingScope},
-		{"RELEASE_REGISTRY_TOKEN", images, "Publish/sign/promote images; cleanup rights depend on registry", "Image registry; package read/write access, distinct from source-forge API credentials", registryScope},
+		{"RELEASE_GPG_PRIVATE_KEY", gpg, "Sign distro packages or release files", "Organization OpenPGP signing key", signingScope},
+		{"RELEASE_GPG_PASSPHRASE", gpg, "Unlock the GPG key", setupKeyPassphrase, signingScope},
+		{"RELEASE_GPG_FINGERPRINT", gpg, "Pin the GPG key (public fingerprint through a secret input)", "Full primary fingerprint", signingScope},
+		{"RELEASE_REGISTRY_TOKEN", images, registryPurpose, "Image registry; package read/write access, distinct from source-forge API credentials", registryScope},
 	}
 	if prepare {
 		items = append(items, SetupRequirement{"RELEASE_SSH_SIGNING_KEY", SetupRequired, "Sign and push release commit and tag", "Source-forge bot; repository and branch/tag push access", "release/prepare"})
 	}
 
 	return items
+}
+
+// strongerSetup is the state of a credential two choices share: required by
+// either, conditional on either, or unused by both.
+func strongerSetup(a, b SetupState) SetupState {
+	switch {
+	case a == SetupRequired || b == SetupRequired:
+		return SetupRequired
+	case a == SetupConditional || b == SetupConditional:
+		return SetupConditional
+	default:
+		return SetupUnused
+	}
 }

@@ -482,6 +482,10 @@ func TestCreateRelease_PostsRelease(t *testing.T) {
 			t.Errorf("link body missing name/url: %s", body)
 		}
 
+		if !strings.Contains(body, `"direct_asset_path":"/foo.zip"`) {
+			t.Errorf("link lacks the stable public release download path: %s", body)
+		}
+
 		return fakegitserver.Response{Status: 201, Body: `{}`}
 	})
 	gitlabProvider := &gitlab.Provider{
@@ -616,7 +620,7 @@ func TestUploadReleaseAsset_ClobbersExistingLink(t *testing.T) {
 
 	// The same-name link is repointed at the new upload in place, so the
 	// release never lacks the asset between a delete and a create.
-	if want := `{"name":"artifact.tar.gz","url":"` + srv.URL() + `/group/project/uploads/def/artifact.tar.gz"}`; updated != want {
+	if want := `{"name":"artifact.tar.gz","url":"` + srv.URL() + `/group/project/uploads/def/artifact.tar.gz","direct_asset_path":"/artifact.tar.gz"}`; updated != want {
 		t.Fatalf("link update body = %s, want %s", updated, want)
 	}
 

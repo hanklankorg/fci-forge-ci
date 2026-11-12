@@ -12,7 +12,9 @@ import (
 	"github.com/diggsweden/forge-ci/internal/domain/errs"
 	"github.com/diggsweden/forge-ci/internal/domain/pipeline"
 	"github.com/diggsweden/forge-ci/internal/domain/projecttype"
+	"github.com/diggsweden/forge-ci/internal/domain/provider"
 	domainrelease "github.com/diggsweden/forge-ci/internal/domain/release"
+	"github.com/diggsweden/forge-ci/internal/domain/runners"
 )
 
 func TestNewReleasePlan_ComputesPolicyAndStagePlans(t *testing.T) {
@@ -329,6 +331,110 @@ func TestNewReleasePlan_RejectsPushedSLSAWithoutCosignSigner(t *testing.T) {
 	}
 }
 
+// A declaration may sign its release files with gpg while a cosign method
+// signs its images and their provenance. Every release plans it: the GitHub
+// and Forgejo releases sign the files with GPG, and the GitLab release warns
+// that it signs them with its Cosign key.
+func TestReleasePlans_GPGFilesBesideCosignImages(t *testing.T) {
+	t.Parallel()
+
+	for _, filesMethod := range []domainrelease.SignMethod{"", domainrelease.SignMethodGPG} {
+		t.Run("files-method="+string(filesMethod), func(t *testing.T) {
+			t.Parallel()
+
+			cfg := &config.Config{
+				Sign:       config.SignConfig{Method: domainrelease.SignMethodSigstore, FilesMethod: filesMethod},
+				Artifacts:  []config.Artifact{{Name: "app", ProjectType: projecttype.NPM}},
+				Containers: []config.Container{{Name: "image"}},
+			}
+			if err := config.Derive(cfg); err != nil {
+				t.Fatal(err)
+			}
+
+			configPlan := pipeline.NewConfigPlan(cfg)
+
+			// Pushed SLSA provenance is on by default and needs the cosign method.
+			if _, err := pipeline.NewReleasePlan(pipeline.ReleasePlanInput{
+				ConfigPlan: configPlan, ReleaseSBOMs: "none", ReleaseSignArtifacts: true, RepositoryVisibility: "public",
+			}); err != nil {
+				t.Fatalf("NewReleasePlan() error = %v", err)
+			}
+
+			if _, _, err := pipeline.NewPolicyReleaseStagePlans(configPlan); err != nil {
+				t.Fatalf("NewPolicyReleaseStagePlans() error = %v", err)
+			}
+
+			if got := cfg.Sign.DeclaresGPG(); got != (filesMethod != "") {
+				t.Errorf("DeclaresGPG() = %t with files-method %q", got, filesMethod)
+			}
+		})
+	}
+}
+
+// A release that signs its files with fixed methods warns about a written
+// sign.method or sign.files-method outside them and a sign.key other than its
+// Cosign key, naming the key it signs with, and about a written
+// sign.transparency, which its own input decides. A declaration without a
+// sign block, and a release that signs by the declaration, have no warning.
+func TestReleaseSigningWarnings(t *testing.T) {
+	t.Parallel()
+
+	const (
+		otherKey     = "awskms:///alias/release"
+		cosignKey    = "the Cosign key (RELEASE_COSIGN_PRIVATE_KEY)"
+		policyDecide = "its transparency-log input decides"
+	)
+
+	kms := config.SignConfig{Method: domainrelease.SignMethodKMS, Key: config.CosignKeyEnvRef}
+	kmsNone := kms
+	kmsNone.Transparency = domainrelease.TransparencyNone
+	sigstorePublic := config.SignConfig{Method: domainrelease.SignMethodSigstore, Transparency: domainrelease.TransparencyPublic}
+
+	for _, tc := range []struct {
+		forge provider.ForgeAPI
+		sign  config.SignConfig
+		want  []string
+	}{
+		{forge: provider.ForgeForgejo, sign: config.SignConfig{Method: domainrelease.SignMethodSigstore}, want: []string{"sign.method sigstore is not available on the forgejo release", cosignKey}},
+		{forge: provider.ForgeForgejo, sign: config.SignConfig{Method: domainrelease.SignMethodKMS, Key: otherKey}, want: []string{`sign.key "` + otherKey + `" is not used by the forgejo release`, cosignKey}},
+		{forge: provider.ForgeForgejo, sign: kms},
+		{forge: provider.ForgeForgejo, sign: config.SignConfig{Method: domainrelease.SignMethodGPG}},
+		{forge: provider.ForgeForgejo},
+		{forge: provider.ForgeGitLab, sign: config.SignConfig{Method: domainrelease.SignMethodSigstore}, want: []string{"sign.method sigstore is not available on the gitlab release", cosignKey}},
+		{forge: provider.ForgeGitLab, sign: config.SignConfig{Method: domainrelease.SignMethodGPG}},
+		{forge: provider.ForgeGitLab, sign: config.SignConfig{Method: domainrelease.SignMethodKMS, Key: config.CosignKeyEnvRef, FilesMethod: domainrelease.SignMethodGPG}},
+		{forge: provider.ForgeGitLab, sign: config.SignConfig{Method: domainrelease.SignMethodSigstore, FilesMethod: domainrelease.SignMethodGPG}, want: []string{"sign.method sigstore is not available on the gitlab release; release files are signed with GPG", cosignKey}},
+		{forge: provider.ForgeForgejo, sign: config.SignConfig{Method: domainrelease.SignMethodKMS, Key: config.CosignKeyEnvRef, FilesMethod: domainrelease.SignMethodGPG}},
+		{forge: provider.ForgeForgejo, sign: config.SignConfig{Method: domainrelease.SignMethodSigstore, FilesMethod: domainrelease.SignMethodGPG}, want: []string{"sign.method sigstore is not available on the forgejo release; release files are signed with GPG", cosignKey}},
+		{forge: provider.ForgeForgejo, sign: config.SignConfig{Method: domainrelease.SignMethodKMS, Key: otherKey, FilesMethod: domainrelease.SignMethodGPG}, want: []string{"release files are signed with GPG", cosignKey}},
+		{forge: provider.ForgeGitLab, sign: config.SignConfig{Method: domainrelease.SignMethodKMS, Key: otherKey}, want: []string{`sign.key "` + otherKey + `" is not used by the gitlab release`, cosignKey}},
+		{forge: provider.ForgeGitLab, sign: kms},
+		{forge: provider.ForgeGitLab},
+		{forge: provider.ForgeGitLab, sign: kmsNone, want: []string{"sign.transparency none is not used by the gitlab release", policyDecide}},
+		{forge: provider.ForgeForgejo, sign: kmsNone, want: []string{"sign.transparency none is not used by the forgejo release", policyDecide}},
+		{forge: provider.ForgeForgejo, sign: sigstorePublic, want: []string{"sign.method sigstore is not available", "sign.transparency public is not used by the forgejo release"}},
+		{forge: provider.ForgeGitHub, sign: config.SignConfig{Method: domainrelease.SignMethodSigstore}},
+		{forge: provider.ForgeGitHub, sign: config.SignConfig{Method: domainrelease.SignMethodKMS, Key: otherKey}},
+		{forge: provider.ForgeGitHub, sign: sigstorePublic},
+	} {
+		name := strings.Join([]string{string(tc.forge), string(tc.sign.Method), string(tc.sign.FilesMethod), tc.sign.Key, string(tc.sign.Transparency)}, "/")
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			got := strings.Join(pipeline.ReleaseSigningWarnings(tc.sign, tc.forge), "\n")
+			if len(tc.want) == 0 && got != "" {
+				t.Fatalf("ReleaseSigningWarnings() = %q, want none", got)
+			}
+
+			for _, want := range tc.want {
+				if !strings.Contains(got, want) {
+					t.Errorf("ReleaseSigningWarnings() = %q, want %q", got, want)
+				}
+			}
+		})
+	}
+}
+
 func TestNewReleasePlan_AllowsNonSLSAOrNonContainerContextsWithoutCosignSigner(t *testing.T) {
 	t.Parallel()
 
@@ -444,5 +550,68 @@ func TestNewReleasePlan_VersionBumpTargetNeedsAnArtifact(t *testing.T) {
 
 	if target := plan.Stages.Prepare.Targets.VersionBump; target.Runs || len(target.Items) != 0 {
 		t.Errorf("version bump target = %+v, want not running with no artifacts", target)
+	}
+}
+
+// The plan is refused when a platform it builds has no runner, after
+// RELEASE_PLATFORMS narrowed it, and when its Xcode jobs have no macOS runner.
+func TestNewReleasePlan_RefusesAPlatformWithoutARunner(t *testing.T) {
+	t.Parallel()
+
+	newPlan := func(t *testing.T, selection string, xcode bool, pairs ...string) error {
+		t.Helper()
+
+		cfg := &config.Config{
+			Sign:       config.SignConfig{Method: domainrelease.SignMethodSigstore, Transparency: domainrelease.TransparencyPublic},
+			Artifacts:  []config.Artifact{{Name: "go-service", ProjectType: projecttype.Go, Go: &config.GoConfig{BuildMode: config.GoBuildModeContainerFirst}}},
+			Containers: []config.Container{{Name: "api", From: []string{"go-service"}, Platforms: "linux/amd64,linux/arm64"}},
+		}
+
+		if xcode {
+			no := false
+			cfg.Artifacts = append(cfg.Artifacts, config.Artifact{Name: "ios", ProjectType: projecttype.XcodeIOS, XcodeIOS: &config.XcodeIOSConfig{EnableCodeSigning: &no}})
+		}
+
+		if err := config.Derive(cfg); err != nil {
+			t.Fatal(err)
+		}
+
+		inputs, err := runners.ParseInputs(provider.ForgeForgejo, pairs)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		_, err = pipeline.NewReleasePlan(pipeline.ReleasePlanInput{
+			ConfigPlan:           pipeline.NewConfigPlan(cfg),
+			RefName:              "v1.2.3",
+			ReleaseSBOMs:         "none",
+			ReleaseSignArtifacts: true,
+			ReleasePlatforms:     selection,
+			Runners:              inputs,
+		})
+
+		return err
+	}
+
+	amd64 := `build-runs-on-linux-amd64=["pool"]`
+
+	if err := newPlan(t, "", false, amd64); !errors.Is(err, errs.ErrUsage) || !strings.Contains(err.Error(), "build-runs-on-linux-arm64") {
+		t.Errorf("arm64 build without its runner: err = %v, want a refusal naming build-runs-on-linux-arm64", err)
+	}
+
+	if err := newPlan(t, "linux/amd64", false, amd64); err != nil {
+		t.Errorf("a run narrowed to amd64 needs no arm64 runner: %v", err)
+	}
+
+	if err := newPlan(t, "", false, amd64, `build-runs-on-linux-arm64=["arm64"]`); err != nil {
+		t.Errorf("both runners passed: %v", err)
+	}
+
+	if err := newPlan(t, "linux/amd64", true, amd64); !errors.Is(err, errs.ErrUsage) || !strings.Contains(err.Error(), "runs-on-darwin-arm64") {
+		t.Errorf("Xcode jobs on Forgejo: err = %v, want a refusal naming runs-on-darwin-arm64", err)
+	}
+
+	if err := newPlan(t, "", true); err != nil {
+		t.Errorf("a layer that passes no runner inputs is not checked: %v", err)
 	}
 }

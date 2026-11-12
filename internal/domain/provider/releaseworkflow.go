@@ -6,6 +6,8 @@ package provider
 import (
 	"net/url"
 	"strings"
+
+	domainrelease "github.com/diggsweden/forge-ci/internal/domain/release"
 )
 
 // ReleaseWorkflowScope answers whether an instance is one the pinned reusable
@@ -15,8 +17,8 @@ import (
 //
 // Two application call sites used to ask this by branching on
 // `forge != ForgeGitHub` themselves — one in app/validate, one in app/doctor —
-// which is the pattern TestAppLayerDoesNotBranchOnForgeIdentity exists to forbid and
-// could not see, because it looked for `==` and `case` and not `!=`.
+// which is the pattern TestAppAndDomainDoNotBranchOnForgeIdentity forbids. Its
+// substring predecessor could not see them: it looked for `==` and `case`, not `!=`.
 //
 // The question is about the INSTANCE, not the forge. github.com and a GitHub
 // Enterprise Server deployment are the same forge and differ here, in the same
@@ -80,4 +82,18 @@ func instanceHost(serverURL string) (string, bool) {
 	}
 
 	return parsed.Hostname(), true
+}
+
+// ReleaseSignMethods returns the sign.method values the forge's release signs
+// its files by, or nil when it signs them by any method the declaration
+// states. The GitLab and Forgejo releases sign them with their Cosign key,
+// which is method kms, and with their OpenPGP key for gpg. This is the one
+// list of them.
+func ReleaseSignMethods(forge ForgeAPI) []domainrelease.SignMethod {
+	switch forge {
+	case ForgeGitLab, ForgeForgejo:
+		return []domainrelease.SignMethod{domainrelease.SignMethodKMS, domainrelease.SignMethodGPG}
+	default:
+		return nil
+	}
 }

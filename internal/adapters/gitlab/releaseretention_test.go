@@ -141,3 +141,39 @@ func TestUploadReleaseAsset_DeletesTheReplacedUpload(t *testing.T) {
 		t.Errorf("last request = %s %s, want the replaced upload deleted after the link moved", last.Method, last.Path)
 	}
 }
+
+// The readback asks for one tag and its links, and says that GitLab reports
+// no size for them; a tag without a release is none, not an error.
+func TestReadRelease_ReadsOnlyTheTaggedRelease(t *testing.T) {
+	t.Parallel()
+
+	srv := fakegitserver.NewGitLab(t)
+	srv.OnGet(glReleasesBase+"/"+glTag, func(fakegitserver.Request) fakegitserver.Response {
+		return fakegitserver.Response{Status: 200, Body: `{"tag_name":"v1.0.0","created_at":"2026-01-02T00:00:00Z"}`}
+	})
+	srv.OnGet(glReleasesBase+"/"+glTag+"/assets/links", func(fakegitserver.Request) fakegitserver.Response {
+		return fakegitserver.Response{Status: 200, Body: `[{"id":7,"name":"app.tar.gz","url":"https://gitlab.invalid/a"}]`}
+	})
+	srv.OnGet(glReleasesBase+"/v9.9.9", func(fakegitserver.Request) fakegitserver.Response {
+		return fakegitserver.Response{Status: 404, Body: `{"message":"404 Not Found"}`}
+	})
+
+	release, err := retentionProvider(srv).ReadRelease(t.Context(), "examplescope/repo", glTag)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	want := provider.ListedAsset{ID: 7, Name: "app.tar.gz", URL: "https://gitlab.invalid/a", SizeUnknown: true}
+	if release == nil || release.Tag != glTag || !slices.Equal(release.Assets, []provider.ListedAsset{want}) {
+		t.Errorf("release = %+v", release)
+	}
+
+	if requests := srv.Requests(); len(requests) != 2 {
+		t.Errorf("read more than the tagged release and its links: %+v", requests)
+	}
+
+	release, err = retentionProvider(srv).ReadRelease(t.Context(), "examplescope/repo", "v9.9.9")
+	if err != nil || release != nil {
+		t.Errorf("release = %+v, err = %v; want neither", release, err)
+	}
+}

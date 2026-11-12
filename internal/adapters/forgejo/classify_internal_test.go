@@ -4,8 +4,13 @@
 package forgejo
 
 import (
+	"crypto/tls"
+	"crypto/x509"
 	"errors"
+	"net"
 	"net/http"
+	"net/url"
+	"syscall"
 	"testing"
 
 	"code.gitea.io/sdk/gitea"
@@ -67,24 +72,33 @@ func TestClassifyErr_MapsEveryStatusClass(t *testing.T) {
 }
 
 // TestClassifyErr_WithoutAResponseIsUnavailable covers the transport-level
-// case: no HTTP response at all means the request never reached a server, which
-// is the one situation that genuinely is a dependency being unavailable.
+// case: no HTTP response and a request the network stopped is the one
+// situation that genuinely is a dependency being unavailable. A certificate
+// that does not verify, and any other error without a response, is a
+// failure the next attempt meets again.
 func TestClassifyErr_WithoutAResponseIsUnavailable(t *testing.T) {
 	t.Parallel()
+
+	refused := &url.Error{Op: "Get", URL: "https://forge.example", Err: &net.OpError{Op: "dial", Net: "tcp", Err: syscall.ECONNREFUSED}}
+	untrusted := &url.Error{Op: "Get", URL: "https://forge.example", Err: &tls.CertificateVerificationError{Err: x509.UnknownAuthorityError{}}}
 
 	for _, tc := range []struct {
 		name string
 		resp *gitea.Response
+		err  error
+		want error
 	}{
-		{name: "no response value"},
-		{name: "a response wrapper with no HTTP response", resp: &gitea.Response{}},
+		{name: "no response value", err: refused, want: errs.ErrDependencyUnavailable},
+		{name: "a response wrapper with no HTTP response", resp: &gitea.Response{}, err: refused, want: errs.ErrDependencyUnavailable},
+		{name: "a certificate that does not verify", err: untrusted, want: errs.ErrValidation},
+		{name: "an error of the client itself", err: errForgejoTransport, want: errs.ErrValidation},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			got := classifyErr(tc.resp, errForgejoTransport)
-			if !errors.Is(got, errs.ErrDependencyUnavailable) {
-				t.Errorf("classified as %v, want ErrDependencyUnavailable", got)
+			got := classifyErr(tc.resp, tc.err)
+			if !errors.Is(got, tc.want) || errors.Is(got, errs.ErrDependencyUnavailable) != errors.Is(tc.want, errs.ErrDependencyUnavailable) {
+				t.Errorf("classified as %v, want %v", got, tc.want)
 			}
 		})
 	}

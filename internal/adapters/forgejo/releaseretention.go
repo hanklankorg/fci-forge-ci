@@ -6,6 +6,7 @@ package forgejo
 import (
 	"context"
 	"fmt"
+	"net/http"
 
 	"code.gitea.io/sdk/gitea"
 
@@ -13,7 +14,10 @@ import (
 	"github.com/diggsweden/forge-ci/internal/domain/provider"
 )
 
-var _ provider.ReleaseAssetPruner = (*Provider)(nil)
+var (
+	_ provider.ReleaseAssetPruner = (*Provider)(nil)
+	_ provider.ReleaseReader      = (*Provider)(nil)
+)
 
 // ListReleases lists every release of repo with all its attachments, for
 // retention. The attachments are listed per release, page by page, so a
@@ -46,6 +50,36 @@ func (p *Provider) ListReleases(ctx context.Context, repo string) ([]provider.Li
 	}
 
 	return listed, nil
+}
+
+// ReadRelease reads the release of tag with all its attachments. Forgejo
+// keeps one release per tag.
+func (p *Provider) ReadRelease(ctx context.Context, repo, tag string) (*provider.ListedRelease, error) {
+	owner, name, err := splitRepo(repo)
+	if err != nil {
+		return nil, err
+	}
+
+	client, err := p.client(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	release, resp, err := client.GetReleaseByTag(owner, name, tag)
+	if err != nil {
+		if responseStatus(resp) == http.StatusNotFound {
+			return nil, nil //nolint:nilnil // no release for the tag is an answer, not an error.
+		}
+
+		return nil, fmt.Errorf("forgejo get release %q: %w", tag, classifyErr(resp, err))
+	}
+
+	entry, err := listedRelease(client, owner, name, release)
+	if err != nil {
+		return nil, err
+	}
+
+	return &entry, nil
 }
 
 // listedRelease is one release with every attachment, listed page by page.

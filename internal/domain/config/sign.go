@@ -22,6 +22,10 @@ import (
 // Validation invariants (see Validate):
 //
 //   - Method is one of [gpg, sigstore, kms] or empty (→ gpg default).
+//   - FilesMethod is empty or gpg, and gpg only beside method=sigstore or
+//     method=kms: release files are then signed with OpenPGP while Method
+//     keeps signing the container images. Every other combination is
+//     refused rather than guessed at.
 //   - method=kms requires Key; method=sigstore + method=gpg forbid it.
 //   - method=sigstore optionally accepts OIDCIssuer; method=gpg + kms forbid it.
 //   - Transparency is one of [public, none] or empty (→ public default).
@@ -40,9 +44,13 @@ import (
 //     CosignKeyEnvRef, a Cosign key the workflow hands the signing
 //     step as a secret.
 type SignConfig struct {
-	Method     domainrelease.SignMethod `yaml:"method,omitempty"`
-	Key        string                   `yaml:"key,omitempty"`
-	OIDCIssuer string                   `yaml:"oidc-issuer,omitempty"`
+	Method domainrelease.SignMethod `yaml:"method,omitempty"`
+	// FilesMethod signs the release files with another method than Method,
+	// which then covers the container images alone. Empty means Method
+	// signs both, as it always has. The one accepted value is gpg.
+	FilesMethod domainrelease.SignMethod `yaml:"files-method,omitempty"`
+	Key         string                   `yaml:"key,omitempty"`
+	OIDCIssuer  string                   `yaml:"oidc-issuer,omitempty"`
 	// Transparency selects whether cosign publishes each signature to
 	// the public Sigstore Rekor log. Empty means public: opting out of
 	// the public record is a decision that should be written down, not
@@ -86,6 +94,26 @@ func (s SignConfig) EffectiveMethod() domainrelease.SignMethod {
 	return s.Method
 }
 
+// EffectiveFilesMethod returns the method that signs the release files:
+// FilesMethod when the declaration sets it, the method for everything
+// otherwise.
+func (s SignConfig) EffectiveFilesMethod() domainrelease.SignMethod {
+	if s.FilesMethod != "" {
+		return s.FilesMethod
+	}
+
+	return s.EffectiveMethod()
+}
+
+// DeclaresGPG reports whether the declaration names gpg for its release
+// files, as sign.method or as sign.files-method. A declaration that names no
+// method does not, though gpg is its effective method: the Forgejo and GitLab
+// releases sign their release files with GPG only when told to, and with
+// their Cosign key otherwise.
+func (s SignConfig) DeclaresGPG() bool {
+	return s.Method == domainrelease.SignMethodGPG || s.FilesMethod == domainrelease.SignMethodGPG
+}
+
 // EffectiveTransparency returns the configured transparency or the
 // package default when none is set. Meaningful only for the cosign
 // methods; Validate rejects the field outright for gpg.
@@ -114,6 +142,10 @@ func (s SignConfig) Validate() error {
 		if _, err := domainrelease.ParseTransparency(string(s.Transparency)); err != nil {
 			return err
 		}
+	}
+
+	if err := s.validateFilesMethod(method); err != nil {
+		return err
 	}
 
 	switch method {
@@ -162,6 +194,31 @@ func (s SignConfig) Validate() error {
 		if err := validateKMSKey(s.Key); err != nil {
 			return err
 		}
+	}
+
+	return nil
+}
+
+// validateFilesMethod admits the one split a declaration can state: gpg for
+// the release files beside a cosign method for the images. A second cosign
+// method would need a second key, issuer and transparency choice, and gpg
+// beside gpg says nothing, so both are refused.
+func (s SignConfig) validateFilesMethod(method domainrelease.SignMethod) error {
+	if s.FilesMethod == "" {
+		return nil
+	}
+
+	if s.FilesMethod != domainrelease.SignMethodGPG {
+		return fmt.Errorf(
+			"sign.files-method accepts only gpg (got %q); omit it to sign release files with sign.method: %w",
+			s.FilesMethod, errs.ErrInvalidConfig)
+	}
+
+	if method == domainrelease.SignMethodGPG {
+		return fmt.Errorf(
+			"sign.files-method requires sign.method sigstore or kms, which then signs the container images; "+
+				"sign.method=gpg already signs release files with gpg: %w",
+			errs.ErrInvalidConfig)
 	}
 
 	return nil

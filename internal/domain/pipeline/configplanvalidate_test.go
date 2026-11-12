@@ -170,6 +170,7 @@ func TestConfigPlanInvariant_SigningControls(t *testing.T) {
 	for _, sign := range []config.SignConfig{
 		{}, {Method: domainrelease.SignMethodGPG},
 		{Method: domainrelease.SignMethodSigstore, OIDCIssuer: "https://issuer.example.test"},
+		{Method: domainrelease.SignMethodSigstore, FilesMethod: domainrelease.SignMethodGPG},
 		{Method: domainrelease.SignMethodKMS, Key: "hashivault://transit/keys/release"},
 		{Method: domainrelease.SignMethodKMS, Key: "file:fixture.key", Transparency: domainrelease.TransparencyNone},
 	} {
