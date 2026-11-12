@@ -34,7 +34,7 @@ GOLANGCI_LINT_CACHE = "{{ get_env(name='GOLANGCI_LINT_CACHE', default=config_roo
 
 [tools]
 # Pin the compiler patch because release binaries include its standard library.
-go = "1.27.3"
+go = "1.27.4"
 
 # Lint/security orchestrator — derives a verify plan from the repo and
 # runs the configured checks. See nanolinter.toml for the plan.
