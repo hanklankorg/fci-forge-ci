@@ -10,8 +10,11 @@ Gradle JVM build example. For Android applications, see [examples/android-app](.
 - **GitLab**: [`gitlab/.gitlab-ci.yml`](gitlab/.gitlab-ci.yml), the lint gate,
   `check` and `build-gradle`. See the
   [GitLab guide](../../docs/gitlab.md#getting-started).
-- **Forgejo**: not available; the Forgejo layer builds Go and Cargo only. See
-  [Delivery layers side by side](../../docs/providers.md#delivery-layers-side-by-side).
+- **Forgejo**: [`forgejo/pullrequest.yml`](forgejo/pullrequest.yml) and
+  [`forgejo/release.yml`](forgejo/release.yml). The layer has no Gradle
+  action, so the release's build job runs `forge-ci build gradle run`
+  itself; the release plan's bump writes the release version into
+  `gradle.properties`. See the [Forgejo guide](../../docs/forgejo.md).
 
 The rest of this page describes the GitHub configuration.
 
@@ -40,11 +43,7 @@ See [artifacts.yml](artifacts.yml) in this directory.
 Key points:
 - `project-type: gradle` → routes to `build-gradle-app.yml` (JVM-only; no Android SDK, no APK/AAB).
 - `config.gradle-tasks: build` → runs the project's normal Gradle build.
-- Gradle publishing is not wired to forge-ci's Maven Central publisher today. If you need Gradle publishing, run your own Gradle publishing task in a project-owned workflow until forge-ci has a Gradle-aware publisher.
-
-### `.github/workflows/release-workflow.yml`
-
-See [github/release-workflow.yml](github/release-workflow.yml). Uses the release orchestrator with `artifacts-config`.
+- This example publishes nothing. To publish the library to GitHub Packages or Maven Central, set `build-type: library` and `publish-to: [forge-packages, maven-central]` on the artifact, and apply Gradle's `maven-publish` plugin; see [Gradle publishing](../../docs/publishing.md#gradle-jvm-and-android-libraries).
 
 ## How to Use
 
@@ -74,19 +73,10 @@ See [github/release-workflow.yml](github/release-workflow.yml). Uses the release
 
 ## What Gets Built
 
-- JAR artifacts from `build/libs/` (root and any subprojects) uploaded as `gradle-build-artifacts`.
-- Build SBOM (CycloneDX) uploaded as `gradle-build-sbom`, produced by the `cyclonedx-gradle-plugin` via a throwaway init-script (no changes required to the consumer's `build.gradle`).
+- JAR artifacts from `build/libs/` (root and any subprojects, not `buildSrc`), uploaded as `<artifact name>-build-artifacts`, here `my-gradle-lib-build-artifacts`.
+- A CycloneDX Build SBOM, uploaded as `<artifact name>-build-sbom`. forge-ci adds the `cyclonedx-gradle-plugin` itself; your `build.gradle` needs no change.
 
-## Version Management
-
-The workflow reads `version=` from `gradle.properties` for the build summary:
-
-```properties
-# gradle.properties
-version=1.0.0
-```
-
-Version bump on release is handled by the release orchestrator's prepare stage, independent of this workflow.
+On a release, the orchestrator's prepare stage bumps the version.
 
 ## See Also
 

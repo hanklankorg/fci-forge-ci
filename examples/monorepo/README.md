@@ -4,31 +4,49 @@ Multiple artifacts built from a single repository with container support.
 
 ## Per forge
 
-- **GitHub**: [`github/release-workflow.yml`](github/release-workflow.yml),
-  with `artifacts.yml` or `multi-artifact-container.yml`. See the
+- **GitHub**: [`github/pullrequest-workflow.yml`](github/pullrequest-workflow.yml)
+  and [`github/release-workflow.yml`](github/release-workflow.yml), with
+  `artifacts.yml` or `multi-artifact-container.yml`. See the
   [GitHub guide](../../docs/github.md#getting-started).
-- **GitLab**: [`gitlab/.gitlab-ci.yml`](gitlab/.gitlab-ci.yml), the lint gate,
-  `check`, and on tags the plan-driven fan-out: a child pipeline with one
-  `build-<ecosystem>` component per artifact of `artifacts.yml`. See the
-  [GitLab guide](../../docs/gitlab.md#builds).
-- **Forgejo**: not available; the Forgejo layer builds Go and Cargo only and
-  has no plan-driven fan-out. See [Delivery layers side by side](../../docs/providers.md#delivery-layers-side-by-side).
+- **GitLab**: [`gitlab/.gitlab-ci.yml`](gitlab/.gitlab-ci.yml). On a tag, the
+  pipeline starts one `build-<ecosystem>` job per artifact of `artifacts.yml`
+  ([Builds](../../docs/gitlab.md#builds)). For the release, copy
+  [`gitlab/check-release.sh`](gitlab/check-release.sh) and
+  [`gitlab/build-release.sh`](gitlab/build-release.sh) to `.gitlab/` and name
+  them in the release policy's `checks` and `build` inputs. The frontend's
+  tests run in `build-release.sh`, so a failing test stops the release before
+  anything is signed. See
+  [Releases and promotion](../../docs/gitlab.md#releases-and-promotion).
+- **Forgejo**: [`forgejo/pullrequest.yml`](forgejo/pullrequest.yml), the lint
+  gate and each project's checks in the image of its toolchain, and
+  [`forgejo/release.yml`](forgejo/release.yml), one release of both projects.
+  The workflow names a build job for each project and joins their files into
+  one hand-off; the images those jobs run in are pinned by digest in the
+  workflow. See
+  [Delivery layers side by side](../../docs/providers.md#delivery-layers-side-by-side).
+
+On every forge the release is one version of both projects under one tag: the
+backend's jar and the frontend's package as signed release files with their
+Build SBOMs, an image of each in one image repository, told apart by tag
+suffix, and the frontend's package in the forge's package registry.
 
 The rest of this page describes the GitHub configuration.
 
-## Project Structure
+## Two variants
+
+**[`artifacts.yml`](artifacts.yml)**: one container per artifact.
+`backend-api` (Maven application, Java 25) ships as a release jar and an image
+tagged `-backend`; `frontend-ui` (npm, Node 24) also publishes to the forge's
+package registry and ships an image tagged `-frontend`.
 
 ```text
 my-monorepo/
 ├── services/
-│   ├── backend/
-│   │   ├── src/
-│   │   ├── pom.xml
-│   │   └── Containerfile
-│   └── worker/
+│   └── backend/
 │       ├── src/
-│       └── build.gradle.kts
-├── apps/
+│       ├── pom.xml
+│       └── Containerfile
+├── packages/
 │   └── frontend/
 │       ├── src/
 │       ├── package.json
@@ -40,162 +58,69 @@ my-monorepo/
         └── release-workflow.yml
 ```
 
-## Configuration Examples
+```bash
+mkdir -p .forge-ci
+cp examples/monorepo/artifacts.yml .forge-ci/artifacts.yml
+```
 
-This directory contains multiple monorepo configuration examples:
+**[`multi-artifact-container.yml`](multi-artifact-container.yml)**: one
+combined container, `combined-app`, from three artifacts: `api` (Maven,
+`services/api`), `worker` (Gradle JVM, `services/worker`) and `web` (npm,
+`apps/web`). It builds from a `Containerfile` at the repository root; copy
+[`Containerfile.multi-artifact`](Containerfile.multi-artifact) there.
 
-### 1. Basic Monorepo - [artifacts.yml](artifacts.yml)
+```bash
+mkdir -p .forge-ci
+cp examples/monorepo/multi-artifact-container.yml .forge-ci/artifacts.yml
+cp examples/monorepo/Containerfile.multi-artifact Containerfile
+```
 
-**Use case:** Build multiple artifacts, each with their own container
+Change each `working-directory` and `container-file` to match your layout.
+The [monorepo reference](../../docs/artifacts-reference.md#monorepo-configuration)
+describes both patterns.
 
-**Contains:**
-- Maven backend (Java 25 runtime image)
-- NPM frontend (Node 24 runtime image)
-
-**Result:** 2 containers + frontend package
-
----
-
-### 2. Multi-Artifact Container - [multi-artifact-container.yml](multi-artifact-container.yml)
-
-**Use case:** Combine multiple builds into ONE container
-
-**Contains:**
-- API service (Maven)
-- Worker service (Gradle JVM)
-- Web frontend (NPM)
-
-**Result:** 1 combined container with all three artifacts
-
----
-
-## How Monorepo Builds Work
+## How a release runs
 
 ```text
 1. Parse artifacts.yml
    └─> Identify all artifacts and containers
 
 2. Build Stage (parallel)
-    ├─> Build backend (Maven)
-   └─> Build frontend (NPM)
+   ├─> Build backend-api (Maven)
+   └─> Build frontend-ui (npm)
 
 3. Publish Stage (parallel)
-    ├─> backend container → GHCR
-    ├─> frontend package → GitHub Packages
-   └─> frontend container → GHCR
+   ├─> backend-api container → GHCR
+   ├─> frontend-ui package → GitHub Packages
+   └─> frontend-ui container → GHCR
 
 4. Release Stage
    └─> Single GitHub release with all artifacts
 ```
 
-## Key Features
+All artifacts share the version of the signed release-request tag:
+`release-request/v1.0.0` makes every artifact version 1.0.0.
 
-### Unified Versioning
-All artifacts share the version requested by the signed release-request tag.
-Automation creates the final version tag after every bump succeeds:
-```bash
-git tag -s release-request/v1.0.0 -m "Release v1.0.0"
-# All artifacts become version 1.0.0
-```
+## Getting started
 
-### Independent Publishing
-Each artifact can publish to different targets:
-```yaml
-artifacts:
-  - name: backend
-    project-type: maven
-    # The application JAR is a release asset. Applications are not published
-    # as Maven packages; declare a container separately when wanted.
+1. Pick a variant and copy its files as shown above.
+2. Copy the workflows:
 
-  - name: frontend
-    project-type: npm
-    publish-to: [forge-packages]
+   ```bash
+   cp examples/monorepo/github/*.yml .github/workflows/
+   ```
 
-  # If you need Maven shared libraries and Maven applications in the same repo,
-  # use one Maven reactor/root artifact today so fixed Maven upload names do not collide.
-```
+3. Configure secrets and create the release request as the
+   [examples Quick Start](../README.md#quick-start) describes (steps 4 and 5).
 
-### Flexible Container Dependencies
-Containers reference artifacts by name:
-```yaml
-containers:
-  # Single artifact container
-  - name: backend
-    from: [backend]
-    context: .
+## Limitations and troubleshooting
 
-  # Multi-artifact container
-  - name: combined
-    from: [api, worker, web]
-    context: .
-```
-
-## Getting Started
-
-### 1. Choose Your Example
-
-**For separate containers:**
-```bash
-mkdir -p .forge-ci
-cp examples/monorepo/artifacts.yml .forge-ci/artifacts.yml
-```
-
-**For combined container:**
-```bash
-mkdir -p .forge-ci
-cp examples/monorepo/multi-artifact-container.yml .forge-ci/artifacts.yml
-```
-
-### 2. Customize Configuration
-
-Update artifact names and paths to match your structure:
-```yaml
-artifacts:
-  - name: backend
-    project-type: maven
-    working-directory: services/backend  # Match your structure
-```
-
-### 3. Create Workflow
-
-```bash
-cp examples/monorepo/github/release-workflow.yml .github/workflows/
-```
-
-### 4. Release
-
-Configure release secrets first, including `RELEASE_TOKEN`, GPG signing secrets,
-and any target-specific credentials such as Maven Central. See
-[Reference Guide](../../docs/reference.md).
-
-```bash
-git tag -s release-request/v1.0.0 -m "Release v1.0.0"
-git push origin release-request/v1.0.0
-```
-
-Do not push `v1.0.0` directly; the orchestrator creates it once at the prepared
-branch HEAD after all artifact version bumps succeed.
-
-## Common Patterns
-
-Use the [monorepo reference](../../docs/artifacts-reference.md#monorepo-configuration)
-for the general separate-container and combined-container patterns. The two
-files in this directory are concrete instances: the basic example separates
-the Maven backend and NPM frontend, while the multi-artifact variant combines
-Maven, Gradle and NPM outputs.
-
-## Limitations
-
-The [shared monorepo limitations](../../docs/artifacts-reference.md#monorepo-limitations)
-apply to both examples, including unified versioning, fixed Maven upload names
-and serialized release preparation. Use one Maven reactor/root artifact for
-dependent Maven modules rather than separate colliding uploads.
-
-## Troubleshooting
-
-For missing artifact names, build dependencies and unpacked Containerfile paths,
-use [Assembly and dependency ordering](../../docs/artifacts-reference.md#assembly-and-dependency-ordering).
-Those rules are shared with other consumers rather than repeated per example.
+- [Monorepo limitations](../../docs/artifacts-reference.md#monorepo-limitations):
+  one version and one changelog for all artifacts, and every artifact builds
+  on every release. For dependent Maven modules, declare one Maven reactor
+  artifact.
+- [Assembly and dependency ordering](../../docs/artifacts-reference.md#assembly-and-dependency-ordering):
+  missing artifact names, build dependencies and Containerfile paths.
 
 ## See Also
 

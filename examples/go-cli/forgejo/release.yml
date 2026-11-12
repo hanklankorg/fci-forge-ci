@@ -77,7 +77,7 @@ jobs:
     if: success() && startsWith(forgejo.ref, 'refs/tags/')
     uses: OWNER/forge-ci/.forgejo/workflows/prepare-release.yml@PIN_FORGE_CI_SHA
     with:
-      runner-label: ${{ vars.CI_RUNNER_LABEL }}
+      runs-on: ${{ vars.CI_RUNNER_LABEL }}
       # The repository and the commit of the uses: line above, written out:
       # the workflow fetches its own files from there.
       forge-ci-repository: OWNER/forge-ci
@@ -220,9 +220,11 @@ jobs:
     if: ${{ always() && needs.build.result == 'success' }}
     uses: OWNER/forge-ci/.forgejo/workflows/sign-and-publish-release.yml@PIN_FORGE_CI_SHA
     with:
-      runner-label: ${{ vars.CI_RUNNER_LABEL }}
+      runs-on: ${{ vars.CI_RUNNER_LABEL }}
+      signer-runs-on: ${{ vars.CI_RUNNER_LABEL }}
       release-tag: ${{ needs.prepare.outputs.release-tag }}
       release-sha: ${{ needs.prepare.outputs.release-sha }}
+      artifacts-config: ${{ needs.prepare.outputs.artifacts-config }}
       # The commit the request tag pushed, from the event context. The signer
       # binds the release commit to it, so do not route this through a job
       # output: a value that travels with the release is not evidence about it.

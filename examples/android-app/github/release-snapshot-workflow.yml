@@ -16,9 +16,6 @@
 #
 # Created artifacts:
 # - AAB uploaded to Google Play internal track
-#
-# This mirrors the iOS release-snapshot-workflow which uploads to TestFlight.
-# For Android, the equivalent is Google Play's internal testing track.
 
 name: Release Snapshot Workflow
 
@@ -34,7 +31,7 @@ permissions:
 
 jobs:
   build:
-    uses: diggsweden/forge-ci/.github/workflows/build-gradle-android.yml@v0.90.0
+    uses: diggsweden/forge-ci/.github/workflows/build-gradle-android.yml@PIN_FORGE_CI_SHA # v0.90.0
     permissions:
       contents: read
     secrets:
@@ -43,6 +40,8 @@ jobs:
       ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
       ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
     with:
+      forge-ci-binary-ref: PIN_FORGE_CI_SHA # v0.90.0
+      runtime-image: ghcr.io/diggsweden/forge-ci-runtime-android-35@sha256:0000000000000000000000000000000000000000000000000000000000000000 # FIXME v0.90.0 digest
       build-module: app
       product-flavor: demo
       build-types: release
@@ -53,13 +52,15 @@ jobs:
 
   upload-play-store:
     needs: build
-    uses: diggsweden/forge-ci/.github/workflows/publish-google-play.yml@v0.90.0
+    uses: diggsweden/forge-ci/.github/workflows/publish-google-play.yml@PIN_FORGE_CI_SHA # v0.90.0
     permissions:
       actions: read
       contents: read
     secrets:
       GOOGLE_PLAY_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON }}
     with:
+      forge-ci-binary-ref: PIN_FORGE_CI_SHA # v0.90.0
+      runtime-image: ghcr.io/diggsweden/forge-ci-runtime-base@sha256:0000000000000000000000000000000000000000000000000000000000000000 # FIXME v0.90.0 digest
       branch: ${{ github.ref }}
       # Pull the AAB upload name straight from the build job's output instead
       # of duplicating the derived format string. Stays correct if the format

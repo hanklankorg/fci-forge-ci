@@ -12,10 +12,29 @@ publish stage.
 - **GitLab**: [`gitlab/.gitlab-ci.yml`](gitlab/.gitlab-ci.yml), the lint gate,
   `check` and `build-go`; the release runs from a separate policy project. See
   the [GitLab guide](../../docs/gitlab.md#getting-started).
+  [`gitlab/snapshot-files-policy.yml`](gitlab/snapshot-files-policy.yml) is
+  the include that policy project holds to keep a branch's binaries as
+  unsigned job artifacts for 7 days
+  ([snapshot files](../../docs/workflows.md#snapshot-files)).
 - **Forgejo**: [`forgejo/pullrequest.yml`](forgejo/pullrequest.yml) and
   [`forgejo/release.yml`](forgejo/release.yml), a `build-go` binary release
   between the layer's prepare and signer workflows. See the
   [Forgejo guide](../../docs/forgejo.md#getting-started).
+  [`forgejo/snapshot.yml`](forgejo/snapshot.yml) builds and tests every
+  pushed branch except `main`, without signing or publishing anything.
+  [`forgejo/snapshot-files.yml`](forgejo/snapshot-files.yml), run by hand on
+  a branch, also keeps its binaries as an unsigned run artifact for 7 days
+  ([snapshot files](../../docs/workflows.md#snapshot-files)).
+
+A Forgejo release can also publish `.deb`, `.rpm` and `.apk` packages to the
+owner's package registries:
+[`artifacts-forgejo-packages.yml`](artifacts-forgejo-packages.yml) declares
+it, [`.goreleaser.yml`](.goreleaser.yml) builds the packages with `nfpms`, and
+[`forgejo/release-goreleaser.yml`](forgejo/release-goreleaser.yml), copied as
+`release.yml`, signs each with the release's OpenPGP key. That workflow
+installs `go`, GoReleaser and syft from the project's own mise config and
+`mise.lock`. See
+[Distro packages in the owner's registries](../../docs/forgejo.md#distro-packages-in-the-owners-registries).
 
 ## Pull/merge-request gate coverage
 
@@ -23,10 +42,7 @@ publish stage.
 |---|---|---|
 | GitHub | Lint and security checks, then `go vet` and `go test` in the starter's own `test` job | The project's vulnerability policy, for example `govulncheck`; require both jobs as status checks |
 | GitLab | Lint, `go vet`, `go test`, then a cross-platform build and Build SBOM | Any additional project-specific checks; tests run once in the `test` stage |
-| Forgejo | Lint, release-isolation validation, `go test`, and a build without a Build SBOM | Any additional project-specific checks |
-
-The starters intentionally use each forge's native job composition. A successful
-starter pipeline proves only the checks listed above.
+| Forgejo | Lint, a check that the workflow keeps release jobs separate, `go test`, and a build without a Build SBOM | Any additional project-specific checks |
 
 ## Files
 
@@ -57,7 +73,6 @@ When calling the builders directly, their defaults differ:
 |---|---|---|---|
 | `platforms` | Linux and macOS, amd64 and arm64 | Linux, amd64 and arm64 | Linux amd64 |
 | `main-package` | `.` | `.` | `.` |
-| `skip-tests` | `false` | `false` | `'false'` |
 | `enable-build-sbom` | `true` | `true` | `'true'` |
 
 Select `platforms` explicitly when moving a build between forges. The examples

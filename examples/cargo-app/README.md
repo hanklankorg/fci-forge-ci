@@ -16,26 +16,23 @@ each container manifest.
   images: in a release the policy project's `build` commands do. See the
   [GitLab guide](../../docs/gitlab.md#getting-started).
 - **Forgejo**: [`forgejo/pullrequest.yml`](forgejo/pullrequest.yml) and
-  [`forgejo/release.yml`](forgejo/release.yml), a `build-cargo` binary release
-  of a crate at the repository root. An image is added to the build job as in
-  the [Go service example](../go-service/forgejo/release.yml). See the
+  [`forgejo/release.yml`](forgejo/release.yml), a binary release of the two
+  services with one `build-cargo` step each, as on GitLab. Copy
+  `artifacts.yml` to `.forge-ci/artifacts.yml`: the signed release commit
+  carries the version of each crate it declares, which `prepare-release.yml`
+  bumps in a key-free job in `runtime-image-rust`. The images are added to
+  the build job as in the [Go service example](../go-service/forgejo/release.yml). See the
   [Forgejo guide](../../docs/forgejo.md#getting-started).
 
 The rest of this page describes the GitHub configuration.
 
 ## Why this shape (container-first)
 
-This example uses `config.build-mode: container-first` because its primary
-outputs are service images. Each Containerfile owns native dependencies such
-as `libssl-dev`; Buildah runs on native linux/amd64 and linux/arm64 runners.
-The runtime image and optional extracted binary share one compilation.
-`sbom-cargo.yml` reads `Cargo.lock` with `cargo cyclonedx` without compiling,
-and the container scan follows each service's effective SBOM selection.
-Workspace tests, Clippy/formatting and RUSTSEC policy stay in the caller's
-`test.yml`, as the example below shows.
-
-For the full lifecycle comparison, cross-linker requirements, standalone CLI
-output layout and `artifact-first` alternative, use the
+This example uses `config.build-mode: container-first` because its main
+outputs are service images. Each Containerfile installs its own native
+dependencies, such as `libssl-dev`, and the runtime image and the optional
+extracted binary come from one compilation. For the `artifact-first`
+alternative, see the
 [Cargo ecosystem reference](../../docs/ecosystems.md#cargo-dual-mode).
 
 ## Files
@@ -61,10 +58,7 @@ The reference `Containerfile.example` uses three named stages:
 
 1. **`builder`**: installs native deps via apt, `COPY`s workspace sources,
    runs `cargo build --release` with `--mount=type=cache` for
-   `/usr/local/cargo/registry` and `target/`. Buildah may reuse those mounts on
-   a persistent worker; forge-ci's cross-run CI cache is the separate
-   registry layer cache (`--cache-from`/`--cache-to`), not a forge-native cache
-   backend.
+   `/usr/local/cargo/registry` and `target/`.
 2. **`export-binary`**: `FROM scratch`, just `COPY --from=builder` the
    binaries to root. Used by `extract.binary.target: export-binary` to
    write the binary to disk during container publish.
@@ -87,58 +81,32 @@ podman build --target runtime --build-arg SERVICE=worker -t worker:dev .
 podman build --target export-binary -o ./out .
 ```
 
-CI uses `forge-ci container build`, backed by Buildah and a tagless OCI push.
-Local Podman builds work without Docker installed.
+## Workspace tests
 
-## Workspace tests live in the caller's `test.yml`
+forge-ci does not run your tests. The `test` job in
+`github/pullrequest-workflow.yml` runs `cargo test --workspace`; add feature
+combinations and testcontainers runs there, for example
+`cargo test --workspace --features worker/testcontainers,api-service/testcontainers -- --test-threads=1`.
+Require that job and `pr-checks` as status checks.
 
-Workspace-level features and testcontainers can't be expressed per-artefact,
-so they live in the caller. The forge-ci PR orchestrator does not invoke
-this workflow automatically; call it from your own PR workflow if you need it.
+## Toolchain pin
 
-```yaml
-# .github/workflows/test.yml
-name: Cargo Test
-on: [workflow_call]
-permissions:
-  contents: read
-jobs:
-  test:
-    runs-on: ubuntu-26.04
-    steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
-      - run: rustup show active-toolchain >/dev/null 2>&1 || rustup toolchain install
-      - uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: cargo-test-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
-      - run: |
-          cargo test --workspace --features worker/testcontainers,api-service/testcontainers \
-            -- --test-threads=1
-```
-
-**Required:** pin the toolchain via `rust-toolchain.toml` at every Cargo
-artefact's `working-directory`. `validate cargo` enforces this: a
-release will fail at the prerequisites stage if the pin is missing.
-`sbom-cargo.yml` auto-detects the file directly.
-The GitLab example's check job runs `cargo fmt` and `cargo clippy`, so its
-pin must also list `components = ["rustfmt", "clippy"]`; the `minimal`
-profile installs neither. Every build also cross-compiles each platform it
-selects, so the pin lists those targets too, for example `targets =
-["x86_64-unknown-linux-gnu", "aarch64-unknown-linux-gnu"]` for GitLab's
-default Linux amd64 and arm64; a missing one fails with "can't find crate
-for `std`".
+- **Required:** pin the toolchain in `rust-toolchain.toml` at every Cargo
+  artefact's `working-directory`. `validate cargo` enforces this, and a
+  release fails at the prerequisites stage without it.
+- The GitLab example's check job runs `cargo fmt` and `cargo clippy`, so the
+  pin must also list `components = ["rustfmt", "clippy"]`; the `minimal`
+  profile installs neither.
+- Every build cross-compiles each platform it selects, so the pin lists those
+  targets too, for example `targets = ["x86_64-unknown-linux-gnu",
+  "aarch64-unknown-linux-gnu"]` for GitLab's default Linux amd64 and arm64. A
+  missing target fails with "can't find crate for `std`".
 
 ## Private cargo registry credentials (build-time)
 
-If the workspace pulls from a private cargo registry, **do not** put the token
-in `containers[].build-args`: build arguments are not a secret channel and can
-be exposed by Containerfile instructions, image metadata, or build logs.
-
-Use `containers[].build-secrets` instead. Declare the name once:
+If the workspace pulls from a private cargo registry, pass the token as a
+build secret, not in `containers[].build-args`, which can leak into image
+metadata and logs. Declare the name once:
 
 ```yaml
 containers:
@@ -158,9 +126,8 @@ RUN --mount=type=secret,id=private_cargo_registry_token,target=/run/secrets/carg
     cargo build --release
 ```
 
-The caller workflow forwards a single `FORGE_CI_BUILD_SECRETS_JSON`
-envelope; see [docs/artifacts-reference.md `build-secrets`](../../docs/artifacts-reference.md#build-secrets)
-for the full recipe.
+The caller workflow passes the value in `FORGE_CI_BUILD_SECRETS_JSON`; see
+[`build-secrets`](../../docs/artifacts-reference.md#build-secrets).
 
 ## Adding a third service
 

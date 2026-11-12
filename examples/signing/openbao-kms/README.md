@@ -80,14 +80,11 @@ from the ecosystem examples.
 
 ## What gets produced
 
-This example selects KMS signatures with no public transparency log.
-The shared [verification reference](../../../docs/verification.md#signtransparency-what-the-signing-run-publishes-about-itself)
-owns the Sigstore v3 bundle, OCI-signature and absent-transparency-proof contracts.
-Use the example's committed public key in the concrete commands below.
+Each release file gets a `<file>.bundle` signed by the OpenBao key, with no
+public transparency-log proof. See
+[what the signing run publishes](../../../docs/verification.md#signtransparency-what-the-signing-run-publishes-about-itself).
 
 ## How to verify
-
-Artefacts:
 
 ```bash
 forge-ci validate artifact-signature \
@@ -95,7 +92,7 @@ forge-ci validate artifact-signature \
     --key .forge-ci/release-pubkey.pem
 ```
 
-Container image:
+If you add a container, verify its image the same way:
 
 ```bash
 forge-ci validate container-signature \
@@ -105,6 +102,5 @@ forge-ci validate container-signature \
 ```
 
 Keep the committed public key and changes to the signing workflow under review.
-The [verification reference](../../../docs/verification.md#--methodkms-cosign-with-explicit-key-reference)
-owns the general KMS trust model; this example supplies its specific Transit key,
-JWT role and caller configuration.
+For the KMS trust model, see the
+[verification reference](../../../docs/verification.md#--methodkms-cosign-with-explicit-key-reference).

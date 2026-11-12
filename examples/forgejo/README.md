@@ -40,14 +40,18 @@ The file carries placeholders, all literal so that `git grep` finds them:
 | `OWNER` | who hosts `forge-ci` on your instance |
 | `PIN_FORGE_CI_SHA` | the `forge-ci` commit your consumers pin |
 
-Then set `CI_RUNNER_LABEL` to a JSON label array such as `["ci-builder"]` and the secret
-`ENGINE_PACKAGE_TOKEN` in that repository: a token that may write packages
-of `OWNER`, for the binary; the image has its own, `SIGNER_REGISTRY_TOKEN`. `OWNER`'s packages must be
-readable without credentials, as its `forge-ci` repository is. The
+Then set, in that repository:
+
+- the variables `CI_RUNNER_LABEL` and `CI_RUNNER_LABEL_ARM64`, the amd64 and
+  arm64 runner pools as JSON label arrays such as `["ci-builder"]`, and
+  `SIGNER_REGISTRY_USER`, the user of the signer image registry;
+- the secret `ENGINE_PACKAGE_TOKEN`, a token that may write packages of
+  `OWNER`, for the binary, and the secret `SIGNER_REGISTRY_TOKEN` for the
+  image.
+
+`OWNER`'s packages must be readable without credentials, as its `forge-ci`
+repository is. The file's header lists every variable and secret, including
+the ones for kaniko and runner lending. The
 [Forgejo guide](../../docs/forgejo.md#the-signer-image) describes the image,
 and [Forks](../../docs/forgejo.md#using-the-layer-from-a-fork) the order of
 the steps around it.
-
-The tests in `test/forgejoguard` and `test/forgejobehavior` hold this file to
-the layer: it publishes the binary first and builds from one verified
-checkout.

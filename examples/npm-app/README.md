@@ -8,10 +8,11 @@ Simple NPM/Node.js application with container build.
   and [`github/release-workflow.yml`](github/release-workflow.yml), with
   `artifacts.yml`. See the [GitHub guide](../../docs/github.md#getting-started).
 - **GitLab**: [`gitlab/.gitlab-ci.yml`](gitlab/.gitlab-ci.yml), the lint gate,
-  `check` and `build-npm`. No component builds or publishes the image;
-  `publish-forge-packages` publishes the tarball to the project's package
-  registry. See the [GitLab guide](../../docs/gitlab.md#getting-started).
-- **Forgejo**: not available; the Forgejo layer builds Go and Cargo only. See
+  `check` and `build-npm`. No component builds or publishes the image; the
+  release policy publishes the tarball to the project's package registry, as
+  `publish-forge-packages` does without one. See the
+  [GitLab guide](../../docs/gitlab.md#package-publication).
+- **Forgejo**: not available; the Forgejo layer has build actions for Go, Cargo and Maven only. See
   [Delivery layers side by side](../../docs/providers.md#delivery-layers-side-by-side).
 
 The rest of this page describes the GitHub configuration.
@@ -33,25 +34,6 @@ my-npm-app/
         └── release-workflow.yml
 ```
 
-## Configuration Files
-
-### `.forge-ci/artifacts.yml`
-
-See [artifacts.yml](artifacts.yml) in this directory.
-
-Key points:
-- Single NPM artifact
-- Publishes to GitHub Packages
-- Builds multi-platform container
-
-### `.github/workflows/release-workflow.yml`
-
-See [github/release-workflow.yml](github/release-workflow.yml).
-
-### `.github/workflows/pullrequest-workflow.yml`
-
-See [github/pullrequest-workflow.yml](github/pullrequest-workflow.yml).
-
 ## How to Use
 
 1. **Copy files to your repository:**
@@ -65,9 +47,9 @@ See [github/pullrequest-workflow.yml](github/pullrequest-workflow.yml).
 
 2. **Customize for your project:**
    - Update `name` in artifacts.yml
-   - Review any `node-version` publishing config
+   - Set `config.node-version`
    - Verify `Containerfile` path
-   - Configure release secrets from [Reference Guide](../../docs/reference.md), including `RELEASE_TOKEN` and GPG signing secrets
+   - Configure release secrets from [Reference Guide](../../docs/reference.md), including `RELEASE_TOKEN` and the GPG secrets that sign the release commit and tag
 
 3. **Create first release:**
    ```bash
@@ -80,30 +62,14 @@ See [github/pullrequest-workflow.yml](github/pullrequest-workflow.yml).
 
 ## What Gets Built
 
+[`artifacts.yml`](artifacts.yml) declares one npm artifact and one container:
+
 - NPM package → Runs `npm run build` when a `build` script exists, then packs
   the package
-- Published to → GitHub Packages
+- Published to → GitHub Packages only (`publish-to: [forge-packages]`). See the
+  [Publishing Guide](../../docs/publishing.md#npm-packages-github-packages).
 - Container image → `ghcr.io/owner/repo:v1.0.0`
 - Platforms → `linux/amd64`, `linux/arm64`
-
-## NPM Registry Support
-
-Current release workflows publish NPM packages to GitHub Packages:
-
-```yaml
-# artifacts.yml
-artifacts:
-  - name: my-package
-    project-type: npm
-    publish-to:
-      - forge-packages
-```
-
-npmjs.org production publishing is not implemented yet. Current config
-validation rejects `npmjs`; do not add it unless you are working on that
-implementation.
-
-See [Publishing Guide](../../docs/publishing.md#npm-packages-github-packages) for details.
 
 ## See Also
 

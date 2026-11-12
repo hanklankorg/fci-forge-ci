@@ -17,12 +17,13 @@ versioned binaries first and assembles images from them in separate native jobs.
 - **Forgejo**: [`forgejo/pullrequest.yml`](forgejo/pullrequest.yml) and
   [`forgejo/release.yml`](forgejo/release.yml), the service binaries and one
   image from [`forgejo/Containerfile.example`](forgejo/Containerfile.example)
-  using the prebuilt binaries and `release-images.yml`. Copy
-  [`artifacts-forgejo.yml`](artifacts-forgejo.yml) to `.forge-ci/images.yml`;
-  this declaration has no extraction step. Commit `mise.lock` for the runner
-  platforms to use the locked toolchain setup. Images default to linux/amd64;
-  arm64 requires a native runner and `RELEASE_PLATFORMS=linux/amd64,linux/arm64`. See
-  the [Forgejo guide](../../docs/forgejo.md#getting-started).
+  using the prebuilt binaries and `release-images.yml`.
+  [`forgejo/snapshot.yml`](forgejo/snapshot.yml) builds a container-only
+  snapshot on every push to `main`, or when run by hand. Commit `mise.lock`
+  for the runner platforms to use the locked toolchain setup. Images default
+  to linux/amd64; arm64 requires a native runner and
+  `RELEASE_PLATFORMS=linux/amd64,linux/arm64`. See the
+  [Forgejo guide](../../docs/forgejo.md#getting-started).
 
 ## Files
 

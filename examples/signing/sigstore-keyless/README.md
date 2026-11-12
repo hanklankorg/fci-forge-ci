@@ -11,8 +11,7 @@ the included `.forge-ci/allowed_signers.example`, replace its demonstration
 key with the public half of `RELEASE_SSH_SIGNING_KEY` and its principal with
 the `bot-email` you set in `github/release-workflow.yml`, and commit it as
 `.forge-ci/allowed_signers`. The SSH key protects Git objects; it is not used
-for artifact signatures. forge-ci does not currently offer keyless
-Git-object signing.
+for artifact signatures. Git objects cannot be signed keyless.
 
 ## Files
 
@@ -33,17 +32,11 @@ example, which ships this setup.
 
 ## What gets produced
 
-For every release artefact (`.tgz`, `.jar`, binary, …) and every
-container image, the release flow produces a Sigstore v3 bundle
-file (`<artefact>.bundle`) containing:
-
-- the signature
-- the Fulcio-issued certificate binding the signing key to the
-  workflow identity
-- the Rekor transparency-log inclusion proof
-
-The signature for container images is stored in the OCI registry
-next to the image, not as a sidecar file.
+Each release binary gets a Sigstore bundle, `<file>.bundle`, with the
+signature, the Fulcio certificate for the workflow identity and the Rekor
+proof. If you add a container, its signature is stored in the registry next
+to the image. See
+[what the signing run publishes](../../../docs/verification.md#signtransparency-what-the-signing-run-publishes-about-itself).
 
 ## How to verify
 

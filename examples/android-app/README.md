@@ -1,177 +1,71 @@
 # Android App Example
 
-Example configuration for Android applications with multiple product flavors and build types.
+Example configuration for Android applications with product flavors, APK and
+AAB builds, release signing and optional Google Play upload.
 
 ## Per forge
 
-- **GitHub**: [`github/build-workflow.yml`](github/build-workflow.yml),
-  [`github/release-workflow.yml`](github/release-workflow.yml) and
-  [`github/release-snapshot-workflow.yml`](github/release-snapshot-workflow.yml),
-  with `artifacts.yml`. See the
-  [GitHub guide](../../docs/github.md#getting-started).
+- **GitHub**: three workflows, with `artifacts.yml`:
+  - [`github/build-workflow.yml`](github/build-workflow.yml): a development
+    build on push to `main`, or when run by hand.
+  - [`github/release-workflow.yml`](github/release-workflow.yml): the release,
+    started by a signed `release-request/vX.Y.Z` tag. After validation and
+    version preparation, it creates the final `vX.Y.Z` tag and the GitHub
+    Release, and can publish to Google Play. Pushing a final tag directly
+    does not start it.
+  - [`github/release-snapshot-workflow.yml`](github/release-snapshot-workflow.yml):
+    run by hand, it builds a signed release AAB and uploads it to the Google
+    Play internal track. It needs `GOOGLE_PLAY_SERVICE_ACCOUNT_JSON`, a
+    service account JSON key with Google Play publishing permissions.
+
+  See the [GitHub guide](../../docs/github.md#getting-started).
 - **GitLab**: [`gitlab/.gitlab-ci.yml`](gitlab/.gitlab-ci.yml), the lint gate,
   `check` and `build-gradle-android`. GitLab has no Google Play component and
   no snapshot flow. See the [GitLab guide](../../docs/gitlab.md#getting-started).
-- **Forgejo**: not available; the Forgejo layer builds Go and Cargo only. See
+- **Forgejo**: not available; the Forgejo layer has build actions for Go, Cargo and Maven only. See
   [Delivery layers side by side](../../docs/providers.md#delivery-layers-side-by-side).
 
 The rest of this page describes the GitHub configuration.
 
-> **Current source versus release pins:** `v0.90.0` examples identify a historical
-> baseline, not the current source revision. Confirm matching workflows, CLI
-> assets and runtime images before adoption. For unreleased changes, follow
-> [Branch Testing](../../docs/runtime-images.md#branch-testing).
+## Runtime image
 
-## Use Case
-
-Android applications that need to:
-- Build multiple variants (debug, release)
-- Generate APK and AAB files
-- Use custom artifact naming
-- Support product flavors (demo, prod, staging, etc.)
-- Sign release builds
-
-## Files
-
-### `github/build-workflow.yml`
-Development build workflow that creates Android artifacts on push to main.
-
-### `artifacts.yml`
-Artifact configuration for release builds (used with `github/release-workflow.yml`).
-
-### `github/release-workflow.yml`
-Production release workflow triggered by signed `release-request/vX.Y.Z` tags.
-After validation and version preparation, automation creates the final
-`vX.Y.Z` tag, creates the GitHub Release, and optionally publishes to Google
-Play. Direct final-tag pushes do not trigger this example workflow.
-
-### `github/release-snapshot-workflow.yml`
-Manual snapshot/testing release workflow that builds and uploads to Google Play internal track. This mirrors the iOS `release-snapshot-workflow.yml` which uploads to TestFlight.
-
-## Features
-
-### Multiple Build Types
-- **Debug APK**: Development builds with debugging enabled
-- **Release APK**: Optimized production builds
-- **AAB (Android App Bundle)**: For Google Play Store distribution
-
-### Custom Artifact Naming
-Artifacts are named with date stamps and custom prefixes:
-```text
-2025-01-15 - testing_store - my-app - demo - APK debug
-2025-01-15 - testing_store - my-app - demo - APK release
-2025-01-15 - testing_store - my-app - demo - AAB release
-```
-
-### Product Flavors
-Support for multiple flavors:
-- `demo` - Demo/testing version
-- `prod` - Production version
-- `staging` - Staging environment
-- Custom flavors as needed
-
-### Runtime Image
 The Android workflow runs in the forge-ci Android runtime image, which
-contains the supported JDK, Gradle, and Android SDK toolchain. Normal consumers
-use the workflow default; override `runtime-image` only for branch testing,
-mirroring, or stricter reproducibility.
+contains the supported JDK, Gradle and Android SDK. Pin the digest of the
+release you call; the snippets below carry a `FIXME` placeholder.
 
-## Configuration
+## Calling the build
 
-### Basic Setup
-
-```yaml
-jobs:
-  build:
-    uses: diggsweden/forge-ci/.github/workflows/build-gradle-android.yml@v0.90.0
-    with:
-      build-module: "app"
-      product-flavor: "demo"
-```
-
-### With Signing
+A signed build of the `prod` flavor:
 
 ```yaml
 jobs:
   build:
-    uses: diggsweden/forge-ci/.github/workflows/build-gradle-android.yml@v0.90.0
+    uses: diggsweden/forge-ci/.github/workflows/build-gradle-android.yml@PIN_FORGE_CI_SHA # v0.90.0
     secrets:  # Required for signing
       ANDROID_KEYSTORE: ${{ secrets.ANDROID_KEYSTORE }}
       ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
       ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
       ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
     with:
+      forge-ci-binary-ref: PIN_FORGE_CI_SHA # v0.90.0
+      runtime-image: ghcr.io/diggsweden/forge-ci-runtime-android-35@sha256:0000000000000000000000000000000000000000000000000000000000000000 # FIXME v0.90.0 digest
       build-module: "app"
       product-flavor: "prod"
       enable-signing: true
 ```
 
-**Required Secrets:**
-- `ANDROID_KEYSTORE` - Base64-encoded keystore file
-- `ANDROID_KEYSTORE_PASSWORD` - Keystore password
-- `ANDROID_KEY_ALIAS` - Key alias
-- `ANDROID_KEY_PASSWORD` - Key password
+The secrets are the base64-encoded keystore (`ANDROID_KEYSTORE`), its
+password, the key alias and the key password. Leave out `secrets:` and
+`enable-signing` for an unsigned build.
 
-The workflow maps `ANDROID_KEYSTORE` to the internal `ANDROID_KEYSTORE_BASE64`
-environment variable used by the `forge-ci` CLI. Create the repository secret
-as `ANDROID_KEYSTORE`.
+Other inputs you are likely to change:
 
-### Release Only (No Debug)
-
-```yaml
-jobs:
-  build:
-    uses: diggsweden/forge-ci/.github/workflows/build-gradle-android.yml@v0.90.0
-    secrets:  # Required for signing
-      ANDROID_KEYSTORE: ${{ secrets.ANDROID_KEYSTORE }}
-      ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-      ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-      ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-    with:
-      build-module: "app"
-      build-types: "release"  # Only release builds
-      include-aab: true
-      enable-signing: true
-```
-
-### Custom Naming
-
-```yaml
-jobs:
-  build:
-    uses: diggsweden/forge-ci/.github/workflows/build-gradle-android.yml@v0.90.0
-    with:
-      build-module: "app"
-      artifact-name-prefix: "production_store"  # Custom prefix
-      include-date-stamp: true  # Include date in name
-```
-
-## Multi-Flavor Builds
-
-Build multiple flavors in parallel:
-
-```yaml
-jobs:
-  build-demo:
-    uses: diggsweden/forge-ci/.github/workflows/build-gradle-android.yml@v0.90.0
-    with:
-      build-module: "app"
-      product-flavor: "demo"
-      artifact-name-prefix: "demo_store"
-
-  build-prod:
-    uses: diggsweden/forge-ci/.github/workflows/build-gradle-android.yml@v0.90.0
-    secrets:  # Required for signing
-      ANDROID_KEYSTORE: ${{ secrets.ANDROID_KEYSTORE }}
-      ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-      ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-      ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-    with:
-      build-module: "app"
-      product-flavor: "prod"
-      artifact-name-prefix: "production_store"
-      enable-signing: true
-```
+- `build-types`: `debug,release` by default; `"release"` skips the debug build.
+- `include-aab`: also builds an AAB for Google Play; on by default.
+- `product-flavor`: one flavor per call; for two flavors, add a second job
+  that calls the workflow with the other flavor.
+- `artifact-name-prefix` and `include-date-stamp`: the upload names, for
+  example `<date> - testing_store - my-app - demo - APK release`.
 
 ## Gradle Configuration
 
@@ -219,60 +113,50 @@ android {
 }
 ```
 
-## Input Parameters
+## Library variant
 
-The [Android component reference](../../docs/components.md#build-gradle-androidyml)
-owns the input/default table, output paths and derived-versus-overridden artifact
-naming rules. This example uses the `app` module and the `demo`/`prod` flavors
-shown above; the publishing job consumes the build's `aab-name` output below.
-
-## Workflow Comparison: iOS vs Android
-
-| Workflow | iOS | Android |
-|----------|-----|---------|
-| **Release (Production)** | Release-request-triggered, version bump, changelog, TestFlight, GitHub Release | Release-request-triggered, version bump, changelog, Google Play, GitHub Release |
-| **Release Snapshot (Testing)** | Manual trigger, build + TestFlight only | Manual trigger, build + Google Play internal track |
-
-### Release Snapshot Workflow
-
-The `release-snapshot-workflow.yml` is for testing builds before a formal release:
+A module that applies `com.android.library` is built in library mode: its
+unit tests and its release AAR, `<module>/build/outputs/aar/*.aar`, and a
+Build SBOM. A library has no keystore signing, no APK or AAB and no Google
+Play, and its version is the `version` property of `gradle.properties`, not
+`versionName` and `versionCode`. Declare it with `build-type: library`:
 
 ```yaml
-# Manual trigger - no version bump, no changelog, no GitHub release
-# Just build and upload to Google Play internal track
-name: Release Snapshot Workflow
-on:
-  workflow_dispatch:
-
-jobs:
-  build:
-    uses: diggsweden/forge-ci/.github/workflows/build-gradle-android.yml@v0.90.0
-    secrets:  # Required for signing
-      ANDROID_KEYSTORE: ${{ secrets.ANDROID_KEYSTORE }}
-      ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-      ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-      ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-    with:
-      build-module: app
-      product-flavor: demo
-      build-types: release
-      include-aab: true
-      enable-signing: true
-
-  upload-play-store:
-    needs: build
-    uses: diggsweden/forge-ci/.github/workflows/publish-google-play.yml@v0.90.0
-    secrets:
-      GOOGLE_PLAY_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON }}
-    with:
-      branch: ${{ github.ref }}
-      aab-artifact-name: ${{ needs.build.outputs.aab-name }}
-      package-name: com.example.myapp
-      track: internal  # Equivalent to TestFlight
+artifacts:
+  - name: my-android-library
+    project-type: gradle-android
+    build-type: library
+    sboms: build
+    publish-to: [forge-packages]
+    config:
+      build-module: lib
+      gradle-version-file: gradle.properties
 ```
 
-**Required Secrets for Google Play:**
-- `GOOGLE_PLAY_SERVICE_ACCOUNT_JSON` - Service account JSON key with Google Play publishing permissions
+A direct call of the build sets `library: true`, on GitHub and on the GitLab
+`build-gradle-android` component alike:
+
+```yaml
+jobs:
+  build:
+    uses: diggsweden/forge-ci/.github/workflows/build-gradle-android.yml@PIN_FORGE_CI_SHA # v0.90.0
+    with:
+      forge-ci-binary-ref: PIN_FORGE_CI_SHA # v0.90.0
+      runtime-image: ghcr.io/diggsweden/forge-ci-runtime-android-35@sha256:0000000000000000000000000000000000000000000000000000000000000000 # FIXME v0.90.0 digest
+      library: true
+      build-module: "lib"
+```
+
+The checks of a pull or merge request name the module's own tasks, for
+example `./gradlew --no-daemon lib:test lib:lintRelease lib:assembleRelease`.
+Publishing the AAR as a Maven publication needs `maven-publish` in the
+module; see [Android libraries](../../docs/publishing.md#android-libraries).
+Library mode needs v0.91.0 or later.
+
+## Input Parameters
+
+All inputs, defaults and output names:
+[Android component reference](../../docs/components.md#build-gradle-androidyml).
 
 ## See Also
 

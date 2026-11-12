@@ -26,9 +26,10 @@
 # No component builds or publishes the container image. In a release, it is
 # built by the `build` commands of the separate, pinned policy project that
 # includes the `release` component; see
-# https://gitlab.example.com/team/ci/forge-ci/-/blob/PIN_FORGE_CI_SHA/docs/gitlab.md#native-release-policy-under-acceptance.
+# https://gitlab.example.com/team/ci/forge-ci/-/blob/PIN_FORGE_CI_SHA/docs/gitlab.md#native-release-policy.
 # The packed tarball
-# goes to the project's package registry with publish-forge-packages
+# goes to the project's package registry in that release, whose artifacts.yml
+# lists forge-packages, or without the policy with publish-forge-packages
 # (project-type: npm); see
 # https://gitlab.example.com/team/ci/forge-ci/-/blob/PIN_FORGE_CI_SHA/docs/gitlab.md#package-publication.
 #

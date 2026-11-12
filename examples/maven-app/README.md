@@ -12,12 +12,13 @@ Simple Maven application with container build.
   the [GitLab guide](../../docs/gitlab.md#getting-started).
 - **Forgejo**: [`forgejo/pullrequest.yml`](forgejo/pullrequest.yml) and
   [`forgejo/release.yml`](forgejo/release.yml), a `build-maven` jar release of
-  a project at the repository root. The signed release commit carries the
-  POMs' release version: `prepare-release.yml` bumps them in a key-free job
-  (`version-bump: maven`) and verifies the bump before committing it, and
-  `build-maven` checks the version it builds. An image
+  a project at the repository root. `prepare-release.yml` bumps the POM
+  versions, and `build-maven` checks the version it builds. An image
   is added to the build job as in the
-  [Go service example](../go-service/forgejo/release.yml). See the
+  [Go service example](../go-service/forgejo/release.yml).
+  [`forgejo/snapshot.yml`](forgejo/snapshot.yml) publishes a development
+  image of `main` through the shared snapshot workflow, the jar built first
+  in a digest-pinned Java toolchain image. See the
   [Forgejo guide](../../docs/forgejo.md#getting-started).
 
 The rest of this page describes the GitHub configuration.
@@ -38,25 +39,6 @@ my-maven-app/
         └── release-workflow.yml
 ```
 
-## Configuration Files
-
-### `.forge-ci/artifacts.yml`
-
-See [artifacts.yml](artifacts.yml) in this directory.
-
-Key points:
-- Single Maven artifact
-- Publishes the container image to GHCR
-- Builds multi-platform container
-
-### `.github/workflows/release-workflow.yml`
-
-See [github/release-workflow.yml](github/release-workflow.yml).
-
-### `.github/workflows/pullrequest-workflow.yml`
-
-See [github/pullrequest-workflow.yml](github/pullrequest-workflow.yml).
-
 ## How to Use
 
 1. **Copy files to your repository:**
@@ -70,9 +52,9 @@ See [github/pullrequest-workflow.yml](github/pullrequest-workflow.yml).
 
 2. **Customize for your project:**
    - Update `name` in artifacts.yml
-   - Review any `java-version` publishing config
+   - Set `config.java-version`
    - Verify `Containerfile` path
-   - Configure release secrets from [Reference Guide](../../docs/reference.md), including `RELEASE_TOKEN` and GPG signing secrets
+   - Configure release secrets from [Reference Guide](../../docs/reference.md), including `RELEASE_TOKEN` and the GPG secrets that sign the release commit and tag
    - **Set `<project.build.outputTimestamp>` in `pom.xml` `<properties>`**: required for reproducible jars; `validate jvm-reproducibility` fails the release if missing. See [Reproducible Builds](../../docs/verification.md#reproducible-builds) for the exact snippet.
 
 3. **Create first release:**
@@ -85,6 +67,9 @@ See [github/pullrequest-workflow.yml](github/pullrequest-workflow.yml).
    create or push that final tag directly.
 
 ## What Gets Built
+
+[`artifacts.yml`](artifacts.yml) declares one Maven application and its
+container, published to GHCR:
 
 - Maven JAR artifact → `target/*.jar`
 - Container image → `ghcr.io/owner/repo:v1.0.0`

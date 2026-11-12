@@ -4,9 +4,11 @@ Complete working examples for different project types.
 
 > Each example follows one of the two ecosystem patterns (A: build artefact + container COPY; B: container is the build environment). See **[docs/ecosystems.md](../docs/ecosystems.md)** for the full framing and per-ecosystem capability matrices.
 >
-> Examples target the v0.90.0 workflow contract. Choose an authenticated release
-> and its matching runtime images. For an unreleased candidate, use the
-> branch-testing flow in **[docs/runtime-images.md](../docs/runtime-images.md)**.
+> Examples pin `v0.90.0` as a placeholder release. Pin the release you install
+> and its runtime image digests instead, as
+> **[Which version to pin](../docs/README.md#documentation-index)** describes.
+> For an unreleased candidate, use the branch-testing flow in
+> **[docs/runtime-images.md](../docs/runtime-images.md)**.
 >
 > Image digests such as `PIN_DIGEST` are placeholders. Select a published,
 > readable lint image for the required toolchain and pin its verified digest.
@@ -19,8 +21,8 @@ forge-neutral `artifacts.yml`, a `nanolinter.toml` verify plan for the lint
 gate, a README with a short "Per forge" list, and a subdirectory per forge
 that builds it: `github/` with the caller workflows,
 `gitlab/.gitlab-ci.yml`, and `forgejo/pullrequest.yml` with
-`forgejo/release.yml`. A forge without a directory cannot build that
-ecosystem; [Delivery layers side by side](../docs/providers.md#delivery-layers-side-by-side)
+`forgejo/release.yml` and, where offered, `forgejo/snapshot.yml`. A forge
+without a directory cannot build that ecosystem; [Delivery layers side by side](../docs/providers.md#delivery-layers-side-by-side)
 has the capability table.
 
 | Ecosystem | GitHub | GitLab | Forgejo |
@@ -29,10 +31,11 @@ has the capability table.
 | [Go Service](go-service/): a multi-arch container, compiled in the Containerfile (Pattern B) | [workflows](go-service/github/) | [pipeline](go-service/gitlab/.gitlab-ci.yml) | [workflows](go-service/forgejo/) |
 | [Rust Application](cargo-app/): a Cargo workspace shipped as containers, with the private-registry build-secrets pattern | [workflows](cargo-app/github/) | [pipeline](cargo-app/gitlab/.gitlab-ci.yml) | [workflows](cargo-app/forgejo/) |
 | [Maven Application](maven-app/): a Java service shipped as a multi-platform container (Pattern A) | [workflows](maven-app/github/) | [pipeline](maven-app/gitlab/.gitlab-ci.yml) | [workflows](maven-app/forgejo/) |
-| [Gradle JVM](gradle-app/): JVM builds and [artifact-first package publication](../docs/gradle-publishing.md) | [workflows](gradle-app/github/) | [pipeline](gradle-app/gitlab/.gitlab-ci.yml); publication requires explicit artifact handoff | CLI composition |
+| [Gradle JVM](gradle-app/): JVM builds and [artifact-first package publication](../docs/publishing.md#gradle-jvm-and-android-libraries) | [workflows](gradle-app/github/) | [pipeline](gradle-app/gitlab/.gitlab-ci.yml); publication requires explicit artifact handoff | [workflows](gradle-app/forgejo/) |
 | [NPM Application](npm-app/): a Node service published as a package and shipped as a container (Pattern A) | [workflows](npm-app/github/) | [pipeline](npm-app/gitlab/.gitlab-ci.yml) | not available |
-| [Android Application](android-app/): APK and AAB with product flavors, optional Google Play upload | [workflows](android-app/github/) | [pipeline](android-app/gitlab/.gitlab-ci.yml) | not available |
-| [Monorepo](monorepo/): several artifacts and project types, one container per artifact or one combined | [workflows](monorepo/github/) | [pipeline](monorepo/gitlab/.gitlab-ci.yml) | not available |
+| [Android Application](android-app/): APK and AAB with product flavors, optional Google Play upload; a [library variant](android-app/README.md#library-variant) builds an AAR | [workflows](android-app/github/) | [pipeline](android-app/gitlab/.gitlab-ci.yml) | not available |
+| [Monorepo](monorepo/): several artifacts and project types, one container per artifact or one combined | [workflows](monorepo/github/) | [pipeline](monorepo/gitlab/.gitlab-ci.yml) | [workflows](monorepo/forgejo/) |
+| [No build](no-build/): scripts and configuration distributed through Git, `project-type: meta` | [workflows](no-build/github/) | [pipeline](no-build/gitlab/.gitlab-ci.yml) | [workflows](no-build/forgejo/) |
 
 What each forge's files do differs with its layer. The GitHub workflows call
 the orchestrators and read `artifacts.yml`. The GitLab pipelines are the
@@ -49,19 +52,23 @@ job at a time; see [Runners and runner lending](../docs/runners.md).
 
 ### Container snapshots: [`container-snapshot/`](container-snapshot/)
 
-Container-only development images, with a manual GitHub developer-branch selector
-and inherited scan/SBOM policy. The example explains native Forgejo/GitLab call
-contracts, automatic artifact-first producers and optional prepared-context
-overrides. Declared snapshot
-containers are default-on; `publish-containers: false` opts out.
+Development images of any branch, built from a container declaration alone,
+with the scan and SBOM settings of the declaration. Publishing is on by default;
+`publish-containers: false` turns it off.
+
+### Base images: [`base-images/`](base-images/)
+
+A root image and two flavors built on it, each signed and promoted. For
+Forgejo and GitLab.
 
 ### By signing backend: [`signing/`](signing/)
 
 How a GitHub release is signed, independent of what is being released.
 Combine one with any ecosystem example above: what each adds is the `sign:`
 (and `git-signing:`) block of its `artifacts.yml` and the `secrets:` lines of
-its `github/release-workflow.yml`; its README says where they go, and the rest
-of both files is the Go CLI example, which ships the Sigstore keyless setup.
+its `github/release-workflow.yml`; its README says where they go. The rest of
+both files is a placeholder project: the Go CLI, or a Maven library for
+OpenBao.
 The GitLab and Forgejo layers sign with a Cosign key pair of the organization;
 see their guides.
 
@@ -116,7 +123,8 @@ see their guides.
    authentication, the signing methods, and target-specific credentials such
    as Maven Central or Google Play.
 
-5. **Create release:**
+5. **Create release:** `forge-ci setup release-request v1.0.0` checks your
+   signing setup and prints these commands once it passes:
    ```bash
    git tag -s release-request/v1.0.0 -m "Release v1.0.0"
    git push origin release-request/v1.0.0
@@ -135,7 +143,7 @@ The GitHub configuration of each example:
 |-------------|----------------|--------------------|---------------------------------|
 | Maven App   | Maven          | single, GHCR       | GHCR                            |
 | NPM App     | NPM            | single, GHCR       | GitHub Packages                 |
-| Gradle JVM  | Gradle         | optional           | not wired today                 |
+| Gradle JVM  | Gradle         | optional           | none; GitHub Packages or Maven Central with `publish-to` |
 | Android App | Gradle Android | optional           | Google Play                     |
 | Cargo App   | Cargo          | one or many        | container only                  |
 | Go CLI      | Go             | none               | GitHub Release binaries         |
@@ -146,30 +154,24 @@ The GitHub configuration of each example:
 
 ## Common Modifications
 
-- [Maven Central publishing](../docs/publishing.md#maven-central) owns library
+- [Maven Central publishing](../docs/publishing.md#maven-central): library
   selection, Sonatype setup and the `MAVEN_CENTRAL_*` secrets.
-- [NPM publishing](../docs/publishing.md#npm-packages-github-packages) owns scoped
-  packages and registry requirements. Current production support is GitHub
-  Packages, not `npmjs.org`.
-- [Container configuration](../docs/artifacts-reference.md#containers-section)
-  owns optional container builds, platform selection, security gates and SBOM
-  selection. Disabling a gate removes its guarantee.
-- [Build secrets](../docs/artifacts-reference.md#build-secrets) owns the secret
-  envelope and mount contract; credentials do not belong in build arguments.
+- [npm publishing](../docs/publishing.md#npm-packages-github-packages): scoped
+  packages for GitHub Packages.
+- [Container configuration](../docs/artifacts-reference.md#containers-section):
+  optional containers, platforms, security gates and SBOMs.
+- [Build secrets](../docs/artifacts-reference.md#build-secrets): pass
+  credentials to a container build as secrets, not as build arguments.
 
 ## Testing Your Configuration
 
-Follow [Testing consumer configuration](../docs/runtime-images.md#testing-consumer-configuration)
-for YAML validation, the branch-only snapshot workflow, and a disposable signed
-release request. The same page owns the reviewed-commit workflow/binary/image
-pins required when testing an unreleased candidate.
+[Testing consumer configuration](../docs/runtime-images.md#testing-consumer-configuration)
+shows how to validate the YAML, run a branch snapshot and try a disposable
+signed release request, also against an unreleased forge-ci candidate.
 
 ## Troubleshooting
 
-The [configuration troubleshooting reference](../docs/artifacts-reference.md#configuration-troubleshooting)
-owns missing config/Containerfile paths and successful builds without the
-expected publication. Keep this index focused on choosing and adapting an
-example rather than maintaining another copy of those contracts.
+See the [configuration troubleshooting reference](../docs/artifacts-reference.md#configuration-troubleshooting).
 
 ## See Also
 

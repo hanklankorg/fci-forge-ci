@@ -26,7 +26,7 @@
 # Gradle publishing is not wired in publish-forge-packages, as on GitHub.
 # Releases run from a separate, pinned policy project that includes the
 # `release` component; see
-# https://gitlab.example.com/team/ci/forge-ci/-/blob/PIN_FORGE_CI_SHA/docs/gitlab.md#native-release-policy-under-acceptance.
+# https://gitlab.example.com/team/ci/forge-ci/-/blob/PIN_FORGE_CI_SHA/docs/gitlab.md#native-release-policy.
 #
 # Once the release policy is the project's CI configuration path, GitLab runs
 # it instead of this file, so the policy includes this gate for merge

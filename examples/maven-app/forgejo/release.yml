@@ -54,10 +54,10 @@
 #
 #   prepare (forge-ci)  ->  build (yours)  ->  sign-and-publish (forge-ci)
 #
-# prepare runs with version-bump: maven. Its key-free version-bump job runs
-# `mvn versions:set` in the Maven image; the signing job verifies that the
-# resulting patch only moves the POMs' version to the release version, and
-# commits the POMs beside the changelog. So the release tag's source declares
+# prepare bumps what the release plan of .forge-ci/artifacts.yml declares:
+# its key-free version job runs `mvn versions:set` in runtime-image-java; the
+# signing job verifies that the resulting patch only moves the POMs' version
+# to the release version, and commits the POMs beside the changelog. So the release tag's source declares
 # the version the jar carries, as on GitHub and GitLab.
 #
 # The build job is a Maven build with forge-ci's build-maven action, the same
@@ -93,7 +93,7 @@ jobs:
     if: success() && startsWith(forgejo.ref, 'refs/tags/')
     uses: OWNER/forge-ci/.forgejo/workflows/prepare-release.yml@PIN_FORGE_CI_SHA
     with:
-      runner-label: ${{ vars.CI_RUNNER_LABEL }}
+      runs-on: ${{ vars.CI_RUNNER_LABEL }}
       # The repository and the commit of the uses: line above, written out:
       # the workflow fetches its own files from there.
       forge-ci-repository: OWNER/forge-ci
@@ -110,9 +110,8 @@ jobs:
       verify-release-request-signature: 'false'
       release-request-allowed-signers: .forgejo/release-allowed-signers
       # The signed release commit carries the POMs' release version. The
-      # bump runs Maven in its own key-free job, in this image.
-      version-bump: maven
-      version-bump-image: docker.io/library/maven:3.9-eclipse-temurin-25@sha256:PIN_MAVEN_IMAGE_DIGEST
+      # plan's bump runs Maven in its own key-free job, in this image.
+      runtime-image-java: docker.io/library/maven:3.9-eclipse-temurin-25@sha256:PIN_MAVEN_IMAGE_DIGEST
       # This jar-only starter has no distro packages or container ledger.
       sign-distro-packages: 'false'
       publish-container-images: 'false'
@@ -237,9 +236,11 @@ jobs:
     if: ${{ always() && needs.build.result == 'success' }}
     uses: OWNER/forge-ci/.forgejo/workflows/sign-and-publish-release.yml@PIN_FORGE_CI_SHA
     with:
-      runner-label: ${{ vars.CI_RUNNER_LABEL }}
+      runs-on: ${{ vars.CI_RUNNER_LABEL }}
+      signer-runs-on: ${{ vars.CI_RUNNER_LABEL }}
       release-tag: ${{ needs.prepare.outputs.release-tag }}
       release-sha: ${{ needs.prepare.outputs.release-sha }}
+      artifacts-config: ${{ needs.prepare.outputs.artifacts-config }}
       # The commit the request tag pushed, from the event context. The signer
       # binds the release commit to it, so do not route this through a job
       # output: a value that travels with the release is not evidence about it.
