@@ -8,11 +8,14 @@
 #
 #   base    — bash, ca-certificates, curl, git, gnupg, gzip, jq, openssh-client
 #             (ssh-keygen, for SSH tag verification), tar, unzip, xz, zip, yq, git-cliff, gh, glab, mise, publiccode-parser, cosign,
-#             and the matching architecture's forge-ci binary from this
+#             syft, and the matching architecture's forge-ci binary from this
 #             runtime run's cli-dist artifact. Used by config / plan / release /
 #             orchestrator / changelog / provider-dispatch / publiccode-lint
-#             jobs.
-#   full    — base + syft + trivy. Used by security and SBOM jobs.
+#             jobs. Syft is in base because the GitLab release's image
+#             publishing job runs in the consumer's job-image, the toolchain
+#             image its checks need, and requires Syft there without
+#             downloading it; so every toolchain image carries it.
+#   full    — base + trivy. Used by security jobs.
 #   rust    — base + Rust stable toolchain + cargo-cyclonedx. Used by
 #             build-cargo and sbom-cargo.
 #   go      — base + Go 1.27 toolchain, cyclonedx-gomod, GCC, libc headers
@@ -150,10 +153,10 @@ RUN apt-get update \
 COPY scripts/bootstrap /opt/forge-ci/scripts/bootstrap
 COPY templates /opt/forge-ci/templates
 
-# The verify/publish jobs extract the matching Linux architecture's binary from
-# this run's build-cli artifact to cli-prebuilt/forge-ci. COPY preserves those
-# bytes. The rolling CLI publisher consumes the same archives; stable release
-# archives are built separately by release-binary.yml.
+# The verify/publish jobs verify the matching architecture's canonical delivery
+# artifact against .engine/bin/forge-ci-linux-<arch>.sha256 and stage it here.
+# COPY preserves those bytes. Version/commit/date-stamped release archives are
+# a separate build product and must not replace the delivery binary in runtimes.
 COPY cli-prebuilt/forge-ci /usr/local/bin/forge-ci
 
 # yq and publiccode-parser come from go-tools, built with the image's Go.
@@ -173,8 +176,10 @@ RUN bash -c 'set -euo pipefail \
   && source /opt/forge-ci/scripts/bootstrap/install-mise.sh && install_mise \
   && install -m 0755 "$(command -v mise)" /usr/local/bin/mise \
   && source /opt/forge-ci/scripts/bootstrap/install-cosign.sh && install_cosign \
-  && install -m 0755 "$(command -v cosign)" /usr/local/bin/cosign' \
-  && rm -rf /tmp/git-cliff-bin /tmp/gh-bin /tmp/glab-bin /tmp/mise-bin /tmp/cosign-bin \
+  && install -m 0755 "$(command -v cosign)" /usr/local/bin/cosign \
+  && source /opt/forge-ci/scripts/bootstrap/install-syft.sh && install_syft \
+  && install -m 0755 "$(command -v syft)" /usr/local/bin/syft' \
+  && rm -rf /tmp/git-cliff-bin /tmp/gh-bin /tmp/glab-bin /tmp/mise-bin /tmp/cosign-bin /tmp/syft-bin \
   && yq --version \
   && git-cliff --version \
   && gh --version \
@@ -182,6 +187,7 @@ RUN bash -c 'set -euo pipefail \
   && mise --version \
   && publiccode-parser --version \
   && cosign version \
+  && syft version \
   && forge-ci --version
 
 # Git aborts operations on a repository whose on-disk owner differs from the
@@ -214,12 +220,9 @@ FROM base AS full
 
 # hadolint ignore=SC1091
 RUN bash -c 'set -euo pipefail \
-  && source /opt/forge-ci/scripts/bootstrap/install-syft.sh && install_syft \
-  && install -m 0755 "$(command -v syft)" /usr/local/bin/syft \
   && source /opt/forge-ci/scripts/bootstrap/install-trivy.sh && install_trivy \
   && install -m 0755 "$(command -v trivy)" /usr/local/bin/trivy' \
-  && rm -rf /tmp/syft-bin /tmp/trivy-bin \
-  && syft version \
+  && rm -rf /tmp/trivy-bin \
   && trivy --version
 
 # =============================================================================
@@ -431,6 +434,9 @@ ENV ANDROID_HOME=/opt/android-sdk \
 # Plugin's download of a missing platform or build-tools work for either user.
 # The licence pipe needs no pipefail: `yes` always dies of SIGPIPE, and
 # sdkmanager's status is the one that counts.
+# sdkmanager fetches the packages itself and does not retry a dropped
+# connection. It verifies each archive's checksum, so the install is repeated,
+# at most three times, and a failure is its own output.
 # hadolint ignore=DL3008,DL4006
 RUN mkdir -p "$ANDROID_HOME/cmdline-tools" \
   && bash -c 'source /opt/forge-ci/scripts/bootstrap/install-common.sh; ci_download "$@"' -- \
@@ -440,10 +446,14 @@ RUN mkdir -p "$ANDROID_HOME/cmdline-tools" \
   && mv "$ANDROID_HOME/cmdline-tools/cmdline-tools" "$ANDROID_HOME/cmdline-tools/latest" \
   && rm -f /tmp/cmdline-tools.zip \
   && { yes 2>/dev/null || true; } | sdkmanager --licenses >/dev/null \
-  && sdkmanager --install \
-       "platform-tools" \
-       "platforms;${ANDROID_PLATFORM}" \
-       "build-tools;${ANDROID_BUILD_TOOLS_VERSION}" \
+  && for attempt in 1 2 3; do \
+       sdkmanager --install \
+         "platform-tools" \
+         "platforms;${ANDROID_PLATFORM}" \
+         "build-tools;${ANDROID_BUILD_TOOLS_VERSION}" && break; \
+       if [ "$attempt" -eq 3 ]; then exit 1; fi; \
+       sleep $((attempt * 5)); \
+     done \
   && rm -rf "$ANDROID_HOME/.android" \
   && chown -R 65532:65532 "$ANDROID_HOME" \
   && sdkmanager --version \
