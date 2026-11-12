@@ -139,7 +139,7 @@ func TestDoctor_AutoDerive_ReadsOneRootManifestAndRefusesAPolyglotRoot(t *testin
 
 	const (
 		check   = "configuration auto-derives"
-		goMod   = "module example.invalid/autoderive-canary\n\ngo 1.27.3\n"
+		goMod   = "module example.invalid/autoderive-canary\n\ngo 1.27.4\n"
 		cargo   = "[package]\nname = \"autoderive-canary\"\nversion = \"0.1.0\"\nedition = \"2021\"\n"
 		derived = `no .forge-ci/artifacts.yml; using the go artifact "autoderive-canary" derived from the root manifest (write the file to configure more)`
 	)

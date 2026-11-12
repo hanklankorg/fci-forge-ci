@@ -674,7 +674,7 @@ func runGitLabReleaseVisibility(t *testing.T, row gitlabReleaseRow, private bool
 	livetest.RestrictGitLabJobToken(t, target, repo)
 
 	files := map[string]string{
-		"go.mod": "module example.invalid/layer-release-canary\n\ngo 1.27.3\n",
+		"go.mod": "module example.invalid/layer-release-canary\n\ngo 1.27.4\n",
 		"go.sum": "", "cmd/layer-release-canary/main.go": releaseCanaryMain,
 		".chglog/config-keepachangelog.yml": chglogKeepConfig, ".chglog/CHANGELOG-keepachangelog.tpl": chglogKeepTemplate,
 		".chglog/config-minimal.yml": chglogMinimalConfig, ".chglog/CHANGELOG-minimal.tpl": chglogMinimalTemplate,

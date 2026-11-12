@@ -49,7 +49,7 @@ func snapshotCanaryFiles(selected bool) map[string]filePayload {
 	return map[string]filePayload{
 		".forge-ci/artifacts.yml": {Body: snapshotArtifactConfig, Mode: 0644},
 		"Containerfile":           {Body: snapshotArtifactContainerfile, Mode: 0644},
-		"go.mod":                  {Body: "module example.invalid/snapshot-canary\n\ngo 1.27.3\n", Mode: 0644},
+		"go.mod":                  {Body: "module example.invalid/snapshot-canary\n\ngo 1.27.4\n", Mode: 0644},
 		"main.go":                 {Body: "package main\nimport \"fmt\"\nvar commit = \"unknown\"\nvar version = \"unknown\"\nvar date = \"unknown\"\nfunc main() { fmt.Println(\"" + marker + "|\"+commit) }\n", Mode: 0644},
 	}
 }

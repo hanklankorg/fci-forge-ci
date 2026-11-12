@@ -10,7 +10,7 @@ kind=$(cat .gitlab/generic-cli-kind)
 case "${kind}" in
 go)
   export GOTOOLCHAIN=local
-  test "$(go env GOVERSION)" = go1.27.3
+  test "$(go env GOVERSION)" = go1.27.4
   exec go run ./test/live/fixtures/adapters/generic-cli/checksource
   ;;
 cargo)

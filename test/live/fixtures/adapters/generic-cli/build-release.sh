@@ -17,7 +17,7 @@ kind=$(cat .gitlab/generic-cli-kind)
 case "${kind}" in
 go)
   export GOTOOLCHAIN=local GOOS=linux GOARCH=amd64
-  test "$(go env GOVERSION)" = go1.27.3
+  test "$(go env GOVERSION)" = go1.27.4
   # The full original-source gate already passed before preparation. The Go
   # preparation is changelog-only (independently checked by validate-tag);
   # repository contract tests must not run against this synthetic CI overlay.

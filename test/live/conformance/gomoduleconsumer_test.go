@@ -51,7 +51,7 @@ func TestForgejoLayer_GoModuleReleaseReachesAFreshConsumer(t *testing.T) {
 		}
 
 		files[releaseWorkflowFile] = named
-		files["go.mod"] = "module " + path + "\n\ngo 1.27.3\n"
+		files["go.mod"] = "module " + path + "\n\ngo 1.27.4\n"
 		files["greeting/greeting.go"] = goModuleLibrary
 	})
 

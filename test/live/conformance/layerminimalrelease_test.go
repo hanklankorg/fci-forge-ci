@@ -200,7 +200,7 @@ func runLayerRelease(t *testing.T, name string, private bool, objectFormat, adve
 	)
 
 	files := map[string]string{
-		"go.mod":                                  "module example.invalid/layer-release-canary\n\ngo 1.27.3\n",
+		"go.mod":                                  "module example.invalid/layer-release-canary\n\ngo 1.27.4\n",
 		".chglog/config-keepachangelog.yml":       chglogKeepConfig,
 		".chglog/CHANGELOG-keepachangelog.tpl":    chglogKeepTemplate,
 		".chglog/config-minimal.yml":              chglogMinimalConfig,

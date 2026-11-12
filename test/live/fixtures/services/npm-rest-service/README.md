@@ -21,7 +21,7 @@ bash scripts/ci/run-live-tests.sh focused "$LIVEFILTER"
 ```
 
 This selects `TestForgejoLayer_ConsumerTrial/public`, public disposable
-repositories, native amd64, Go 1.27.3 and stable release **2.1.1**. The normal
+repositories, native amd64, Go 1.27.4 and stable release **2.1.1**. The normal
 release preparer bumps manifests only in the scratch repository. Existing SDK contract acceptance and scratch
 ownership checks apply. Existing `logJobs` retains bounded redacted traces for
 successful and failed jobs before scratch cleanup.

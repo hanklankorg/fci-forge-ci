@@ -24,7 +24,7 @@ import (
 const (
 	consumerPRCanary = "consumer-pr-canary.txt"
 
-	consumerPRGoMod = "module example.invalid/consumer-pr-canary\n\ngo 1.27.3\n"
+	consumerPRGoMod = "module example.invalid/consumer-pr-canary\n\ngo 1.27.4\n"
 
 	consumerPRBuildJob = "Build consumer pull request"
 	consumerPRLintJob  = "Lint consumer pull request"
