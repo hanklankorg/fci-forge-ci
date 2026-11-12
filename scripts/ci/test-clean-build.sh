@@ -1,7 +1,18 @@
 #!/usr/bin/env bash
 # SPDX-FileCopyrightText: 2026 Digg - Agency for Digital Government
 # SPDX-License-Identifier: CC0-1.0
+# Runs the justfile's clean-build recipe in a scratch repo: checks an overridden
+# or symlinked bin/ is refused and the default bin/ and dist/ are removed.
+# Called by `just test-unit`; docs/DEVELOPMENT.md also runs it directly.
 set -euo pipefail
+usage() {
+  printf 'Usage: %s [-h|--help]\nChecks that just clean-build removes only the default bin/ and dist/.\n' "${0##*/}"
+}
+case ${1-} in
+'') ;;
+-h | --help) usage && exit 0 ;;
+*) usage >&2 && exit 2 ;;
+esac
 root=$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)
 work=$(mktemp -d)
 trap 'rm -rf -- "$work"' EXIT

@@ -72,9 +72,8 @@ jobs:
           } >>"$GITHUB_OUTPUT"
 
   blackbox:
-    # TEMPORARY bootstrap pause until Nanolinter is published. Set the repository
-    # variable SELF_RELEASE_INTEGRATION_GATES=true to restore both strict gates.
-    if: ${{ vars.SELF_RELEASE_INTEGRATION_GATES == 'true' }}
+    # A release gate: it always runs, and the release needs it. No variable
+    # or input skips it.
     name: Strict external black-box gate
     runs-on: ubuntu-26.04
     timeout-minutes: 60
@@ -119,7 +118,10 @@ jobs:
           source ../forge-ci/scripts/bootstrap/install-mise.sh
           install_mise
           mise trust .mise.toml
-          mise install maven
+          if ! mise install maven; then
+            echo "::error title=Release gates could not run::The black-box gate did not run: mise could not install the suite's pinned Maven. This is not a test failure. The release stays blocked until it can be installed."
+            exit 1
+          fi
           mise bin-paths maven >>"$GITHUB_PATH"
       - name: Install Rust
         # ubuntu-26.04 ships rustup without a default toolchain. Its proxy
@@ -172,9 +174,9 @@ jobs:
         run: bash scripts/ci/engine-binary.sh check
 
   evidence:
-    # TEMPORARY bootstrap pause: project-tool installation currently fails on
-    # the unpublished Nanolinter release. Keep the strict recipe intact.
-    if: ${{ vars.SELF_RELEASE_INTEGRATION_GATES == 'true' }}
+    # A release gate: it always runs, and the release needs it. No variable
+    # or input skips it.
+    #
     # The release-time shape of `just test`. The pull-request gate runs the
     # integration tier in its default profile on purpose — a contributor
     # without buildah or trivy still gets a useful run, and what their machine
@@ -211,7 +213,12 @@ jobs:
         run: |
           source ./scripts/bootstrap/install-mise.sh
           install_mise
-          mise install
+          # A tool that cannot be installed is not a test failure. Say that
+          # the gate did not run and why; nothing here skips it.
+          if ! mise install; then
+            echo "::error title=Release gates could not run::The integration gate did not run: mise could not install the project tools pinned in .mise.toml (see the tool it names above). This is not a test failure. The release stays blocked until the pinned tool can be installed."
+            exit 1
+          fi
           # Expose mise-managed binaries to subsequent steps.
           printf '%s\n' "${MISE_DATA_DIR:-$HOME/.local/share/mise}/shims" >>"$GITHUB_PATH"
           dirname "$(command -v mise)" >>"$GITHUB_PATH"
@@ -240,15 +247,26 @@ jobs:
     # being published, then fails with an actionable message if they never
     # appear. Check anonymously so a token cannot hide a private package.
     name: Wait for runtime images
-    # Skipped bootstrap gates must not skip image checks; enabled gates must pass.
+    # No condition of its own: it runs only when every gate it needs passed.
     needs: [resolve-branch, checksums, blackbox, evidence]
-    if: ${{ !cancelled() && needs.resolve-branch.result == 'success' && needs.checksums.result == 'success' && (vars.SELF_RELEASE_INTEGRATION_GATES != 'true' || (needs.blackbox.result == 'success' && needs.evidence.result == 'success')) }}
     runs-on: ubuntu-26.04
     timeout-minutes: 15
     permissions:
       contents: read
+    outputs:
+      # Every workflow admits its runtime images only as digests; these are
+      # what the registry serves for this commit's tags, read once here and
+      # pinned for the whole release.
+      base-digest: ${{ steps.images.outputs.base-digest }}
+      full-digest: ${{ steps.images.outputs.full-digest }}
+      java-digest: ${{ steps.images.outputs.java-digest }}
+      node-digest: ${{ steps.images.outputs.node-digest }}
+      rust-digest: ${{ steps.images.outputs.rust-digest }}
+      go-digest: ${{ steps.images.outputs.go-digest }}
+      android-digest: ${{ steps.images.outputs.android-digest }}
     steps:
       - name: Poll for this commit's runtime images
+        id: images
         env:
           NAMESPACE: ${{ needs.resolve-branch.outputs.image-namespace }}
           IMAGE_TAG: ${{ needs.resolve-branch.outputs.image-tag }}
@@ -268,6 +286,14 @@ jobs:
             done
             if [ "$missing" -eq 0 ]; then
               printf 'All runtime images are available for %s\n' "$IMAGE_TAG"
+              for pair in base=-base full= java=-java-25 node=-node-24 \
+                rust=-rust-stable go=-go-1.27 android=-android-35; do
+                role="${pair%%=*}"
+                image="${NAMESPACE}/forge-ci-runtime${pair#*=}:${IMAGE_TAG}"
+                digest="$(docker buildx imagetools inspect "$image" --format '{{.Manifest.Digest}}')"
+                [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] || { printf '::error::%s has no admissible digest: %s\n' "$image" "$digest" >&2; exit 1; }
+                printf '%s-digest=%s\n' "$role" "$digest" >>"$GITHUB_OUTPUT"
+              done
               exit 0
             fi
             printf 'Waiting for runtime images (%ds / %ds)...\n' "$elapsed" "$timeout"
@@ -279,8 +305,9 @@ jobs:
           exit 1
 
   release:
+    # No condition of its own: a failed, cancelled or skipped gate skips the
+    # release, since GitHub then requires every needed job to have succeeded.
     needs: [resolve-branch, checksums, blackbox, evidence, wait-for-images]
-    if: ${{ !cancelled() && needs.resolve-branch.result == 'success' && needs.checksums.result == 'success' && needs.wait-for-images.result == 'success' && (vars.SELF_RELEASE_INTEGRATION_GATES != 'true' || (needs.blackbox.result == 'success' && needs.evidence.result == 'success')) }}
     uses: ./.github/workflows/release-orchestrator.yml
     permissions:
       contents: write
@@ -297,13 +324,14 @@ jobs:
       RELEASE_GPG_PUBLIC_KEY: ${{ secrets.RELEASE_GPG_PUBLIC_KEY }}
     with:
       branch: ${{ needs.resolve-branch.outputs.branch }}
-      runtime-image: ${{ needs.resolve-branch.outputs.image-namespace }}/forge-ci-runtime-base:${{ needs.resolve-branch.outputs.image-tag }}
-      runtime-image-full: ${{ needs.resolve-branch.outputs.image-namespace }}/forge-ci-runtime:${{ needs.resolve-branch.outputs.image-tag }}
-      runtime-image-java: ${{ needs.resolve-branch.outputs.image-namespace }}/forge-ci-runtime-java-25:${{ needs.resolve-branch.outputs.image-tag }}
-      runtime-image-node: ${{ needs.resolve-branch.outputs.image-namespace }}/forge-ci-runtime-node-24:${{ needs.resolve-branch.outputs.image-tag }}
-      runtime-image-rust: ${{ needs.resolve-branch.outputs.image-namespace }}/forge-ci-runtime-rust-stable:${{ needs.resolve-branch.outputs.image-tag }}
-      runtime-image-go: ${{ needs.resolve-branch.outputs.image-namespace }}/forge-ci-runtime-go-1.27:${{ needs.resolve-branch.outputs.image-tag }}
-      runtime-image-android: ${{ needs.resolve-branch.outputs.image-namespace }}/forge-ci-runtime-android-35:${{ needs.resolve-branch.outputs.image-tag }}
+      runtime-image: ${{ needs.resolve-branch.outputs.image-namespace }}/forge-ci-runtime-base@${{ needs.wait-for-images.outputs.base-digest }}
+      canonical-builder-image: ${{ needs.resolve-branch.outputs.image-namespace }}/forge-ci-runtime-go-1.27@${{ needs.wait-for-images.outputs.go-digest }}
+      runtime-image-full: ${{ needs.resolve-branch.outputs.image-namespace }}/forge-ci-runtime@${{ needs.wait-for-images.outputs.full-digest }}
+      runtime-image-java: ${{ needs.resolve-branch.outputs.image-namespace }}/forge-ci-runtime-java-25@${{ needs.wait-for-images.outputs.java-digest }}
+      runtime-image-node: ${{ needs.resolve-branch.outputs.image-namespace }}/forge-ci-runtime-node-24@${{ needs.wait-for-images.outputs.node-digest }}
+      runtime-image-rust: ${{ needs.resolve-branch.outputs.image-namespace }}/forge-ci-runtime-rust-stable@${{ needs.wait-for-images.outputs.rust-digest }}
+      runtime-image-go: ${{ needs.resolve-branch.outputs.image-namespace }}/forge-ci-runtime-go-1.27@${{ needs.wait-for-images.outputs.go-digest }}
+      runtime-image-android: ${{ needs.resolve-branch.outputs.image-namespace }}/forge-ci-runtime-android-35@${{ needs.wait-for-images.outputs.android-digest }}
       artifacts-config: .forge-ci/artifacts.yml
       forge-ci-binary-ref: ${{ github.sha }}
       changelog-creator: git-cliff
@@ -314,11 +342,8 @@ jobs:
     # Builds, signs and attaches the release binaries once the final tag and
     # GitHub Release exist. Called rather than chained with workflow_run, which
     # only fires from the default branch.
+    # No condition of its own: it runs only after a successful release.
     needs: release
-    # Optional integration gates can be skipped transitively. Override GitHub's
-    # implicit success() gate, but never publish after a failed/skipped release
-    # or cancellation.
-    if: ${{ !cancelled() && needs.release.result == 'success' }}
     uses: ./.github/workflows/release-binary.yml
     permissions:
       contents: write
