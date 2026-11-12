@@ -135,8 +135,8 @@ func TestLint_MissingBinaryIsADependencyProblem(t *testing.T) {
 	adapter := &swiftlint.Adapter{Bin: "swiftlint-does-not-exist"}
 
 	_, code, err := adapter.Lint(context.Background(), swiftlint.LintInput{Dir: t.TempDir()})
-	if !errors.Is(err, errs.ErrDependencyUnavailable) {
-		t.Fatalf("err = %v, want ErrDependencyUnavailable", err)
+	if !errors.Is(err, errs.ErrPrerequisite) {
+		t.Fatalf("err = %v, want ErrPrerequisite", err)
 	}
 
 	if !strings.Contains(err.Error(), "swiftlint-does-not-exist") {

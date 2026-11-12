@@ -319,7 +319,14 @@ func TestXcodeDependencyBoundary_Archive(t *testing.T) {
 
 		ops := &fakeXcodeBuild{exitCode: 17}
 		if start {
-			ops.err = errors.Join(errGenerationBoundary, errs.ErrDependencyUnavailable)
+			ops.err = errors.Join(errGenerationBoundary, errs.ErrPrerequisite)
+		}
+
+		// An xcodebuild that cannot start is this job's set-up; one that
+		// exits non-zero failed the build. Neither is an unreached host.
+		want := errs.ErrValidation
+		if start {
+			want = errs.ErrPrerequisite
 		}
 
 		var out bytes.Buffer
@@ -331,7 +338,7 @@ func TestXcodeDependencyBoundary_Archive(t *testing.T) {
 			t.Fatal("archive failure published outputs")
 		}
 
-		if !errors.Is(err, errs.ErrDependencyUnavailable) || len(ops.calls) != 1 || strings.Contains(out.String(), "Built artifacts:") {
+		if !errors.Is(err, want) || errors.Is(err, errs.ErrDependencyUnavailable) || len(ops.calls) != 1 || strings.Contains(out.String(), "Built artifacts:") {
 			t.Fatalf("err=%v calls=%v out=%s", err, ops.calls, &out)
 		}
 

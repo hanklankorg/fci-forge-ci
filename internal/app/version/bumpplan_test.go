@@ -142,7 +142,7 @@ func TestBumpPlan_EngineTargetsExactChangeSet(t *testing.T) {
 		"apps/android/CHANGELOG.md", "apps/android/gradle.properties", "apps/android/build.gradle.kts", "apps/android/settings.gradle.kts", "apps/android/build.gradle", "apps/android/settings.gradle", "apps/android/config/android.release",
 		"apps/ios/CHANGELOG.md", "apps/ios/versions.xcconfig", ":(glob)apps/ios/**/*.xcconfig", "apps/ios/config/release.settings",
 		"rust/CHANGELOG.md", "rust/Cargo.toml", "rust/Cargo.lock", "java/CHANGELOG.md", ":(glob)java/**/pom.xml",
-		"web/CHANGELOG.md", "web/package.json", "web/package-lock.json", "custom.txt",
+		"web/CHANGELOG.md", "web/package.json", "web/package-lock.json", "web/npm-shrinkwrap.json", "custom.txt",
 		":(glob)custom/*.properties", ":(exclude)custom/private*", ":(literal)custom/[literal]", "custom/file?.txt",
 	}
 	require.Equal(t, strings.Join(wantPaths, " "), sink.Single("file-pattern"))

@@ -19,11 +19,20 @@ import (
 
 var errTransientMise = errors.New("transient mise failure")
 
+// errMiseOffline is a mise call the network stopped, as the runner returns
+// it: the exit, then what mise wrote to stderr.
+var errMiseOffline = errors.New("mise install: exit status 1\nmise ERROR Failed to install core:go@1.26.6: HTTP timed out after 30s")
+
+// errMiseRefusal is a mise call that refused what it downloaded.
+var errMiseRefusal = errors.New("mise install: exit status 1\nmise ERROR Checksum mismatch for file go1.26.6.linux-amd64.tar.gz")
+
 type recordingMiseRunner struct {
 	responses map[string]string
 	fails     map[string]int
-	calls     []recordingMiseCall
-	lastCtx   context.Context //nolint:containedctx // recorded so cancellation reaching the runner can be asserted.
+	// failure is what a failing call returns; errMiseOffline when nil.
+	failure error
+	calls   []recordingMiseCall
+	lastCtx context.Context //nolint:containedctx // recorded so cancellation reaching the runner can be asserted.
 }
 
 type recordingMiseCall struct {
@@ -47,7 +56,11 @@ func (r *recordingMiseRunner) Run(ctx context.Context, env []string, args ...str
 	if r.fails != nil && r.fails[key] > 0 {
 		r.fails[key]--
 
-		return "", errTransientMise
+		if r.failure != nil {
+			return "", r.failure
+		}
+
+		return "", errMiseOffline
 	}
 
 	if value, ok := r.responses[key]; ok {
@@ -253,8 +266,8 @@ func TestInstallMiseTools_AFailingRustupToolchainDownloadStopsTheInstall(t *test
 	runner := &recordingMiseRunner{fails: map[string]int{"exec\x00--no-deps\x00aqua:rust-lang/rustup\x00--\x00rustup\x00show": 99}}
 
 	err := toolchain.InstallMiseTools(context.Background(), runner, nil, toolchain.InstallMiseToolsInput{Root: root, Locked: "false", RetryAttempts: 3, RetryDelay: -1})
-	if !errors.Is(err, errTransientMise) {
-		t.Fatalf("err = %v, want the runner's own cause after the last attempt", err)
+	if !errors.Is(err, errs.ErrDependencyUnavailable) || !strings.Contains(err.Error(), errMiseOffline.Error()) {
+		t.Fatalf("err = %v, want the runner's own cause after the last attempt, as an unavailable dependency", err)
 	}
 
 	if got := len(runner.calls); got != 4 || !slices.Equal(runner.calls[3].args[len(runner.calls[3].args)-2:], []string{"rustup", "show"}) {
@@ -325,14 +338,40 @@ func TestInstallMiseTools_ExhaustedRetriesFail(t *testing.T) {
 	err := toolchain.InstallMiseTools(context.Background(), runner, &out, toolchain.InstallMiseToolsInput{
 		Root: t.TempDir(), Locked: "false", RetryAttempts: 3, RetryDelay: -1,
 	})
-	if !errors.Is(err, errTransientMise) {
-		t.Fatalf("err = %v, want the runner's own cause after the last attempt", err)
+	if !errors.Is(err, errs.ErrDependencyUnavailable) || !strings.Contains(err.Error(), errMiseOffline.Error()) {
+		t.Fatalf("err = %v, want the runner's own cause after the last attempt, as an unavailable dependency", err)
 	}
 
 	// Exactly the attempts asked for: one more would be an off-by-one in a
 	// loop that shells out, one fewer means an attempt was silently dropped.
 	if got := len(runner.calls); got != 3 {
 		t.Errorf("mise ran %d time(s), want 3 attempts", got)
+	}
+}
+
+// Only the network is worth another attempt. A checksum mise refuses, and
+// any failure that states no transport failure, is returned from the first
+// attempt with its own class: asking again cannot pass it, and a job that
+// exits "unavailable" for it is run again for nothing.
+func TestInstallMiseTools_AFailureThatIsNotTheNetworkIsNotRetried(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("PATH", "/usr/bin")
+
+	for _, cause := range []error{errMiseRefusal, errTransientMise} {
+		runner := &recordingMiseRunner{fails: map[string]int{"install": 99}, failure: cause}
+
+		var out strings.Builder
+
+		err := toolchain.InstallMiseTools(context.Background(), runner, &out, toolchain.InstallMiseToolsInput{
+			Root: t.TempDir(), Locked: "false", RetryAttempts: 3, RetryDelay: -1,
+		})
+		if !errors.Is(err, cause) || errors.Is(err, errs.ErrDependencyUnavailable) {
+			t.Fatalf("err = %v, want %v itself and not an unavailable dependency", err, cause)
+		}
+
+		if len(runner.calls) != 1 || strings.Contains(out.String(), "retrying") {
+			t.Errorf("mise ran %d time(s) with output %q, want one attempt and no retry notice", len(runner.calls), out.String())
+		}
 	}
 }
 
@@ -384,7 +423,7 @@ func TestInstallMiseTools_ARuntimeFailureStopsBeforeTheToolInstall(t *testing.T)
 	err := toolchain.InstallMiseTools(context.Background(), runner, nil, toolchain.InstallMiseToolsInput{
 		Root: root, Locked: "false", Tools: "go", RetryAttempts: 2, RetryDelay: -1,
 	})
-	if !errors.Is(err, errTransientMise) {
+	if !errors.Is(err, errs.ErrDependencyUnavailable) || !strings.Contains(err.Error(), errMiseOffline.Error()) {
 		t.Fatalf("err = %v, want the runtime failure", err)
 	}
 

@@ -255,6 +255,7 @@ type fakeCargoOps struct {
 	calls              [][]string
 	failOne            bool
 	err                error
+	said               string // what cargo writes to stderr when it fails
 	availabilityChecks int
 }
 
@@ -263,10 +264,14 @@ func (f *fakeCargoOps) Available() bool {
 
 	return f.avail
 }
-func (f *fakeCargoOps) RunInherit(_ context.Context, _ string, _, _ io.Writer, args ...string) error {
+func (f *fakeCargoOps) RunInherit(_ context.Context, _ string, _, stderr io.Writer, args ...string) error {
 	f.calls = append(f.calls, append([]string{}, args...))
 	if f.failOne && len(f.calls) == 1 {
 		return errors.New("offline failed")
+	}
+
+	if f.err != nil {
+		_, _ = io.WriteString(stderr, f.said)
 	}
 
 	return f.err
@@ -786,27 +791,78 @@ func TestBump_Cargo_NoLockSkipsRefresh(t *testing.T) {
 	}
 }
 
-func TestBump_Cargo_NotInstalledWarnsButSucceeds(t *testing.T) {
+// A committed Cargo.lock that the bump cannot refresh would be released
+// stale, so the bump fails where it happens and names the cause. Without
+// cargo it is refused before the manifest is written.
+func TestBump_Cargo_MissingCargoRefusedBeforeWriting(t *testing.T) {
+	t.Parallel()
+
+	const manifest = "[package]\nname = \"x\"\nversion = \"0.0.1\"\n"
+
+	for name, ops := range map[string]appversion.CargoOps{"cargo missing": &fakeCargoOps{avail: false}, "no cargo adapter": nil} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			fsys := testfs.NewReal(t)
+			fsys.WriteFile("Cargo.toml", []byte(manifest))
+			fsys.WriteFile("Cargo.lock", []byte("# stub"))
+
+			err := appversion.Bump(t.Context(), appversion.BumpOps{Cargo: ops}, io.Discard, io.Discard, output.Annotator{}, appversion.BumpInput{
+				ProjectType: projecttype.Cargo, Version: "1.0.0", WorkingDir: fsys.Root,
+			})
+			require.ErrorIs(t, err, errs.ErrPrerequisite)
+			require.ErrorContains(t, err, "refresh Cargo.lock")
+			require.Equal(t, manifest, string(fsys.ReadFile("Cargo.toml")))
+		})
+	}
+}
+
+// A failed refresh is classed by what cargo itself reported: an index it
+// could not reach may pass when asked again, a manifest it refuses will not.
+func TestBump_Cargo_FailedRefreshIsClassedByCargoReport(t *testing.T) {
+	t.Parallel()
+
+	for name, tc := range map[string]struct {
+		said string
+		want error
+	}{
+		"index not reached": {
+			said: "    Updating crates.io index\nerror: failed to get `m` as a dependency of package `x v1.0.0`\n\nCaused by:\n  [6] Could not resolve hostname (Could not resolve host: index.crates.io)\n",
+			want: errs.ErrDependencyUnavailable,
+		},
+		"manifest refused": {
+			said: "error: failed to parse manifest at `/work/Cargo.toml`\n\nCaused by:\n  no targets specified in the manifest\n",
+			want: errs.ErrValidation,
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			fsys := testfs.NewReal(t)
+			fsys.WriteFile("Cargo.toml", []byte("[package]\nname = \"x\"\nversion = \"0.0.1\"\n"))
+			fsys.WriteFile("Cargo.lock", []byte("# stub"))
+
+			ops := &fakeCargoOps{avail: true, said: tc.said, err: fmt.Errorf("cargo update: exit status 101: %w", errs.ErrValidation)}
+			err := appversion.Bump(t.Context(), appversion.BumpOps{Cargo: ops}, io.Discard, io.Discard, output.Annotator{}, appversion.BumpInput{
+				ProjectType: projecttype.Cargo, Version: "1.0.0", WorkingDir: fsys.Root,
+			})
+			require.ErrorIs(t, err, tc.want)
+			require.ErrorContains(t, err, "refresh Cargo.lock")
+
+			// An unreached index must not also read as cargo's own failure.
+			if !errors.Is(tc.want, errs.ErrValidation) {
+				require.NotErrorIs(t, err, errs.ErrValidation)
+			}
+		})
+	}
+}
+
+func TestBump_Cargo_NoLockNeedsNoCargo(t *testing.T) {
 	t.Parallel()
 	fsys := testfs.NewReal(t)
-	dir := fsys.Root
 	fsys.WriteFile("Cargo.toml", []byte("[package]\nname = \"x\"\nversion = \"0.0.1\"\n"))
-	fsys.WriteFile("Cargo.lock", []byte("# stub"))
 
-	ops := &fakeCargoOps{avail: false}
-
-	var out bytes.Buffer
-	if err := appversion.Bump(context.Background(), appversion.BumpOps{Cargo: ops}, &out, io.Discard, output.Annotator{}, appversion.BumpInput{
-		ProjectType: projecttype.Cargo,
-		Version:     "1.0.0",
-		WorkingDir:  dir,
-	}); err != nil {
-		t.Fatalf("Bump: %v", err)
-	}
-
-	if !strings.Contains(out.String(), "Warning: cargo not found") {
-		t.Errorf("expected warning, got: %s", out.String())
-	}
+	require.NoError(t, appversion.Bump(t.Context(), appversion.BumpOps{Cargo: &fakeCargoOps{avail: false}}, io.Discard, io.Discard, output.Annotator{}, appversion.BumpInput{
+		ProjectType: projecttype.Cargo, Version: "1.0.0", WorkingDir: fsys.Root,
+	}))
 }
 
 // TestBump_NoOpProjectTypesTouchNothing covers the claim the two no-op tests

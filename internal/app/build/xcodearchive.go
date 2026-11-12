@@ -126,7 +126,7 @@ func runXcodeArchive(ctx context.Context, ops XcodeBuildOps, out, stderr io.Writ
 	}
 
 	if code != 0 {
-		return fmt.Errorf("xcodebuild archive exited with status %d: %w", code, errs.ErrDependencyUnavailable)
+		return fmt.Errorf("xcodebuild archive exited with status %d: %w", code, errs.ErrValidation)
 	}
 
 	return nil

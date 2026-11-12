@@ -101,6 +101,18 @@ func TestGoForwardingBoundary_ExactReleaseInputs(t *testing.T) {
 			}
 
 			for idx, got := range tool.calls {
+				// The download's stderr is also read for a transport
+				// failure, so it reaches the caller's through a copy.
+				if idx == 0 {
+					_, _ = io.WriteString(got.Stderr, "heard\n")
+
+					if !strings.HasSuffix(stderr.String(), "heard\n") {
+						t.Fatalf("the download's stderr does not reach the caller's: %q", &stderr)
+					}
+
+					got.Stderr = &stderr
+				}
+
 				if got.Stdout != &stdout || got.Stderr != &stderr {
 					t.Fatalf("call %d writers not forwarded", idx)
 				}

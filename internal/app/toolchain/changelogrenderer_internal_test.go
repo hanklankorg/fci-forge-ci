@@ -231,7 +231,7 @@ func TestInstallChangelogRenderer_ArchiveAndDownloadFailures(t *testing.T) {
 		err := InstallChangelogRenderer(context.Background(), release.server.Client(), nil, thisArchPin(InstallChangelogRendererInput{
 			Backend: gitChglogBin, Version: "0.15.4", BaseURL: release.server.URL, BinHome: binHome, PathFile: pathFile,
 		}, strings.Repeat("1", 64)))
-		if !errors.Is(err, errs.ErrDependencyUnavailable) || release.requests.Load() != 1 {
+		if !errors.Is(err, errs.ErrMissingInput) || release.requests.Load() != 1 {
 			t.Fatalf("err = %v after %d request(s), want one refused download", err, release.requests.Load())
 		}
 

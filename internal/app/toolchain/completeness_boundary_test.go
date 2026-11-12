@@ -138,7 +138,7 @@ func TestExposureBoundary_EnumerationFailurePreservesState(t *testing.T) {
 	var out bytes.Buffer
 
 	err := toolchain.ExposeMiseTools(t.Context(), runner, &out, toolchain.ExposeMiseToolsInput{Root: root, Locked: "false", PathFile: filepath.Join(root, "PATH"), BinHome: binHome})
-	if !errors.Is(err, errTransientMise) || !errors.Is(err, errs.ErrDependencyUnavailable) || len(runner.calls) != 1 || out.Len() != 0 {
+	if !errors.Is(err, errTransientMise) || errors.Is(err, errs.ErrDependencyUnavailable) || len(runner.calls) != 1 || out.Len() != 0 {
 		t.Fatalf("err=%v calls=%v out=%s", err, runner.calls, &out)
 	}
 

@@ -90,8 +90,8 @@ func TestLint_MissingBinaryIsADependencyProblem(t *testing.T) {
 	a := &swiftformat.Adapter{Bin: "swift-format-does-not-exist"}
 
 	_, code, err := a.Lint(context.Background(), t.TempDir(), []string{"a.swift"})
-	if !errors.Is(err, errs.ErrDependencyUnavailable) {
-		t.Fatalf("err = %v, want ErrDependencyUnavailable", err)
+	if !errors.Is(err, errs.ErrPrerequisite) {
+		t.Fatalf("err = %v, want ErrPrerequisite", err)
 	}
 
 	if !strings.Contains(err.Error(), "swift-format-does-not-exist") {

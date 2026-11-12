@@ -186,7 +186,7 @@ func TestGoReleaseBuild_MissingGoModFails(t *testing.T) {
 type missingCycloneDXGoModTool struct{}
 
 func (missingCycloneDXGoModTool) Run(context.Context, appbuild.GoRunInput) error {
-	return fmt.Errorf("cyclonedx-gomod not found in $PATH: %w", errs.ErrDependencyUnavailable)
+	return fmt.Errorf("cyclonedx-gomod not found in $PATH: %w", errs.ErrPrerequisite)
 }
 
 // A Forgejo release failed with only "cyclonedx-gomod not found in $PATH".
@@ -198,7 +198,7 @@ func TestGoReleaseBuild_AMissingSBOMGeneratorSaysHowToBringIt(t *testing.T) {
 	err := appbuild.GoReleaseBuild(context.Background(), &recordingSummarySink{}, &fakeGoTool{}, missingCycloneDXGoModTool{}, &out, &out, appbuild.GoReleaseBuildInput{
 		Dir: newGoModDir(t), EnableBuildSBOM: true, Version: "1.2.3", Platforms: "linux/amd64",
 	})
-	if !errors.Is(err, errs.ErrDependencyUnavailable) || !strings.Contains(err.Error(), "install cyclonedx-gomod") ||
+	if !errors.Is(err, errs.ErrPrerequisite) || !strings.Contains(err.Error(), "install cyclonedx-gomod") ||
 		!strings.Contains(err.Error(), "--build-sbom=false") {
 		t.Fatalf("err = %v, want the unavailable class and how to bring the generator", err)
 	}

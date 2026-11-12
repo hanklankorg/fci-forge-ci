@@ -49,7 +49,7 @@ func InstallSystemDependencies(ctx context.Context, installer SystemPackageInsta
 			return nil
 		}
 
-		return fmt.Errorf("apt-get is required to install bootstrap system dependencies: %w", errs.ErrDependencyUnavailable)
+		return fmt.Errorf("apt-get is required to install bootstrap system dependencies: %w", errs.ErrPrerequisite)
 	}
 
 	if installer == nil {

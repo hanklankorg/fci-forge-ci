@@ -125,8 +125,8 @@ func TestGo_RunClassifiesAMissingBinaryAsUnavailable(t *testing.T) {
 		Stdout: &bytes.Buffer{},
 		Stderr: &bytes.Buffer{},
 	})
-	if !errors.Is(err, errs.ErrDependencyUnavailable) {
-		t.Fatalf("missing go binary = %v, want ErrDependencyUnavailable", err)
+	if !errors.Is(err, errs.ErrPrerequisite) {
+		t.Fatalf("missing go binary = %v, want ErrPrerequisite", err)
 	}
 
 	if errors.Is(err, errs.ErrValidation) {

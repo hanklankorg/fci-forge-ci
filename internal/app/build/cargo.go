@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	appenforcement "github.com/diggsweden/forge-ci/internal/app/enforcement"
 	domainbuild "github.com/diggsweden/forge-ci/internal/domain/build"
@@ -48,7 +49,8 @@ type CargoMetadataInput struct {
 
 // CargoTestInput drives CargoTest.
 type CargoTestInput struct {
-	Dir string
+	Dir           string
+	SelectionJSON string
 }
 
 // CargoBuildBinariesInput drives CargoBuildBinaries.
@@ -71,19 +73,55 @@ type CargoBuildBinariesInput struct {
 // so a dependency that drifted vs the lockfile fails the build at fetch
 // time rather than producing a non-reproducible binary at compile time.
 func CargoFetch(ctx context.Context, tool CargoTool, w, stderr io.Writer, dir string) error {
-	return tool.Run(ctx, CargoRunInput{
-		Dir:    defaultCargoDir(dir),
-		Args:   []string{"fetch", flagCargoLocked},
-		Stdout: w,
-		Stderr: stderr,
+	return CargoFetchWithRetry(ctx, tool, w, stderr, CargoFetchInput{Dir: dir, Attempts: 1})
+}
+
+// CargoFetchInput permits bounded dependency-read retries, never build retries.
+type CargoFetchInput struct {
+	Dir        string
+	Attempts   int
+	RetryDelay time.Duration
+}
+
+// CargoFetchWithRetry retries dependency reads only, and only a transport
+// failure, with cancellation-aware waits.
+func CargoFetchWithRetry(ctx context.Context, tool CargoTool, w, stderr io.Writer, in CargoFetchInput) error {
+	if in.Attempts < 1 || in.Attempts > 10 || in.RetryDelay < 0 || in.RetryDelay > time.Minute {
+		return fmt.Errorf("cargo fetch requires 1–10 attempts and a retry delay between 0 and 1m: %w", errs.ErrUsage)
+	}
+
+	return retryDependencyRead(ctx, stderr, in.Attempts, in.RetryDelay, errs.CargoReport, func(stderr io.Writer) error {
+		return tool.Run(ctx, CargoRunInput{Dir: defaultCargoDir(in.Dir), Args: []string{"fetch", flagCargoLocked}, Stdout: w, Stderr: stderr})
 	})
 }
 
 // CargoTest runs `cargo test --locked` against the workspace. Tests
 // remain caller-owned in pull-request quality flows; this is the release
-// build's pre-compile gate, opt-out via --skip-tests.
-func CargoTest(ctx context.Context, tool CargoTool, w, stderr io.Writer, in CargoTestInput) error {
-	_, err := appenforcement.TestRun(ctx, w, stderr, enforcement.Cargo, func(stdout, stderr io.Writer) error {
+// build's mandatory pre-compile gate. Administrator policy rejects --skip-tests.
+func CargoTest(ctx context.Context, tool CargoTool, out, stderr io.Writer, in CargoTestInput) error {
+	if in.SelectionJSON != "" {
+		selection, err := domainbuild.ParseCargoTestSelection(in.SelectionJSON)
+		if err != nil {
+			return err
+		}
+
+		for _, target := range selection.Runs {
+			gate := appenforcement.SelectedTestRun
+			if target.Gate == domainbuild.PolicyTestGate {
+				gate = appenforcement.SelectedPolicyTestRun
+			}
+
+			if err := gate(ctx, out, stderr, enforcement.Cargo, func(stdout, stderr io.Writer) error {
+				return tool.Run(ctx, CargoRunInput{Dir: defaultCargoDir(in.Dir), Args: target.Args(), Stdout: stdout, Stderr: stderr})
+			}); err != nil {
+				return err
+			}
+		}
+
+		return nil
+	}
+
+	_, err := appenforcement.TestRun(ctx, out, stderr, enforcement.Cargo, func(stdout, stderr io.Writer) error {
 		return tool.Run(ctx, CargoRunInput{
 			Dir:    defaultCargoDir(in.Dir),
 			Args:   []string{testCommand, flagCargoLocked, "--all-targets"},
@@ -406,6 +444,12 @@ func readCargoMetadata(ctx context.Context, tool CargoTool, dir string) (cargoMe
 				break
 			}
 		}
+	}
+
+	// A package without a binary target has nothing for `cargo build --bin`
+	// to build; say so here rather than let cargo fail on the package name.
+	if binCount == 0 {
+		return cargoMetadata{}, fmt.Errorf("package %s has no Cargo binary target: project-type cargo builds a binary; a library crate is released with the binary that links it, not on its own: %w", root.Name, errs.ErrInvalidConfig)
 	}
 
 	if binCount > 1 {

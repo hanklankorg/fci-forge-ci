@@ -430,3 +430,62 @@ printf 'java.home = %%s\n' '%s' >&2
 		t.Fatalf("diagnostic lost runtime path or exposed secret: %v", diagnostic)
 	}
 }
+
+func TestMavenInterruptedDiscoveryRetainsRedactedCause(t *testing.T) {
+	for _, interruption := range []string{"deadline", "cancel"} {
+		t.Run(interruption, func(t *testing.T) {
+			root, work := t.TempDir(), t.TempDir()
+			t.Setenv("TMPDIR", work)
+
+			java := filepath.Join(root, "java")
+
+			script := "#!/bin/sh\nprintf 'runtime selector unavailable; synthetic-private-token; synthetic-jvm-option\\n' >&2\nexec /bin/sleep 30\n"
+			if err := os.WriteFile(java, []byte(script), 0o700); err != nil {
+				t.Fatal(err)
+			}
+
+			ca := filepath.Join(root, "ca.pem")
+			if err := os.WriteFile(ca, publicCATestPEM(t), 0o600); err != nil {
+				t.Fatal(err)
+			}
+
+			ctx, cancel := context.WithTimeout(t.Context(), 250*time.Millisecond)
+			defer cancel()
+
+			want := context.DeadlineExceeded
+
+			if interruption == "cancel" {
+				ctx, cancel = context.WithCancel(t.Context())
+				defer cancel()
+
+				timer := time.AfterFunc(250*time.Millisecond, cancel)
+				defer timer.Stop()
+
+				want = context.Canceled
+			}
+
+			adapter := &Adapter{MvnBin: "/nonexistent/mvn", Env: []string{"PATH=" + root, "SSL_CERT_FILE=" + ca,
+				"GITHUB_TOKEN=synthetic-private-token", "JAVA_TOOL_OPTIONS=synthetic-jvm-option"}}
+			start := time.Now()
+			_, cleanup, err := adapter.trustedEnvironment(ctx, "")
+			cleanup()
+
+			if !errors.Is(err, want) || !errors.Is(err, errs.ErrValidation) {
+				t.Fatalf("lost interruption/classification: %v", err)
+			}
+
+			if !strings.Contains(err.Error(), "runtime selector unavailable") || strings.Contains(err.Error(), "synthetic-private-token") || strings.Contains(err.Error(), "synthetic-jvm-option") {
+				t.Fatalf("missing safe interrupted diagnostic: %v", err)
+			}
+
+			if time.Since(start) > 3*time.Second {
+				t.Fatal("probe cancellation did not terminate promptly")
+			}
+
+			entries, readErr := os.ReadDir(work)
+			if readErr != nil || len(entries) != 0 {
+				t.Fatalf("trust workspace created before discovery admission: %v, %v", entries, readErr)
+			}
+		})
+	}
+}

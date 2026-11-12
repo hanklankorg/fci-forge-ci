@@ -144,8 +144,8 @@ func TestInstallSystemDependencies_MissingAPT(t *testing.T) {
 
 	err := toolchain.InstallSystemDependencies(context.Background(), installer, io.Discard,
 		toolchain.InstallSystemDependenciesInput{Packages: "curl", SkipIfMissingAPT: false})
-	if !errors.Is(err, errs.ErrDependencyUnavailable) {
-		t.Fatalf("err = %v, want ErrDependencyUnavailable", err)
+	if !errors.Is(err, errs.ErrPrerequisite) {
+		t.Fatalf("err = %v, want ErrPrerequisite", err)
 	}
 
 	if err := toolchain.InstallSystemDependencies(context.Background(), installer, io.Discard,

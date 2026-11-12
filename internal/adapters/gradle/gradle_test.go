@@ -61,3 +61,28 @@ func TestRunInherit_NonZeroExitWraps(t *testing.T) {
 		t.Errorf("error missing args: %v", err)
 	}
 }
+
+// A wrapper that could not reach the host of its distribution ends as an
+// unavailable dependency; the same exception from a program the build ran
+// is the build's failure.
+func TestRunInherit_AWrapperThatReachedNoHostIsAnUnavailableDependency(t *testing.T) {
+	const unknown = `Exception in thread "main" java.net.UnknownHostException: services.gradle.org`
+
+	for frame, want := range map[string]error{
+		"org.gradle.wrapper.Download.downloadInternal(Download.java:129)": errs.ErrDependencyUnavailable,
+		"com.example.Client.main(Client.java:12)":                         errs.ErrValidation,
+	} {
+		bin := stubGradlew(t, `echo 'Downloading https://services.gradle.org/distributions/gradle-9.1.0-bin.zip'; printf '%s\n\tat %s\n' '`+unknown+`' '`+frame+`' >&2; exit 1`)
+
+		var stderr bytes.Buffer
+
+		err := (&gradle.Adapter{Bin: bin}).RunInherit(context.Background(), &bytes.Buffer{}, &stderr, "test")
+		if err == nil || !errors.Is(err, want) || errs.ExitCodeFromError(err) != errs.ExitCodeFromError(want) {
+			t.Errorf("%s: err = %v, want %v", frame, err, want)
+		}
+
+		if !strings.Contains(stderr.String(), unknown) {
+			t.Errorf("the wrapper's output did not reach the caller: %q", stderr.String())
+		}
+	}
+}

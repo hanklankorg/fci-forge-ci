@@ -90,7 +90,7 @@ func ExposeMiseTools(ctx context.Context, runner MiseRunner, out io.Writer, in E
 
 	binPaths, err := runner.Run(ctx, nil, "bin-paths")
 	if err != nil {
-		return fmt.Errorf("enumerate mise bin paths: %w: %w", err, errs.ErrDependencyUnavailable)
+		return fmt.Errorf("enumerate mise bin paths: %w", err)
 	}
 
 	cargoDir, err := resolveCargoBinDir(ctx, runner, root, locked)

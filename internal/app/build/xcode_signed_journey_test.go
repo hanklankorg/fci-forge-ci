@@ -329,7 +329,7 @@ func TestXcodeReleaseBuild_SignedBuildFailureStopsBeforePublication(t *testing.T
 				if args[0] == stage {
 					ops.exitCode = 17
 					if failure == "start_error" {
-						ops.err = errors.Join(cause, errs.ErrDependencyUnavailable)
+						ops.err = errors.Join(cause, errs.ErrPrerequisite)
 					}
 				} else {
 					fsys.MkdirAll("checkout/build/app.xcarchive")
@@ -340,7 +340,11 @@ func TestXcodeReleaseBuild_SignedBuildFailureStopsBeforePublication(t *testing.T
 			var stdout, stderr bytes.Buffer
 
 			err := appbuild.XcodeReleaseBuild(t.Context(), sink, sec, ops, output.Annotator{}, &stdout, &stderr, in)
-			require.ErrorIs(t, err, errs.ErrDependencyUnavailable)
+			require.NotErrorIs(t, err, errs.ErrDependencyUnavailable)
+
+			if failure != "start_error" {
+				require.ErrorIs(t, err, errs.ErrValidation)
+			}
 
 			if failure == "start_error" {
 				require.ErrorIs(t, err, cause)

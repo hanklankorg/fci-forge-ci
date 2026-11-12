@@ -108,7 +108,7 @@ func SwiftFormatLint(
 	}
 
 	if exitCode != 0 && exitCode != 1 {
-		return fmt.Errorf("swift-format did not complete (exit %d): %w", exitCode, errs.ErrDependencyUnavailable)
+		return fmt.Errorf("swift-format did not complete (exit %d): %w", exitCode, errs.ErrPrerequisite)
 	}
 
 	_, _ = fmt.Fprint(out, output)
@@ -185,7 +185,7 @@ func SwiftLintLint(
 	}
 
 	if exitCode != 0 && exitCode != 2 {
-		return fmt.Errorf("swiftlint did not complete (exit %d): %w", exitCode, errs.ErrDependencyUnavailable)
+		return fmt.Errorf("swiftlint did not complete (exit %d): %w", exitCode, errs.ErrPrerequisite)
 	}
 
 	_, _ = fmt.Fprint(out, output)

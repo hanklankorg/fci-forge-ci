@@ -6,6 +6,7 @@ package apt_test
 import (
 	"bytes"
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
@@ -13,6 +14,7 @@ import (
 	"testing"
 
 	"github.com/diggsweden/forge-ci/internal/adapters/apt"
+	"github.com/diggsweden/forge-ci/internal/domain/errs"
 	"github.com/diggsweden/forge-ci/internal/testutil/mockbinary"
 )
 
@@ -87,6 +89,34 @@ esac
 
 	if strings.Contains(out.String(), "install") {
 		t.Errorf("installed despite a failed update: %q", out.String())
+	}
+}
+
+// An install that fails because apt-get could not read a package source ends
+// as an unavailable dependency, though the update that said so only warned
+// and exited 0. A package that does not exist stays a validation failure.
+func TestInstall_AnUnreadSourceIsAnUnavailableDependency(t *testing.T) {
+	t.Parallel()
+
+	const unresolved = `W: Failed to fetch http://deb.debian.org/debian/dists/trixie/InRelease  Temporary failure resolving 'deb.debian.org'`
+
+	for warning, want := range map[string]error{unresolved: errs.ErrDependencyUnavailable, "": errs.ErrValidation} {
+		mock := mockbinary.New(t)
+		mock.Add("apt-get", `
+case "$1" in
+  update) printf '%s\n' "`+warning+`" ;;
+  install) echo 'E: Unable to locate package buildah' >&2; exit 100 ;;
+esac
+`)
+
+		err := newAdapter(t, mock, image{}).Install(context.Background(), []string{"buildah"}, &bytes.Buffer{})
+		if err == nil || !errors.Is(err, want) || errs.ExitCodeFromError(err) != errs.ExitCodeFromError(want) {
+			t.Errorf("after the warning %q: err = %v, want %v", warning, err, want)
+		}
+
+		if errors.Is(want, errs.ErrDependencyUnavailable) && !strings.HasSuffix(err.Error(), "install: exit status 100: Temporary failure resolving 'deb.debian.org': dependency unavailable") {
+			t.Errorf("err = %q, want it to name the host", err)
+		}
 	}
 }
 

@@ -6,6 +6,7 @@ package build
 import (
 	"context"
 	"os"
+	"time"
 
 	"github.com/urfave/cli/v3"
 
@@ -29,8 +30,8 @@ func goCmd() *cli.Command {
 }
 
 // goRunCmd runs the whole Go release build in one step. It is what a forge build
-// job calls; the granular subcommands above remain the composable units it
-// orchestrates. The job wraps this only with checkout + artifact upload.
+// job calls; the metadata and download subcommands remain the composable units
+// it orchestrates. The job wraps this only with checkout + artifact upload.
 func goRunCmd() *cli.Command {
 	return &cli.Command{
 		Name:  subCmdRun,
@@ -54,23 +55,25 @@ EXAMPLE:
 			&cli.StringFlag{Name: "ldflags", Sources: cli.EnvVars("LD_FLAGS"), Usage: "extra -ldflags appended after the version-injection block"},
 			&cli.StringFlag{Name: "main-package", Value: ".", Sources: cli.EnvVars("MAIN_PACKAGE"), Usage: "main package import path relative to --working-dir"},
 			&cli.BoolFlag{Name: flagSkipTests, Sources: cli.EnvVars("SKIP_TESTS"), Usage: usageSkipTestTask},
+			&cli.StringFlag{Name: flagTestSelectionJSON, Usage: "administrator-owned native Go test selection (packages, optional run, required application/policy gate); always uncached with race detection; policy always blocks"},
 			&cli.BoolFlag{Name: flagBuildSBOM, Value: true, Sources: cli.EnvVars("ENABLE_BUILD_SBOM"), Usage: "generate the CycloneDX Build SBOM (default true)"},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			return deps.FromCmd(ctx, cmd, func(d *deps.Deps) error {
 				return appbuild.GoReleaseBuild(ctx, d.SummarySink, gotool.Go{}, gotool.CycloneDXGoMod{}, os.Stderr, os.Stderr, appbuild.GoReleaseBuildInput{
-					Dir:             cmd.String(flagWorkingDir),
-					ArtifactName:    cmd.String(flagArtifactName),
-					SkipTests:       cmd.Bool(flagSkipTests),
-					EnableBuildSBOM: cmd.Bool(flagBuildSBOM),
-					BinaryName:      cmd.String(flagBinaryName),
-					Version:         cmd.String(flagVersion),
-					RefName:         cmd.String(flagRefName),
-					Commit:          cmd.String("commit"),
-					Platforms:       cmd.String(flagPlatforms),
-					BuildTags:       cmd.String(flagBuildTags),
-					LDFlags:         cmd.String("ldflags"),
-					MainPackage:     cmd.String("main-package"),
+					Dir:               cmd.String(flagWorkingDir),
+					ArtifactName:      cmd.String(flagArtifactName),
+					SkipTests:         cmd.Bool(flagSkipTests),
+					TestSelectionJSON: cmd.String(flagTestSelectionJSON),
+					EnableBuildSBOM:   cmd.Bool(flagBuildSBOM),
+					BinaryName:        cmd.String(flagBinaryName),
+					Version:           cmd.String(flagVersion),
+					RefName:           cmd.String(flagRefName),
+					Commit:            cmd.String("commit"),
+					Platforms:         cmd.String(flagPlatforms),
+					BuildTags:         cmd.String(flagBuildTags),
+					LDFlags:           cmd.String("ldflags"),
+					MainPackage:       cmd.String("main-package"),
 				})
 			})
 		},
@@ -81,13 +84,18 @@ func goDownloadCmd() *cli.Command {
 	return &cli.Command{
 		Name:  "download",
 		Usage: "download Go module dependencies",
-		Description: `EXAMPLE:
-   forge-ci build go download --working-dir .`,
+		Description: `Runs once by default. Explicit retries use linear, cancellation-aware waits;
+only dependency reads are retried, never artifact publication or signing.
+
+EXAMPLE:
+   forge-ci build go download --working-dir . --attempts 3 --retry-delay 2s`,
 		Flags: []cli.Flag{
 			&cli.StringFlag{Name: flagWorkingDir, Value: ".", Sources: cli.EnvVars("WORKING_DIRECTORY"), Usage: usageGoModDirectory},
+			&cli.IntFlag{Name: "attempts", Value: 1, Usage: "dependency download attempts (1–10)"},
+			&cli.DurationFlag{Name: "retry-delay", Value: 2 * time.Second, Usage: "linear retry delay (0–1m)"},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
-			return appbuild.GoDownload(ctx, gotool.Go{}, os.Stderr, os.Stderr, cmd.String(flagWorkingDir))
+			return appbuild.GoDownloadWithRetry(ctx, gotool.Go{}, os.Stderr, os.Stderr, appbuild.GoDownloadInput{Dir: cmd.String(flagWorkingDir), Attempts: cmd.Int("attempts"), RetryDelay: cmd.Duration("retry-delay")})
 		},
 	}
 }

@@ -59,8 +59,9 @@ type GoMetadataInput struct {
 
 // GoTestInput drives GoTest.
 type GoTestInput struct {
-	Dir       string
-	BuildTags string
+	Dir           string
+	BuildTags     string
+	SelectionJSON string
 }
 
 // GoBuildSBOMInput drives GoBuildSBOM.
@@ -72,11 +73,57 @@ type GoBuildSBOMInput struct {
 
 // GoDownload runs `go mod download`.
 func GoDownload(ctx context.Context, tool GoTool, w, stderr io.Writer, dir string) error {
-	return tool.Run(ctx, GoRunInput{Dir: defaultGoDir(dir), Args: []string{"mod", "download"}, Stdout: w, Stderr: stderr})
+	return GoDownloadWithRetry(ctx, tool, w, stderr, GoDownloadInput{Dir: dir, Attempts: 1})
+}
+
+// GoDownloadInput allows explicit bounded retries without changing existing callers.
+type GoDownloadInput struct {
+	Dir        string
+	Attempts   int
+	RetryDelay time.Duration
+}
+
+// GoDownloadWithRetry retries dependency reads only, and only a transport
+// failure, with cancellation-aware waits.
+func GoDownloadWithRetry(ctx context.Context, tool GoTool, out, stderr io.Writer, in GoDownloadInput) error {
+	if in.Attempts < 1 || in.Attempts > 10 || in.RetryDelay < 0 || in.RetryDelay > time.Minute {
+		return fmt.Errorf("go download requires 1–10 attempts and a retry delay between 0 and 1m: %w", errs.ErrUsage)
+	}
+
+	return retryDependencyRead(ctx, stderr, in.Attempts, in.RetryDelay, errs.GoReport, func(stderr io.Writer) error {
+		return tool.Run(ctx, GoRunInput{Dir: defaultGoDir(in.Dir), Args: []string{"mod", "download"}, Stdout: out, Stderr: stderr})
+	})
 }
 
 // GoTest runs `go test ./...` with optional build tags.
 func GoTest(ctx context.Context, tool GoTool, out, stderr io.Writer, in GoTestInput) error {
+	if in.SelectionJSON != "" {
+		selection, err := domainbuild.ParseGoTestSelection(in.SelectionJSON)
+		if err != nil {
+			return err
+		}
+
+		args := []string{testCommand, "-json", "-count=1", "-race", "-buildvcs=false"}
+		if strings.TrimSpace(in.BuildTags) != "" {
+			args = append(args, "-tags", strings.TrimSpace(in.BuildTags))
+		}
+
+		if selection.Run != "" {
+			args = append(args, "-run", selection.Run)
+		}
+
+		args = append(args, selection.Packages...)
+
+		run := appenforcement.SelectedTestRun
+		if selection.Gate == domainbuild.PolicyTestGate {
+			run = appenforcement.SelectedPolicyTestRun
+		}
+
+		return run(ctx, out, stderr, enforcement.GoJSON, func(stdout, stderr io.Writer) error {
+			return tool.Run(ctx, GoRunInput{Dir: defaultGoDir(in.Dir), Args: args, Stdout: stdout, Stderr: stderr})
+		})
+	}
+
 	args := []string{testCommand}
 
 	policy, err := appenforcement.Resolve(ctx)
@@ -218,6 +265,10 @@ func GoBuildBinaries(ctx context.Context, tool GoTool, out, stderr io.Writer, in
 	}
 	defer func() { _ = dist.Close() }()
 
+	if err := requireGoCommand(ctx, tool, stderr, dir, mainPackage, in.BuildTags, platforms[0]); err != nil {
+		return err
+	}
+
 	for _, platform := range platforms {
 		goos, goarch, _ := parseGoPlatform(platform)
 		if rmErr := dist.RemoveAll(goos + "-" + goarch); rmErr != nil {
@@ -268,6 +319,37 @@ func GoBuildBinaries(ctx context.Context, tool GoTool, out, stderr io.Writer, in
 // goMetadata is the resolved Go build identity shared by `build go metadata`
 // (which emits it) and `build go run` (which threads it through the sequence
 // in-process).
+// requireGoCommand refuses a package that is not `package main`, asked of go
+// itself for the first target platform. `go build -o` of a library succeeds
+// and writes a package archive to the binary's path, which a release would
+// then sign and publish as the program.
+func requireGoCommand(ctx context.Context, tool GoTool, stderr io.Writer, dir, mainPackage, buildTags, platform string) error {
+	goos, goarch, _ := parseGoPlatform(platform)
+
+	args := []string{"list", "-f", "{{.Name}}"}
+	if strings.TrimSpace(buildTags) != "" {
+		args = append(args, "-tags", strings.TrimSpace(buildTags))
+	}
+
+	var name strings.Builder
+
+	if err := tool.Run(ctx, GoRunInput{
+		Dir:    dir,
+		Env:    []string{"CGO_ENABLED=0", "GOOS=" + goos, "GOARCH=" + goarch},
+		Args:   append(args, mainPackage),
+		Stdout: &name,
+		Stderr: stderr,
+	}); err != nil {
+		return err
+	}
+
+	if got := strings.TrimSpace(name.String()); got != "main" {
+		return fmt.Errorf("main-package %s is package %q, not a command: project-type go builds a package main into a binary; release a library as project-type meta: %w", mainPackage, got, errs.ErrValidation)
+	}
+
+	return nil
+}
+
 type goMetadata struct {
 	BinaryName string
 	Version    string

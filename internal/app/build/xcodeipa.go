@@ -68,7 +68,7 @@ func exportXcodeIPA(ctx context.Context, ops XcodeBuildOps, out, stderr io.Write
 	}
 
 	if code != 0 {
-		return fmt.Errorf("xcodebuild -exportArchive exited with status %d: %w", code, errs.ErrDependencyUnavailable)
+		return fmt.Errorf("xcodebuild -exportArchive exited with status %d: %w", code, errs.ErrValidation)
 	}
 
 	return nil

@@ -172,9 +172,10 @@ func runMise(ctx context.Context, runner MiseRunner, env []string, out io.Writer
 	return err
 }
 
-// miseRetrier runs one mise call up to attempts times, delay apart. Any
-// failure of the call is tried again: mise and rustup verify what they
-// download in every attempt, so a retry repeats a refusal and cannot pass it.
+// miseRetrier runs one mise call up to attempts times, delay apart. Only a
+// call that states a transport failure is tried again, and it ends as the
+// dependency being unavailable; a refused checksum, a status and every other
+// failure of mise or rustup returns at once as the tool's own.
 type miseRetrier struct {
 	runner   MiseRunner
 	out      io.Writer
@@ -205,7 +206,20 @@ func (m miseRetrier) output(ctx context.Context, env []string, args ...string) (
 }
 
 func (m miseRetrier) retry(ctx context.Context, args []string, call func() error) error {
-	return retry.Run(ctx, nil, m.attempts, m.delay, call, retry.WithBackoff(retry.Constant), retry.OnRetry(func(attempt, total int, _ time.Duration, _ error) {
+	return retry.Run(ctx, nil, m.attempts, m.delay, func() error {
+		err := call()
+		if err == nil {
+			return nil
+		}
+
+		class := errs.ToolFailure(errs.MiseReport(err.Error()))
+		if !errs.Retriable(class) {
+			return retry.Permanent(err)
+		}
+
+		//nolint:errorlint // flattened: the tool's failure class must not outrank the retriable one.
+		return fmt.Errorf("%v: %w", err, class)
+	}, retry.WithBackoff(retry.Constant), retry.OnRetry(func(attempt, total int, _ time.Duration, _ error) {
 		if m.out != nil {
 			_, _ = fmt.Fprintf(m.out, "mise %s failed (attempt %d/%d); retrying...\n", strings.Join(args, " "), attempt, total)
 		}

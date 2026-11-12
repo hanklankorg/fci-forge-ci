@@ -11,6 +11,7 @@ import (
 
 	appenforcement "github.com/diggsweden/forge-ci/internal/app/enforcement"
 	appsummary "github.com/diggsweden/forge-ci/internal/app/summary"
+	domainbuild "github.com/diggsweden/forge-ci/internal/domain/build"
 	"github.com/diggsweden/forge-ci/internal/domain/ci"
 )
 
@@ -19,11 +20,12 @@ import (
 type CargoReleaseBuildInput struct {
 	ReleaseBuildOptions
 
-	BinaryName string
-	Version    string
-	RefName    string
-	Commit     string
-	Platforms  string
+	BinaryName        string
+	Version           string
+	RefName           string
+	Commit            string
+	Platforms         string
+	TestSelectionJSON string
 }
 
 // CargoBuildSBOM generates a Build-layer SBOM with cargo-cyclonedx from the
@@ -39,7 +41,7 @@ func CargoBuildSBOM(ctx context.Context, tool CargoTool, w, stderr io.Writer, di
 }
 
 // CargoReleaseBuild runs the whole Cargo release build as one step: resolve
-// metadata, fetch deps, test (unless skipped), generate the Build SBOM (unless
+// metadata, fetch deps, run mandatory tests, generate the Build SBOM (unless
 // disabled), cross-compile per platform into dist/, and append the SBOM status.
 //
 // It is the Cargo sibling of GoReleaseBuild — the binary-owned build sequence
@@ -49,6 +51,12 @@ func CargoBuildSBOM(ctx context.Context, tool CargoTool, w, stderr io.Writer, di
 func CargoReleaseBuild(ctx context.Context, summarySink ci.SummarySink, tool CargoTool, out, stderr io.Writer, in CargoReleaseBuildInput) error {
 	if err := appenforcement.RequireTests(ctx, in.SkipTests); err != nil {
 		return err
+	}
+
+	if in.TestSelectionJSON != "" {
+		if _, err := domainbuild.ParseCargoTestSelection(in.TestSelectionJSON); err != nil {
+			return err
+		}
 	}
 
 	meta, err := resolveCargoMetadata(ctx, tool, CargoMetadataInput{
@@ -68,7 +76,7 @@ func CargoReleaseBuild(ctx context.Context, summarySink ci.SummarySink, tool Car
 		return fmt.Errorf("cargo fetch: %w", err)
 	}
 
-	if err := CargoTest(ctx, tool, out, stderr, CargoTestInput{Dir: in.Dir}); err != nil {
+	if err := CargoTest(ctx, tool, out, stderr, CargoTestInput{Dir: in.Dir, SelectionJSON: in.TestSelectionJSON}); err != nil {
 		return fmt.Errorf("cargo test: %w", err)
 	}
 

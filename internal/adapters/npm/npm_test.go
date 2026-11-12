@@ -133,3 +133,29 @@ func TestAdapter_RunCapturesExitStderr(t *testing.T) {
 		t.Errorf("stderr = %q", stderr)
 	}
 }
+
+// An `npm ci` that could not resolve its registry is an unavailable
+// dependency. A registry that answered is not, and neither is the same error
+// code under `npm test`, where a script of the project may have printed it.
+func TestAdapter_InstallThatReachedNoRegistryIsAnUnavailableDependency(t *testing.T) {
+	t.Parallel()
+
+	const unresolved = "npm error code EAI_AGAIN\nnpm error errno EAI_AGAIN request to https://registry.npmjs.org/left-pad failed, reason: getaddrinfo EAI_AGAIN registry.npmjs.org"
+
+	for _, scenario := range []struct {
+		action, said string
+		want         error
+	}{
+		{"ci", unresolved, errs.ErrDependencyUnavailable},
+		{"ci", "npm error code E404\nnpm error 404 Not Found - GET https://registry.npmjs.org/left-padd", errs.ErrValidation},
+		{"test", unresolved, errs.ErrValidation},
+	} {
+		m := mockbinary.New(t)
+		m.Add("npm", `printf '%b\n' '`+scenario.said+`' >&2; exit 1`)
+
+		err := (&npm.Adapter{Bin: m.Path("npm")}).RunInherit(context.Background(), "", &bytes.Buffer{}, &bytes.Buffer{}, scenario.action)
+		if err == nil || !errors.Is(err, scenario.want) || errs.ExitCodeFromError(err) != errs.ExitCodeFromError(scenario.want) {
+			t.Errorf("npm %s after %q: err = %v, want %v", scenario.action, scenario.said, err, scenario.want)
+		}
+	}
+}

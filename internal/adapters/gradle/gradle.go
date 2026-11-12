@@ -7,10 +7,13 @@
 package gradle
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"io"
 	"os/exec"
 
+	"github.com/diggsweden/forge-ci/internal/domain/errs"
 	"github.com/diggsweden/forge-ci/internal/safeexec"
 )
 
@@ -36,13 +39,28 @@ func (a *Adapter) RunInDirInherit(ctx context.Context, dir string, stdout, stder
 
 // RunInDirEnvInherit runs the wrapper with explicit environment overrides.
 // Unselected runtime variables remain inherited, including JDK/SDK settings.
+//
+// A wrapper that could not reach the host of its Gradle distribution ends as
+// an unavailable dependency (errs.GradleWrapperReport). Every failure of
+// Gradle itself stays a validation failure, a dependency it could not
+// resolve included: its report of one cannot be told from a task's own.
 func (a *Adapter) RunInDirEnvInherit(ctx context.Context, dir string, env []string, stdout, stderr io.Writer, args ...string) error {
 	cmd := a.command(ctx, dir, env, stdout, stderr, args...)
-	if err := cmd.Run(); err != nil {
-		return safeexec.WrapError(err, a.bin(), safeexec.FirstArg(args))
+
+	var said bytes.Buffer
+
+	safeexec.KeepStderr(cmd, &said)
+
+	err := cmd.Run()
+	if err == nil {
+		return nil
 	}
 
-	return nil
+	if _, ok := errors.AsType[*exec.ExitError](err); ok {
+		return safeexec.ExitFailure(err, a.bin(), safeexec.FirstArg(args), errs.GradleWrapperReport(said.String()))
+	}
+
+	return safeexec.WrapError(err, a.bin(), safeexec.FirstArg(args))
 }
 
 func (a *Adapter) command(ctx context.Context, dir string, env []string, stdout, stderr io.Writer, args ...string) *exec.Cmd {

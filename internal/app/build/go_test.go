@@ -5,6 +5,7 @@ package build_test
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"errors"
 	"os"
@@ -19,9 +20,22 @@ import (
 	"github.com/diggsweden/forge-ci/internal/testutil/testfs"
 )
 
-type fakeGoTool struct{ calls []appbuild.GoRunInput }
+// fakeGoTool records go's commands. The package-name query before a compile
+// is answered with packageName, "main" when empty, and kept in lists.
+type fakeGoTool struct {
+	calls       []appbuild.GoRunInput
+	lists       []appbuild.GoRunInput
+	packageName string
+}
 
 func (f *fakeGoTool) Run(_ context.Context, in appbuild.GoRunInput) error {
+	if len(in.Args) > 0 && in.Args[0] == "list" {
+		f.lists = append(f.lists, in)
+		_, err := in.Stdout.Write([]byte(cmp.Or(f.packageName, "main") + "\n"))
+
+		return err
+	}
+
 	f.calls = append(f.calls, in)
 
 	return nil
@@ -588,5 +602,38 @@ func TestGoBuildBinaries_RejectsLinkedDistBeforeCleanup(t *testing.T) {
 
 	if body, err := os.ReadFile(canary); err != nil || string(body) != "keep" {
 		t.Fatalf("outside data changed: %q, %v", body, err)
+	}
+}
+
+// A library compiles: `go build -o` writes its package archive where the
+// binary belongs and exits 0. The build asks go what the package is first,
+// and refuses one that is not a command before it removes or writes a file.
+func TestGoBuildBinaries_RefusesAPackageThatIsNotMain(t *testing.T) {
+	t.Parallel()
+
+	fsys := testfs.NewReal(t)
+	prior := fsys.WriteFile("dist/linux-amd64/prior", []byte("keep"))
+	tool := &fakeGoTool{packageName: "greeting"}
+
+	err := appbuild.GoBuildBinaries(t.Context(), tool, &bytes.Buffer{}, &bytes.Buffer{}, appbuild.GoBuildBinariesInput{
+		Dir: fsys.Root, BinaryName: "app", Version: "1.0.0", BuildTags: "netgo", Platforms: "linux/arm64,linux/amd64",
+	})
+	if !errors.Is(err, errs.ErrValidation) || !strings.Contains(err.Error(), `package "greeting"`) || !strings.Contains(err.Error(), "project-type meta") {
+		t.Fatalf("err = %v, want a refusal naming the package and project-type meta", err)
+	}
+
+	if len(tool.calls) != 0 {
+		t.Errorf("compiled a library: %+v", tool.calls)
+	}
+
+	if _, statErr := os.Stat(prior); statErr != nil {
+		t.Errorf("the refusal removed a prior build: %v", statErr)
+	}
+
+	wantArgs := []string{"list", "-f", "{{.Name}}", "-tags", "netgo", "."}
+	wantEnv := []string{"CGO_ENABLED=0", "GOOS=linux", "GOARCH=arm64"}
+
+	if len(tool.lists) != 1 || !slices.Equal(tool.lists[0].Args, wantArgs) || !slices.Equal(tool.lists[0].Env, wantEnv) {
+		t.Errorf("package query = %+v, want one of %q with %q", tool.lists, wantArgs, wantEnv)
 	}
 }

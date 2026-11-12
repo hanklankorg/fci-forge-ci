@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"os"
 	"slices"
 	"strings"
 	"testing"
@@ -14,6 +15,7 @@ import (
 	"github.com/diggsweden/forge-ci/internal/adapters/maven"
 	"github.com/diggsweden/forge-ci/internal/domain/errs"
 	"github.com/diggsweden/forge-ci/internal/testutil/mockbinary"
+	"github.com/stretchr/testify/require"
 )
 
 func TestEvalExpression_ReturnsTrimmedStdout(t *testing.T) {
@@ -39,6 +41,28 @@ func TestEvalExpression_ReturnsTrimmedStdout(t *testing.T) {
 	if !slices.Equal(invs[0].Args, want) {
 		t.Errorf("args = %v, want %v", invs[0].Args, want)
 	}
+}
+
+func TestProjectDirectoryBindsLifecycleAndMetadataWithoutGlobalChdir(t *testing.T) {
+	mock := mockbinary.New(t)
+	mock.OnPath()
+	mock.Add("mvn", `pwd`)
+
+	before, err := os.Getwd()
+	require.NoError(t, err)
+	directory := t.TempDir()
+	adapter := &maven.Adapter{Dir: directory}
+	metadata, err := adapter.EvalExpression(t.Context(), "project.version")
+	require.NoError(t, err)
+	require.Equal(t, directory, metadata)
+
+	var output bytes.Buffer
+	require.NoError(t, adapter.RunInherit(t.Context(), &output, &output, "install"))
+	require.Equal(t, directory, strings.TrimSpace(output.String()))
+
+	after, err := os.Getwd()
+	require.NoError(t, err)
+	require.Equal(t, before, after)
 }
 
 func TestEvalExpression_NonZeroExitIncludesOutput(t *testing.T) {
@@ -139,5 +163,33 @@ func TestRunInheritIn_RunsInsideTheGivenDirectory(t *testing.T) {
 
 	if got := strings.TrimSpace(stdout.String()); got != dir {
 		t.Errorf("mvn ran in %q, want %q", got, dir)
+	}
+}
+
+// A build Maven ends on a transfer from a host it could not reach is an
+// unavailable dependency. The same warning before failed tests is not.
+func TestRunInherit_ATransferFromAnUnreachedHostIsAnUnavailableDependency(t *testing.T) {
+	t.Parallel()
+
+	const (
+		warned   = `[WARNING] Could not transfer metadata /.meta/prefixes.txt from/to central (https://repo.maven.apache.org/maven2): repo.maven.apache.org: Temporary failure in name resolution`
+		absent   = `[ERROR] 	The following artifacts could not be resolved: org.apache.maven.plugins:maven-resources-plugin:pom:3.5.0 (absent): Could not transfer artifact org.apache.maven.plugins:maven-resources-plugin:pom:3.5.0 from/to central (https://repo.maven.apache.org/maven2): repo.maven.apache.org`
+		failures = `[ERROR] Failed to execute goal org.apache.maven.plugins:maven-surefire-plugin:3.5.2:test (default-test) on project app: There are test failures.`
+	)
+
+	for ended, want := range map[string]error{absent: errs.ErrDependencyUnavailable, failures: errs.ErrValidation} {
+		m := mockbinary.New(t)
+		m.Add("mvn", `printf '%s\n' '`+warned+`' '[INFO] BUILD FAILURE' '`+ended+`'; exit 1`)
+
+		var stdout bytes.Buffer
+
+		err := (&maven.Adapter{MvnBin: m.Path("mvn")}).RunInherit(context.Background(), &stdout, &bytes.Buffer{}, "test")
+		if err == nil || !errors.Is(err, want) || errs.ExitCodeFromError(err) != errs.ExitCodeFromError(want) {
+			t.Errorf("ended on %q: err = %v, want %v", ended, err, want)
+		}
+
+		if !strings.Contains(stdout.String(), ended) {
+			t.Errorf("Maven's output did not reach the caller: %q", stdout.String())
+		}
 	}
 }

@@ -17,7 +17,7 @@ type Go struct{}
 
 // Run executes go with inherited environment plus in.Env. Errors are
 // classified by safeexec.WrapError so missing-on-PATH maps to
-// ExitCodeUnavailable and a non-zero exit maps to ExitCodeValidation.
+// ExitCodeConfiguration and a non-zero exit maps to ExitCodeValidation.
 func (Go) Run(ctx context.Context, in domainbuild.GoRunInput) error {
 	return run(ctx, "go", in)
 }

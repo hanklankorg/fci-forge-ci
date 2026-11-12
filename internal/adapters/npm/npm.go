@@ -8,8 +8,12 @@ package npm
 import (
 	"bytes"
 	"context"
+	"errors"
+	"fmt"
 	"io"
+	"os/exec"
 
+	"github.com/diggsweden/forge-ci/internal/domain/errs"
 	"github.com/diggsweden/forge-ci/internal/safeexec"
 )
 
@@ -55,18 +59,39 @@ func (a *Adapter) RunInherit(ctx context.Context, dir string, stdout, stderr io.
 }
 
 // RunWithEnv invokes npm with an explicitly selected environment for one phase.
+//
+// An `npm ci` that could not reach its registry ends as an unavailable
+// dependency, by the error code npm prints (errs.NPMFailure). The class of
+// every other command is left alone: `npm test` and `npm run` end on what a
+// script of the project printed, which may be another npm's error code.
 func (a *Adapter) RunWithEnv(ctx context.Context, dir string, env []string, stdout, stderr io.Writer, args ...string) error {
 	cmd := safeexec.Command(ctx, a.bin(), args...)
 	cmd.Dir = dir
 	cmd.Env = env
 	cmd.Stdout = stdout
-
 	cmd.Stderr = stderr
-	if err := cmd.Run(); err != nil {
-		return safeexec.WrapError(err, a.bin(), safeexec.FirstArg(args))
+
+	action := safeexec.FirstArg(args)
+
+	// Only what `npm ci` says is kept and read.
+	var said bytes.Buffer
+
+	if action == "ci" {
+		safeexec.KeepStderr(cmd, &said)
 	}
 
-	return nil
+	err := cmd.Run()
+	if err == nil {
+		return nil
+	}
+
+	if _, ok := errors.AsType[*exec.ExitError](err); ok {
+		if class := errs.NPMFailure(said.String()); errs.Retriable(class) {
+			return fmt.Errorf("%s %s: %w: %w", a.bin(), action, err, class)
+		}
+	}
+
+	return safeexec.WrapError(err, a.bin(), action)
 }
 
 func (a *Adapter) bin() string {

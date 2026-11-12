@@ -413,3 +413,29 @@ func TestCargoMetadata_PicksTheMemberAtTheWorkingDirectory(t *testing.T) {
 		t.Errorf("worker/: package = %q, want hello-worker", packageName)
 	}
 }
+
+// A Cargo artifact is one binary. A package with none or with several is
+// refused when its metadata is read, before any step runs cargo for it.
+func TestCargoMetadata_RefusesAPackageWithoutExactlyOneBinary(t *testing.T) {
+	t.Parallel()
+
+	for name, tc := range map[string]struct {
+		targets string
+		want    error
+		message string
+	}{
+		"library":      {targets: `[{"name": "greeting", "kind": ["lib"]}]`, want: errs.ErrInvalidConfig, message: "package greeting has no Cargo binary target"},
+		"two binaries": {targets: `[{"name": "one", "kind": ["bin"]}, {"name": "two", "kind": ["bin"]}]`, want: errs.ErrUsage, message: "multiple Cargo binaries"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			tool := &fakeCargoTool{metadata: `{"packages": [{"name": "greeting", "version": "1.0.0", "targets": ` + tc.targets + `}], "workspace_root": "."}`}
+
+			_, _, _, err := appbuild.ResolveCargoMetadataForTest(t.Context(), tool, appbuild.CargoMetadataInput{Dir: t.TempDir()})
+			if !errors.Is(err, tc.want) || !strings.Contains(err.Error(), tc.message) {
+				t.Fatalf("err = %v, want %v naming %q", err, tc.want, tc.message)
+			}
+		})
+	}
+}

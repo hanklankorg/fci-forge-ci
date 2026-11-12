@@ -244,6 +244,12 @@ func downloadReleaseArchiveOnce(ctx context.Context, client *http.Client, url st
 
 	resp, err := client.Do(req)
 	if err != nil {
+		// Only a request the network stopped is asked again: a certificate
+		// that does not verify fails the same way every time.
+		if !errs.IsTransport(err) {
+			return nil, false, fmt.Errorf("download %s: %v: %w", url, err, errs.ErrValidation) //nolint:errorlint // flattened like the transport case below.
+		}
+
 		//nolint:errorlint // transport error is intentionally flattened: wrapping it would let a
 		// mid-download cancellation match context.Canceled and change the exit-code classification.
 		return nil, true, fmt.Errorf("download %s: %v: %w", url, err, errs.ErrDependencyUnavailable)
@@ -252,7 +258,10 @@ func downloadReleaseArchiveOnce(ctx context.Context, client *http.Client, url st
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		return nil, shouldRetryReleaseHTTPStatus(resp.StatusCode), fmt.Errorf("download %s: HTTP %d: %w", url, resp.StatusCode, errs.ErrDependencyUnavailable)
+		class := releaseHTTPStatusClass(resp.StatusCode)
+		retryable := errors.Is(class, errs.ErrDependencyUnavailable) || errors.Is(class, errs.ErrRateLimited)
+
+		return nil, retryable, fmt.Errorf("download %s: HTTP %d: %w", url, resp.StatusCode, class)
 	}
 
 	if resp.ContentLength > maxReleaseArchiveBytes {
@@ -261,6 +270,10 @@ func downloadReleaseArchiveOnce(ctx context.Context, client *http.Client, url st
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxReleaseArchiveBytes+1))
 	if err != nil {
+		if !errs.IsTransport(err) {
+			return nil, false, fmt.Errorf("read %s: %v: %w", url, err, errs.ErrValidation) //nolint:errorlint // keep the text, classify as the download's failure.
+		}
+
 		return nil, true, fmt.Errorf("read %s: %v: %w", url, err, errs.ErrDependencyUnavailable) //nolint:errorlint // keep the transport text, classify as unavailable.
 	}
 
@@ -271,8 +284,20 @@ func downloadReleaseArchiveOnce(ctx context.Context, client *http.Client, url st
 	return body, false, nil
 }
 
-func shouldRetryReleaseHTTPStatus(status int) bool {
-	return status == http.StatusRequestTimeout || status == http.StatusTooManyRequests || status >= 500
+// releaseHTTPStatusClass is the class of a download the server answered
+// without the archive. A status the server may recover from is the
+// dependency being unavailable, and the only kind tried again; a refused
+// credential, a missing archive and every other answer keep their own class.
+func releaseHTTPStatusClass(status int) error {
+	if status == http.StatusRequestTimeout {
+		return errs.ErrDependencyUnavailable
+	}
+
+	if class := errs.FromHTTPStatus(status); class != nil {
+		return class
+	}
+
+	return errs.ErrValidation
 }
 
 func verifyArchiveSHA256(name string, body []byte, expected string) error {

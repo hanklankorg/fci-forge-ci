@@ -62,9 +62,9 @@ func (a *Adapter) Lint(ctx context.Context, in LintInput) (string, int, error) {
 		return buf.String(), exitErr.ExitCode(), nil
 	}
 
-	// A non-exit failure (most commonly swiftlint missing from PATH) is an
-	// external-dependency problem, not an internal bug — classify it as
-	// EX_UNAVAILABLE (69) rather than the unclassified EX_SOFTWARE (70).
+	// A non-exit failure (most commonly swiftlint missing from PATH) is a
+	// missing prerequisite, not an internal bug: EX_CONFIG (78), not the
+	// unclassified EX_SOFTWARE (70).
 	return buf.String(), -1, safeexec.WrapError(runErr, a.bin(), "lint")
 }
 

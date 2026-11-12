@@ -70,7 +70,7 @@ func (c Client) Upload(ctx context.Context, registry provider.ForgeMavenRegistry
 			return fmt.Errorf("maven artifact upload: %w", stalled)
 		}
 
-		return fmt.Errorf("maven artifact upload failed: %w", errs.ErrDependencyUnavailable)
+		return fmt.Errorf("maven artifact upload failed: %w", errs.RequestFailure(err))
 	}
 
 	defer func() { _ = response.Body.Close() }()

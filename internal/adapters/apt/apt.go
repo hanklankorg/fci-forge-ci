@@ -5,15 +5,18 @@
 package apt
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"io"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 
 	"github.com/diggsweden/forge-ci/internal/domain/aptsources"
+	"github.com/diggsweden/forge-ci/internal/domain/errs"
 	"github.com/diggsweden/forge-ci/internal/safeexec"
 )
 
@@ -66,16 +69,24 @@ func (a *Adapter) Install(ctx context.Context, packages []string, out io.Writer)
 	sources, cleanup := a.httpsSources(out)
 	defer cleanup()
 
-	if err := a.run(ctx, out, env, "update", sources); err != nil {
+	// What apt-get says is kept over both commands: an update that cannot
+	// read a source only warns, and the install after it fails for it.
+	var said bytes.Buffer
+
+	heard := io.MultiWriter(out, &said)
+
+	if err := a.run(ctx, heard, &said, env, "update", sources); err != nil {
 		return err
 	}
 
-	return a.run(ctx, out, env, "install", sources, append([]string{"-y", "--no-install-recommends"}, packages...)...)
+	return a.run(ctx, heard, &said, env, "install", sources, append([]string{"-y", "--no-install-recommends"}, packages...)...)
 }
 
 // run runs one apt-get command. The source options come first, so that both
-// commands of an install read the same sources.
-func (a *Adapter) run(ctx context.Context, out io.Writer, env []string, command string, sources []string, args ...string) error {
+// commands of an install read the same sources. A command that fails after
+// apt-get could not reach a package source ends as an unavailable dependency
+// (errs.AptReport reads said); every other failure is a validation failure.
+func (a *Adapter) run(ctx context.Context, out io.Writer, said *bytes.Buffer, env []string, command string, sources []string, args ...string) error {
 	argv := append(append(append([]string{}, sources...), command), args...)
 
 	cmd := safeexec.Command(ctx, a.bin(), argv...)
@@ -83,11 +94,16 @@ func (a *Adapter) run(ctx context.Context, out io.Writer, env []string, command 
 	cmd.Stderr = out
 	cmd.Env = env
 
-	if err := cmd.Run(); err != nil {
-		return safeexec.WrapError(err, a.bin(), command)
+	err := cmd.Run()
+	if err == nil {
+		return nil
 	}
 
-	return nil
+	if _, ok := errors.AsType[*exec.ExitError](err); ok {
+		return safeexec.ExitFailure(err, a.bin(), command, errs.AptReport(said.String()))
+	}
+
+	return safeexec.WrapError(err, a.bin(), command)
 }
 
 // httpsSources returns the apt-get options that select a private HTTPS copy

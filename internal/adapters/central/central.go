@@ -203,7 +203,7 @@ func (c Client) request(ctx context.Context, endpoint string, query url.Values, 
 			return nil, ctx.Err()
 		}
 
-		return nil, fmt.Errorf("central API request failed: %w", errs.ErrDependencyUnavailable)
+		return nil, fmt.Errorf("central API request failed: %w", errs.RequestFailure(err))
 	}
 
 	defer func() { _ = response.Body.Close() }()

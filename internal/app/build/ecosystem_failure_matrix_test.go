@@ -37,7 +37,9 @@ func ecosystemRuns() []ecosystemRun {
 			run: func(t *testing.T, rec *toolrecorder.Recorder, summary *recordingSummarySink, stdout *bytes.Buffer) error {
 				t.Helper()
 
-				return appbuild.GoReleaseBuild(context.Background(), summary, rec, rec, stdout, stdout, appbuild.GoReleaseBuildInput{
+				goTool := rec.Respond(goToolResponses(rec))
+
+				return appbuild.GoReleaseBuild(context.Background(), summary, goTool, goTool, stdout, stdout, appbuild.GoReleaseBuildInput{
 					Dir: newGoModDir(t), EnableBuildSBOM: true,
 					Version:   "1.2.3",
 					Platforms: "linux/amd64",
@@ -145,6 +147,21 @@ func ecosystemCallCount(t *testing.T, ecosystem ecosystemRun) int {
 	require.NoErrorf(t, ecosystem.run(t, rec, &recordingSummarySink{}, &stdout), "%s happy path: %s", ecosystem.name, stdout.String())
 
 	return len(rec.Calls)
+}
+
+// goToolResponses answers the package-name query the compile asks first as go
+// does for a command.
+func goToolResponses(rec *toolrecorder.Recorder) func(int, toolrecorder.Call) toolrecorder.Response {
+	failure := rec.Responder()
+
+	return func(index int, call toolrecorder.Call) toolrecorder.Response {
+		response := failure(index, call)
+		if response.Err == nil && len(call.Args) > 0 && call.Args[0] == "list" {
+			response.Stdout = "main\n"
+		}
+
+		return response
+	}
 }
 
 // cargoToolResponses supplies the metadata document and the compiled binary a

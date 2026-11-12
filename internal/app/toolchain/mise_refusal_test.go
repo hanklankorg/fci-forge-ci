@@ -7,12 +7,15 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
-	"errors"
+	"crypto/tls"
+	"crypto/x509"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 
 	"github.com/diggsweden/forge-ci/internal/app/toolchain"
@@ -68,6 +71,7 @@ func TestInstallMise_RefusesAndClassifiesEveryDownloadFailure(t *testing.T) {
 		name         string
 		transport    http.RoundTripper
 		wantErr      error
+		notErr       error
 		wantAttempts int
 		why          string
 	}{
@@ -75,8 +79,24 @@ func TestInstallMise_RefusesAndClassifiesEveryDownloadFailure(t *testing.T) {
 			name:         "a permanent 404 is not retried",
 			wantAttempts: 1,
 			transport:    fixedTransport(http.StatusNotFound, nil, 0, nil),
-			wantErr:      errs.ErrDependencyUnavailable,
+			wantErr:      errs.ErrMissingInput,
+			notErr:       errs.ErrDependencyUnavailable,
 			why:          "a missing version does not become available by asking again; retrying it wastes the run's time",
+		},
+		{
+			name:         "a refused credential is not retried",
+			wantAttempts: 1,
+			transport:    fixedTransport(http.StatusForbidden, nil, 0, nil),
+			wantErr:      errs.ErrPermissionDenied,
+			notErr:       errs.ErrDependencyUnavailable,
+			why:          "a mirror that refuses the caller refuses it again, and is not a mirror that is down",
+		},
+		{
+			name:         "a 408 is retried",
+			wantAttempts: 4,
+			transport:    fixedTransport(http.StatusRequestTimeout, nil, 0, nil),
+			wantErr:      errs.ErrDependencyUnavailable,
+			why:          "the server gave up waiting, which the next request may not meet",
 		},
 		{
 			name:         "a 500 is retried to the attempt limit",
@@ -89,15 +109,23 @@ func TestInstallMise_RefusesAndClassifiesEveryDownloadFailure(t *testing.T) {
 			name:         "a 429 is retried",
 			wantAttempts: 4,
 			transport:    fixedTransport(http.StatusTooManyRequests, nil, 0, nil),
-			wantErr:      errs.ErrDependencyUnavailable,
+			wantErr:      errs.ErrRateLimited,
 			why:          "rate limiting is transient by definition",
 		},
 		{
 			name:         "a transport failure is retried",
 			wantAttempts: 4,
-			transport:    fixedTransport(0, nil, 0, errors.New("dial failed")),
+			transport:    fixedTransport(0, nil, 0, &net.OpError{Op: "dial", Net: "tcp", Err: syscall.ECONNREFUSED}),
 			wantErr:      errs.ErrDependencyUnavailable,
 			why:          "a dropped connection is the case retries exist for",
+		},
+		{
+			name:         "a certificate that does not verify is not retried",
+			wantAttempts: 1,
+			transport:    fixedTransport(0, nil, 0, &tls.CertificateVerificationError{Err: x509.UnknownAuthorityError{}}),
+			wantErr:      errs.ErrValidation,
+			notErr:       errs.ErrDependencyUnavailable,
+			why:          "the next attempt meets the same certificate",
 		},
 		{
 			name:         "an oversized Content-Length is refused before the body is read",
@@ -123,6 +151,11 @@ func TestInstallMise_RefusesAndClassifiesEveryDownloadFailure(t *testing.T) {
 
 			require.Errorf(t, err, "the download was accepted: %s", tc.why)
 			require.ErrorIsf(t, err, tc.wantErr, "err = %v, want %v: %s", err, tc.wantErr, tc.why)
+
+			if tc.notErr != nil {
+				require.NotErrorIsf(t, err, tc.notErr, "err = %v, which is also %v: %s", err, tc.notErr, tc.why)
+			}
+
 			require.Equalf(t, tc.wantAttempts, counted.calls,
 				"%d attempts, want %d: %s", counted.calls, tc.wantAttempts, tc.why)
 		})
