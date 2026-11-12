@@ -59,9 +59,19 @@ spec:
     runtime-image:
       description: forge-ci runtime image carrying Node + npm, pinned by @sha256.
       regex: '^[^[:space:]]+@sha256:[0-9a-f]{64}$'
+    runner-tags:
+      type: array
+      default: []
+      description: Runner tags of the job, all of which one runner must carry; empty, the default, leaves it untagged. Name literal tags only, never a $VARIABLE, which a project variable could set.
 ---
 "$[[ inputs.job-name ]]":
+  # One more attempt when the engine found a dependency unavailable, exit
+  # 69, and for no other failure.
+  retry:
+    max: 1
+    exit_codes: 69
   stage: $[[ inputs.stage ]]
+  tags: $[[ inputs.runner-tags ]]
   rules:
     - when: on_success
   needs: []

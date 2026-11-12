@@ -17,9 +17,9 @@
 #      `artifacts:reports:sast`, so blocking findings land on the merge-request
 #      Security tab. The conversion uses `forge-ci security report
 #      to-gitlab-sast`, run from the engine binary this component's commit
-#      records, as the check component runs it. It is best-effort, so an image
-#      without Git, curl or sha256sum leaves the SARIF as a plain artifact
-#      rather than failing the lint gate.
+#      records, as the check component runs it. A report that cannot be
+#      written fails the job and keeps the SARIF as a plain artifact, so the
+#      image needs Git, curl and sha256sum, or enable-gitlab-sast: false.
 spec:
   component: [sha]
   inputs:
@@ -44,9 +44,19 @@ spec:
     forge-ci-repository:
       description: >-
         Project serving this component and its public engine package, including any subgroups. The SARIF to GitLab-SAST conversion runs the engine binary that this component's commit records, downloaded from that project's generic packages and checked against the recorded checksum. May name $CI_PROJECT_PATH: lib-forge-ci.sh refuses an expanded path that is not a project on server-url before any download.
+    runner-tags:
+      type: array
+      default: []
+      description: Runner tags of the job, all of which one runner must carry; empty, the default, leaves it untagged. Name literal tags only, never a $VARIABLE, which a project variable could set.
 ---
 "$[[ inputs.job-name ]]":
+  # One more attempt when the engine found a dependency unavailable, exit
+  # 69, and for no other failure.
+  retry:
+    max: 1
+    exit_codes: 69
   stage: $[[ inputs.stage ]]
+  tags: $[[ inputs.runner-tags ]]
   rules:
     - when: on_success
   needs: []
@@ -150,8 +160,8 @@ spec:
       # tab. The engine comes from forge-ci-repository at this component's commit:
       # the checkout records the binary's checksum, and the binary is
       # downloaded from that project's generic packages and checked against
-      # it. Conversion is best-effort and does not change the lint gate's exit
-      # code.
+      # it. The report is what the merge request shows: a conversion that
+      # fails, fails the job, after the gate has printed its verdict.
       if [ "$ENABLE_GITLAB_SAST" = "true" ] && [ -f "$SARIF_FILE" ]; then
         # GitLab runs the script under errexit, which would end the job on a
         # failed conversion, while an `if` or `||` around the subshell would
@@ -189,11 +199,12 @@ spec:
         converted=$?
         set -e
         if [ "$converted" -ne 0 ]; then
-          echo "WARN: GitLab-SAST conversion skipped (engine checkout, download or conversion failed); SARIF kept as plain artifact."
+          echo "ERROR: the GitLab SAST report could not be written (engine checkout, download or conversion failed); the SARIF is kept as a plain artifact (a pipeline error, not a lint finding)." >&2
+          if [ "$gate" -eq 0 ]; then gate=1; fi
         fi
       fi
 
-      # The lint gate is the only thing that decides the job result.
+      # The lint gate decides the job result, and so does a lost SAST report.
       exit "$gate"
   artifacts:
     when: always

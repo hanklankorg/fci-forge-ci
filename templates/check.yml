@@ -46,13 +46,24 @@ spec:
       type: boolean
       default: false
       description: Enforcement setting the job's forge-ci and FORGE_CI_BIN apply, set only in the administrator's entry point; false reports missing reproducible-build settings without failing.
+    runner-tags:
+      type: array
+      default: []
+      description: Runner tags of the job, all of which one runner must carry; empty, the default, leaves it untagged. Name literal tags only, never a $VARIABLE, which a project variable could set.
 ---
 "$[[ inputs.job-name ]]":
   stage: $[[ inputs.stage ]]
+  tags: $[[ inputs.runner-tags ]]
   rules:
     - when: on_success
   needs: []
   cache: []
+  # One more attempt when the engine found a dependency unavailable, exit
+  # 69, and for no other failure; the job writes nothing outside its own
+  # files.
+  retry:
+    max: 1
+    exit_codes: 69
   # A consumer's image may start a tool of its own. The Docker executor would
   # run the job's shell through that entrypoint; the Kubernetes one ignores it.
   # GitLab refuses an empty image user, so the user is a variable the runner
@@ -153,6 +164,8 @@ spec:
         cat -- "${bundle}" "${CI_SERVER_TLS_CA_FILE}" > "${RC_HELPERS_DIR}/ca-bundle.crt"
         export CURL_CA_BUNDLE="${RC_HELPERS_DIR}/ca-bundle.crt"
         export SSL_CERT_FILE="${CURL_CA_BUNDLE}" GIT_SSL_CAINFO="${CURL_CA_BUNDLE}"
+        # Node reads none of those; npm needs it for the forge's registry.
+        export NODE_EXTRA_CA_CERTS="${CURL_CA_BUNDLE}"
         git_options+=(-c "http.sslCAInfo=${GIT_SSL_CAINFO}")
       fi
       # The consumer may default Git to SHA-256. The helper repository has
@@ -161,8 +174,19 @@ spec:
       if [ "${#expected}" -eq 64 ]; then object_format=sha256; fi
       git init --quiet --object-format="${object_format}" "${RC_HELPERS_DIR}"
       git -C "${RC_HELPERS_DIR}" remote add origin "${FORGE_CI_REPOSITORY_URL}"
-      GIT_TERMINAL_PROMPT=0 git "${git_options[@]}" -C "${RC_HELPERS_DIR}" \
-        fetch --quiet --depth=1 --no-tags --no-recurse-submodules origin "${expected}"
+      # A forge that could not be reached is asked three times, and the job
+      # then ends as unavailable, exit 69. Any other refusal of the fetch
+      # ends it at once.
+      for attempt in 1 2 3; do
+        fetch_error=$(GIT_TERMINAL_PROMPT=0 git "${git_options[@]}" -C "${RC_HELPERS_DIR}" fetch --quiet --depth=1 --no-tags --no-recurse-submodules origin "${expected}" 2>&1) && break
+        printf '%s\n' "${fetch_error}" >&2
+        case "${fetch_error}" in
+        "fatal: unable to access '"*"': Could not resolve host: "* | "fatal: unable to access '"*"': Failed to connect to "*) ;;
+        *) exit 1 ;;
+        esac
+        if [ "${attempt}" -eq 3 ]; then exit 69; fi
+        sleep 5
+      done
       git "${git_options[@]}" -C "${RC_HELPERS_DIR}" checkout --quiet --detach "${expected}"
       test "$(git -C "${RC_HELPERS_DIR}" rev-parse HEAD)" = "${expected}"
       # shellcheck source=.engine/bin/lib-forge-ci.sh

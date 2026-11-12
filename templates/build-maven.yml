@@ -8,7 +8,7 @@
 # (install → metadata → app/lib build → SBOM → summaries) lives in the binary as
 # `forge-ci build maven run`, which branches on --build-type, so this job is a
 # single line — the same sequence GitHub runs. mvn runs in the job's working
-# directory (we cd into it). GitLab clones the repo for the job; the runtime-java
+# directory (the CLI binds subprocesses to it). GitLab clones the repo for the job; the runtime-java
 # image carries Maven + forge-ci. JARs/POMs land under target/ and the Build
 # SBOM as target/bom.json, which the job publishes as artifacts.
 #
@@ -68,9 +68,19 @@ spec:
     runtime-image:
       description: forge-ci runtime image carrying Maven, pinned by @sha256.
       regex: '^[^[:space:]]+@sha256:[0-9a-f]{64}$'
+    runner-tags:
+      type: array
+      default: []
+      description: Runner tags of the job, all of which one runner must carry; empty, the default, leaves it untagged. Name literal tags only, never a $VARIABLE, which a project variable could set.
 ---
 "$[[ inputs.job-name ]]":
+  # One more attempt when the engine found a dependency unavailable, exit
+  # 69, and for no other failure.
+  retry:
+    max: 1
+    exit_codes: 69
   stage: $[[ inputs.stage ]]
+  tags: $[[ inputs.runner-tags ]]
   rules:
     - when: on_success
   needs: []
@@ -96,12 +106,9 @@ spec:
   before_script: []
   after_script: []
   script:
-    # mvn runs in the current directory, so cd into the project before the
-    # consolidated build (which reads pom.xml from ".").
-    - cd -- "$RC_PROJECT_DIRECTORY"
     # The administrator's setting as written, a flag of the engine: no
     # project variable can supply or change it.
-    - forge-ci build maven run --enforce-application-tests='$[[ inputs.enforce-application-tests ]]'
+    - forge-ci build maven run --working-dir "$RC_PROJECT_DIRECTORY" --enforce-application-tests='$[[ inputs.enforce-application-tests ]]'
   artifacts:
     # Always, so failed tests still reach the merge request test report.
     when: always
