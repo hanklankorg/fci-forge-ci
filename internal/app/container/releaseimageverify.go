@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -17,7 +18,8 @@ import (
 )
 
 // Release-image verification outcomes: fully verified evidence, or signed
-// with matching identity so the signer may re-attest it.
+// with matching identity and no stored provenance, so the signer may attest
+// it again.
 const (
 	ReleaseImageStatusVerified     = "verified"
 	ReleaseImageStatusReattestable = "reattestable"
@@ -62,6 +64,16 @@ type imageEvidenceVerifier interface {
 	VerifyAttestationOutput(ctx context.Context, in domaincontainer.AttestationVerifyRequest, out, errOut io.Writer) error
 }
 
+// releaseImageRegistry is the registry surface re-attestation needs: the
+// image's labels, and whether an attestation of a predicate type is stored
+// for it. The second is a read of the registry and no verification, so a
+// provenance attestation that is there and does not verify is told from one
+// that is not there.
+type releaseImageRegistry interface {
+	OCIImageLabelsRegistry
+	HasAttestation(ctx context.Context, ref, predicateType string) (bool, error)
+}
+
 type releaseImageProvenanceExpectation struct {
 	Tag             string
 	Commit          string
@@ -74,10 +86,15 @@ type releaseImageProvenanceExpectation struct {
 	IdentitySource  string
 }
 
+// errProvenanceOfAnotherRelease marks provenance whose signature verified
+// and whose statement does not describe the expected release.
+var errProvenanceOfAnotherRelease = errors.New("release image verify: the signed provenance is not of this release")
+
 // VerifyExistingReleaseImage checks an already-published release image's
 // signature, SBOM, and SLSA provenance against the expected release identity;
-// with AllowReattest it falls back to the re-attestation eligibility check.
-func VerifyExistingReleaseImage(ctx context.Context, verifier imageEvidenceVerifier, registry OCIImageLabelsRegistry, out io.Writer, in ReleaseImageVerifyExistingInput) (ReleaseImageVerifyExistingResult, error) {
+// with AllowReattest an image the registry stores no provenance attestation
+// for falls back to the re-attestation eligibility check.
+func VerifyExistingReleaseImage(ctx context.Context, verifier imageEvidenceVerifier, registry releaseImageRegistry, out io.Writer, in ReleaseImageVerifyExistingInput) (ReleaseImageVerifyExistingResult, error) {
 	if verifier == nil {
 		return ReleaseImageVerifyExistingResult{}, fmt.Errorf("release image verify: cosign verifier is required: %w", errs.ErrUsage)
 	}
@@ -94,7 +111,11 @@ func VerifyExistingReleaseImage(ctx context.Context, verifier imageEvidenceVerif
 		return ReleaseImageVerifyExistingResult{Status: ReleaseImageStatusVerified}, nil
 	}
 
-	if !in.AllowReattest {
+	// Re-attestation supplies provenance an image lacks. It never replaces
+	// provenance that verified and names another release, and a check that
+	// could not be made, as against a registry that was not reached, is no
+	// refused verification to look behind.
+	if !in.AllowReattest || errors.Is(evidenceErr, errProvenanceOfAnotherRelease) || !errors.Is(evidenceErr, errs.ErrValidation) {
 		return ReleaseImageVerifyExistingResult{}, evidenceErr
 	}
 
@@ -108,11 +129,11 @@ func VerifyExistingReleaseImage(ctx context.Context, verifier imageEvidenceVerif
 		return ReleaseImageVerifyExistingResult{}, fmt.Errorf("release image verify: re-attestation is only supported without base-lineage expectations: %w", errs.ErrUsage)
 	}
 
-	if err := releaseImageCanBeReattested(ctx, verifier, registry, out, in.Ref, in.CosignPublicKey, expected); err != nil {
+	if err := releaseImageCanBeReattested(ctx, verifier, registry, out, in.Ref, in.CosignPublicKey, expected, evidenceErr); err != nil {
 		return ReleaseImageVerifyExistingResult{}, err
 	}
 
-	_, _ = fmt.Fprintf(out, "Release image is signed, SBOM-attested, and has matching OCI release identity: %s\n", in.Ref)
+	_, _ = fmt.Fprintf(out, "Release image is signed, SBOM-attested, has no provenance attestation, and has matching OCI release identity: %s\n", in.Ref)
 
 	return ReleaseImageVerifyExistingResult{Status: ReleaseImageStatusReattestable}, nil
 }
@@ -250,13 +271,17 @@ func verifyReleaseImageEvidence(ctx context.Context, verifier imageEvidenceVerif
 
 		_, _ = fmt.Fprintln(out, "Refusing to reuse an immutable image tag from another release commit.")
 
-		return err
+		return fmt.Errorf("%w: %w", errProvenanceOfAnotherRelease, err)
 	}
 
 	return nil
 }
 
-func releaseImageCanBeReattested(ctx context.Context, verifier imageEvidenceVerifier, registry OCIImageLabelsRegistry, out io.Writer, ref, publicKey string, expected releaseImageProvenanceExpectation) error {
+// releaseImageCanBeReattested decides whether an image whose full
+// verification was refused with evidenceErr may be attested again: it is
+// signed and SBOM-attested, the registry stores no provenance attestation
+// for it, and its OCI labels name this release.
+func releaseImageCanBeReattested(ctx context.Context, verifier imageEvidenceVerifier, registry releaseImageRegistry, out io.Writer, ref, publicKey string, expected releaseImageProvenanceExpectation, evidenceErr error) error {
 	var errBuf bytes.Buffer
 	if err := verifier.VerifyImage(ctx, domaincontainer.ImageVerifyRequest{ImageRef: ref, KeyRef: publicKey}, &errBuf); err != nil {
 		_, _ = fmt.Fprintf(out, "re-attest declined: cosign verify did not pass for %s:\n", ref)
@@ -275,6 +300,22 @@ func releaseImageCanBeReattested(ctx context.Context, verifier imageEvidenceVeri
 	}
 
 	inspectRef := releaseImageDigestOnlyRef(ref)
+
+	// Whether provenance is absent is read from the registry. The verifier's
+	// refusal does not say: cosign ends on the same error for an image with
+	// no provenance attestation and for one whose attestation it rejected.
+	present, err := registry.HasAttestation(ctx, inspectRef, domainprovenance.PredicateTypeV1)
+	if err != nil {
+		_, _ = fmt.Fprintf(out, "re-attest declined: could not read the stored attestations of %s\n", inspectRef)
+
+		return fmt.Errorf("release image verify: read stored attestations: %w", err)
+	}
+
+	if present {
+		_, _ = fmt.Fprintf(out, "re-attest declined: a SLSA provenance attestation is stored for %s and the image did not verify; new provenance is never attached beside it.\n", inspectRef)
+
+		return fmt.Errorf("release image verify: refusing to re-attest an image that has a stored SLSA provenance attestation and did not verify: %w", evidenceErr)
+	}
 
 	labels, err := registry.Labels(ctx, inspectRef)
 	if err != nil {
@@ -372,7 +413,7 @@ func releaseImageProvenanceStatementMatches(statement map[string]any, expected r
 		return false
 	}
 
-	if !releaseImageHasGitCommitDependency(build, expected.Commit) {
+	if !releaseImageHasSourceDependency(build, expected) {
 		return false
 	}
 
@@ -406,10 +447,14 @@ func releaseImageBaseMatches(params, build map[string]any, expected releaseImage
 	return releaseImageHasBaseDependency(build, expected.BaseRef, expected.BaseInputID)
 }
 
-func releaseImageHasGitCommitDependency(build map[string]any, commit string) bool {
+func releaseImageHasSourceDependency(build map[string]any, expected releaseImageProvenanceExpectation) bool {
+	// The producer exports the same ref in workflow.ref and SourceDependency.
+	// Do not accept an independently rewritten short/full ref or URL alias.
+	source := domainprovenance.SourceDependency(expected.Source, expected.Tag, expected.Commit)
+
 	for _, dep := range releaseImageDependencies(build) {
 		digest, ok := domainprovenance.NestedMap(dep, "digest")
-		if ok && domainprovenance.StatementString(digest, "gitCommit") == commit {
+		if ok && domainprovenance.StatementString(dep, "uri") == source.URI && domainprovenance.StatementString(digest, source.DigestType) == source.Digest {
 			return true
 		}
 	}

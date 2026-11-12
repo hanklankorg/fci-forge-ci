@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: The Forge CI Authors
+// SPDX-FileCopyrightText: 2026 Digg - Agency for Digital Government
 // SPDX-License-Identifier: EUPL-1.2 OR GPL-3.0-or-later
 
 package container
@@ -35,6 +35,7 @@ func TestPrivateBaseValidationReuseAndRefusals(t *testing.T) {
 		"verified", "bad-credentials", "forbidden", "missing-auth",
 		"signature", "cyclonedx", "slsaprovenance1", "malformed",
 		"source", "workflow", "flavor", "base_input_id",
+		"parent-verified", "parent-wrong", "parent-missing",
 	} {
 		t.Run(mode, func(t *testing.T) { testPrivateBaseValidation(t, mode) })
 	}
@@ -131,6 +132,10 @@ cat %q
 		"--expected-repository", repo, "--expected-source", "https://source.example/owner/app", "--expected-workflow", "base.yml",
 		"--base-input-id", input, "--flavors-file", "flavors", "--cosign-public-key-path", "key.pub",
 		"--cosign-public-key-sha256", fmt.Sprintf("%x", sha256.Sum256(key)), "--auth-file", authFile}
+	if strings.HasPrefix(mode, "parent-") {
+		args = append(args, "--base-inputs-json", fmt.Sprintf(`[{"flavor":"rust","base_input_id":%q,"parent_base":{"ref":%q,"input_id":%q}}]`, input,
+			"other.example/shared/parent@sha256:"+strings.Repeat("b", 64), strings.Repeat("c", 64)))
+	}
 
 	for range 2 {
 		command := &cli.Command{
@@ -143,18 +148,20 @@ cat %q
 		command.Writer, command.ErrWriter = &out, &out
 
 		err := command.Run(t.Context(), args)
-		if mode == "verified" {
+		if mode == "verified" || mode == "parent-verified" {
 			require.NoError(t, err)
 
 			var outputs struct {
 				AllFound bool   `json:"all_found"`
 				Missing  string `json:"missing_flavors_json"`
 				Images   string `json:"all_images_json"`
+				Parents  string `json:"parent_bases_json"`
 			}
 			require.NoError(t, json.Unmarshal(out.Bytes(), &outputs))
 			require.True(t, outputs.AllFound)
 			require.Equal(t, "[]", outputs.Missing)
 			require.JSONEq(t, fmt.Sprintf(`[{"flavor":"rust","tag":%q,"ref":%q,"candidate_tag":"","candidate_ref":"","base_input_id":%q}]`, repo+":"+input+"-rust", repo+"@"+digest, input), outputs.Images)
+			require.JSONEq(t, fmt.Sprintf(`{"rust":{"ref":%q,"input_id":%q}}`, repo+"@"+digest, input), outputs.Parents)
 		} else {
 			require.Error(t, err)
 
@@ -162,7 +169,9 @@ cat %q
 			case "bad-credentials", "forbidden":
 				require.ErrorIs(t, err, errs.ErrPermissionDenied)
 			case "missing-auth":
-				require.ErrorIs(t, err, errs.ErrDependencyUnavailable)
+				// The file is this job's to provide: no second attempt finds it.
+				require.ErrorIs(t, err, errs.ErrMissingInput)
+				require.NotErrorIs(t, err, errs.ErrDependencyUnavailable)
 			default:
 				require.ErrorIs(t, err, errs.ErrValidation)
 			}
@@ -190,9 +199,18 @@ cat %q
 func privateBaseEnvelope(t *testing.T, mode, input string) []byte {
 	t.Helper()
 
-	params := map[string]string{"source": "git+https://source.example/owner/app", "workflow": "base.yml", "flavor": "rust", "base_input_id": input}
+	params := map[string]any{"source": "git+https://source.example/owner/app", "workflow": "base.yml", "flavor": "rust", "base_input_id": input}
 	if _, exists := params[mode]; exists {
 		params[mode] = "wrong-lineage"
+	}
+
+	if mode == "parent-verified" || mode == "parent-wrong" {
+		id := strings.Repeat("c", 64)
+		if mode == "parent-wrong" {
+			id = strings.Repeat("d", 64)
+		}
+
+		params["parent_base"] = map[string]any{"ref": "other.example/shared/parent@sha256:" + strings.Repeat("b", 64), "input_id": id}
 	}
 
 	statement, err := json.Marshal(map[string]any{

@@ -7,6 +7,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -116,17 +117,21 @@ func ResolvePushedManifestDigest(ctx context.Context, registry RawManifestRegist
 
 	expectedDigest := ""
 
-	warnOnInvalidExpected := false
 	if in.DigestFile != "" {
-		warnOnInvalidExpected = true
-
+		// A named file that cannot be read, or holds no digest, is no reason
+		// to skip the check it was named for.
 		body, err := os.ReadFile(in.DigestFile)
-		if err == nil {
-			expectedDigest = string(body)
+		if err != nil {
+			return nil, fmt.Errorf("read the pushed manifest digest file: %w: %w", err, errs.ErrMissingInput)
+		}
+
+		expectedDigest = strings.TrimSpace(string(body))
+		if !domaincontainer.ValidDigest(expectedDigest) {
+			return nil, fmt.Errorf("the pushed manifest digest file %s holds no digest: %w", in.DigestFile, errs.ErrMalformedInput)
 		}
 	}
 
-	digest, err := resolveVerifiedManifestDigest(ctx, registry, out, in.Ref, expectedDigest, warnOnInvalidExpected, in.RetryAttempts, in.RetryDelay)
+	digest, err := resolveVerifiedManifestDigest(ctx, registry, out, in.Ref, expectedDigest, in.RetryAttempts, in.RetryDelay)
 	if err != nil {
 		return nil, err
 	}
@@ -205,21 +210,21 @@ func verifyPublishedLayout(ctx context.Context, registry RawManifestRegistry, ou
 		return "", fmt.Errorf("layout publisher returned an invalid digest: %w", errs.ErrInvalidConfig)
 	}
 
-	return resolveVerifiedManifestDigest(ctx, registry, out, ref, expected, false, attempts, delay)
+	return resolveVerifiedManifestDigest(ctx, registry, out, ref, expected, attempts, delay)
 }
 
-func resolveVerifiedManifestDigest(ctx context.Context, registry RawManifestRegistry, out io.Writer, ref, expectedDigest string, warnOnInvalidExpected bool, retryAttempts int, retryDelay time.Duration) (string, error) {
-	expectedDigest = strings.TrimSpace(expectedDigest)
-	if !domaincontainer.ValidDigest(expectedDigest) {
-		if warnOnInvalidExpected && out != nil {
-			_, _ = fmt.Fprintf(out, "Pushed manifest digest file was empty or invalid for %s; reading digest from registry.\n", ref)
+// An empty expectedDigest means the caller named none to compare with.
+func resolveVerifiedManifestDigest(ctx context.Context, registry RawManifestRegistry, out io.Writer, ref, expectedDigest string, retryAttempts int, retryDelay time.Duration) (string, error) {
+	// Retries cover a registry that has not yet served a just-pushed
+	// manifest. A refused credential does not change between attempts, so it
+	// stops at once instead of waiting out every retry.
+	registryDigest, err := retry.Do(ctx, out, retry.Attempts(retryAttempts, defaultBuildPushRetryAttempts), retry.Delay(retryDelay, defaultBuildPushRetryDelay), func() (string, error) {
+		digest, err := registryManifestDigest(ctx, registry, ref)
+		if errors.Is(err, errs.ErrPermissionDenied) {
+			return "", retry.Permanent(err)
 		}
 
-		expectedDigest = ""
-	}
-
-	registryDigest, err := retry.Do(ctx, out, retry.Attempts(retryAttempts, defaultBuildPushRetryAttempts), retry.Delay(retryDelay, defaultBuildPushRetryDelay), func() (string, error) {
-		return registryManifestDigest(ctx, registry, ref)
+		return digest, err
 	})
 	if err != nil {
 		return "", err

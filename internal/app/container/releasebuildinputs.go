@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: The Forge CI Authors
+// SPDX-FileCopyrightText: 2026 Digg - Agency for Digital Government
 // SPDX-License-Identifier: EUPL-1.2 OR GPL-3.0-or-later
 
 package container
@@ -18,6 +18,7 @@ import (
 	"github.com/diggsweden/forge-ci/internal/cliio"
 	"github.com/diggsweden/forge-ci/internal/domain/errs"
 	"github.com/diggsweden/forge-ci/internal/domain/pipeline"
+	"github.com/diggsweden/forge-ci/internal/pathsafe"
 )
 
 // ReleaseBuildInputRegistry reads authenticated caches and pinned parent images.
@@ -45,7 +46,10 @@ func FetchReleaseBuildInputs(ctx context.Context, registry ReleaseBuildInputRegi
 		return err
 	}
 
-	if err := os.Mkdir(directory, 0o700); err != nil {
+	// The directory is new, as the build's metadata directory is renewed,
+	// and its missing parents are created as real directories: the build
+	// reads <inputs-dir>/<name>-arch-<arch>, so a run fetches into that.
+	if err := newBuildInputsDir(directory); err != nil {
 		return err
 	}
 
@@ -77,6 +81,18 @@ func FetchReleaseBuildInputs(ctx context.Context, registry ReleaseBuildInputRegi
 	return os.WriteFile(filepath.Join(directory, "inputs.json"), body, 0o600)
 }
 
+// newBuildInputsDir creates directory, which must not exist yet, under its
+// parents, creating those that are missing and refusing a link among them.
+func newBuildInputsDir(directory string) error {
+	root, err := pathsafe.MkdirRoot(filepath.Dir(directory), 0o700)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = root.Close() }()
+
+	return root.Mkdir(filepath.Base(directory), 0o700)
+}
+
 // PreparedBuildRegistry reads local layouts only. Implementations used by the
 // build command must not hold registry credentials.
 type PreparedBuildRegistry interface {
@@ -88,6 +104,10 @@ type PreparedBuildRegistry interface {
 // access. Every parent is verified before the first builder operation. Cached
 // output still passes the ordinary complete-set scan/publication barrier.
 func StageReleaseBuildWithInputs(ctx context.Context, tool SignerImageTool, loader RegistryInputLoader, registry PreparedBuildRegistry, out io.Writer, input SignerImageBuildArchInput, parents map[string]string, directory string) (*SignerImageArchMetadata, error) {
+	if err := CheckSignerImageBuilderIdentity(tool, input.BuilderMaterialID); err != nil {
+		return nil, err
+	}
+
 	if err := pipeline.ValidateRegistryInputs(pipeline.ReleaseImageBuild{BuildArgs: strings.Join(input.BuildArgs, "\n"), RegistryInputs: parents}); err != nil {
 		return nil, err
 	}

@@ -37,10 +37,10 @@ exports --local-manifest, otherwise pulls --registry-digest-ref or
 before Trivy runs, because Trivy's
 --input mode does not select a platform from a manifest list.
 
-A Trivy scan that exits non-zero is run again, --trivy-attempts times in all,
+A Trivy scan the network stopped is run again, --trivy-attempts times in all,
 after attempt x --trivy-retry-delay-seconds: the vulnerability database
-download fails transiently. A scanner that cannot be started and a report that
-does not validate are not retried.`,
+download fails transiently. A scan that fails for another reason, a scanner
+that cannot be started and a report that does not validate are not retried.`,
 		Flags: []cli.Flag{
 			&cli.StringFlag{Name: "oci-layout", Sources: cli.EnvVars("IMAGE_EVIDENCE_OCI_LAYOUT"), Usage: "existing OCI layout directory to scan"},
 			&cli.StringFlag{Name: "local-image-ref", Sources: cli.EnvVars("IMAGE_EVIDENCE_LOCAL_IMAGE_REF"), Usage: "Buildah local image reference to export to an OCI layout before scanning"},

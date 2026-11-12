@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: The Forge CI Authors
+// SPDX-FileCopyrightText: 2026 Digg - Agency for Digital Government
 // SPDX-License-Identifier: EUPL-1.2 OR GPL-3.0-or-later
 
 package container
@@ -19,6 +19,7 @@ import (
 	"github.com/diggsweden/forge-ci/internal/adapters/trivy"
 	appcontainer "github.com/diggsweden/forge-ci/internal/app/container"
 	appsnapshot "github.com/diggsweden/forge-ci/internal/app/snapshotimage"
+	"github.com/diggsweden/forge-ci/internal/cli/commonflags"
 	"github.com/diggsweden/forge-ci/internal/cli/deps"
 	"github.com/diggsweden/forge-ci/internal/cli/regflags"
 	"github.com/diggsweden/forge-ci/internal/domain/snapshotimage"
@@ -26,7 +27,7 @@ import (
 )
 
 func snapshotImagesGroup() *cli.Command {
-	return &cli.Command{Name: "snapshot-images", Usage: "plan, stage, publish and collect declared snapshot images", Commands: []*cli.Command{snapshotImagesPlanCmd(), snapshotImagesReadPlanCmd(), snapshotBuildArtifactCmd(), snapshotPrepareInputsCmd(), snapshotGatherContextCmd(), snapshotImagesContextCmd(), snapshotImagesRestoreContextCmd(), snapshotImagesBuildCmd(), snapshotImagesPublishCmd(), snapshotImagesCollectCmd()}}
+	return &cli.Command{Name: "snapshot-images", Usage: "plan, stage, publish and collect declared snapshot images", Commands: []*cli.Command{snapshotImagesPlanCmd(), snapshotImagesReadPlanCmd(), snapshotBuildArtifactCmd(), snapshotBuildFilesCmd(), snapshotPrepareInputsCmd(), snapshotGatherContextCmd(), snapshotImagesContextCmd(), snapshotImagesRestoreContextCmd(), snapshotImagesBuildCmd(), snapshotImagesPublishCmd(), snapshotImagesCollectCmd()}}
 }
 
 // Fields the read-plan transport query understands.
@@ -38,6 +39,9 @@ const (
 	snapshotFieldArchs         = "archs"
 	snapshotFieldScan          = "scan"
 	snapshotFieldSBOM          = "sbom"
+	// snapshotFieldBuildSBOM: whether the build of the producer or file
+	// output called name writes its Build SBOM.
+	snapshotFieldBuildSBOM = "build-sbom"
 )
 
 var (
@@ -74,7 +78,8 @@ func snapshotImagesReadPlanCmd() *cli.Command {
 }
 
 // snapshotPlanFieldValues returns the values of one transport field of plan;
-// per-image fields resolve the image called name.
+// per-image fields resolve the image called name, build-sbom the producer or
+// file output of that name.
 func snapshotPlanFieldValues(plan snapshotimage.Plan, field, name string) ([]string, error) {
 	values := []string{}
 
@@ -98,6 +103,13 @@ func snapshotPlanFieldValues(plan snapshotimage.Plan, field, name string) ([]str
 		}
 
 		return snapshotImageFieldValues(image, field), nil
+	case snapshotFieldBuildSBOM:
+		enabled, err := appsnapshot.BuildSBOM(plan, name)
+		if err != nil {
+			return nil, err
+		}
+
+		values = append(values, strconv.FormatBool(enabled))
 	default:
 		return nil, fmt.Errorf("%w %q", errUnknownSnapshotField, field)
 	}
@@ -151,27 +163,43 @@ func snapshotImagesContextCmd() *cli.Command {
 
 func snapshotImagesPlanCmd() *cli.Command {
 	return &cli.Command{Name: subCmdPlan, Usage: "pin source and plan declared native snapshot images; no implicit root image", Flags: []cli.Flag{
-		&cli.StringFlag{Name: "file", Value: appsnapshot.DefaultConfigFile},
+		&cli.StringFlag{Name: flagFile, Value: appsnapshot.DefaultConfigFile},
 		&cli.StringFlag{Name: "branch", Required: true, Usage: "logical source branch (also for detached/manual checkouts)"},
 		&cli.StringFlag{Name: "source-sha", Required: true},
-		&cli.StringFlag{Name: flagImageRepository, Required: true, Usage: "full base OCI repository; configured image-name overrides its repository using the existing name rules"},
+		&cli.StringFlag{Name: flagImageRepository, Usage: "full base OCI repository, required when the plan publishes an image; configured image-name overrides its repository using the existing name rules"},
 		&cli.StringFlag{Name: flagOutput, Required: true},
-		&cli.BoolFlag{Name: flagPublish, Value: true, Usage: "enable declared images (false emits an empty disabled plan)"},
-	}, Action: func(ctx context.Context, cmd *cli.Command) error {
-		if err := snapshotOutputDistinct(cmd.String(flagOutput), cmd.String("file")); err != nil {
+		&cli.BoolFlag{Name: flagPublish, Value: true, Usage: "enable declared images (false plans no image)"},
+		&cli.BoolFlag{Name: "publish-files", Usage: "keep the built files of every declared artifact its ecosystem builds outside an image as unsigned file outputs"},
+		commonflags.RequiredRunnerInput(),
+		// A --runner-input value is a JSON array, whose commas separate nothing.
+	}, DisableSliceFlagSeparator: true, Action: func(ctx context.Context, cmd *cli.Command) error {
+		if err := snapshotOutputDistinct(cmd.String(flagOutput), cmd.String(flagFile)); err != nil {
 			return err
 		}
 
-		p, err := appsnapshot.Plan(ctx, gitadapter.New(), appsnapshot.PlanInput{File: cmd.String("file"), Branch: cmd.String("branch"), SourceSHA: cmd.String("source-sha"), ImageRepository: cmd.String(flagImageRepository), Publish: cmd.Bool(flagPublish)})
+		snapshotPlan, err := appsnapshot.Plan(ctx, gitadapter.New(), appsnapshot.PlanInput{File: cmd.String(flagFile), Branch: cmd.String("branch"), SourceSHA: cmd.String("source-sha"), ImageRepository: cmd.String(flagImageRepository), Publish: cmd.Bool(flagPublish), PublishFiles: cmd.Bool("publish-files")})
 		if err != nil {
 			return err
 		}
 
-		if err = appsnapshot.WriteJSON(cmd.String(flagOutput), p); err != nil {
-			return err
-		}
+		return deps.FromCmd(ctx, cmd, func(dep *deps.Deps) error {
+			// A planned build with no runner is refused before the plan is
+			// written, so no job starts on it.
+			runnerInputs, err := commonflags.RequiredRunnerInputs(cmd, dep.Platform, "a snapshot image plan")
+			if err != nil {
+				return err
+			}
 
-		return deps.FromCmd(ctx, cmd, func(dep *deps.Deps) error { return appsnapshot.EmitPlan(ctx, dep.OutputSink, p) })
+			if err := runnerInputs.Admit(snapshotPlan.RunnerNeeds()); err != nil {
+				return err
+			}
+
+			if err := appsnapshot.WriteJSON(cmd.String(flagOutput), snapshotPlan); err != nil {
+				return err
+			}
+
+			return appsnapshot.EmitPlan(ctx, dep.OutputSink, snapshotPlan)
+		})
 	}}
 }
 

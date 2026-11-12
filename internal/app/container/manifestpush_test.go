@@ -9,6 +9,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -226,7 +227,32 @@ func TestResolvePushedManifestDigest_OptionalLegacyFileAndRetries(t *testing.T) 
 	raw := []byte(`{"schemaVersion":2}`)
 
 	digest := manifestTestDigest(raw)
-	for _, value := range []string{"", digest + "\n", "not-a-digest", "sha256:" + strings.Repeat("0", 64)} {
+
+	// A digest file that is named and cannot be read fails before the
+	// registry is asked: the registry's own answer would verify nothing.
+	unread := &fakeManifestPushRegistry{raw: raw}
+	if result, err := appcontainer.ResolvePushedManifestDigest(t.Context(), unread, fakeoutputsink.New(t), io.Discard, appcontainer.PushedManifestDigestInput{
+		Ref: "registry.example/app:v1", DigestFile: filepath.Join(t.TempDir(), "absent"),
+	}); !errors.Is(err, errs.ErrMissingInput) || result != nil || len(unread.queried) != 0 {
+		t.Fatalf("an unreadable digest file was passed over: %+v %v queried=%v", result, err, unread.queried)
+	}
+
+	// Nor does a file that holds no digest leave the registry to vouch for itself.
+	for _, content := range []string{"", "\n", "not-a-digest", "sha256:" + strings.Repeat("a", 63), "sha512:" + strings.Repeat("a", 64), strings.Repeat("a", 64)} {
+		file := filepath.Join(t.TempDir(), "digest")
+		if err := os.WriteFile(file, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+
+		registry := &fakeManifestPushRegistry{raw: raw}
+		if result, err := appcontainer.ResolvePushedManifestDigest(t.Context(), registry, fakeoutputsink.New(t), io.Discard, appcontainer.PushedManifestDigestInput{
+			Ref: "registry.example/app:v1", DigestFile: file,
+		}); !errors.Is(err, errs.ErrMalformedInput) || result != nil || len(registry.queried) != 0 {
+			t.Fatalf("a digest file holding %q was passed over: %+v %v", content, result, err)
+		}
+	}
+
+	for _, value := range []string{"", digest + "\n", "sha256:" + strings.Repeat("0", 64)} {
 		input := appcontainer.PushedManifestDigestInput{Ref: "registry.example/app:v1", RetryAttempts: 2, RetryDelay: time.Nanosecond}
 		if value != "" {
 			input.DigestFile = filepath.Join(t.TempDir(), "digest")
@@ -256,10 +282,6 @@ func TestResolvePushedManifestDigest_OptionalLegacyFileAndRetries(t *testing.T) 
 		if !slices.Equal(registry.queried, []string{input.Ref, input.Ref}) {
 			t.Fatal("lookup retried another reference")
 		}
-
-		if strings.Contains(log.String(), "digest file was empty or invalid") != (value == "not-a-digest") {
-			t.Fatal("legacy digest warning changed")
-		}
 	}
 }
 
@@ -284,4 +306,30 @@ func manifestTestDigest(raw []byte) string {
 	sum := sha256.Sum256(raw)
 
 	return "sha256:" + hex.EncodeToString(sum[:])
+}
+
+type deniedManifestRegistry struct {
+	fakeManifestPushRegistry
+
+	calls int
+}
+
+func (d *deniedManifestRegistry) Manifest(context.Context, string) ([]byte, error) {
+	d.calls++
+
+	return nil, fmt.Errorf("token refused: %w", errs.ErrPermissionDenied)
+}
+
+// A refused credential stops at once: retrying cannot change it, and each
+// wait only delays the error a person needs to see.
+func TestResolvePushedManifestDigest_DoesNotRetryAPermissionDenial(t *testing.T) {
+	t.Parallel()
+
+	registry := &deniedManifestRegistry{}
+
+	_, err := appcontainer.ResolvePushedManifestDigest(t.Context(), registry, nil, io.Discard,
+		appcontainer.PushedManifestDigestInput{Ref: "registry.example/app:v1", RetryAttempts: 3, RetryDelay: time.Hour})
+	if !errors.Is(err, errs.ErrPermissionDenied) || registry.calls != 1 {
+		t.Fatalf("err = %v after %d calls, want one permission-denied call", err, registry.calls)
+	}
 }

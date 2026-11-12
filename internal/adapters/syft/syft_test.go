@@ -185,8 +185,8 @@ func TestSyft_MissingBinaryIsADependencyProblem(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			err := run()
-			if !errors.Is(err, errs.ErrDependencyUnavailable) {
-				t.Fatalf("err = %v, want ErrDependencyUnavailable", err)
+			if !errors.Is(err, errs.ErrPrerequisite) {
+				t.Fatalf("err = %v, want ErrPrerequisite", err)
 			}
 
 			if !strings.Contains(err.Error(), "syft-does-not-exist") {

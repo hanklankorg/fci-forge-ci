@@ -26,6 +26,11 @@ type BuildAndScanInput struct {
 	ScanSeverity string
 	// TrivyVersion is embedded in the GitLab container-scanning report.
 	TrivyVersion string
+	// DeferScan exports an oci-mode layout unscanned: a later `security scan
+	// container --oci-layout` job, in the full runtime image that carries
+	// Trivy, scans it and gates publication. Refused in push-by-digest mode,
+	// where nothing stands between the scan and the push.
+	DeferScan bool
 }
 
 // BuildAndScan builds one platform, scans its exported layout, then publishes
@@ -55,8 +60,18 @@ func BuildAndScan(
 		return BuildImage(ctx, builder, pusher, sink, out, in.Build)
 	}
 
+	if in.DeferScan {
+		if in.Build.Mode != domaincontainer.BuildModeOCI {
+			return "", fmt.Errorf("--defer-scan leaves the exported layout to a later scan job and is valid in oci mode only: %w", errs.ErrUsage)
+		}
+
+		_, _ = fmt.Fprintln(out, "Scan deferred: the layout scan job scans this exported layout before publication.")
+
+		return buildImage(ctx, builder, pusher, sink, out, in.Build, nil)
+	}
+
 	if trivy == nil {
-		return "", fmt.Errorf("admin policy requires a vulnerability scanner: %w", errs.ErrDependencyUnavailable)
+		return "", fmt.Errorf("admin policy requires a vulnerability scanner: %w", errs.ErrPrerequisite)
 	}
 
 	// --cache-to writes during the build, before a scan could refuse it.

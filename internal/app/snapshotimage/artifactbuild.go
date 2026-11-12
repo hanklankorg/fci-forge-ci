@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: The Forge CI Authors
+// SPDX-FileCopyrightText: 2026 Digg - Agency for Digital Government
 // SPDX-License-Identifier: EUPL-1.2 OR GPL-3.0-or-later
 
 package snapshotimage
@@ -118,6 +118,24 @@ func runArtifactBuild(ctx context.Context, ops appversion.GenerateSnapshotOps, r
 	return CheckSource(ctx, ops, plan.SourceSHA)
 }
 
+// BuildSBOM reports whether the build of the producer or file output called
+// name writes its Build SBOM: what the build CLI is told with --build-sbom. A
+// job that brings the generator itself asks this before the build.
+func BuildSBOM(plan snapshotimage.Plan, name string) (bool, error) {
+	planned, err := plan.Artifact(name)
+	if err != nil {
+		if planned, err = plan.File(name); err != nil {
+			return false, err
+		}
+	}
+
+	return buildsSBOM(planned), nil
+}
+
+func buildsSBOM(planned pipeline.PlannedArtifact) bool {
+	return slices.Contains(planned.EffectiveSBOMs, config.SBOMLayerBuild)
+}
+
 func artifactBuildRequest(plan snapshotimage.Plan, planned pipeline.PlannedArtifact, parent []string) (ArtifactBuildRequest, error) {
 	root, err := pathsafe.OpenRoot(planned.WorkingDirectory)
 	if err != nil {
@@ -131,7 +149,7 @@ func artifactBuildRequest(plan snapshotimage.Plan, planned pipeline.PlannedArtif
 		return ArtifactBuildRequest{}, err
 	}
 
-	args := []string{"build", string(planned.ProjectType), "run", "--working-dir", ".", "--build-sbom=" + strconv.FormatBool(slices.Contains(planned.EffectiveSBOMs, config.SBOMLayerBuild))}
+	args := []string{"build", string(planned.ProjectType), "run", "--working-dir", ".", "--build-sbom=" + strconv.FormatBool(buildsSBOM(planned))}
 
 	typeArgs, private, err := projectBuildArgs(plan, planned)
 	if err != nil {
@@ -147,6 +165,12 @@ func artifactBuildRequest(plan snapshotimage.Plan, planned pipeline.PlannedArtif
 	// CLI policy overrides. Only explicitly requested read-only dependency auth
 	// crosses this boundary; the child also applies its existing auth isolation.
 	allowed := []string{"PATH", "TMPDIR", "TEMP", "TMP", "GOROOT", "GOTOOLCHAIN", "GOPATH", "GOPROXY", "GOSUMDB", "GOPRIVATE", "GONOSUMDB", "GONOPROXY", "GOCACHE", "GOMODCACHE", "RUSTUP_HOME", "CARGO_HOME", "CC", "CXX", "CGO_ENABLED", "SSL_CERT_FILE", "SSL_CERT_DIR", "NODE_EXTRA_CA_CERTS", "JAVA_HOME"}
+	// Image-provisioned Mise shims need the installed-tool location and the
+	// image's config selection together. Losing these when HOME is replaced
+	// selects consumer config (and can attempt acquisition) instead of the
+	// preprovisioned tools. Do not admit trust overrides, credentials, arbitrary
+	// MISE_* or XDG config: only these nonsecret image runtime selectors.
+	allowed = append(allowed, "MISE_DATA_DIR", "MISE_CONFIG_DIR", "MISE_OVERRIDE_CONFIG_FILENAMES")
 	if private {
 		allowed = append(allowed, "DEPENDENCY_TOKEN", "DEPENDENCY_USERNAME")
 	}

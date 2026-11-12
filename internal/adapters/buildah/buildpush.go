@@ -14,6 +14,7 @@ import (
 // BuildManifest builds one platform into a shared buildah manifest list.
 func (a *Adapter) BuildManifest(ctx context.Context, req container.BuildPushManifestBuildRequest, out io.Writer) error {
 	args := append(a.global("bud", "--pull=always"), chrootIsolation()...)
+	args = append(args, registryRetry()...)
 	args = append(args,
 		"--platform", req.Platform,
 		fmt.Sprintf("--tls-verify=%t", req.TLSVerify),

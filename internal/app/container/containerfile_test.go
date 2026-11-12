@@ -132,6 +132,25 @@ func TestValidateContainerfile_MultipleMatchesErrors(t *testing.T) {
 	}
 }
 
+// A directory a job unpacks an artifact into is named by the caller: one
+// that is absolute or climbs out of the checkout is refused, and no
+// containerfile output is written.
+func TestValidateContainerfile_RefusesASourceDirOutsideTheCheckout(t *testing.T) {
+	fsys := testfs.NewReal(t)
+	fsys.WriteFile("Containerfile", []byte("FROM scratch"))
+
+	for _, dir := range []string{"/tmp", "..", "services/../../elsewhere", ""} {
+		sink := fakeoutputsink.New(t)
+
+		err := appcontainer.ValidateContainerfile(context.Background(), sink, io.Discard, appcontainer.ValidateContainerfileInput{
+			Path: fsys.Path("Containerfile"), SourceDirs: []string{".", "services/app", dir},
+		})
+		if !errors.Is(err, errs.ErrValidation) || len(sink.Keys()) != 0 {
+			t.Errorf("source dir %q: err = %v, outputs = %q, want ErrValidation and none", dir, err, sink.Keys())
+		}
+	}
+}
+
 func TestValidateContainerfile_NoMatchErrors(t *testing.T) {
 	fsys := testfs.NewReal(t)
 

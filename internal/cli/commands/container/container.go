@@ -41,6 +41,7 @@ import (
 	appcontainer "github.com/diggsweden/forge-ci/internal/app/container"
 	"github.com/diggsweden/forge-ci/internal/cli/cienv"
 	"github.com/diggsweden/forge-ci/internal/cli/cmdmeta"
+	"github.com/diggsweden/forge-ci/internal/cli/commonflags"
 	"github.com/diggsweden/forge-ci/internal/cli/deps"
 	"github.com/diggsweden/forge-ci/internal/cli/planfile"
 	"github.com/diggsweden/forge-ci/internal/cli/regflags"
@@ -65,13 +66,16 @@ const flagFlavor = "flavor"
 
 // New returns the `container` subgroup command tree.
 func New() *cli.Command {
+	bases := baseImagesGroup()
+	bases.Commands = append(bases.Commands, childBaseGroup())
+
 	return &cli.Command{
 		Name:  "container",
 		Usage: "container-image helpers (name resolution, manifests, namespace policy, tag/label metadata, …)",
 		Commands: slices.Concat(
-			cmdmeta.WithCategory("Build & sign", setupBuildahCmd(), buildCmd(), buildPushOCIImageCmd(), imageGroup(), layoutGroup(), signerImageGroup(), loginCmd(), logoutCmd(), signCmd(), attestCmd()),
+			cmdmeta.WithCategory("Build & sign", setupBuildahCmd(), setupImageBuilderCmd(), buildCmd(), buildPushOCIImageCmd(), imageGroup(), layoutGroup(), signerImageGroup(), loginCmd(), logoutCmd(), signCmd(), attestCmd()),
 			cmdmeta.WithCategory("Image metadata & manifests", builderIdentityCmd(), refGroup(), metadataCmd(), containerfileArgDefaultCmd(), releaseLabelsCmd(), releaseIdentityMatchesCmd(), imageLabelsJSONCmd(), imageEvidenceCmd(), platformPlanCmd(), manifestGroup(), writeDigestMarkerCmd()),
-			cmdmeta.WithCategory("Release promotion", ledgerGroup(), releaseImagesGroup(), snapshotImagesGroup(), baseImagesGroup(), packageRetentionCmd()),
+			cmdmeta.WithCategory("Release promotion", ledgerGroup(), releaseImagesGroup(), snapshotImagesGroup(), bases, packageRetentionCmd(), runtimePublicationCmd()),
 			cmdmeta.WithCategory("Validation", validateGroup()),
 			cmdmeta.WithCategory("Workflow plumbing", prepareKanikoActionCmd(), materializeBuildSecretsCmd(), extractNPMTarballCmd(), suffixBinariesCmd()),
 		),
@@ -381,19 +385,32 @@ its suffix) to the output sink. --release-platforms, or RELEASE_PLATFORMS, narro
 declared --platforms to a subset; an undeclared, duplicated or malformed entry
 is refused.
 
+The layer passes its runner inputs with --runner-input, as release-images
+plan takes them; a planned platform whose image build runner input has no
+value is refused here, before any output is written.
+
 EXAMPLE:
    forge-ci container platform-plan --platforms "linux/amd64,linux/arm64" --release-platforms "$RELEASE_PLATFORMS"`,
+		// A --runner-input value is a JSON array, whose commas separate nothing.
+		DisableSliceFlagSeparator: true,
 		Flags: []cli.Flag{
 			&cli.StringFlag{Name: "platforms", Sources: cli.EnvVars("PLATFORMS"), Usage: "comma/space/newline-separated build platforms (linux/amd64,linux/arm64)"},
 			&cli.StringFlag{Name: flagPlatform, Sources: cli.EnvVars("PLATFORM"), Usage: "single build platform; falls back to the first entry of --platforms"},
 			&cli.StringFlag{Name: "release-platforms", Sources: cli.EnvVars("RELEASE_PLATFORMS"), Usage: "comma-separated subset of --platforms to build; empty builds them all"},
+			commonflags.RunnerInput(),
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			return deps.FromCmd(ctx, cmd, func(dep *deps.Deps) error {
-				_, err := appcontainer.PlatformPlan(ctx, dep.OutputSink, os.Stderr, appcontainer.PlatformPlanInput{
+				runnerInputs, err := commonflags.RunnerInputs(cmd, dep.Platform)
+				if err != nil {
+					return err
+				}
+
+				_, err = appcontainer.PlatformPlan(ctx, dep.OutputSink, os.Stderr, appcontainer.PlatformPlanInput{
 					Platforms:        cmd.String("platforms"),
 					Platform:         cmd.String(flagPlatform),
 					ReleasePlatforms: cmd.String("release-platforms"),
+					Runners:          runnerInputs,
 				})
 
 				return err

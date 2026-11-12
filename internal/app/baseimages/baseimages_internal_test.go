@@ -60,6 +60,42 @@ func TestVerifyExistingBaseImages_ReportsVerifiedAndMissing(t *testing.T) {
 	}
 }
 
+// A reused base is a parent only when its reads were authenticated, and then
+// as the digest its evidence verified on. A missing flavor is no parent.
+func TestVerifyExistingBaseImages_ProjectsAuthenticatedParents(t *testing.T) {
+	t.Parallel()
+
+	repo := "forge.example/examplescope/myapp-base"
+	baseID := strings.Repeat("a", 64)
+	ref := repo + "@sha256:" + strings.Repeat("1", 64)
+
+	for _, tc := range []struct {
+		name          string
+		authenticated bool
+		want          string
+	}{
+		{name: "authenticated", authenticated: true, want: `{"rust":{"ref":"` + ref + `","input_id":"` + baseID + `"}}`},
+		{name: "anonymous", want: `{}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			registry := &fakeBaseImageRegistry{digests: map[string]string{repo + ":" + baseID + "-rust": "sha256:" + strings.Repeat("1", 64)}}
+			verifier := &fakeBaseImageVerifier{payload: baseLineagePayload(t,
+				lineageFields{source: "https://forge.example/examplescope/myapp", workflow: "container-bases.yml", flavor: "rust", baseInputID: baseID},
+			)}
+
+			result, err := VerifyExistingBaseImages(t.Context(), registry, verifier, io.Discard, BaseImageVerifyExistingInput{
+				Authenticated: tc.authenticated, Flavors: []string{"rust", "go"}, BaseInputID: baseID, ExpectedRepository: repo,
+				ExpectedSource: "https://forge.example/examplescope/myapp", ExpectedWorkflow: "container-bases.yml", CosignPublicKey: "cosign.pub",
+			})
+			if err != nil || result.ParentBasesJSON != tc.want {
+				t.Fatalf("ParentBasesJSON = %s, err = %v; want %s", result.ParentBasesJSON, err, tc.want)
+			}
+		})
+	}
+}
+
 // GHCR answers an anonymous read of a package that does not exist yet, or is
 // private, with DENIED. With no credentials that is a miss
 // the first release builds, with a note naming the explicit auth option; a real
@@ -174,6 +210,7 @@ func TestPromoteBaseImages_CopiesMissingFinalTagAndEmitsOutputs(t *testing.T) {
 			{Flavor: "rust", Tag: rustFinal, Ref: repo + "@" + rustDigest, CandidateTag: rustCandidate, CandidateRef: repo + "@" + rustDigest, BaseInputID: baseID},
 			{Flavor: "go", Tag: goFinal, Ref: repo + "@" + goDigest, BaseInputID: baseID},
 		},
+		BaseInputs:         []BaseInput{{Flavor: "rust", BaseInputID: baseID}, {Flavor: "go", BaseInputID: baseID}},
 		ExpectedRepository: repo,
 		ExpectedSource:     "https://forge.example/examplescope/myapp",
 		ExpectedWorkflow:   "container-bases.yml",
@@ -392,7 +429,7 @@ func (f *fakeBaseImageRegistry) CopyTag(_ context.Context, source, dest string) 
 	// Split here rather than calling the production digestFromRef: a fake that
 	// borrows the helper it is standing in for agrees with it by construction,
 	// so a wrong assumption would be wrong in both places and the test would
-	// still pass. docs/testing.md names this as the reason the live tier
+	// still pass. docs/live-runs.md names this as the reason the live tier
 	// exists; it costs one line to not reproduce it here.
 	_, digest, _ := strings.Cut(source, "@")
 	f.digests[dest] = digest

@@ -56,10 +56,9 @@ func (a *Adapter) RunInherit(ctx context.Context, stdout, stderr io.Writer, args
 		return exitErr.ExitCode(), nil
 	}
 
-	// A non-exit failure (most commonly trivy missing from PATH) is an
-	// external-dependency problem, not an internal bug — classify it so it
-	// surfaces as EX_UNAVAILABLE (69) rather than the unclassified
-	// EX_SOFTWARE (70).
+	// A non-exit failure (most commonly trivy missing from PATH) is a
+	// missing prerequisite, not an internal bug: EX_CONFIG (78), not the
+	// unclassified EX_SOFTWARE (70).
 	return -1, safeexec.WrapError(err, a.bin(), safeexec.FirstArg(args))
 }
 

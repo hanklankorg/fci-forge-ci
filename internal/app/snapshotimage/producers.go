@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: The Forge CI Authors
+// SPDX-FileCopyrightText: 2026 Digg - Agency for Digital Government
 // SPDX-License-Identifier: EUPL-1.2 OR GPL-3.0-or-later
 
 package snapshotimage
@@ -258,6 +258,23 @@ func prepareProducer(plan snapshotimage.Plan, planned pipeline.PlannedArtifact, 
 	return exportTree(tmp, output, plan)
 }
 
+// downloadSource is where the build stage's uploaded artifact, downloaded to
+// dir, holds what the build left in producerSource. The Maven build uploads
+// its POMs beside target/, so its jars keep that directory. The Gradle build
+// uploads build/libs of the project and of every subproject, so the project's
+// own jars keep build/libs. Every other build uploads the content of its
+// output directory alone.
+func downloadSource(planned pipeline.PlannedArtifact, dir string) string {
+	switch planned.ProjectType {
+	case projecttype.Maven:
+		return filepath.Join(dir, "target")
+	case projecttype.Gradle:
+		return filepath.Join(dir, "build/libs")
+	default:
+		return dir
+	}
+}
+
 // producerSource is the existing build CLI's output directory for a project type.
 func producerSource(planned pipeline.PlannedArtifact) string {
 	switch planned.ProjectType {
@@ -457,7 +474,7 @@ func PrepareInputs(ctx context.Context, ops appversion.GenerateSnapshotOps, plan
 	defer func() { _ = os.RemoveAll(stage) }()
 
 	for _, planned := range plan.Artifacts {
-		if err := prepareProducer(plan, planned, filepath.Join(input, planned.Name), filepath.Join(stage, planned.Name)); err != nil {
+		if err := prepareProducer(plan, planned, downloadSource(planned, filepath.Join(input, planned.Name)), filepath.Join(stage, planned.Name)); err != nil {
 			return err
 		}
 	}

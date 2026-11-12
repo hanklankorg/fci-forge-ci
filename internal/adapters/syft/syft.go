@@ -108,9 +108,9 @@ func (a *Adapter) run(ctx context.Context, stdout, stderr io.Writer, args []stri
 	cmd.Stderr = stderr
 
 	if err := cmd.Run(); err != nil {
-		// A non-exit failure (most commonly syft missing from PATH) is an
-		// external-dependency problem, not an internal bug — classify it as
-		// EX_UNAVAILABLE (69) rather than the unclassified EX_SOFTWARE (70).
+		// A non-exit failure (most commonly syft missing from PATH) is a
+		// missing prerequisite, not an internal bug: EX_CONFIG (78), not the
+		// unclassified EX_SOFTWARE (70).
 		return safeexec.WrapError(err, a.bin(), safeexec.FirstArg(args))
 	}
 

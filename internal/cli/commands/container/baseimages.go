@@ -9,7 +9,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -23,6 +22,7 @@ import (
 	"github.com/diggsweden/forge-ci/internal/cli/cienv"
 	"github.com/diggsweden/forge-ci/internal/cli/deps"
 	"github.com/diggsweden/forge-ci/internal/cli/regflags"
+	"github.com/diggsweden/forge-ci/internal/cliio"
 	domaincontainer "github.com/diggsweden/forge-ci/internal/domain/container"
 	"github.com/diggsweden/forge-ci/internal/domain/errs"
 	"github.com/diggsweden/forge-ci/internal/pathsafe"
@@ -71,10 +71,14 @@ lineage attestations, sign digest-pinned base images, and promote verified
 candidate images to immutable final base tags. Checkout and pinned-binary
 bootstrap remain owned by the caller.`,
 		Commands: []*cli.Command{
+			rootBaseGroup(),
 			baseImagesImportCmd(),
 			baseImagesSignCmd(),
 			baseImagesVerifyCmd(),
+			baseImagesAuthenticateParentCmd(),
+			baseImagesSelectParentCmd(),
 			baseImagesPromoteCmd(),
+			baseImagesDeclaredInputsCmd(),
 			baseImagesCleanupCmd(),
 			baseImagesPruneCmd(),
 			baseImagesFreshnessCmd(),
@@ -317,40 +321,47 @@ func validateBaseImagesPublicKey(path, want string) error {
 // regular file whose SHA-256 is want. It is the one trust-root check behind
 // the base-image and release-image verbs; verb prefixes its messages.
 func verifyCosignPublicKeyDigest(verb, path, want string) error {
+	_, err := readVerifiedCosignPublicKey(verb, path, want)
+
+	return err
+}
+
+// Return the exact pinned bytes so callers can freeze them for later verifier
+// subprocesses rather than reopen a caller-mutable key pathname.
+func readVerifiedCosignPublicKey(verb, path, want string) ([]byte, error) {
 	if !domaincontainer.ValidSHA256Hex(want) {
-		return fmt.Errorf("%s: cosign-public-key-sha256 must be a sha256 hex digest: %w", verb, errs.ErrValidation)
+		return nil, fmt.Errorf("%s: cosign-public-key-sha256 must be a sha256 hex digest: %w", verb, errs.ErrValidation)
 	}
 
 	info, err := os.Lstat(path)
 	if err != nil || !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 {
-		return fmt.Errorf("%s: Cosign public key is missing, not a regular file, or a symlink: %s: %w", verb, path, errs.ErrMissingInput)
+		return nil, fmt.Errorf("%s: Cosign public key is missing, not a regular file, or a symlink: %s: %w", verb, path, errs.ErrMissingInput)
 	}
 
-	file, err := os.Open(path) //nolint:gosec // caller-selected public key path validated as a relative regular file.
+	const maxPublicKeyBytes = 1 << 20
+
+	if info.Size() > maxPublicKeyBytes {
+		return nil, fmt.Errorf("%s: Cosign public key exceeds 1 MiB: %w", verb, errs.ErrMalformedInput)
+	}
+	// The existing regular-file reader opens nonblocking and bounds even a file
+	// replaced/grown after Lstat. Pin the bytes actually read, not a later reopen.
+	body, err := cliio.ReadRegularFile(path)
 	if err != nil {
-		return fmt.Errorf("%s: open Cosign public key %s: %w", verb, path, err)
+		return nil, fmt.Errorf("%s: read Cosign public key %s: %w", verb, path, err)
 	}
 
-	defer func() { _ = file.Close() }()
-
-	// The path can be swapped between the check and the open; judge the file opened.
-	if opened, statErr := file.Stat(); statErr != nil || !os.SameFile(info, opened) {
-		return fmt.Errorf("%s: Cosign public key changed while opening: %s: %w", verb, path, errs.ErrValidation)
-	}
-
-	body, err := io.ReadAll(file)
-	if err != nil {
-		return fmt.Errorf("%s: read Cosign public key %s: %w", verb, path, err)
+	if len(body) > maxPublicKeyBytes {
+		return nil, fmt.Errorf("%s: Cosign public key exceeds 1 MiB: %w", verb, errs.ErrMalformedInput)
 	}
 
 	sum := sha256.Sum256(body)
 
 	actual := hex.EncodeToString(sum[:])
 	if actual != want {
-		return fmt.Errorf("%s: Cosign public key digest does not match expected trust root\n  path:     %s\n  expected: %s\n  actual:   %s: %w", verb, path, want, actual, errs.ErrValidation)
+		return nil, fmt.Errorf("%s: Cosign public key digest does not match expected trust root\n  path:     %s\n  expected: %s\n  actual:   %s: %w", verb, path, want, actual, errs.ErrValidation)
 	}
 
-	return nil
+	return body, nil
 }
 
 func parseBaseInputs(raw string) ([]appbaseimages.BaseInput, error) {

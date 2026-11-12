@@ -9,7 +9,6 @@ import (
 
 	"github.com/urfave/cli/v3"
 
-	"github.com/diggsweden/forge-ci/internal/adapters/cosign"
 	appcontainer "github.com/diggsweden/forge-ci/internal/app/container"
 	"github.com/diggsweden/forge-ci/internal/cli/dryrun"
 	"github.com/diggsweden/forge-ci/internal/domain/imageledger"
@@ -58,17 +57,18 @@ func ledgerPromoteCmd() *cli.Command {
 				AllowDigestRefFallback: cmd.Bool("allow-digest-ref-fallback"),
 			}
 
-			// A cross-registry destination (--stage-repo) copies the
-			// signature via cosign; same-repo promotions never consult it.
-			var realSigCopier imageledger.SignatureCopier
+			// A destination in another repository or registry (--stage-repo)
+			// shares nothing with the source, so the image's signatures and
+			// attestations are copied with it; a same-repository promotion
+			// never consults the copier.
+			registry := ledgerRegistry(cmd)
 
+			var realSigCopier imageledger.SignatureCopier
 			if stage.TargetRepo != "" {
-				copier := cosign.New()
-				copier.AuthFile = cmd.String(flagAuthFile)
-				realSigCopier = cosignSigCopier{cosign: copier, out: os.Stderr}
+				realSigCopier = auditSignatureCopier{SignatureCopier: registry, out: os.Stderr}
 			}
 
-			reg, sigCopier := promotionRegistries(ledgerRegistry(cmd), dryrun.Enabled(cmd), realSigCopier)
+			reg, sigCopier := promotionRegistries(registry, dryrun.Enabled(cmd), realSigCopier)
 
 			return appcontainer.PromoteLedger(ctx, appcontainer.LedgerPromotion{
 				Registry:        reg,
@@ -90,7 +90,7 @@ func ledgerPromoteCmd() *cli.Command {
 // simulates copies in memory and previews them (the simulated registry
 // doubles as the signature copier); a real run narrates each copy via
 // auditCopier (audit trail) and uses the caller's signature copier
-// (cosign for cross-registry promotion, nil when unused).
+// (the registry adapter for cross-registry promotion, nil when unused).
 func promotionRegistries(resolver imageledger.Registry, dryRun bool, realSigCopier imageledger.SignatureCopier) (imageledger.Registry, imageledger.SignatureCopier) {
 	if dryRun {
 		sim := newDryRunRegistry(resolver, os.Stderr)

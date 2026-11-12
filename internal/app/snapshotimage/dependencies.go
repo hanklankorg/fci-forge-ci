@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: The Forge CI Authors
+// SPDX-FileCopyrightText: 2026 Digg - Agency for Digital Government
 // SPDX-License-Identifier: EUPL-1.2 OR GPL-3.0-or-later
 
 package snapshotimage
@@ -82,30 +82,28 @@ func inside(directory, path string) bool {
 	return err != nil || filepath.IsLocal(rel)
 }
 
-func validateDependencies(plan snapshotimage.Plan, path string) error {
-	if path == "" {
-		path = snapshotimage.DefaultDependenciesFile
-	}
-
+// validateDependencies checks the recorded inventory at path against the
+// checkout's dependency inputs and returns it once every file agrees.
+func validateDependencies(plan snapshotimage.Plan, path string) (snapshotimage.DependencyInventory, error) {
 	var recorded snapshotimage.DependencyInventory
 	if err := ReadJSON(path, &recorded); err != nil {
-		return fmt.Errorf("read snapshot dependencies: %w", err)
+		return recorded, fmt.Errorf("read snapshot dependencies: %w", err)
 	}
 
 	if recorded.Version != snapshotimage.Version || recorded.SourceSHA != plan.SourceSHA || recorded.SourceBranch != plan.SourceBranch {
-		return errInventorySourceDiffers
+		return recorded, errInventorySourceDiffers
 	}
 
 	actual, err := dependencyInventory(plan)
 	if err != nil {
-		return err
+		return recorded, err
 	}
 
 	if !reflect.DeepEqual(recorded, actual) {
-		return errInventoryDiffers
+		return recorded, errInventoryDiffers
 	}
 
-	return nil
+	return recorded, nil
 }
 
 func dependencyInventory(plan snapshotimage.Plan) (snapshotimage.DependencyInventory, error) {

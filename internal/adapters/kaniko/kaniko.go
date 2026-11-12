@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: The Forge CI Authors
+// SPDX-FileCopyrightText: 2026 Digg - Agency for Digital Government
 // SPDX-License-Identifier: EUPL-1.2 OR GPL-3.0-or-later
 
 // Package kaniko builds container images with the kaniko executor, for a
@@ -35,12 +35,16 @@
 package kaniko
 
 import (
+	"bytes"
 	"context"
 	"crypto/x509"
+	"errors"
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/diggsweden/forge-ci/internal/archive"
@@ -52,6 +56,18 @@ import (
 // DefaultExecutor is where the kaniko image, and the kaniko job image built
 // from it, install the executor.
 const DefaultExecutor = "/kaniko/executor"
+
+// Log markers the live image-plan oracle counts to tell a real build from a
+// reused architecture cache. Referencing them here keeps the oracle and the
+// producer in one place: a wording change fails to compile instead of
+// failing a lab run.
+const (
+	// LayoutBuildNoticeSuffix follows the local image name when a build is
+	// staged until its layout is exported.
+	LayoutBuildNoticeSuffix = " builds when its layout is exported"
+	// ExecutionNotice is printed once per executed kaniko build.
+	ExecutionNotice = "kaniko replaces this container's root filesystem with the image's and deletes it after the build; mounts, the layout, the context and /kaniko are kept."
+)
 
 // Adapter wraps the kaniko executor. Executor is overridable for tests and
 // for an installation that places the binary elsewhere.
@@ -142,7 +158,7 @@ func (a *Adapter) BuildSignerImage(_ context.Context, req container.SignerImageB
 	}
 
 	a.staged[req.LocalImage] = req
-	_, _ = fmt.Fprintf(out, "kaniko: %s builds when its layout is exported\n", req.LocalImage)
+	_, _ = fmt.Fprintf(out, "kaniko: %s"+LayoutBuildNoticeSuffix+"\n", req.LocalImage)
 
 	return nil
 }
@@ -185,7 +201,7 @@ func (a *Adapter) ExportLocalImageToLayout(ctx context.Context, imageRef, layout
 // outside the output directory and installs nothing until every entry passed.
 func (a *Adapter) exportFilesystem(ctx context.Context, req container.BuildRequest, out io.Writer) error {
 	if a.Filesystem == nil {
-		return fmt.Errorf("kaniko --mode local needs a layout filesystem reader: %w", errs.ErrDependencyUnavailable)
+		return fmt.Errorf("kaniko --mode local needs a layout filesystem reader: %w", errs.ErrPrerequisite)
 	}
 
 	// Resolved before kaniko runs: the job's root filesystem is replaced
@@ -241,7 +257,7 @@ func (a *Adapter) effectiveUID() int {
 func (a *Adapter) preflight() error {
 	info, err := os.Stat(a.executor())
 	if err != nil || info.IsDir() || info.Mode()&0o111 == 0 {
-		return fmt.Errorf("kaniko executor is not at %s: run this job in the kaniko job image (containers/kaniko-job), which CI_IMAGE_BUILDER_JOB_IMAGE names, or set --kaniko-executor: %w", a.executor(), errs.ErrDependencyUnavailable)
+		return fmt.Errorf("kaniko executor is not at %s: run this job in the kaniko job image (containers/kaniko-job), which CI_IMAGE_BUILDER_JOB_IMAGE names, or set --kaniko-executor: %w", a.executor(), errs.ErrPrerequisite)
 	}
 
 	if a.effectiveUID() != 0 {
@@ -267,19 +283,31 @@ func (a *Adapter) run(ctx context.Context, spec build, layoutDir string, out io.
 	// replaced /etc/ssl. Go loads the system roots once; load them now.
 	_, _ = x509.SystemCertPool()
 
-	_, _ = fmt.Fprintln(out, "kaniko replaces this container's root filesystem with the image's and deletes it after the build; mounts, the layout, the context and /kaniko are kept.")
+	_, _ = fmt.Fprintln(out, ExecutionNotice)
+
+	// One writer for both streams keeps them in the order kaniko wrote them.
+	// What it said is kept beside the log: a registry kaniko could not reach
+	// ends the build as an unavailable dependency (errs.KanikoReport).
+	var said bytes.Buffer
+
+	heard := io.MultiWriter(out, &said)
 
 	cmd := safeexec.Command(ctx, a.executor(), args...)
-	cmd.Stdout = out
-	cmd.Stderr = out
+	cmd.Stdout = heard
+	cmd.Stderr = heard
 
 	cmd.Env = append(safeexec.ImageBuilderEnv(os.Environ()), env...)
 
-	if err := cmd.Run(); err != nil {
-		return safeexec.WrapError(err, "kaniko", "build")
+	err = cmd.Run()
+	if err == nil {
+		return nil
 	}
 
-	return nil
+	if _, ok := errors.AsType[*exec.ExitError](err); ok {
+		return safeexec.ExitFailure(err, "kaniko", "build", errs.KanikoReport(said.String()))
+	}
+
+	return safeexec.WrapError(err, "kaniko", "build")
 }
 
 // arguments assembles the executor's argv for one layout build, with the
@@ -351,6 +379,8 @@ func layoutArguments(spec build, containerfile, layoutDir string) ([]string, err
 		"--cleanup",
 		// Content changes with unchanged mtime/size must still reach the image.
 		"--snapshot-mode=full",
+		// A base image is fetched again when the registry cannot be reached.
+		"--image-download-retry", strconv.Itoa(container.RegistryRetries),
 		"--oci-layout-path", layout,
 		"--ignore-path", layout,
 		"--ignore-path", contextDir,

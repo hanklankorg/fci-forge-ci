@@ -44,33 +44,13 @@ func PromoteBaseImages(ctx context.Context, registry baseImageRegistry, verifier
 		return BaseImagePromoteResult{}, fmt.Errorf("base images promote: cosign verifier is required: %w", errs.ErrUsage)
 	}
 
-	if err := validateBaseImageCommon(in.ExpectedRepository, in.ExpectedSource, in.ExpectedWorkflow, in.BaseInputID, in.CosignPublicKey); err != nil {
+	items, baseInputs, err := normalizeBaseImagePromotion(in)
+	if err != nil {
 		return BaseImagePromoteResult{}, err
-	}
-
-	if len(in.Images) == 0 {
-		return BaseImagePromoteResult{}, fmt.Errorf("base images promote: all-images-json must contain at least one image: %w", errs.ErrValidation)
-	}
-
-	items := make([]BaseImageMetadata, 0, len(in.Images))
-
-	destinations := make(map[string]bool, len(in.Images))
-	for idx, image := range in.Images {
-		item, err := normalizePromoteBaseImage(image, in.BaseInputID, in.ExpectedRepository)
-		if err != nil {
-			return BaseImagePromoteResult{}, fmt.Errorf("base images promote: entry %d: %w", idx, err)
-		}
-
-		if destinations[item.Tag] {
-			return BaseImagePromoteResult{}, fmt.Errorf("base images promote: duplicate final destination: %w", errs.ErrValidation)
-		}
-
-		destinations[item.Tag] = true
-		items = append(items, item)
 	}
 	// Evidence and immutable destination checks for every entry precede copies.
 	for _, item := range items {
-		if err := preflightBaseImagePromotion(ctx, registry, verifier, in, item); err != nil {
+		if err := preflightBaseImagePromotion(ctx, registry, verifier, in, item, baseInputs[item.Flavor].ParentBase); err != nil {
 			return BaseImagePromoteResult{}, err
 		}
 	}
@@ -89,10 +69,75 @@ func PromoteBaseImages(ctx context.Context, registry baseImageRegistry, verifier
 	return baseImagePromotionResult(promoted)
 }
 
-func preflightBaseImagePromotion(ctx context.Context, registry baseImageRegistry, verifier imageEvidenceVerifier, in BaseImagePromoteInput, item BaseImageMetadata) error {
+// ValidateBaseImagePromotion validates the complete metadata and mandatory expected
+// input map without registry or verifier I/O. The CLI uses it before login.
+func ValidateBaseImagePromotion(in BaseImagePromoteInput) error {
+	_, _, err := normalizeBaseImagePromotion(in)
+
+	return err
+}
+
+func normalizeBaseImagePromotion(in BaseImagePromoteInput) ([]BaseImageMetadata, map[string]BaseInput, error) {
+	if err := validateBaseImageCommon(in.ExpectedRepository, in.ExpectedSource, in.ExpectedWorkflow, in.BaseInputID, in.CosignPublicKey); err != nil {
+		return nil, nil, err
+	}
+
+	if len(in.Images) == 0 {
+		return nil, nil, fmt.Errorf("base images promote: all-images-json must contain at least one image: %w", errs.ErrValidation)
+	}
+
+	if len(in.BaseInputs) == 0 {
+		return nil, nil, fmt.Errorf("base images promote: base-inputs-json must map every promoted flavor: %w", errs.ErrValidation)
+	}
+
+	baseInputs, err := baseInputByFlavor(in.BaseInputs)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	items := make([]BaseImageMetadata, 0, len(in.Images))
+
+	destinations := make(map[string]bool, len(in.Images))
+
+	flavors := make(map[string]bool, len(in.Images))
+	for idx, image := range in.Images {
+		item, err := normalizePromoteBaseImage(image, in.BaseInputID, in.ExpectedRepository)
+		if err != nil {
+			return nil, nil, fmt.Errorf("base images promote: entry %d: %w", idx, err)
+		}
+
+		if destinations[item.Tag] {
+			return nil, nil, fmt.Errorf("base images promote: duplicate final destination: %w", errs.ErrValidation)
+		}
+
+		if flavors[item.Flavor] {
+			return nil, nil, fmt.Errorf("base images promote: duplicate image flavor: %w", errs.ErrValidation)
+		}
+
+		expected, exists := baseInputs[item.Flavor]
+		if !exists || expected.BaseInputID != item.BaseInputID {
+			return nil, nil, fmt.Errorf("base images promote: entry %d: missing or conflicting base-inputs-json expectation: %w", idx, errs.ErrValidation)
+		}
+
+		destinations[item.Tag] = true
+		flavors[item.Flavor] = true
+		items = append(items, item)
+	}
+
+	for flavor := range baseInputs {
+		if !flavors[flavor] {
+			return nil, nil, fmt.Errorf("base images promote: base-inputs-json flavor %q has no target image: %w", flavor, errs.ErrValidation)
+		}
+	}
+
+	return items, baseInputs, nil
+}
+
+func preflightBaseImagePromotion(ctx context.Context, registry baseImageRegistry, verifier imageEvidenceVerifier, in BaseImagePromoteInput, item BaseImageMetadata, parent *BaseImageParent) error {
 	digest := digestFromRef(item.Ref)
 	if err := verifyBaseImageEvidence(ctx, verifier, io.Discard, item.Ref, in.CosignPublicKey, baseImageLineageExpectation{
 		Source: in.ExpectedSource, Workflow: in.ExpectedWorkflow, Flavor: item.Flavor, BaseInputID: item.BaseInputID,
+		ParentBase: parent,
 	}, 3); err != nil {
 		return err
 	}

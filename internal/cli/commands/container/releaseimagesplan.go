@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: The Forge CI Authors
+// SPDX-FileCopyrightText: 2026 Digg - Agency for Digital Government
 // SPDX-License-Identifier: EUPL-1.2 OR GPL-3.0-or-later
 
 package container
@@ -15,6 +15,7 @@ import (
 	appconfig "github.com/diggsweden/forge-ci/internal/app/config"
 	appcontainer "github.com/diggsweden/forge-ci/internal/app/container"
 	"github.com/diggsweden/forge-ci/internal/cli/cienv"
+	"github.com/diggsweden/forge-ci/internal/cli/commonflags"
 	"github.com/diggsweden/forge-ci/internal/cli/deps"
 	"github.com/diggsweden/forge-ci/internal/cli/regflags"
 	"github.com/diggsweden/forge-ci/internal/domain/errs"
@@ -66,8 +67,10 @@ builds carry their own labels.
 
 With --output, the plan is written to that file instead, for release-images
 build and publish on a forge whose jobs take no multiline outputs, and only
-registry-user is emitted. --runner-archs then names the architectures a native
-build job exists for; a container building another is refused here.
+registry-user is emitted.
+
+The layer passes its runner inputs with --runner-input; a build of a platform
+whose image build runner input has no value is refused here.
 
 EXAMPLE:
    forge-ci container release-images plan --image-repository ghcr.io/owner/app --registry-username owner --release-tag v1.2.3`,
@@ -75,7 +78,7 @@ EXAMPLE:
 		DisableSliceFlagSeparator: true,
 		Flags: []cli.Flag{
 			&cli.StringFlag{Name: "image-plan-json", Sources: cli.EnvVars("IMAGE_PLAN_JSON"), Usage: "resolved consumer image policy as builds/images JSON; admitted against --image-repository instead of loading artifacts.yml; supports content-addressed base tags"},
-			&cli.StringFlag{Name: "file", Value: defaultArtifactsFile, Sources: cli.EnvVars("ARTIFACTS_CONFIG"), Usage: "path to the artifacts.yml file declaring the containers; without it and the default file, the root Containerfile is the repository's image"},
+			&cli.StringFlag{Name: flagFile, Value: defaultArtifactsFile, Sources: cli.EnvVars("ARTIFACTS_CONFIG"), Usage: "path to the artifacts.yml file declaring the containers; without it and the default file, the root Containerfile is the repository's image"},
 			&cli.StringFlag{Name: flagImageRepository, Sources: cli.EnvVars("IMAGE_REPOSITORY"), Usage: "the one repository the release's images publish to, e.g. ghcr.io/owner/app; empty is the forge's own registry, <server host>/<owner>/<repository>"},
 			&cli.StringFlag{Name: flagServerURL, Sources: cienv.ServerURL(), Usage: "forge server URL, whose registry an empty --image-repository names"},
 			&cli.StringFlag{Name: flagRepository, Sources: cienv.Repository(), Usage: "owner/repo the image repositories are derived from"},
@@ -85,15 +88,15 @@ EXAMPLE:
 			&cli.StringFlag{Name: "release-platforms", Sources: cli.EnvVars("RELEASE_PLATFORMS"), Usage: "comma-separated subset of each container's platforms to build; empty builds every declared platform, linux/amd64 when a container declares none"},
 			&cli.StringSliceFlag{Name: flagLabel, Usage: "key=value label every image carries after the standard ones, such as org.opencontainers.image.licenses=MIT (repeatable); a standard provenance label is refused"},
 			&cli.StringFlag{Name: flagOutput, Usage: "write the builds/images plan to this file instead of the builds, images and image-names outputs"},
-			&cli.StringFlag{Name: flagRunnerArchs, Usage: "with --output: comma-separated architectures that have a native build job; empty admits every one"},
+			commonflags.RunnerInput(),
 			regflags.UsernameFor("user the registry token logs in as, written to the registry-user output; empty is the --repository owner on the forge's own registry and refused on another one"),
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			return deps.FromCmd(ctx, cmd, func(dep *deps.Deps) error {
 				// A layer passes an input left empty as an empty value, which
 				// names no file.
-				file := cmd.String("file")
-				named := cmd.IsSet("file") && file != ""
+				file := cmd.String(flagFile)
+				named := cmd.IsSet(flagFile) && file != ""
 
 				resolved := cmd.String("image-plan-json")
 				if resolved != "" && named {
@@ -110,10 +113,16 @@ EXAMPLE:
 					return err
 				}
 
+				runnerInputs, err := commonflags.RunnerInputs(cmd, dep.Platform)
+				if err != nil {
+					return err
+				}
+
 				input := appconfig.EmitReleaseImagesPlanInput{
 					Config:            appconfig.EmitConfigPlanInput{Path: cmp.Or(file, defaultArtifactsFile)},
 					DefaultWhenAbsent: !named,
 					ResolvedPlan:      resolved,
+					Runners:           runnerInputs,
 					Images: pipeline.ReleaseImagesInput{
 						ImageRepository:  imageRepository,
 						Repository:       cmd.String(flagRepository),
@@ -123,20 +132,7 @@ EXAMPLE:
 					},
 				}
 
-				var plan pipeline.ReleaseImagesPlan
-				if output := cmd.String(flagOutput); output != "" {
-					plan, err = appconfig.ResolveReleaseImagesPlan(input, deps.Annotator(cmd))
-					if err == nil {
-						err = writeReleaseImagesPlanFile(output, plan, cmd.String(flagRunnerArchs))
-					}
-				} else {
-					if cmd.String(flagRunnerArchs) != "" {
-						return fmt.Errorf("--runner-archs needs --output: %w", errs.ErrUsage)
-					}
-
-					plan, err = appconfig.EmitReleaseImagesPlan(ctx, dep.OutputSink, deps.Annotator(cmd), input)
-				}
-
+				plan, err := runReleaseImagesPlan(ctx, cmd, dep, input)
 				if err != nil {
 					return err
 				}
@@ -149,6 +145,21 @@ EXAMPLE:
 			})
 		},
 	}
+}
+
+// runReleaseImagesPlan writes the plan to --output, or emits it as outputs.
+func runReleaseImagesPlan(ctx context.Context, cmd *cli.Command, dep *deps.Deps, input appconfig.EmitReleaseImagesPlanInput) (pipeline.ReleaseImagesPlan, error) {
+	output := cmd.String(flagOutput)
+	if output == "" {
+		return appconfig.EmitReleaseImagesPlan(ctx, dep.OutputSink, deps.Annotator(cmd), input)
+	}
+
+	plan, err := appconfig.ResolveReleaseImagesPlan(input, deps.Annotator(cmd))
+	if err != nil {
+		return pipeline.ReleaseImagesPlan{}, err
+	}
+
+	return plan, writeReleaseImagesPlanFile(output, plan)
 }
 
 // releasePlanRegistryUser is the user the publishing job logs in as, decided

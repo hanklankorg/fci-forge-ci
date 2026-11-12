@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: The Forge CI Authors
+// SPDX-FileCopyrightText: 2026 Digg - Agency for Digital Government
 // SPDX-License-Identifier: EUPL-1.2 OR GPL-3.0-or-later
 
 package container
@@ -40,24 +40,35 @@ func selfBuildArgs(ctx context.Context, in appsnapshot.ArtifactBuildRequest) []s
 }
 
 func snapshotBuildArtifactCmd() *cli.Command {
-	return &cli.Command{Name: "build-artifact", Usage: "build one frozen artifact with the existing ecosystem CLI, or prepare its already-built CI upload", Flags: []cli.Flag{&cli.StringFlag{Name: flagPlan, Required: true}, &cli.StringFlag{Name: flagName, Required: true}, &cli.StringFlag{Name: "output-dir", Value: snapshotimage.DefaultProducerDir}, &cli.StringFlag{Name: "from-artifact", Usage: "exact downloaded artifact directory; skips the ecosystem build"}}, Action: func(ctx context.Context, cmd *cli.Command) error {
+	return &cli.Command{Name: "build-artifact", Usage: "build one frozen artifact with the existing ecosystem CLI, or prepare its already-built CI upload", Flags: []cli.Flag{&cli.StringFlag{Name: flagPlan, Required: true}, &cli.StringFlag{Name: flagName, Required: true}, &cli.StringFlag{Name: flagOutputDir, Value: snapshotimage.DefaultProducerDir}, &cli.StringFlag{Name: "from-artifact", Usage: "exact downloaded artifact directory; skips the ecosystem build"}}, Action: func(ctx context.Context, cmd *cli.Command) error {
 		p, err := appsnapshot.ReadPlan(cmd.String(flagPlan))
 		if err != nil {
 			return err
 		}
 
-		return appsnapshot.BuildArtifact(ctx, gitadapter.New(), snapshotSelfBuild{}, p, appsnapshot.BuildArtifactInput{Name: cmd.String(flagName), OutputDir: cmd.String("output-dir"), FromArtifact: cmd.String("from-artifact"), Environment: os.Environ()})
+		return appsnapshot.BuildArtifact(ctx, gitadapter.New(), snapshotSelfBuild{}, p, appsnapshot.BuildArtifactInput{Name: cmd.String(flagName), OutputDir: cmd.String(flagOutputDir), FromArtifact: cmd.String("from-artifact"), Environment: os.Environ()})
+	}}
+}
+
+func snapshotBuildFilesCmd() *cli.Command {
+	return &cli.Command{Name: "build-files", Usage: "build one planned file output with the existing ecosystem CLI and write its unsigned bundle, the built files and their receipt; no uploads", Flags: []cli.Flag{&cli.StringFlag{Name: flagPlan, Required: true}, &cli.StringFlag{Name: flagName, Required: true}, &cli.StringFlag{Name: flagOutputDir, Value: snapshotimage.DefaultFilesDir}}, Action: func(ctx context.Context, cmd *cli.Command) error {
+		p, err := appsnapshot.ReadPlan(cmd.String(flagPlan))
+		if err != nil {
+			return err
+		}
+
+		return appsnapshot.BuildFiles(ctx, gitadapter.New(), snapshotSelfBuild{}, p, appsnapshot.BuildFilesInput{Name: cmd.String(flagName), OutputDir: cmd.String(flagOutputDir), Environment: os.Environ()})
 	}}
 }
 
 func snapshotPrepareInputsCmd() *cli.Command {
-	return &cli.Command{Name: "prepare-inputs", Usage: "prepare exact already-built artifact downloads into bound producer outputs; no source rebuild", Flags: []cli.Flag{&cli.StringFlag{Name: flagPlan, Required: true}, &cli.StringFlag{Name: "artifact-dir", Value: snapshotimage.DefaultDownloadDir}, &cli.StringFlag{Name: "output-dir", Value: snapshotimage.DefaultProducerDir}}, Action: func(ctx context.Context, cmd *cli.Command) error {
+	return &cli.Command{Name: "prepare-inputs", Usage: "prepare exact already-built artifact downloads into bound producer outputs; no source rebuild", Flags: []cli.Flag{&cli.StringFlag{Name: flagPlan, Required: true}, &cli.StringFlag{Name: "artifact-dir", Value: snapshotimage.DefaultDownloadDir}, &cli.StringFlag{Name: flagOutputDir, Value: snapshotimage.DefaultProducerDir}}, Action: func(ctx context.Context, cmd *cli.Command) error {
 		p, err := appsnapshot.ReadPlan(cmd.String(flagPlan))
 		if err != nil {
 			return err
 		}
 
-		return appsnapshot.PrepareInputs(ctx, gitadapter.New(), p, cmd.String("artifact-dir"), cmd.String("output-dir"))
+		return appsnapshot.PrepareInputs(ctx, gitadapter.New(), p, cmd.String("artifact-dir"), cmd.String(flagOutputDir))
 	}}
 }
 

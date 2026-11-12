@@ -13,6 +13,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"testing/synctest"
 
 	domaincontainer "github.com/diggsweden/forge-ci/internal/domain/container"
 	"github.com/diggsweden/forge-ci/internal/domain/errs"
@@ -166,7 +167,7 @@ func TestVerifyExistingBaseImages_EvidenceHandoff(t *testing.T) {
 				}
 
 				wantResult = BaseImageVerifyExistingResult{
-					AllFound: true, MissingFlavorsJSON: `[]`,
+					AllFound: true, MissingFlavorsJSON: `[]`, ParentBasesJSON: `{}`,
 					AllImagesJSON: `[{"flavor":"go","tag":"` + lastTag + `","ref":"` + lastRef + `","candidate_tag":"","candidate_ref":"","base_input_id":"` + lastID + `"},` +
 						`{"flavor":"rust","tag":"` + rustTag + `","ref":"` + rustRef + `","candidate_tag":"","candidate_ref":"","base_input_id":"` + rustID + `"},` +
 						`{"flavor":"zig","tag":"` + firstTag + `","ref":"` + firstRef + `","candidate_tag":"","candidate_ref":"","base_input_id":"` + firstID + `"}]`,
@@ -353,4 +354,66 @@ func (r *evidenceRecorder) VerifyAttestationOutput(ctx context.Context, in domai
 	}
 
 	return nil
+}
+
+// refusingVerifier fails every signature check, having written said.
+type refusingVerifier struct {
+	calls int
+	said  string
+}
+
+func (r *refusingVerifier) VerifyImage(_ context.Context, _ domaincontainer.ImageVerifyRequest, errOut io.Writer) error {
+	r.calls++
+
+	_, _ = io.WriteString(errOut, r.said)
+
+	return fmt.Errorf("cosign verify: exit status 1: %w", errs.ErrValidation)
+}
+
+func (*refusingVerifier) VerifyAttestation(context.Context, domaincontainer.AttestationVerifyRequest, io.Writer) error {
+	return nil
+}
+
+func (*refusingVerifier) VerifyAttestationOutput(context.Context, domaincontainer.AttestationVerifyRequest, io.Writer, io.Writer) error {
+	return nil
+}
+
+// A check the network stopped is run again and ends as an unavailable
+// dependency, which is what a registry outage is. Evidence that does not
+// verify is refused from the first attempt: it does not verify the next time
+// either, and a refusal is never an outage.
+func TestBaseImageEvidence_RetriesOnlyATransportFailure(t *testing.T) {
+	t.Parallel()
+
+	ref := "registry.example/contract/outage@sha256:" + strings.Repeat("4", 64)
+
+	for _, tc := range []struct {
+		name      string
+		said      string
+		wantCalls int
+		want      error
+	}{
+		{"registry outage", "Error: GET \"https://registry.example/v2/\": dial tcp: lookup registry.example: no such host\n", 3, errs.ErrDependencyUnavailable},
+		{"no matching signature", "Error: no matching signatures: invalid signature when validating ASN.1 encoded signature\n", 1, errs.ErrValidation},
+		{"registry status", "Error: GET https://registry.example/v2/contract/outage/manifests/sha256-4.sig: UNAUTHORIZED: authentication required\n", 1, errs.ErrValidation},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			synctest.Test(t, func(t *testing.T) {
+				verifier := &refusingVerifier{said: tc.said}
+
+				var out bytes.Buffer
+
+				err := verifyBaseImageEvidence(t.Context(), verifier, &out, ref, "keys/outage.pub", baseImageLineageExpectation{Flavor: "rust"}, 3)
+				if !errors.Is(err, tc.want) || errors.Is(err, errs.ErrDependencyUnavailable) != errors.Is(tc.want, errs.ErrDependencyUnavailable) {
+					t.Fatalf("err = %v, want %v", err, tc.want)
+				}
+
+				if verifier.calls != tc.wantCalls || strings.Count(out.String(), "retrying") != tc.wantCalls-1 {
+					t.Errorf("%d attempt(s) with output %q, want %d", verifier.calls, &out, tc.wantCalls)
+				}
+			})
+		})
+	}
 }

@@ -33,7 +33,7 @@ func TestBuildManifest_ArgvShape(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	for _, want := range []string{"--pull=always", "--isolation chroot", "--network host", "--tls-verify=true", "--timestamp 1700000000", "--manifest localhost/app:list", "--platform linux/arm64", "--label org.opencontainers.image.revision=abc", "--build-arg VERSION=1.2.3 --build-arg COMMIT=abc", "REGISTRY_AUTH_FILE=/tmp/auth.json"} {
+	for _, want := range []string{"--pull=always", "--isolation chroot", "--network host", "--retry 5 --retry-delay 15s", "--tls-verify=true", "--timestamp 1700000000", "--manifest localhost/app:list", "--platform linux/arm64", "--label org.opencontainers.image.revision=abc", "--build-arg VERSION=1.2.3 --build-arg COMMIT=abc", "REGISTRY_AUTH_FILE=/tmp/auth.json"} {
 		if !strings.Contains(log.String(), want) {
 			t.Errorf("missing %q: %s", want, log.String())
 		}
@@ -166,5 +166,43 @@ func TestProbeBuild_BuildsAsTheRealBuildsDo(t *testing.T) {
 	const want = "ARGV bud --isolation chroot --network host --pull=never --tag localhost/probe:latest /tmp/probe\nARGV rmi localhost/probe:latest\n"
 	if log.String() != want {
 		t.Errorf("probe=%q, want %q", log.String(), want)
+	}
+}
+
+// A build ends in the class of the error buildah ended on, and the build
+// log still reaches the caller.
+func TestBuildManifestClassifiesTheErrorBuildahEndsOn(t *testing.T) {
+	t.Parallel()
+
+	const unreached = `Error: creating build container: initializing source docker://gcr.io/distroless/cc-debian13@sha256:e792ab3d241a468a4fd7519ddbbebe66b49b5f365771716ea688ad40b6c6f1c2: pinging container registry gcr.io: Get "https://gcr.io/v2/": dial tcp: lookup gcr.io on 10.201.0.1:53: server misbehaving`
+
+	for said, want := range map[string]error{
+		unreached: errs.ErrDependencyUnavailable,
+		`Error: building at STEP "RUN ./fetch": while running runtime: exit status 1`: errs.ErrValidation,
+	} {
+		bins := mockbinary.New(t)
+		bins.Add("buildah", `echo 'STEP 1/2: RUN ./fetch'; echo 'dial tcp: lookup mirror.example: i/o timeout' >&2; printf '%s\n' '`+said+`' >&2; exit 125`)
+		adapter := &buildah.Adapter{Bin: bins.Path("buildah")}
+
+		var log strings.Builder
+
+		err := adapter.BuildManifest(t.Context(), container.BuildPushManifestBuildRequest{
+			Manifest: "localhost/app:list", SourceDateEpoch: "1700000000", Platform: "linux/amd64", Containerfile: "Containerfile", Context: ".",
+		}, &log)
+		if err == nil || !errors.Is(err, want) || errs.ExitCodeFromError(err) != errs.ExitCodeFromError(want) {
+			t.Errorf("%s: err = %v, want %v", said, err, want)
+		}
+
+		// The engine prints "Error: " and this; the live launcher's rerun
+		// rule reads the host from that line.
+		if errors.Is(want, errs.ErrDependencyUnavailable) {
+			if line := "bud: exit status 125: " + strings.TrimPrefix(unreached, "Error: ") + ": dependency unavailable"; !strings.HasSuffix(err.Error(), line) {
+				t.Errorf("err = %q, want it to end %q", err, line)
+			}
+		}
+
+		if !strings.Contains(log.String(), "STEP 1/2") || !strings.Contains(log.String(), said) {
+			t.Errorf("the build log lost output: %q", log.String())
+		}
 	}
 }

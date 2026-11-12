@@ -54,9 +54,17 @@ type BaseImageMetadata struct {
 
 // BaseInput maps a flavor to the sha256 content ID that produced that base.
 type BaseInput struct {
-	Flavor      string `json:"flavor"`
-	ContentID   string `json:"content_id,omitempty"`
-	BaseInputID string `json:"base_input_id"`
+	Flavor      string           `json:"flavor"`
+	ContentID   string           `json:"content_id,omitempty"`
+	BaseInputID string           `json:"base_input_id"`
+	ParentBase  *BaseImageParent `json:"parent_base,omitempty"`
+}
+
+// BaseImageParent is a caller-verified parent projection to require in the
+// child's signed lineage. It does not request recursive parent verification.
+type BaseImageParent struct {
+	Ref     string `json:"ref"`
+	InputID string `json:"input_id"`
 }
 
 // BaseImageVerifyExistingInput drives VerifyExistingBaseImages.
@@ -78,10 +86,18 @@ type BaseImageVerifyExistingResult struct {
 	AllFound           bool
 	AllImagesJSON      string
 	MissingFlavorsJSON string
+	// ParentBasesJSON maps each found and verified flavor to its {ref,input_id}
+	// parent projection. It is empty, {}, unless the reads were authenticated.
+	ParentBasesJSON string
 }
 
 // BaseImagePromoteInput drives PromoteBaseImages.
 type BaseImagePromoteInput struct {
+	// BaseInputs constrains each image's own ID and expected parent projection.
+	// It is mandatory and its flavors must exactly match the normalized image
+	// flavors; an entry without parent_base claims no parent check, and
+	// parents are not recursively verified.
+	BaseInputs         []BaseInput
 	Images             []BaseImageMetadata
 	BaseInputID        string
 	ExpectedRepository string

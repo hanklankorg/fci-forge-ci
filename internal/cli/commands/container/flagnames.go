@@ -19,6 +19,7 @@ const (
 	flagArch               = "arch"
 	flagArchs              = "archs"
 	flagAuthFile           = regflags.FlagAuthFile
+	flagInputsDir          = "inputs-dir"
 	flagBaseInputID        = "base-input-id"
 	flagBaseInputsJSON     = "base-inputs-json"
 	flagContainerfile      = "containerfile"
@@ -46,6 +47,7 @@ const (
 	flagPublish                 = "publish"
 	flagRecursive               = "recursive"
 	flagRequireLabel            = "require-label"
+	flagTags                    = "tags"
 	flagRef                     = "ref"
 	flagRegistryPasswordFile    = regflags.FlagPasswordFile
 	flagRegistryUsername        = regflags.FlagUsername
@@ -62,6 +64,7 @@ const (
 	flagSourceSHA               = "source-sha"
 	flagStartedOn               = "started-on"
 	flagTag                     = "tag"
+	flagTarget                  = "target"
 	flagVersion                 = "version"
 	flagWorkflow                = "workflow"
 )

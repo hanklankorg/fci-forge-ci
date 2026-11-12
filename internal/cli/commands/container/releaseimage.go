@@ -32,9 +32,17 @@ func releaseImagesVerifyCmd() *cli.Command {
 		Name:  subCmdValidate,
 		Usage: "validate an existing digest-pinned release image before reusing it",
 		Description: `Checks Cosign signature, CycloneDX SBOM attestation, and SLSA
-provenance fields for a digest-pinned release image. With --allow-reattest, a
-provenance mismatch may still return status "reattestable" when the image is
-signed, SBOM-attested, and its OCI release labels match the expected identity.
+provenance fields for a digest-pinned release image. With --allow-reattest, an
+image the registry stores no SLSA provenance attestation for returns status
+"reattestable" when it is signed, SBOM-attested, and its OCI release labels
+match the expected identity. Whether it stores one is read from the registry
+(the OCI referrers of the digest and the sha256-<hex>.att tag), not taken from
+the failed verification. A stored provenance attestation that does not verify
+is refused with or without the flag, and so is signed provenance that verifies
+and names another release. A registry that cannot be read for the stored
+attestations fails the command as an unavailable dependency. The check guards
+against provenance that does not match and provenance that was changed, not
+against whoever controls the registry deleting it.
 The command prints one status token to stdout on success: verified or
 reattestable.`,
 		Flags: append(baseImagesPublicKeyFlags(),
@@ -45,11 +53,11 @@ reattestable.`,
 			&cli.StringFlag{Name: flagExpectedWorkflow, Required: true, Sources: cli.EnvVars("EXPECTED_WORKFLOW"), Usage: "workflow path expected in SLSA workflow externalParameters.workflow.path"},
 			&cli.StringFlag{Name: "expected-base-ref", Sources: cli.EnvVars("EXPECTED_BASE_REF"), Usage: "optional digest-pinned base ref expected in SLSA base lineage"},
 			&cli.StringFlag{Name: "expected-base-input-id", Sources: cli.EnvVars("EXPECTED_BASE_INPUT_ID"), Usage: "optional sha256 base input ID expected in SLSA base lineage"},
-			&cli.BoolFlag{Name: "allow-reattest", Sources: cli.EnvVars("ALLOW_REATTEST"), Usage: "allow signed/SBOM-attested images with matching OCI identity labels to be re-attested"},
+			&cli.BoolFlag{Name: "allow-reattest", Sources: cli.EnvVars("ALLOW_REATTEST"), Usage: "allow signed/SBOM-attested images with matching OCI identity labels and no stored provenance attestation to be re-attested"},
 			&cli.StringFlag{Name: "identity-version", Usage: "OCI org.opencontainers.image.version expected for --allow-reattest; defaults to --expected-tag"},
 			&cli.StringFlag{Name: "identity-ref-name", Usage: "OCI org.opencontainers.image.ref.name expected for --allow-reattest; defaults to --expected-tag"},
 			&cli.StringFlag{Name: "identity-source", Usage: "OCI org.opencontainers.image.source expected for --allow-reattest; defaults to --expected-source"},
-			regflags.AuthFile(regflags.AuthFileOpts{Usage: "Docker/containers auth config for registry label reads and cosign verification"}),
+			regflags.AuthFile(regflags.AuthFileOpts{Usage: "Docker/containers auth config for registry label and attestation reads and cosign verification"}),
 		),
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			if err := validateReleaseImageCLIInput(cmd); err != nil {

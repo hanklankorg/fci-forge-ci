@@ -24,10 +24,15 @@ func baseImagesVerifyCmd() *cli.Command {
 	return &cli.Command{
 		Name:  subCmdValidate,
 		Usage: "validate existing immutable final base-image tags and report missing flavors",
+		Description: `Outputs all_found, all_images_json and missing_flavors_json. With
+--auth-file it also outputs parent_bases_json, an object that maps each found
+flavor to the {ref,input_id} parent projection of the digest its signature,
+SBOM and lineage verified on: the same projection authenticate-parent prints
+for one exact ref. Without --auth-file the object is empty.`,
 		Flags: append(baseImagesCommonFlags(),
 			regflags.AuthFile(regflags.AuthFileOpts{Usage: "explicit registry auth file for digest, signature and attestation reads; omitted uses isolated anonymous access"}),
 			&cli.StringFlag{Name: flagBaseInputID, Sources: cli.EnvVars("BASE_INPUT_ID"), Usage: "optional single sha256 base input ID expected for every flavor"},
-			&cli.StringFlag{Name: flagBaseInputsJSON, Value: "[]", Sources: cli.EnvVars("BASE_INPUTS_JSON"), Usage: "JSON array mapping flavors to sha256 base input IDs"},
+			&cli.StringFlag{Name: flagBaseInputsJSON, Value: "[]", Sources: cli.EnvVars("BASE_INPUTS_JSON"), Usage: "JSON array mapping flavors to sha256 base input IDs and optional parent_base {ref,input_id} expectations"},
 			&cli.StringFlag{Name: "flavors-file", Sources: cli.EnvVars("FLAVORS_FILE"), Usage: "newline-delimited flavor list in the consumer checkout (required: the engine does not assume a repository layout)"},
 		),
 		Action: func(ctx context.Context, cmd *cli.Command) error {
@@ -132,5 +137,9 @@ func writeBaseImagesVerifyOutputs(ctx context.Context, dep *deps.Deps, result ap
 		return err
 	}
 
-	return dep.OutputSink.Set(ctx, "missing_flavors_json", result.MissingFlavorsJSON)
+	if err := dep.OutputSink.Set(ctx, "missing_flavors_json", result.MissingFlavorsJSON); err != nil {
+		return err
+	}
+
+	return dep.OutputSink.Set(ctx, "parent_bases_json", result.ParentBasesJSON)
 }

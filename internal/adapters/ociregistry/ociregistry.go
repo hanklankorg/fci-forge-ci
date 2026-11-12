@@ -97,8 +97,9 @@ func (a *Adapter) ResolveDigest(ctx context.Context, ref string) (string, error)
 }
 
 // classifyRegistryError maps a registry library error onto a domain sentinel by
-// its HTTP status, falling back to "the dependency is unavailable" only when the
-// error carries no status at all.
+// its HTTP status. Without a status it is "the dependency is unavailable" only
+// when the network stopped the request; a certificate that does not verify, an
+// unreadable credential file and any other error are the operation's failure.
 //
 // Every registry call routes through here rather than asserting unavailability,
 // because the two are not interchangeable to a caller: unavailable means "try
@@ -124,7 +125,11 @@ func classifyRegistryError(err error) error {
 		}
 	}
 
-	return errs.ErrDependencyUnavailable
+	if errs.IsTransport(err) {
+		return errs.ErrDependencyUnavailable
+	}
+
+	return errs.ErrValidation
 }
 
 // CopyTag points dest at the manifest (image or multi-arch index) currently

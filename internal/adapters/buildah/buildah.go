@@ -24,11 +24,13 @@ package buildah
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/diggsweden/forge-ci/internal/domain/container"
@@ -197,10 +199,18 @@ func hostNetwork() []string {
 	return []string{"--network", "host"}
 }
 
+// registryRetry returns the flags that retry a build's registry pulls and
+// pushes; see container.RegistryRetries.
+func registryRetry() []string {
+	return []string{"--retry", strconv.Itoa(container.RegistryRetries), "--retry-delay", container.RegistryRetryDelay}
+}
+
 // buildArgs assembles `buildah build` argv from the request. modeArgs are the
 // mode-specific flags (-t / --output / --iidfile); the build context is last.
 func (a *Adapter) buildArgs(req container.BuildRequest, modeArgs ...string) []string {
 	args := append(a.global("build"), hostNetwork()...)
+	args = append(args, registryRetry()...)
+
 	if req.AuthFile != "" {
 		args = append(args, "--authfile", req.AuthFile)
 	}
@@ -297,16 +307,36 @@ func (a *Adapter) runBuildWithEnv(ctx context.Context, out io.Writer, env []stri
 
 func (a *Adapter) runWithCommandEnv(ctx context.Context, w io.Writer, env []string, args ...string) error {
 	cmd := safeexec.Command(ctx, a.bin(), args...)
-	cmd.Stdout = w
 
-	cmd.Stderr = w
-	cmd.Env = env
+	// One writer for both streams keeps them in the order buildah wrote
+	// them, and keeps a single goroutine writing to w.
+	var said bytes.Buffer
 
-	if err := cmd.Run(); err != nil {
-		return safeexec.WrapError(err, a.bin(), safeexec.FirstArg(args))
+	heard := io.Writer(&said)
+	if w != nil {
+		heard = io.MultiWriter(w, &said)
 	}
 
-	return nil
+	cmd.Stdout = heard
+	cmd.Stderr = heard
+	cmd.Env = env
+
+	err := cmd.Run()
+	if err == nil {
+		return nil
+	}
+
+	if _, ok := errors.AsType[*exec.ExitError](err); ok {
+		// The class is read from the error buildah ended on: a registry it
+		// could not reach is the dependency being unavailable, and every
+		// other failure is the build's own.
+		report := strings.TrimPrefix(errs.BuildahReport(said.String()), "Error: ")
+
+		return safeexec.ExitFailure(err, a.bin(), safeexec.FirstArg(args), report)
+	}
+
+	// A buildah that did not start keeps safeexec's class.
+	return safeexec.WrapError(err, a.bin(), safeexec.FirstArg(args))
 }
 
 func (a *Adapter) outputWithEnv(ctx context.Context, env []string, args ...string) (string, error) {

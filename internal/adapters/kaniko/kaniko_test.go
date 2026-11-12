@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: The Forge CI Authors
+// SPDX-FileCopyrightText: 2026 Digg - Agency for Digital Government
 // SPDX-License-Identifier: EUPL-1.2 OR GPL-3.0-or-later
 
 package kaniko
@@ -99,6 +99,7 @@ func TestBuildToLayout_ArgvShape(t *testing.T) {
 		"--label org.opencontainers.image.revision=abc",
 		"--reproducible",
 		"--snapshot-mode=full",
+		"--image-download-retry 5",
 		"--compressed-caching=false",
 		"--cache=true --cache-repo ghcr.io/org/cache --no-push-cache",
 		`CONFIG {"auths":{"ghcr.io":{"auth":"Y2FuYXJ5"}}}`,
@@ -172,7 +173,7 @@ func TestPreflight_NamesTheMissingExecutorAndTheMissingRoot(t *testing.T) {
 	t.Parallel()
 
 	missing := &Adapter{Executor: filepath.Join(t.TempDir(), "executor"), euid: func() int { return 0 }}
-	if err := missing.BuildToLayout(t.Context(), container.BuildRequest{Context: ".", Mode: container.BuildModeOCI, OutputDir: t.TempDir()}, t.TempDir(), &strings.Builder{}); !errors.Is(err, errs.ErrDependencyUnavailable) || !strings.Contains(err.Error(), "kaniko job image") {
+	if err := missing.BuildToLayout(t.Context(), container.BuildRequest{Context: ".", Mode: container.BuildModeOCI, OutputDir: t.TempDir()}, t.TempDir(), &strings.Builder{}); !errors.Is(err, errs.ErrPrerequisite) || !strings.Contains(err.Error(), "kaniko job image") {
 		t.Errorf("missing executor: err=%v", err)
 	}
 
@@ -526,5 +527,34 @@ func TestBuild_LocalModeRefusesHostileLayers(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// A build ends in the class of the error kaniko ended on: a registry it
+// could not reach is an unavailable dependency, and a RUN step that could
+// not reach a host is the build's failure.
+func TestBuildToLayout_ClassifiesTheErrorKanikoEndsOn(t *testing.T) {
+	t.Parallel()
+
+	const unreached = `error building image: unable to complete operation after 0 attempts, last error: Get "https://index.docker.io/v2/": dial tcp: lookup index.docker.io: i/o timeout`
+
+	for said, want := range map[string]error{
+		unreached: errs.ErrDependencyUnavailable,
+		`error building image: error building stage: failed to execute command: waiting for process to exit: exit status 1`: errs.ErrValidation,
+	} {
+		bins := mockbinary.New(t)
+		bins.Add("executor", `echo 'dial tcp: lookup mirror.example: i/o timeout' >&2; printf '%s\n' '`+said+`'; exit 1`)
+		adapter := &Adapter{Executor: bins.Path("executor"), euid: func() int { return 0 }}
+
+		var log strings.Builder
+
+		err := adapter.BuildToLayout(t.Context(), container.BuildRequest{Context: ".", Mode: container.BuildModeOCI, OutputDir: t.TempDir()}, t.TempDir(), &log)
+		if err == nil || !errors.Is(err, want) || errs.ExitCodeFromError(err) != errs.ExitCodeFromError(want) {
+			t.Errorf("%s: err = %v, want %v", said, err, want)
+		}
+
+		if !strings.Contains(log.String(), said) {
+			t.Errorf("the build log lost output: %q", log.String())
+		}
 	}
 }

@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: The Forge CI Authors
+// SPDX-FileCopyrightText: 2026 Digg - Agency for Digital Government
 // SPDX-License-Identifier: EUPL-1.2 OR GPL-3.0-or-later
 
 package container
@@ -10,11 +10,13 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	appsnapshot "github.com/diggsweden/forge-ci/internal/app/snapshotimage"
+	"github.com/diggsweden/forge-ci/internal/domain/errs"
 	"github.com/diggsweden/forge-ci/internal/domain/pipeline"
 	"github.com/diggsweden/forge-ci/internal/domain/snapshotimage"
 	"github.com/diggsweden/forge-ci/internal/testutil/testenv"
@@ -62,7 +64,22 @@ func TestSnapshotPlanCLIEmitsRunnerOutputsAndPinsManualBranch(t *testing.T) {
 			env.Setenv("GITHUB_SERVER_URL", "https://github.com")
 			env.Setenv("GITHUB_REF_NAME", "event-main")
 
-			err = New().Run(t.Context(), []string{"container", "snapshot-images", "plan", "--file", "artifacts.yml", "--branch", "manual-branch", "--source-sha", sha.String(), "--image-repository", "registry.example/team/app", "--output", "snapshot-plan.json"})
+			plan := []string{"container", "snapshot-images", "plan", "--file", "artifacts.yml", "--branch", "manual-branch", "--source-sha", sha.String(), "--image-repository", "registry.example/team/app", "--output", "snapshot-plan.json"}
+
+			// A planned arm64 build with no arm64 build runner is refused
+			// before the plan is written; the amd64 runner does not stand in.
+			err = New().Run(t.Context(), slices.Concat(plan, []string{"--runner-input", `build-runs-on-linux-amd64=["builder","x64"]`, "--runner-input", "build-runs-on-linux-arm64="}))
+			require.ErrorContains(t, err, "build-runs-on-linux-arm64")
+			require.NoFileExists(t, "snapshot-plan.json")
+
+			// A layer that passes no runner input is refused: the plan is
+			// never made unchecked.
+			err = New().Run(t.Context(), plan)
+			require.ErrorIs(t, err, errs.ErrUsage)
+			require.ErrorContains(t, err, "a snapshot image plan needs the layer's runner inputs")
+			require.NoFileExists(t, "snapshot-plan.json")
+
+			err = New().Run(t.Context(), slices.Concat(plan, []string{"--runner-input", `build-runs-on-linux-amd64=["builder","x64"]`, "--runner-input", `build-runs-on-linux-arm64=["builder","arm64"]`}))
 			require.NoError(t, err)
 			p, err := appsnapshot.ReadPlan("snapshot-plan.json")
 			require.NoError(t, err)

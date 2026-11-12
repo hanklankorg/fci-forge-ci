@@ -92,9 +92,14 @@ type fakeImageEvidenceTrivy struct {
 	noOutput bool
 	// codes, when set, gives the exit code of each call in turn.
 	codes []int
+	// said is what a call that exits non-zero writes to stderr.
+	said string
 }
 
-func (f *fakeImageEvidenceTrivy) RunInherit(_ context.Context, _, _ io.Writer, args ...string) (int, error) {
+// trivyOffline is how Trivy ends when it cannot reach its database.
+const trivyOffline = "FATAL\tFatal error\trun error: init error: DB error: failed to download vulnerability DB: Get \"https://mirror.example/v2/\": dial tcp: lookup mirror.example: no such host\n"
+
+func (f *fakeImageEvidenceTrivy) RunInherit(_ context.Context, _, stderr io.Writer, args ...string) (int, error) {
 	f.args = append([]string{}, args...)
 
 	f.calls = append(f.calls, append([]string{}, args...))
@@ -102,6 +107,10 @@ func (f *fakeImageEvidenceTrivy) RunInherit(_ context.Context, _, _ io.Writer, a
 	code := f.code
 	if index := len(f.calls) - 1; index < len(f.codes) {
 		code = f.codes[index]
+	}
+
+	if code != 0 {
+		_, _ = io.WriteString(stderr, f.said)
 	}
 
 	if f.noOutput {
@@ -757,7 +766,7 @@ func TestImageEvidence_OnePlatformFailingLeavesItsPeersAndNoLayouts(t *testing.T
 		syft := &fakeImageEvidenceSyft{}
 
 		err := appcontainer.ImageEvidence(context.Background(), &fakeImageEvidenceBuildah{}, copier, trivy, syft, io.Discard, io.Discard, input(work))
-		require.ErrorIs(t, err, errs.ErrDependencyUnavailable)
+		require.ErrorIs(t, err, errs.ErrValidation)
 		require.Contains(t, err.Error(), "exited with status 3")
 		require.NotContains(t, err.Error(), "status 5")
 
@@ -797,11 +806,12 @@ func TestImageEvidence_OnePlatformFailingLeavesItsPeersAndNoLayouts(t *testing.T
 	})
 }
 
-// Trivy's database download fails transiently, so a scan that exits non-zero
+// Trivy's database download fails transiently, so a scan the network stopped
 // is run again within the attempt bound: a later success publishes the report
-// of the attempt that passed, an exhausted bound returns the last failure and
-// publishes nothing, and a report left by a failed attempt is gone before the
-// next one starts.
+// of the attempt that passed, an exhausted bound returns the last failure as
+// an unavailable dependency and publishes nothing, and a report left by a
+// failed attempt is gone before the next one starts. A scan Trivy fails for a
+// reason of its own is returned from the first attempt as Trivy's failure.
 func TestImageEvidence_RetriesAFailedScanWithinTheAttemptBound(t *testing.T) {
 	t.Parallel()
 
@@ -811,10 +821,14 @@ func TestImageEvidence_RetriesAFailedScanWithinTheAttemptBound(t *testing.T) {
 		attempts  int
 		wantCalls int
 		wantErr   string
+		said      string
+		wantClass error
 	}{
-		{name: "passes on the third attempt", codes: []int{1, 2, 0}, attempts: 3, wantCalls: 3},
-		{name: "bound exhausted", codes: []int{1, 2, 3}, attempts: 3, wantCalls: 3, wantErr: "exited with status 3"},
-		{name: "one attempt", codes: []int{4, 0}, attempts: 1, wantCalls: 1, wantErr: "exited with status 4"},
+		{name: "passes on the third attempt", codes: []int{1, 2, 0}, attempts: 3, wantCalls: 3, said: trivyOffline},
+		{name: "bound exhausted", codes: []int{1, 2, 3}, attempts: 3, wantCalls: 3, wantErr: "exited with status 3", said: trivyOffline, wantClass: errs.ErrDependencyUnavailable},
+		{name: "one attempt", codes: []int{4, 0}, attempts: 1, wantCalls: 1, wantErr: "exited with status 4", said: trivyOffline, wantClass: errs.ErrDependencyUnavailable},
+		{name: "a failure that is not the network", codes: []int{1, 0}, attempts: 3, wantCalls: 1, wantErr: "exited with status 1", said: "FATAL\tFatal error\trun error: image scan error: unable to initialize the scanner\n", wantClass: errs.ErrValidation},
+		{name: "a failure that says nothing", codes: []int{1, 0}, attempts: 3, wantCalls: 1, wantErr: "exited with status 1", wantClass: errs.ErrValidation},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -824,7 +838,7 @@ func TestImageEvidence_RetriesAFailedScanWithinTheAttemptBound(t *testing.T) {
 			require.NoError(t, os.Mkdir(layout, 0o750))
 
 			trivyPath := filepath.Join(root, "trivy.json")
-			trivy := &fakeImageEvidenceTrivy{codes: tc.codes}
+			trivy := &fakeImageEvidenceTrivy{codes: tc.codes, said: tc.said}
 
 			var out bytes.Buffer
 
@@ -835,7 +849,8 @@ func TestImageEvidence_RetriesAFailedScanWithinTheAttemptBound(t *testing.T) {
 			require.Equal(t, tc.wantCalls-1, strings.Count(out.String(), "retrying in"), out.String())
 
 			if tc.wantErr != "" {
-				require.ErrorIs(t, err, errs.ErrDependencyUnavailable)
+				require.ErrorIs(t, err, tc.wantClass)
+				require.Equal(t, errors.Is(tc.wantClass, errs.ErrDependencyUnavailable), errors.Is(err, errs.ErrDependencyUnavailable))
 				require.Contains(t, err.Error(), tc.wantErr)
 				require.NoFileExists(t, trivyPath)
 

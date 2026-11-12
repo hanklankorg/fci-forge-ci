@@ -85,6 +85,7 @@ func runBuild(ctx context.Context, cmd *cli.Command) error {
 				Build:        buildInput,
 				ScanSeverity: cmd.String("scan-severity"),
 				TrivyVersion: cmd.String("trivy-version"),
+				DeferScan:    cmd.Bool("defer-scan"),
 			})
 
 		return err
@@ -96,6 +97,7 @@ func scanFlags() []cli.Flag {
 	return []cli.Flag{
 		&cli.StringFlag{Name: "scan-severity", Value: security.DefaultContainerBlockSeverity, Sources: planfile.Vars(planScopeBuild, "scan-severity", "SCAN_SEVERITY"), Usage: "blocking threshold for fixable findings (a level or comma-list whose lowest entry counts); the scan always reports down to HIGH"},
 		&cli.StringFlag{Name: "trivy-version", Sources: planfile.Vars(planScopeBuild, "trivy-version", "TRIVY_VERSION"), Usage: "version embedded in the GitLab container-scanning report"},
+		&cli.BoolFlag{Name: "defer-scan", Sources: planfile.Vars(planScopeBuild, "defer-scan", "BUILD_DEFER_SCAN"), Usage: "oci mode only: export the layout unscanned for the publication-gating layout scan (security scan container --oci-layout), which runs where Trivy is baked in"},
 	}
 }
 

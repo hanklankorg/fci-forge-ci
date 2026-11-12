@@ -105,7 +105,7 @@ func TestAdapter_RunInheritMissingBinaryClassifies(t *testing.T) {
 	a := &trivy.Adapter{Bin: "trivy-does-not-exist-xyz"}
 
 	_, err := a.RunInherit(context.Background(), &bytes.Buffer{}, &bytes.Buffer{}, "image", "alpine")
-	if !errors.Is(err, errs.ErrDependencyUnavailable) {
-		t.Errorf("err = %v, want wrapped errs.ErrDependencyUnavailable", err)
+	if !errors.Is(err, errs.ErrPrerequisite) {
+		t.Errorf("err = %v, want wrapped errs.ErrPrerequisite", err)
 	}
 }

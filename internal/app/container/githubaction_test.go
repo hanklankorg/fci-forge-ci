@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: The Forge CI Authors
+// SPDX-FileCopyrightText: 2026 Digg - Agency for Digital Government
 // SPDX-License-Identifier: EUPL-1.2 OR GPL-3.0-or-later
 
 package container_test
@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -122,15 +123,16 @@ func TestGitHubKanikoEntrypointPreservesGatesAndExitStatus(t *testing.T) {
 				in.Snapshot = operation == "snapshot"
 				stagedOutput, err := appcontainer.PrepareGitHubKanikoAction(in)
 				require.NoError(t, err)
-				tools := t.TempDir()
-				require.NoError(t, os.WriteFile(filepath.Join(tools, "forge-ci"), []byte(githubActionFakeEngine), 0o700))
+				// The fake engine was written before any test could fork.
+				tools := githubActionFakeTools
 				entrypoint, err := os.ReadFile(filepath.Join(in.Workspace, appcontainer.GitHubKanikoActionDirectory, "entrypoint.sh"))
 				require.NoError(t, err)
 				require.Contains(t, string(entrypoint), "exec forge-ci container", "the CLI must receive container signals directly")
 				// Relocate only the image's tool prefix so an installed /kaniko
 				// executable can never escape this inert command fixture.
-				script := filepath.Join(tools, "entrypoint.sh")
-				require.NoError(t, os.WriteFile(script, []byte(strings.ReplaceAll(string(entrypoint), "/kaniko/tools", tools)), 0o700))
+				// bash reads the script and does not execute the file.
+				script := filepath.Join(t.TempDir(), "entrypoint.sh")
+				require.NoError(t, os.WriteFile(script, []byte(strings.ReplaceAll(string(entrypoint), "/kaniko/tools", tools)), 0o600))
 				argsFile := filepath.Join(t.TempDir(), "args")
 				command := exec.CommandContext(t.Context(), "bash", script, operation)
 
@@ -144,6 +146,17 @@ func TestGitHubKanikoEntrypointPreservesGatesAndExitStatus(t *testing.T) {
 				}
 				if operation == "snapshot" {
 					command.Env = append(command.Env, "FIXTURE_NO_LOGIN=true")
+				}
+
+				// An image build without the administrator's setting stops
+				// before the engine builds anything; it never means false.
+				if operation != "snapshot" && status == 0 {
+					unset := exec.CommandContext(t.Context(), "bash", script, operation)
+					unset.Env = slices.DeleteFunc(slices.Clone(command.Env), func(entry string) bool { return strings.HasPrefix(entry, "ADMIN_VULNERABILITIES=") })
+					out, unsetErr := unset.CombinedOutput()
+					require.Error(t, unsetErr, "%s", out)
+					require.Contains(t, string(out), "enforce-vulnerabilities setting")
+					require.NoFileExists(t, argsFile, "the build ran without the setting")
 				}
 
 				out, runErr := command.CombinedOutput()

@@ -111,7 +111,7 @@ func TestBaseImagesPromote_NeedsARegistryUserOffTheForge(t *testing.T) {
 			fixture := newBaseSignFixture(t)
 
 			args := []string{
-				"container", "base-images", "promote", "--all-images-json", "[]",
+				"container", "base-images", "promote", "--all-images-json", "[]", "--base-inputs-json", "[]",
 				"--server-url", "https://forge.example:8443", "--repository", baseSlug, "--repository-suffix", "-base",
 				"--expected-workflow", baseWorkflow, "--cosign-public-key-path", "keys/absent.pub",
 				"--cosign-public-key-sha256", strings.Repeat("a", 64),

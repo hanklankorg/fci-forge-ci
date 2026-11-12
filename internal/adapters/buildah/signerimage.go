@@ -19,6 +19,7 @@ func (a *Adapter) BuildSignerImage(ctx context.Context, req container.SignerImag
 	}
 
 	args = append(args, chrootIsolation()...)
+	args = append(args, registryRetry()...)
 	args = append(args,
 		"--pull=missing",
 		"--layers",

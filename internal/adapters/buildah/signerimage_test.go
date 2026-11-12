@@ -65,6 +65,7 @@ func TestBuildSignerImage_ArgvShape(t *testing.T) {
 				"--isolation chroot",
 				// RUN steps keep the job's resolver, as in BuildManifest.
 				"--network host",
+				"--retry 5 --retry-delay 15s",
 				"--authfile /tmp/auth.json",
 				"--platform linux/amd64",
 				// Provenance: these two labels are how a published image

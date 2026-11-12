@@ -173,7 +173,7 @@ func wrapVerificationFailure(operation string, err error) error {
 		return nil
 	}
 
-	if errors.Is(err, errs.ErrDependencyUnavailable) || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+	if errors.Is(err, errs.ErrDependencyUnavailable) || errors.Is(err, errs.ErrPrerequisite) || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return fmt.Errorf("%s: %w", operation, err)
 	}
 

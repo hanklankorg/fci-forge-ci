@@ -14,6 +14,7 @@ import (
 	"github.com/diggsweden/forge-ci/internal/domain/ci"
 	domaincontainer "github.com/diggsweden/forge-ci/internal/domain/container"
 	"github.com/diggsweden/forge-ci/internal/domain/errs"
+	"github.com/diggsweden/forge-ci/internal/domain/runners"
 	"github.com/diggsweden/forge-ci/internal/listval"
 )
 
@@ -24,6 +25,9 @@ type PlatformPlanInput struct {
 	// ReleasePlatforms is RELEASE_PLATFORMS: the subset of Platforms this run builds.
 	// Empty builds every one of them.
 	ReleasePlatforms string
+	// Runners is the calling layer's runner inputs. Each planned platform is
+	// built natively on its own image build runner; nil checks nothing.
+	Runners *runners.Inputs
 }
 
 // PlatformLeg is one entry of the matrix: the platform and the suffix its
@@ -50,6 +54,16 @@ func PlatformPlan(ctx context.Context, sink ci.OutputSink, writer io.Writer, in 
 
 	platforms, err = domaincontainer.SelectPlatforms(platforms, in.ReleasePlatforms)
 	if err != nil {
+		return nil, err
+	}
+
+	// Before any output: a leg never runs on another platform's runner.
+	needs := make([]runners.Need, 0, len(platforms))
+	for _, planned := range platforms {
+		needs = append(needs, runners.Need{Role: runners.Build, Platform: planned, Jobs: "image builds"})
+	}
+
+	if err := in.Runners.Admit(needs); err != nil {
 		return nil, err
 	}
 

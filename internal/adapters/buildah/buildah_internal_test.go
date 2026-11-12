@@ -43,7 +43,7 @@ func TestBuildArgs_Composition(t *testing.T) {
 			name: "context only",
 			a:    &Adapter{},
 			req:  container.BuildRequest{Context: "."},
-			want: []string{"build", network, host, "."},
+			want: []string{"build", network, host, "--retry", "5", "--retry-delay", "15s", "."},
 		},
 		{
 			// Global flags come first and the context always last, with
@@ -52,7 +52,7 @@ func TestBuildArgs_Composition(t *testing.T) {
 			a:    &Adapter{Global: []string{"--storage-driver", "vfs"}},
 			req:  container.BuildRequest{Context: "src"},
 			mode: []string{"--tag", "img:latest"},
-			want: []string{"--storage-driver", "vfs", "build", network, host, "--tag", "img:latest", "src"},
+			want: []string{"--storage-driver", "vfs", "build", network, host, "--retry", "5", "--retry-delay", "15s", "--tag", "img:latest", "src"},
 		},
 		{
 			name: "every optional flag",
@@ -66,7 +66,7 @@ func TestBuildArgs_Composition(t *testing.T) {
 				Labels:        []string{"org.opencontainers.image.revision=abc"},
 			},
 			want: []string{
-				"build", network, host,
+				"build", network, host, "--retry", "5", "--retry-delay", "15s",
 				"-f", "Containerfile.alt",
 				"--platform", "linux/arm64",
 				"--target", "runtime",
@@ -87,7 +87,7 @@ func TestBuildArgs_Composition(t *testing.T) {
 				Secrets: []string{"id=db_password,src=/tmp/build-secrets/db_password", "id=api_token,src=/tmp/build-secrets/api_token"},
 			},
 			want: []string{
-				"build", network, host,
+				"build", network, host, "--retry", "5", "--retry-delay", "15s",
 				"--secret", "id=db_password,src=/tmp/build-secrets/db_password",
 				"--secret", "id=api_token,src=/tmp/build-secrets/api_token",
 				".",
@@ -101,13 +101,13 @@ func TestBuildArgs_Composition(t *testing.T) {
 			name: "source date epoch pins the timestamp",
 			a:    &Adapter{},
 			req:  container.BuildRequest{Context: ".", SourceDateEpoch: "1700000000"},
-			want: []string{"build", network, host, "--timestamp", "1700000000", "."},
+			want: []string{"build", network, host, "--retry", "5", "--retry-delay", "15s", "--timestamp", "1700000000", "."},
 		},
 		{
 			name: "no source date epoch leaves the timestamp alone",
 			a:    &Adapter{},
 			req:  container.BuildRequest{Context: "."},
-			want: []string{"build", network, host, "."},
+			want: []string{"build", network, host, "--retry", "5", "--retry-delay", "15s", "."},
 		},
 		{
 			// Import is best-effort and always safe; exporting is not, so
@@ -115,20 +115,20 @@ func TestBuildArgs_Composition(t *testing.T) {
 			name: "cache import only",
 			a:    &Adapter{},
 			req:  container.BuildRequest{Context: ".", CacheRepo: "ghcr.io/org/cache"},
-			want: []string{"build", network, host, layers, cacheFrom, cacheRef, "."},
+			want: []string{"build", network, host, "--retry", "5", "--retry-delay", "15s", layers, cacheFrom, cacheRef, "."},
 		},
 		{
 			name: "cache import and export",
 			a:    &Adapter{},
 			req:  container.BuildRequest{Context: ".", CacheRepo: "ghcr.io/org/cache", CachePush: true},
-			want: []string{"build", network, host, layers, cacheFrom, cacheRef, "--cache-to", cacheRef, "."},
+			want: []string{"build", network, host, "--retry", "5", "--retry-delay", "15s", layers, cacheFrom, cacheRef, "--cache-to", cacheRef, "."},
 		},
 		{
 			// No cache repo disables caching entirely, CachePush or not.
 			name: "cache push without a repo does nothing",
 			a:    &Adapter{},
 			req:  container.BuildRequest{Context: ".", CachePush: true},
-			want: []string{"build", network, host, "."},
+			want: []string{"build", network, host, "--retry", "5", "--retry-delay", "15s", "."},
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -158,11 +158,11 @@ func TestGlobal_DoesNotAliasTheSharedSlice(t *testing.T) {
 	first := adapter.buildArgs(container.BuildRequest{Context: "one", Target: "a"})
 	second := adapter.buildArgs(container.BuildRequest{Context: "two"})
 
-	if !reflect.DeepEqual(first, []string{"--storage-driver", "vfs", "build", network, host, "--target", "a", "one"}) {
+	if !reflect.DeepEqual(first, []string{"--storage-driver", "vfs", "build", network, host, "--retry", "5", "--retry-delay", "15s", "--target", "a", "one"}) {
 		t.Errorf("first = %q", first)
 	}
 
-	if !reflect.DeepEqual(second, []string{"--storage-driver", "vfs", "build", network, host, "two"}) {
+	if !reflect.DeepEqual(second, []string{"--storage-driver", "vfs", "build", network, host, "--retry", "5", "--retry-delay", "15s", "two"}) {
 		t.Errorf("second call saw the first call's flags: %q", second)
 	}
 

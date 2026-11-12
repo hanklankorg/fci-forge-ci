@@ -38,12 +38,30 @@ func promoteImage() BaseImageMetadata {
 func promoteInputFor(images ...BaseImageMetadata) BaseImagePromoteInput {
 	return BaseImagePromoteInput{
 		Images:             images,
+		BaseInputs:         promoteBaseInputs(images...),
 		BaseInputID:        promoteInput,
 		ExpectedRepository: promoteRepo,
 		ExpectedSource:     "https://forge.example/examplescope/base",
 		ExpectedWorkflow:   ".forgejo/workflows/base-images.yml",
 		CosignPublicKey:    "cosign.pub",
 	}
+}
+
+// promoteBaseInputs is the complete expected map of the fixture images: each
+// distinct flavor with the run's input ID.
+func promoteBaseInputs(images ...BaseImageMetadata) []BaseInput {
+	inputs := make([]BaseInput, 0, len(images))
+	seen := map[string]bool{}
+
+	for _, image := range images {
+		if !seen[image.Flavor] {
+			seen[image.Flavor] = true
+
+			inputs = append(inputs, BaseInput{Flavor: image.Flavor, BaseInputID: promoteInput})
+		}
+	}
+
+	return inputs
 }
 
 func TestPromoteBaseImages_RequiresItsCollaborators(t *testing.T) {
@@ -186,6 +204,7 @@ func TestPromoteBaseImages_StopsWhenFinalLookupIsUncertain(t *testing.T) {
 
 	_, err := PromoteBaseImages(context.Background(), registry, verifier, io.Discard, BaseImagePromoteInput{
 		Images:             []BaseImageMetadata{image},
+		BaseInputs:         promoteBaseInputs(image),
 		BaseInputID:        promoteInput,
 		ExpectedRepository: promoteRepo,
 		ExpectedSource:     source,

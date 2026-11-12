@@ -9,6 +9,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"slices"
 	"strings"
@@ -17,6 +18,7 @@ import (
 	"github.com/diggsweden/forge-ci/internal/adapters/cosign"
 	appcontainer "github.com/diggsweden/forge-ci/internal/app/container"
 	"github.com/diggsweden/forge-ci/internal/domain/errs"
+	"github.com/diggsweden/forge-ci/internal/domain/provenance"
 )
 
 // Named so the propagation assertions below can use errors.Is rather than
@@ -81,7 +83,10 @@ func TestVerifyExistingReleaseImage_VerifiedWithBaseLineage(t *testing.T) {
 	}
 }
 
-func TestVerifyExistingReleaseImage_ReattestableWhenProvenanceMismatches(t *testing.T) {
+// Re-attestation supplies provenance an image lacks: provenance that
+// verified and names another release is evidence against reuse, and the
+// flag does not turn it into an image to attest again.
+func TestVerifyExistingReleaseImage_ReattestRefusesProvenanceOfAnotherRelease(t *testing.T) {
 	verifier := &fakeReleaseImageVerifier{payload: releaseImagePayload(t, releaseImageFields{
 		tag: "other", commit: "other", source: "https://forge.example/examplescope/myapp", workflow: ".forgejo/workflows/release.yml",
 	})}
@@ -89,9 +94,37 @@ func TestVerifyExistingReleaseImage_ReattestableWhenProvenanceMismatches(t *test
 		"org.opencontainers.image.revision": "cafe1234",
 		"org.opencontainers.image.version":  "v1",
 		"org.opencontainers.image.ref.name": "v1",
+		"org.opencontainers.image.source":   "https://forge.example/examplescope/myapp",
+	}}
+	input := releaseImageVerifyInput()
+	input.AllowReattest = true
+
+	result, err := appcontainer.VerifyExistingReleaseImage(t.Context(), verifier, registry, io.Discard, input)
+	if !errors.Is(err, errs.ErrValidation) || result.Status != "" || registry.ref != "" || len(verifier.requests) != 3 {
+		t.Fatalf("provenance of another release was passed on to re-attestation: %+v %v requests=%d", result, err, len(verifier.requests))
+	}
+}
+
+// An image the registry stores no provenance attestation for is reattestable
+// with the flag and refused without it. That it has none is the registry's
+// answer for this digest and the SLSA v1 predicate type, not the verifier's
+// refusal.
+func TestVerifyExistingReleaseImage_ReattestableWhenProvenanceIsAbsent(t *testing.T) {
+	const digestOnlyRef = "forge.example/examplescope/myapp@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+
+	verifier := &fakeReleaseImageVerifier{attestOutputErr: errReleaseImageVerify}
+	registry := &fakeReleaseImageLabels{labels: map[string]string{
+		"org.opencontainers.image.revision": "cafe1234",
+		"org.opencontainers.image.version":  "v1",
+		"org.opencontainers.image.ref.name": "v1",
 		"org.opencontainers.image.source":   "https://FORGE.example/examplescope/myapp",
 	}}
 	input := releaseImageVerifyInput()
+
+	if _, err := appcontainer.VerifyExistingReleaseImage(t.Context(), &fakeReleaseImageVerifier{attestOutputErr: errReleaseImageVerify}, registry, io.Discard, input); !errors.Is(err, errs.ErrValidation) {
+		t.Fatalf("err = %v, want the image refused without the flag", err)
+	}
+
 	input.AllowReattest = true
 
 	result, err := appcontainer.VerifyExistingReleaseImage(t.Context(), verifier, registry, io.Discard, input)
@@ -103,8 +136,12 @@ func TestVerifyExistingReleaseImage_ReattestableWhenProvenanceMismatches(t *test
 		t.Fatalf("status = %q, want %q", result.Status, appcontainer.ReleaseImageStatusReattestable)
 	}
 
-	if registry.ref != "forge.example/examplescope/myapp@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" {
+	if registry.ref != digestOnlyRef {
 		t.Errorf("labels ref = %q", registry.ref)
+	}
+
+	if want := []string{digestOnlyRef + " " + provenance.PredicateTypeV1}; !slices.Equal(registry.attestationReads, want) {
+		t.Errorf("attestation reads = %q, want %q", registry.attestationReads, want)
 	}
 
 	// The full check runs first; the re-attestation precheck then verifies
@@ -120,6 +157,87 @@ func TestVerifyExistingReleaseImage_ReattestableWhenProvenanceMismatches(t *test
 	if !slices.Equal(verifier.requests, want) {
 		t.Errorf("requests =\n%+v\nwant\n%+v", verifier.requests, want)
 	}
+}
+
+// A provenance attestation that is stored and does not verify (another key
+// or identity, a changed envelope, another subject) is refused with the flag
+// as without it: attaching new provenance would put a valid attestation
+// beside the one that was refused.
+func TestVerifyExistingReleaseImage_StoredProvenanceThatDoesNotVerifyIsNeverReattested(t *testing.T) {
+	for _, allowReattest := range []bool{false, true} {
+		verifier := &fakeReleaseImageVerifier{attestOutputErr: errReleaseImageVerify}
+		registry := &fakeReleaseImageLabels{provenanceStored: true, labels: map[string]string{
+			"org.opencontainers.image.revision": "cafe1234",
+			"org.opencontainers.image.version":  "v1",
+			"org.opencontainers.image.ref.name": "v1",
+			"org.opencontainers.image.source":   "https://forge.example/examplescope/myapp",
+		}}
+		input := releaseImageVerifyInput()
+		input.AllowReattest = allowReattest
+
+		result, err := appcontainer.VerifyExistingReleaseImage(t.Context(), verifier, registry, io.Discard, input)
+		if !errors.Is(err, errReleaseImageVerify) || !errors.Is(err, errs.ErrValidation) || result.Status != "" {
+			t.Errorf("allow-reattest=%t: status = %q, err = %v; want the verifier's refusal", allowReattest, result.Status, err)
+		}
+
+		if registry.ref != "" {
+			t.Errorf("allow-reattest=%t: labels were read for an image that is not to be re-attested", allowReattest)
+		}
+	}
+}
+
+// Provenance that verifies is the verified image with the flag too, and the
+// registry is not asked what it stores.
+func TestVerifyExistingReleaseImage_VerifiedProvenanceIsNotReattested(t *testing.T) {
+	verifier := &fakeReleaseImageVerifier{payload: releaseImagePayload(t, releaseImageFields{
+		tag: "v1", commit: "cafe1234", source: "https://forge.example/examplescope/myapp", workflow: ".forgejo/workflows/release.yml",
+	})}
+	registry := &fakeReleaseImageLabels{provenanceStored: true}
+	input := releaseImageVerifyInput()
+	input.AllowReattest = true
+
+	result, err := appcontainer.VerifyExistingReleaseImage(t.Context(), verifier, registry, io.Discard, input)
+	if err != nil || result.Status != appcontainer.ReleaseImageStatusVerified {
+		t.Fatalf("status = %q, err = %v; want verified", result.Status, err)
+	}
+
+	if len(registry.attestationReads) != 0 || registry.ref != "" {
+		t.Errorf("the registry was read for a verified image: %q %q", registry.attestationReads, registry.ref)
+	}
+}
+
+// A registry that could not be asked what it stores is neither an image
+// without provenance nor one with provenance that was refused.
+func TestVerifyExistingReleaseImage_ReattestWithUnreachableRegistryIsUnavailable(t *testing.T) {
+	labels := map[string]string{
+		"org.opencontainers.image.revision": "cafe1234",
+		"org.opencontainers.image.version":  "v1",
+		"org.opencontainers.image.ref.name": "v1",
+		"org.opencontainers.image.source":   "https://forge.example/examplescope/myapp",
+	}
+	unreachable := fmt.Errorf("dial tcp: connection refused: %w", errs.ErrDependencyUnavailable)
+	input := releaseImageVerifyInput()
+	input.AllowReattest = true
+
+	t.Run("the read of the stored attestations", func(t *testing.T) {
+		verifier := &fakeReleaseImageVerifier{attestOutputErr: errReleaseImageVerify}
+		registry := &fakeReleaseImageLabels{labels: labels, provenanceErr: unreachable}
+
+		result, err := appcontainer.VerifyExistingReleaseImage(t.Context(), verifier, registry, io.Discard, input)
+		if errs.ExitCodeFromError(err) != errs.ExitCodeUnavailable || result.Status != "" || registry.ref != "" {
+			t.Fatalf("status = %q, err = %v; want dependency unavailable before any label is read", result.Status, err)
+		}
+	})
+
+	t.Run("the provenance verification", func(t *testing.T) {
+		verifier := &fakeReleaseImageVerifier{attestOutputErr: unreachable}
+		registry := &fakeReleaseImageLabels{labels: labels}
+
+		result, err := appcontainer.VerifyExistingReleaseImage(t.Context(), verifier, registry, io.Discard, input)
+		if errs.ExitCodeFromError(err) != errs.ExitCodeUnavailable || result.Status != "" || len(registry.attestationReads) != 0 {
+			t.Fatalf("status = %q, err = %v; want dependency unavailable and no re-attestation check", result.Status, err)
+		}
+	})
 }
 
 func TestVerifyExistingReleaseImage_ReattestRejectsWrongIdentity(t *testing.T) {
@@ -224,15 +342,11 @@ func TestVerifyExistingReleaseImage_EachFailedCheckRefuses(t *testing.T) {
 
 // A signature that stops verifying between the full check and the
 // re-attestation precheck declines re-attestation: the precheck is the only
-// signature check standing between a provenance mismatch and new provenance.
+// signature check standing between missing provenance and new provenance.
 func TestVerifyExistingReleaseImage_ReattestRequiresSignature(t *testing.T) {
 	t.Parallel()
 
-	verifier := &fakeReleaseImageVerifier{
-		payload:      releaseImagePayload(t, releaseImageFields{tag: "other", commit: "other", source: "https://forge.example/examplescope/myapp", workflow: ".forgejo/workflows/release.yml"}),
-		verifyPasses: 1,
-		verifyErr:    errSignatureMismatch,
-	}
+	verifier := &fakeReleaseImageVerifier{attestOutputErr: errReleaseImageVerify, verifyPasses: 1, verifyErr: errSignatureMismatch}
 	registry := &fakeReleaseImageLabels{labels: map[string]string{
 		"org.opencontainers.image.revision": "cafe1234",
 		"org.opencontainers.image.version":  "v1",
@@ -288,9 +402,7 @@ func TestVerifyExistingReleaseImage_RequiresTheKeyAndTheFourReleaseValues(t *tes
 func TestVerifyExistingReleaseImage_ReattestRefusesBaseLineageExpectations(t *testing.T) {
 	t.Parallel()
 
-	verifier := &fakeReleaseImageVerifier{payload: releaseImagePayload(t, releaseImageFields{
-		tag: "other", commit: "other", source: "https://forge.example/examplescope/myapp", workflow: ".forgejo/workflows/release.yml",
-	})}
+	verifier := &fakeReleaseImageVerifier{attestOutputErr: errReleaseImageVerify}
 	registry := &fakeReleaseImageLabels{labels: map[string]string{
 		"org.opencontainers.image.revision": "cafe1234",
 		"org.opencontainers.image.version":  "v1",
@@ -363,6 +475,18 @@ type fakeReleaseImageLabels struct {
 	ref    string
 	labels map[string]string
 	err    error
+	// provenanceStored and provenanceErr are the registry's answer to
+	// whether it stores an attestation; attestationReads holds each question
+	// as "<ref> <predicate type>".
+	provenanceStored bool
+	provenanceErr    error
+	attestationReads []string
+}
+
+func (f *fakeReleaseImageLabels) HasAttestation(_ context.Context, ref, predicateType string) (bool, error) {
+	f.attestationReads = append(f.attestationReads, ref+" "+predicateType)
+
+	return f.provenanceStored, f.provenanceErr
 }
 
 func (f *fakeReleaseImageLabels) Labels(_ context.Context, ref string) (map[string]string, error) {
@@ -400,7 +524,7 @@ func releaseImagePayloadWith(t *testing.T, fields releaseImageFields, mutate fun
 		},
 	}
 
-	deps := []any{map[string]any{"digest": map[string]any{"gitCommit": fields.commit}}}
+	deps := []any{map[string]any{"uri": provenance.SourceDependency(fields.source, fields.tag, fields.commit).URI, "digest": map[string]any{"gitCommit": fields.commit}}}
 	if fields.baseRef != "" {
 		external["base"] = map[string]any{"ref": fields.baseRef, "input_id": fields.baseInputID}
 		deps = append(deps, map[string]any{
@@ -434,6 +558,57 @@ func releaseImagePayloadWith(t *testing.T, fields releaseImageFields, mutate fun
 	}
 
 	return body
+}
+
+func TestVerifyExistingReleaseImage_SourceDependencyBinding(t *testing.T) {
+	t.Parallel()
+
+	for _, ref := range []string{"v1.2.3", "refs/tags/v1.2.3"} {
+		for _, defect := range []string{"", "missing URI", "foreign URI", "other ref", "ref alias", "unrelated matching commit"} {
+			t.Run(ref+"/"+defect, func(t *testing.T) {
+				t.Parallel()
+
+				input := releaseImageVerifyInput()
+				input.ExpectedTag = ref
+				input.ExpectedCommit = strings.Repeat("a", 40)
+				fields := releaseImageFields{tag: ref, commit: input.ExpectedCommit, source: input.ExpectedSource, workflow: input.ExpectedWorkflow}
+				payload := releaseImagePayloadWith(t, fields, func(s map[string]any) {
+					build := s["predicate"].(map[string]any)["buildDefinition"].(map[string]any)
+					deps := build["resolvedDependencies"].([]any)
+					dep := deps[0].(map[string]any)
+
+					switch defect {
+					case "missing URI":
+						delete(dep, "uri")
+					case "foreign URI":
+						dep["uri"] = "git+https://foreign.example/other/repo@" + ref
+					case "other ref":
+						dep["uri"] = provenance.SourceDependency(fields.source, "other", fields.commit).URI
+					case "ref alias":
+						alias := strings.TrimPrefix(ref, "refs/tags/")
+						if alias == ref {
+							alias = "refs/tags/" + ref
+						}
+
+						dep["uri"] = provenance.SourceDependency(fields.source, alias, fields.commit).URI
+					case "unrelated matching commit":
+						dep["digest"] = map[string]any{"gitCommit": "wrong-source-commit"}
+
+						build["resolvedDependencies"] = append(deps, map[string]any{"uri": "git+https://foreign.example/other/repo@" + ref, "digest": map[string]any{"gitCommit": fields.commit}})
+					}
+				})
+
+				result, err := appcontainer.VerifyExistingReleaseImage(t.Context(), &fakeReleaseImageVerifier{payload: payload}, nil, io.Discard, input)
+				if defect == "" {
+					if err != nil || result.Status != appcontainer.ReleaseImageStatusVerified {
+						t.Fatalf("legitimate producer binding refused: %v", err)
+					}
+				} else if !errors.Is(err, errs.ErrValidation) {
+					t.Fatalf("accepted source dependency substitution: %v", err)
+				}
+			})
+		}
+	}
 }
 
 // TestVerifyExistingReleaseImage_RedactsUnsafeVerifierOutput makes the

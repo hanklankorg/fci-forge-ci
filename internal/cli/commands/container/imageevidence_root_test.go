@@ -38,7 +38,7 @@ while [ $# -gt 0 ]; do
 	shift
 done
 if [ "$calls" -le "$failures" ]; then
-	echo 'FATAL: failed to download vulnerability DB' >&2
+	echo 'FATAL: failed to download vulnerability DB: Get "https://mirror.example/v2/": dial tcp: lookup mirror.example: no such host' >&2
 	exit 1
 fi
 printf '{"Results":[]}' >"$output"

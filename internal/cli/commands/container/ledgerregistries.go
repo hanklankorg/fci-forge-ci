@@ -9,7 +9,6 @@ import (
 	"io"
 	"os"
 
-	"github.com/diggsweden/forge-ci/internal/adapters/cosign"
 	"github.com/diggsweden/forge-ci/internal/adapters/github"
 	"github.com/diggsweden/forge-ci/internal/adapters/ociregistry"
 	"github.com/diggsweden/forge-ci/internal/cli/deps"
@@ -127,7 +126,7 @@ func (d *dryRunRegistry) DeleteTag(_ context.Context, ref string) error {
 }
 
 // CopyWithSignatures simulates a cross-registry promotion (the real run
-// uses cosign copy). It lands the source's digest at dest in the simulated
+// copies the image and its evidence through the registry adapter). It lands the source's digest at dest in the simulated
 // map so the domain's post-copy digest verification still runs and passes.
 func (d *dryRunRegistry) CopyWithSignatures(ctx context.Context, source, dest string) error {
 	dig, err := d.resolver.ResolveDigest(ctx, source)
@@ -141,19 +140,18 @@ func (d *dryRunRegistry) CopyWithSignatures(ctx context.Context, source, dest st
 	return nil
 }
 
-// cosignSigCopier adapts the cosign adapter to imageledger.SignatureCopier:
-// it narrates each cross-registry copy (matching the same-repo audit trail)
-// and supplies the redaction sink. Used for real cross-registry promotion,
-// where the registry-attached signature must travel with the image.
-type cosignSigCopier struct {
-	cosign *cosign.Adapter
-	out    io.Writer
+// auditSignatureCopier narrates each cross-registry copy before delegating,
+// matching the same-repository audit trail of auditCopier.
+type auditSignatureCopier struct {
+	imageledger.SignatureCopier
+
+	out io.Writer
 }
 
-func (c cosignSigCopier) CopyWithSignatures(ctx context.Context, source, dest string) error {
+func (c auditSignatureCopier) CopyWithSignatures(ctx context.Context, source, dest string) error {
 	_, _ = fmt.Fprintf(c.out, "ledger: cross-registry promoting (with signatures) %s -> %s\n", source, dest)
 
-	return c.cosign.CopyImage(ctx, cosign.CopyImageInput{Source: source, Dest: dest}, c.out)
+	return c.SignatureCopier.CopyWithSignatures(ctx, source, dest)
 }
 
 // auditCopier wraps the real promote registry and narrates each CopyTag

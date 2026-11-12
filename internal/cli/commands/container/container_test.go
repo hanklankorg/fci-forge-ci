@@ -201,3 +201,32 @@ func TestLedgerAddCmd_UnreadableLedgerIsNotOverwritten(t *testing.T) {
 		t.Errorf("ledger was rewritten although the read failed\nbefore: %s\nafter:  %s", before, got)
 	}
 }
+
+// platform-plan admits the platforms it plans against the layer's runner
+// inputs: a label list with commas is one value, and an arm64 leg whose image
+// build runner input is empty is refused with no output.
+func TestPlatformPlanCmd_AdmitsAgainstTheRunnerInputs(t *testing.T) {
+	env := ghaenv.Setup(t)
+
+	plan := func(arm64 string) error {
+		return containercmd.New().Run(context.Background(), []string{"container", "platform-plan", "--platforms", "linux/amd64,linux/arm64",
+			"--runner-input", `build-runs-on-linux-amd64=["self-hosted", "x64"]`, "--runner-input", "build-runs-on-linux-arm64=" + arm64})
+	}
+
+	err := plan("")
+	if !errors.Is(err, errs.ErrUsage) || !strings.Contains(err.Error(), "build-runs-on-linux-arm64") {
+		t.Fatalf("an arm64 leg without an arm64 runner input: err = %v, want a usage error naming the input", err)
+	}
+
+	if got := env.Output("matrix-json"); got != "" {
+		t.Errorf("a refused plan emitted matrix-json = %s", got)
+	}
+
+	if err := plan(`["self-hosted", "arm64"]`); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := env.Output("platforms-json"); got != `["linux/amd64","linux/arm64"]` {
+		t.Errorf("platforms-json = %s", got)
+	}
+}

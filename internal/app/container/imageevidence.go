@@ -4,6 +4,7 @@
 package container
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -636,15 +637,21 @@ func scanImageEvidenceLayout(ctx context.Context, deps imageEvidenceDeps, layout
 }
 
 // retryImageEvidenceTrivy runs the scan until it exits zero or the attempts
-// are used up. A scanner that cannot be started is not run again, and each
-// attempt starts without the report a failed one may have left.
+// are used up. Only a scan the network stopped is run again: a scanner that
+// cannot be started and a failure of its own repeat. Each attempt starts
+// without the report a failed one may have left.
 func retryImageEvidenceTrivy(ctx context.Context, deps imageEvidenceDeps, layout, trivyOutput string, scan imageEvidenceScan) error {
 	return retry.Run(ctx, nil, scan.attempts, scan.delay, func() error {
 		if err := os.Remove(trivyOutput); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			return retry.Permanent(fmt.Errorf("remove previous trivy output %s: %w", trivyOutput, err))
 		}
 
-		return runImageEvidenceTrivy(ctx, deps.trivy, deps.out, deps.stderr, layout, trivyOutput, scan.timeout, scan.platform)
+		err := runImageEvidenceTrivy(ctx, deps.trivy, deps.out, deps.stderr, layout, trivyOutput, scan.timeout, scan.platform)
+		if err != nil && !errs.Retriable(err) {
+			return retry.Permanent(err)
+		}
+
+		return err
 	}, retry.OnRetry(func(attempt, total int, wait time.Duration, _ error) {
 		_, _ = fmt.Fprintf(deps.out, "Trivy image scan failed (attempt %d/%d) for %s, retrying in %s...\n", attempt, total, layout, wait)
 	}))
@@ -677,13 +684,15 @@ func runImageEvidenceTrivy(ctx context.Context, trivy ImageEvidenceTrivy, out, s
 		args = append(args, "--platform", platform)
 	}
 
-	code, err := trivy.RunInherit(ctx, out, stderr, args...)
+	var said bytes.Buffer
+
+	code, err := trivy.RunInherit(ctx, out, io.MultiWriter(stderr, &said), args...)
 	if err != nil {
 		return retry.Permanent(fmt.Errorf("trivy image --input %s: %w", layout, err))
 	}
 
 	if code != 0 {
-		return fmt.Errorf("trivy image --input %s exited with status %d: %w", layout, code, errs.ErrDependencyUnavailable)
+		return fmt.Errorf("trivy image --input %s exited with status %d: %w", layout, code, errs.ToolFailure(errs.TrivyReport(said.String())))
 	}
 
 	return nil

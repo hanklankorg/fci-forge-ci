@@ -26,6 +26,9 @@ type ValidateContainerfileInput struct {
 	// Context opts into source-relative, confined build paths in the current
 	// directory. Nil preserves the standalone path resolver's behavior.
 	Context *string
+	// SourceDirs are further directories the job writes below the current
+	// directory; each must be a relative path without a `..` segment.
+	SourceDirs []string
 }
 
 // ValidateContainerfile resolves a Containerfile path. When Path is an
@@ -41,6 +44,12 @@ type ValidateContainerfileInput struct {
 func ValidateContainerfile(ctx context.Context, sink ci.OutputSink, out io.Writer, in ValidateContainerfileInput) error {
 	if in.Path == "" {
 		return fmt.Errorf("containerfile path is required: pass --path <file> or set $CONTAINERFILE: %w", errs.ErrUsage)
+	}
+
+	for _, dir := range in.SourceDirs {
+		if !pathsafe.Relative(dir) {
+			return fmt.Errorf("source directory %q must be a relative path inside the source checkout: %w", dir, errs.ErrValidation)
+		}
 	}
 
 	emit := func(path string) error {

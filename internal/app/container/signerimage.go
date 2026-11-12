@@ -82,12 +82,18 @@ type SignerImageBuildArchInput struct {
 	MetadataDir      string
 	RetryAttempts    int
 	RetryDelay       time.Duration
+	// BuilderMaterialID, when supplied, must match the executable actually used,
+	// including when a prepared or registry cache would avoid the build.
+	BuilderMaterialID string
 }
 
 // SignerImageAssembleInput drives multi-arch manifest assembly.
 type SignerImageAssembleInput struct {
 	// LayoutsDir is the gathered architecture-artifact root; empty preserves cwd.
-	LayoutsDir       string
+	LayoutsDir string
+	// LayoutRoots selects read-only architecture artifact roots, when a forge
+	// extracts native jobs separately instead of merging their directories.
+	LayoutRoots      map[string]string
 	AuthFile         string
 	SourceSHA        string
 	ServerURL        string
@@ -224,6 +230,9 @@ func StageSignerImageArch(ctx context.Context, tool SignerImageTool, inspector L
 }
 
 func buildSignerImageArch(ctx context.Context, tool SignerImageTool, inspector LayoutInspector, out io.Writer, in SignerImageBuildArchInput) (*SignerImageArchMetadata, error) {
+	if err := CheckSignerImageBuilderIdentity(tool, in.BuilderMaterialID); err != nil {
+		return nil, err
+	}
 	// Staging writes no registry, so a build that pulls only public bases
 	// needs no credentials; a push does.
 	derived, err := deriveSignerImageArch(in, inspector == nil)
@@ -293,6 +302,32 @@ func buildSignerImageArch(ctx context.Context, tool SignerImageTool, inspector L
 	return meta, nil
 }
 
+// CheckSignerImageBuilderIdentity binds resolved plans to the selected native
+// executable without running it. Legacy plans do not require an identity probe.
+func CheckSignerImageBuilderIdentity(tool SignerImageTool, expected string) error {
+	if expected == "" {
+		return nil
+	}
+
+	identified, ok := tool.(interface {
+		Identity() (domaincontainer.BuilderIdentity, error)
+	})
+	if !ok {
+		return fmt.Errorf("planned builder identity cannot be checked: %w", errs.ErrValidation)
+	}
+
+	identity, err := identified.Identity()
+	if err != nil {
+		return err
+	}
+
+	if identity.MaterialID() != expected {
+		return fmt.Errorf("native builder material ID differs from planned builder-material-id: %w", errs.ErrValidation)
+	}
+
+	return nil
+}
+
 func stageSignerArchitecture(ctx context.Context, tool SignerImageTool, inspector LayoutInspector, out io.Writer, in SignerImageBuildArchInput, derived signerImageArchDerived) (string, error) {
 	directory := filepath.Join(derived.MetadataDir, "layout")
 	if err := tool.ExportLocalImageToLayout(ctx, derived.LocalImage, directory, out); err != nil {
@@ -331,6 +366,7 @@ type StagedSignerImage struct {
 	in      SignerImageAssembleInput
 	derived signerImageManifestDerived
 	inputs  []LayoutRecordInput
+	digests map[string]string // independently retained before scan/gate callbacks
 }
 
 // AdmitStagedSignerImage reads and checks every staged architecture of one
@@ -351,8 +387,10 @@ func AdmitStagedSignerImage(ctx context.Context, registry StagedSignerRegistry, 
 		return nil, err
 	}
 	// Establish source/platform/content binding before policy callbacks inspect
-	// inputs. PublishImageLayouts rechecks the same bytes after the callbacks.
-	if _, err := verifyImageLayouts(ctx, registry, inputs); err != nil {
+	// inputs. Retain these digests independently of mutable layout records so
+	// publication can require the content that actually passed the callbacks.
+	digests, err := verifyImageLayouts(ctx, registry, inputs)
+	if err != nil {
 		return nil, err
 	}
 
@@ -366,7 +404,7 @@ func AdmitStagedSignerImage(ctx context.Context, registry StagedSignerRegistry, 
 		}
 	}
 
-	return &StagedSignerImage{in: in, derived: derived, inputs: inputs}, nil
+	return &StagedSignerImage{in: in, derived: derived, inputs: inputs, digests: digests}, nil
 }
 
 // Publish uploads the admitted layouts, assembles their index and writes
@@ -374,7 +412,11 @@ func AdmitStagedSignerImage(ctx context.Context, registry StagedSignerRegistry, 
 func (s *StagedSignerImage) Publish(ctx context.Context, registry StagedSignerRegistry, sink ci.OutputSink, summary ci.SummarySink, out io.Writer) (*SignerImageMetadata, error) {
 	in := s.in
 
-	if _, uploadErr := PublishImageLayouts(ctx, registry, out, s.inputs, in.RetryAttempts, in.RetryDelay); uploadErr != nil {
+	if err := s.verifyLayouts(ctx, registry); err != nil {
+		return nil, err
+	}
+
+	if _, uploadErr := publishVerifiedImageLayouts(ctx, registry, out, s.inputs, s.digests, in.RetryAttempts, in.RetryDelay); uploadErr != nil {
 		return nil, uploadErr
 	}
 
@@ -396,17 +438,39 @@ func (s *StagedSignerImage) Publish(ctx context.Context, registry StagedSignerRe
 	return meta, nil
 }
 
+// Recheck every platform against its admission pin before the first upload.
+// Rewriting both a layout and its record must not replace scanned content.
+func (s *StagedSignerImage) verifyLayouts(ctx context.Context, inspector LayoutInspector) error {
+	current, err := verifyImageLayouts(ctx, inspector, s.inputs)
+	if err != nil {
+		return err
+	}
+
+	for platform, digest := range s.digests {
+		if current[platform] != digest {
+			return fmt.Errorf("staged %s layout digest changed after admission: expected %s, got %s: %w", platform, digest, current[platform], errs.ErrValidation)
+		}
+	}
+
+	return nil
+}
+
 func stagedSignerInputs(ctx context.Context, registry LayoutInspector, in SignerImageAssembleInput, derived signerImageManifestDerived) ([]LayoutRecordInput, error) {
 	inputs := make([]LayoutRecordInput, 0, len(derived.Archs))
 	for _, arch := range derived.Archs {
 		tag := derived.ManifestTag + "-" + arch
 
-		ref, err := signerArchRef(in.LayoutsDir, arch, derived.ImageRepository, derived.Name, tag)
+		root, err := signerLayoutRoot(in, arch)
 		if err != nil {
 			return nil, err
 		}
 
-		directory := filepath.Join(in.LayoutsDir, derived.Name+"-arch-"+arch, "layout")
+		ref, err := signerArchRef(root, arch, derived.ImageRepository, derived.Name, tag)
+		if err != nil {
+			return nil, err
+		}
+
+		directory := filepath.Join(root, derived.Name+"-arch-"+arch, "layout")
 
 		record, err := readImageLayoutRecord(directory)
 		if err != nil {
@@ -425,6 +489,23 @@ func stagedSignerInputs(ctx context.Context, registry LayoutInspector, in Signer
 	}
 
 	return inputs, nil
+}
+
+func signerLayoutRoot(in SignerImageAssembleInput, arch string) (string, error) {
+	if len(in.LayoutRoots) == 0 {
+		return in.LayoutsDir, nil
+	}
+
+	if in.LayoutsDir != "" {
+		return "", fmt.Errorf("use one layout root mode: %w", errs.ErrUsage)
+	}
+
+	root := in.LayoutRoots[arch]
+	if root == "" {
+		return "", fmt.Errorf("missing layout root for architecture %s: %w", arch, errs.ErrMissingInput)
+	}
+
+	return root, nil
 }
 
 // AssembleSignerImageManifest assembles the per-arch signer images into the
@@ -749,7 +830,7 @@ func localScratchImage(name string) string {
 func signerArchRef(root, arch, imageRepository, name, expectedTag string) (string, error) {
 	metadataFile := filepath.Join(root, name+"-arch-"+arch, name+"-"+arch+".json")
 
-	body, err := os.ReadFile(metadataFile) //nolint:gosec // workspace-local metadata artifact downloaded by the workflow.
+	body, err := cliio.ReadRegularFile(metadataFile)
 	if err != nil {
 		return "", fmt.Errorf("image metadata missing: %s: %w", metadataFile, err)
 	}

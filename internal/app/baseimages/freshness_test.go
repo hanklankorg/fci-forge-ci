@@ -7,7 +7,10 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
+	"net"
 	"strings"
+	"syscall"
 	"testing"
 
 	"github.com/diggsweden/forge-ci/internal/app/baseimages"
@@ -28,7 +31,7 @@ func (f *fakeFreshnessResolver) ResolveDigest(_ context.Context, ref string) (st
 	return f.digests[ref], nil
 }
 
-var errRegistryBlip = errors.New("registry blip")
+var errRegistryBlip error = &net.OpError{Op: "dial", Net: "tcp", Err: syscall.ECONNREFUSED}
 
 const freshPinned = "docker.io/library/debian:trixie-slim@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
@@ -133,18 +136,47 @@ func TestCheckFreshness_UnreachableRegistryFailsClosedWhenEnforcing(t *testing.T
 		}
 	})
 
-	t.Run("warn-only skips", func(t *testing.T) {
+	// A registry that answered with a refusal was reached: its class stays.
+	t.Run("enforce keeps a refusal's class", func(t *testing.T) {
 		t.Parallel()
+
+		refused := &fakeFreshnessResolver{err: fmt.Errorf("401 from the registry: %w", errs.ErrPermissionDenied)}
 
 		var out, stderr bytes.Buffer
 
-		err := baseimages.CheckFreshness(context.Background(), resolver, fakeoutputsink.New(t), &out, &stderr, freshnessInput(false))
+		err := baseimages.CheckFreshness(context.Background(), refused, fakeoutputsink.New(t), &out, &stderr, freshnessInput(true))
+		if !errors.Is(err, errs.ErrPermissionDenied) || errors.Is(err, errs.ErrDependencyUnavailable) {
+			t.Fatalf("CheckFreshness() = %v, want permission denied and not unavailable", err)
+		}
+	})
+
+	// Warn-only does not block, and does not report the pin as current
+	// either: it is counted as unchecked, with the cause, and never printed
+	// as "digest is current".
+	t.Run("warn-only reports the pin as unchecked, not current", func(t *testing.T) {
+		t.Parallel()
+
+		sink := fakeoutputsink.New(t)
+
+		var out, stderr bytes.Buffer
+
+		err := baseimages.CheckFreshness(context.Background(), resolver, sink, &out, &stderr, freshnessInput(false))
 		if err != nil {
 			t.Fatalf("CheckFreshness() = %v, want nil", err)
 		}
 
-		if !strings.Contains(stderr.String(), "skipping (not blocking)") {
-			t.Errorf("stderr = %q, want skip warning", stderr.String())
+		if sink.Single("stale-count") != "0" {
+			t.Errorf("stale-count = %q, want 0", sink.Single("stale-count"))
+		}
+
+		for _, want := range []string{"the pin was not checked (not blocking): " + errRegistryBlip.Error(), "1 pinned container digest(s) could not be compared with upstream"} {
+			if !strings.Contains(stderr.String(), want) {
+				t.Errorf("stderr = %q, want %q", stderr.String(), want)
+			}
+		}
+
+		if strings.Contains(out.String(), "digest is current") {
+			t.Errorf("out = %q: an unchecked pin was reported current", out.String())
 		}
 	})
 }

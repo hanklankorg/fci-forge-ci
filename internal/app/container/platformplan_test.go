@@ -13,6 +13,8 @@ import (
 
 	appcontainer "github.com/diggsweden/forge-ci/internal/app/container"
 	"github.com/diggsweden/forge-ci/internal/domain/errs"
+	"github.com/diggsweden/forge-ci/internal/domain/provider"
+	"github.com/diggsweden/forge-ci/internal/domain/runners"
 	"github.com/diggsweden/forge-ci/internal/testutil/fakeoutputsink"
 )
 
@@ -148,5 +150,58 @@ func TestPlatformPlan_SelectsFromTheDeclaredPlatforms(t *testing.T) {
 		ReleasePlatforms: "linux/riscv64",
 	}); !errors.Is(err, errs.ErrUsage) {
 		t.Errorf("an undeclared selection: err = %v, want a usage error", err)
+	}
+}
+
+// Each planned platform builds on its own image build runner or not at all:
+// neither the ordinary runner nor another architecture's stands in, and a
+// refused plan emits no matrix a job could be scheduled from.
+func TestPlatformPlan_AdmitsThePlannedPlatformsAgainstTheRunnerInputs(t *testing.T) {
+	t.Parallel()
+
+	plan := func(selection string, pairs ...string) (*fakeoutputsink.Sink, error) {
+		inputs, err := runners.ParseInputs(provider.ForgeForgejo, pairs)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		sink := fakeoutputsink.New(t)
+		_, err = appcontainer.PlatformPlan(t.Context(), sink, nil, appcontainer.PlatformPlanInput{
+			Platforms:        "linux/amd64,linux/arm64",
+			ReleasePlatforms: selection,
+			Runners:          inputs,
+		})
+
+		return sink, err
+	}
+
+	amd64Only := []string{`runs-on=["ordinary"]`, `build-runs-on-linux-amd64=["builder"]`, "build-runs-on-linux-arm64="}
+
+	sink, err := plan("", amd64Only...)
+	if !errors.Is(err, errs.ErrUsage) || !strings.Contains(err.Error(), "build-runs-on-linux-arm64") {
+		t.Errorf("an arm64 leg without an arm64 runner input: err = %v, want a usage error naming the input", err)
+	}
+
+	if got := sink.Keys(); len(got) != 0 {
+		t.Errorf("emitted %q for a refused plan", got)
+	}
+
+	// The same inputs admit the plan once arm64 is narrowed out of it.
+	sink, err = plan("linux/amd64", amd64Only...)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got := sink.Single("platforms-json"); got != `["linux/amd64"]` {
+		t.Errorf("platforms-json = %s", got)
+	}
+
+	sink, err = plan("", `build-runs-on-linux-amd64=["builder"]`, `build-runs-on-linux-arm64=["builder", "arm64"]`)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got := sink.Single("platforms-json"); got != `["linux/amd64","linux/arm64"]` {
+		t.Errorf("platforms-json = %s", got)
 	}
 }

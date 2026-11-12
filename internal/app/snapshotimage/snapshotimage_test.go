@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: The Forge CI Authors
+// SPDX-FileCopyrightText: 2026 Digg - Agency for Digital Government
 // SPDX-License-Identifier: EUPL-1.2 OR GPL-3.0-or-later
 
 package snapshotimage_test
@@ -14,8 +14,10 @@ import (
 
 	"github.com/diggsweden/forge-ci/internal/adapters/gitlaboutput"
 	appsnapshot "github.com/diggsweden/forge-ci/internal/app/snapshotimage"
+	"github.com/diggsweden/forge-ci/internal/domain/config"
 	"github.com/diggsweden/forge-ci/internal/domain/errs"
 	"github.com/diggsweden/forge-ci/internal/domain/output"
+	"github.com/diggsweden/forge-ci/internal/domain/pipeline"
 	"github.com/diggsweden/forge-ci/internal/domain/snapshotimage"
 	"github.com/diggsweden/forge-ci/internal/testutil/fakeoutputsink"
 	"github.com/stretchr/testify/require"
@@ -107,9 +109,8 @@ func TestNoDeclaredContainersNeverInfersRootImage(t *testing.T) {
 
 func TestUnsupportedSnapshotRequestsFailBeforeBuild(t *testing.T) {
 	for _, body := range []string{
-		"containers:\n  - name: app\n    enable-slsa: true\n",
 		"containers:\n  - name: app\n    platforms: linux/s390x\n",
-		"sign:\n  method: sigstore\ncontainers:\n  - name: app\n",
+		"containers:\n  - name: app\n    build-secrets: [token]\n",
 	} {
 		in := input(t, body)
 		_, err := appsnapshot.Plan(t.Context(), &git{head: in.SourceSHA}, in)
@@ -117,23 +118,58 @@ func TestUnsupportedSnapshotRequestsFailBeforeBuild(t *testing.T) {
 	}
 }
 
-func TestArtifactOnlySnapshotOptOutDoesNotWeakenStableSigningPolicy(t *testing.T) {
-	in := input(t, "sign:\n  method: sigstore\ncontainers:\n  - name: app\n")
+// One declaration serves the release and the snapshot: what only a release
+// does, signing and provenance, is left out, and the snapshot image stays
+// unsigned.
+func TestSnapshotReadsTheReleaseDeclarationAndLeavesSigningOut(t *testing.T) {
+	in := input(t, "sign:\n  method: sigstore\n  transparency: public\ngit-signing:\n  method: ssh\ncontainers:\n  - name: app\n    enable-slsa: true\n")
 	git := &git{head: in.SourceSHA}
-	_, err := appsnapshot.Plan(t.Context(), git, in)
-	require.ErrorContains(t, err, "signing must be NONE")
 
-	in.Publish = false
 	plan, err := appsnapshot.Plan(t.Context(), git, in)
 	require.NoError(t, err)
+	require.True(t, plan.Enabled)
+	require.Len(t, plan.Images, 1)
+	require.Equal(t, "NONE", plan.Images[0].Signing)
+	require.False(t, plan.Images[0].Provenance)
+	require.True(t, strings.HasSuffix(plan.Images[0].Tag, "-snapshot"))
+
+	in.Publish = false
+	plan, err = appsnapshot.Plan(t.Context(), git, in)
+	require.NoError(t, err)
 	require.False(t, plan.Enabled)
-	require.Empty(t, plan.Builds)
 	require.Empty(t, plan.Images)
 
-	// Opting out of images must not rewrite the shared stable configuration.
-	in.Publish = true
+	// The release plans the same file with its signing and provenance, as
+	// before: the snapshot leaves them out, it does not turn them off.
+	release := releaseConfigPlan(t, in.File)
+	require.Equal(t, "sigstore", string(release.Sign.Method))
+	require.True(t, release.Containers.All[0].EnableSLSA)
+
+	_, err = pipeline.NewReleasePlan(pipeline.ReleasePlanInput{ConfigPlan: release, ReleaseSBOMs: "none", ReleaseSignArtifacts: true})
+	require.NoError(t, err)
+
+	// A declaration whose image asks for provenance and names no signing
+	// method is a snapshot's all the same, and still no release's.
+	in = input(t, "containers:\n  - name: app\n    enable-slsa: true\n")
 	_, err = appsnapshot.Plan(t.Context(), git, in)
-	require.ErrorContains(t, err, "signing must be NONE")
+	require.NoError(t, err)
+
+	_, err = pipeline.NewReleasePlan(pipeline.ReleasePlanInput{ConfigPlan: releaseConfigPlan(t, in.File), ReleaseSBOMs: "none", ReleaseSignArtifacts: true})
+	require.ErrorContains(t, err, "signing is not enabled with a cosign-capable method")
+}
+
+func releaseConfigPlan(t *testing.T, file string) pipeline.ConfigPlan {
+	t.Helper()
+
+	body, err := os.ReadFile(file)
+	require.NoError(t, err)
+
+	cfg, err := config.Parse(body)
+	require.NoError(t, err)
+	require.NoError(t, config.Validate(cfg))
+	require.NoError(t, config.Derive(cfg))
+
+	return pipeline.NewConfigPlan(cfg)
 }
 
 func TestNativeBuildAndArtifactInputsRefuseBeforeTools(t *testing.T) {

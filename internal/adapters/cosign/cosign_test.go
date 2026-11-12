@@ -79,37 +79,7 @@ func TestSignBlob_KeylessArgvShape(t *testing.T) {
 	}
 }
 
-func TestCopyImage_ArgvShape(t *testing.T) {
-	t.Parallel()
-
-	const digest = "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
-
-	for _, source := range []string{
-		"forge.example/o/r:staging-v1.2.3",
-		"forge.example/o/r:staging-v1.2.3@" + digest,
-		"forge.example/o/r@" + digest,
-	} {
-		t.Run(source, func(t *testing.T) {
-			t.Parallel()
-
-			bins := mockbinary.New(t)
-			bins.Add("cosign", ":")
-			adapter := &cosign.Adapter{Bin: bins.Path("cosign")}
-
-			err := adapter.CopyImage(t.Context(), cosign.CopyImageInput{Source: source, Dest: "ghcr.io/o/r:release"}, nil)
-			if err != nil {
-				t.Fatalf("CopyImage: %v", err)
-			}
-
-			want := []string{"copy", "--force", source, "ghcr.io/o/r:release"}
-			if got := bins.Invocations("cosign")[0].Args; !slices.Equal(got, want) {
-				t.Errorf("argv:\n got=%v\nwant=%v", got, want)
-			}
-		})
-	}
-}
-
-func TestCopyImage_AuthConfigIsPrivateAndRemovedAfterTheChildExits(t *testing.T) {
+func TestPublicKey_AuthConfigIsPrivateAndRemovedAfterTheChildExits(t *testing.T) {
 	t.Parallel()
 
 	for _, exit := range []int{0, 7} {
@@ -138,7 +108,7 @@ exit %d
 			environment := []string{"PATH=" + os.Getenv("PATH"), "MARKER=kept", "DOCKER_CONFIG=" + dir}
 			adapter := &cosign.Adapter{Bin: bins.Path("cosign"), AuthFile: authFile, Env: slices.Clone(environment)}
 
-			err := adapter.CopyImage(t.Context(), cosign.CopyImageInput{Source: "127.0.0.1:1/source:tag", Dest: "127.0.0.1:1/dest:tag"}, nil)
+			err := adapter.PublicKey(t.Context(), "./release.key", new(strings.Builder), nil)
 			if (err == nil) != (exit == 0) {
 				t.Fatalf("child exit %d: %v", exit, err)
 			}
@@ -153,23 +123,9 @@ exit %d
 			}
 
 			if !slices.Equal(adapter.Env, environment) {
-				t.Fatal("copy changed the adapter's captured environment")
+				t.Fatal("the run changed the adapter's captured environment")
 			}
 		})
-	}
-}
-
-func TestCopyImage_RejectsEmptyRefs(t *testing.T) {
-	t.Parallel()
-
-	adapter := refusingAdapter(t)
-
-	if err := adapter.CopyImage(context.Background(), cosign.CopyImageInput{Dest: "ghcr.io/o/r:release"}, nil); err == nil {
-		t.Error("empty source must be rejected")
-	}
-
-	if err := adapter.CopyImage(context.Background(), cosign.CopyImageInput{Source: "forge.example/o/r:v1"}, nil); err == nil {
-		t.Error("empty dest must be rejected")
 	}
 }
 
@@ -781,5 +737,46 @@ func TestAttestImage_SignsAgainOnlyAfterATransientFailure(t *testing.T) {
 				t.Fatalf("cosign ran %d times, want %d", runs, test.runs)
 			}
 		})
+	}
+}
+
+// A signing that ends on a host cosign could not reach is an unavailable
+// dependency. A verification never is, whatever cosign says: the same line
+// under verify-blob is a validation failure, and so is an identity of the
+// certificate that is spelled like a transport failure.
+func TestCosign_OnlySigningEndsAsAnUnavailableDependency(t *testing.T) {
+	t.Parallel()
+
+	const (
+		unreached = `Error: Get "https://registry.example/v2/": dial tcp: lookup registry.example: no such host`
+		identity  = `Error: none of the expected identities matched what was in the certificate, got subjects [dial tcp: lookup evil.example: no such host] with issuer https://issuer.example`
+	)
+
+	sign := func(a *cosign.Adapter) error {
+		return a.SignBlob(context.Background(), cosign.SignBlobInput{Artifact: "app.tgz", BundlePath: "app.tgz.bundle", Keyless: true}, nil)
+	}
+	verify := func(a *cosign.Adapter) error {
+		return a.VerifyBlob(context.Background(), cosign.VerifyBlobInput{
+			Artifact: "app.tgz", BundlePath: "app.tgz.bundle", Keyless: true,
+			CertIdentityRegexp: "^https://forge.example/org/", CertOIDCIssuer: "https://issuer.example",
+		}, nil)
+	}
+
+	for _, scenario := range []struct {
+		name, said string
+		run        func(*cosign.Adapter) error
+		want       error
+	}{
+		{"sign, a host not reached", unreached, sign, errs.ErrDependencyUnavailable},
+		{"verify, a host not reached", unreached, verify, errs.ErrValidation},
+		{"verify, an identity that names a host", identity, verify, errs.ErrValidation},
+	} {
+		bins := mockbinary.New(t)
+		bins.Add("cosign", `printf '%s\n' '`+scenario.said+`' 'main.go:74: error during command execution' >&2; exit 1`)
+
+		err := scenario.run(&cosign.Adapter{Bin: bins.Path("cosign")})
+		if err == nil || !errors.Is(err, scenario.want) || errs.ExitCodeFromError(err) != errs.ExitCodeFromError(scenario.want) {
+			t.Errorf("%s: err = %v, want %v", scenario.name, err, scenario.want)
+		}
 	}
 }

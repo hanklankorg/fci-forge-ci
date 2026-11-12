@@ -28,6 +28,8 @@ type baseImageLineageExpectation struct {
 	Workflow    string
 	Flavor      string
 	BaseInputID string
+	// Nil means no parent expectation, not proof that the image has no parent.
+	ParentBase *BaseImageParent
 }
 
 func verifyBaseImageEvidence(ctx context.Context, verifier imageEvidenceVerifier, out io.Writer, ref, publicKey string, expected baseImageLineageExpectation, attempts int) error {
@@ -48,6 +50,12 @@ func verifyBaseImageEvidence(ctx context.Context, verifier imageEvidenceVerifier
 		verifyStep, cosignErr, oneErr := verifyBaseImageEvidenceOnce(ctx, verifier, ref, publicKey, expected)
 		lastVerifyStep, lastCosignErr = verifyStep, cosignErr
 
+		// Only a check the network stopped is run again; evidence that
+		// does not verify does not verify the next time either.
+		if oneErr != nil && !errs.Retriable(errs.ToolFailure(errs.CosignReport(string(cosignErr)))) {
+			return struct{}{}, retry.Permanent(oneErr)
+		}
+
 		return struct{}{}, oneErr
 	}, retry.OnRetry(func(attempt, total int, _ time.Duration, _ error) {
 		_, _ = fmt.Fprintf(out, "Base image signature/attestation verification did not pass (attempt %d/%d); retrying.\n", attempt, total)
@@ -61,7 +69,7 @@ func verifyBaseImageEvidence(ctx context.Context, verifier imageEvidenceVerifier
 		_, _ = fmt.Fprintln(out, "ERROR: failed to verify base image signature and lineage after retries")
 		printBaseImageVerificationError(out, expected.Flavor, digest, lastVerifyStep, lastCosignErr)
 
-		return fmt.Errorf("base images: failed to verify base image signature and lineage: %w", errs.ErrValidation)
+		return fmt.Errorf("base images: failed to verify base image signature and lineage: %w", errs.ToolFailure(errs.CosignReport(string(lastCosignErr))))
 	}
 
 	_, _ = fmt.Fprintf(out, "Verified base image signature and lineage: flavor=%s digest=%s\n", expected.Flavor, digest)
@@ -195,6 +203,22 @@ func baseLineageMismatch(statement map[string]any, expected baseImageLineageExpe
 	} {
 		if got := provenance.StatementString(params, field.key); got != field.want {
 			return fmt.Sprintf("the attestation says %s %q, expected %q", field.key, got, field.want)
+		}
+	}
+
+	if expected.ParentBase != nil {
+		parent, ok := provenance.NestedMap(params, "parent_base")
+		if !ok {
+			return "the attestation carries no parent_base object"
+		}
+
+		for _, field := range []struct{ key, want string }{
+			{"ref", expected.ParentBase.Ref},
+			{"input_id", expected.ParentBase.InputID},
+		} {
+			if got := provenance.StatementString(parent, field.key); got != field.want {
+				return fmt.Sprintf("the attestation says parent_base.%s %q, expected %q", field.key, got, field.want)
+			}
 		}
 	}
 

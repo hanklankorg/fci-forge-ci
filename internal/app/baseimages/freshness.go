@@ -53,18 +53,22 @@ func CheckFreshness(ctx context.Context, resolver imageDigestResolver, sink ci.O
 		return err
 	}
 
-	stale := 0
+	stale, unchecked := 0, 0
 
 	var progress, diagnostics bytes.Buffer
 
 	for _, check := range checks {
-		isStale, err := checkOneFreshness(ctx, resolver, &progress, &diagnostics, check, in.Enforce)
+		state, err := checkOneFreshness(ctx, resolver, &progress, &diagnostics, check, in.Enforce)
 		if err != nil {
 			return err
 		}
 
-		if isStale {
+		switch state {
+		case freshnessStale:
 			stale++
+		case freshnessUnchecked:
+			unchecked++
+		case freshnessCurrent:
 		}
 	}
 
@@ -78,6 +82,12 @@ func CheckFreshness(ctx context.Context, resolver imageDigestResolver, sink ci.O
 
 	if err := sink.Set(ctx, "stale-count", strconv.Itoa(stale)); err != nil {
 		return err
+	}
+
+	// A pin that could not be compared is not a current one: say so, so a
+	// stale-count of 0 beside it is not read as "all current".
+	if unchecked > 0 {
+		_, _ = fmt.Fprintf(stderr, "NOTE: %d pinned container digest(s) could not be compared with upstream — unknown, not current; not blocking this run.\n", unchecked)
 	}
 
 	if stale == 0 {
@@ -148,22 +158,52 @@ func validateFreshnessCheck(check FreshnessCheck) error {
 	return nil
 }
 
-func checkOneFreshness(ctx context.Context, resolver imageDigestResolver, out, stderr io.Writer, check FreshnessCheck, enforce bool) (bool, error) {
+type freshness int
+
+const (
+	freshnessCurrent freshness = iota
+	freshnessStale
+	// freshnessUnchecked: the source tag could not be resolved, so nothing
+	// is known about the pin.
+	freshnessUnchecked
+)
+
+// digestReadClass is the class of a current digest that could not be read.
+// The resolver's own class decides: a registry that refused the read is not
+// one that could not be reached, and a digest that came back empty is
+// malformed input.
+func digestReadClass(err error) error {
+	switch {
+	case err == nil:
+		return errs.ErrMalformedInput
+	case errs.IsTransport(err), errs.ExitCodeFromError(err) == errs.ExitCodeSoftware:
+		return errs.RequestFailure(err)
+	default:
+		return err
+	}
+}
+
+func checkOneFreshness(ctx context.Context, resolver imageDigestResolver, out, stderr io.Writer, check FreshnessCheck, enforce bool) (freshness, error) {
 	pinnedDigest := "sha256:" + check.PinnedRef[strings.LastIndex(check.PinnedRef, "@sha256:")+len("@sha256:"):]
 
 	currentDigest, err := resolver.ResolveDigest(ctx, check.SourceTag)
 	if err != nil || currentDigest == "" {
 		if enforce {
-			return false, fmt.Errorf("freshness: %s: fetch current digest for %s: %w: %w", check.Name, check.SourceTag, err, errs.ErrDependencyUnavailable)
+			return freshnessUnchecked, fmt.Errorf("freshness: %s: fetch current digest for %s: %w: %w", check.Name, check.SourceTag, err, digestReadClass(err))
 		}
 
-		_, _ = fmt.Fprintf(stderr, "WARNING: %s: could not fetch current digest for %s; skipping (not blocking)\n", check.Name, check.SourceTag)
+		cause := "the registry returned no digest"
+		if err != nil {
+			cause = err.Error()
+		}
 
-		return false, nil
+		_, _ = fmt.Fprintf(stderr, "WARNING: %s: could not fetch current digest for %s, so the pin was not checked (not blocking): %s\n", check.Name, check.SourceTag, cause)
+
+		return freshnessUnchecked, nil
 	}
 
 	if !domaincontainer.ValidDigest(currentDigest) {
-		return false, fmt.Errorf("freshness: %s resolver returned an invalid digest: %w", check.Name, errs.ErrMalformedInput)
+		return freshnessUnchecked, fmt.Errorf("freshness: %s resolver returned an invalid digest: %w", check.Name, errs.ErrMalformedInput)
 	}
 
 	if pinnedDigest != currentDigest {
@@ -178,10 +218,10 @@ func checkOneFreshness(ctx context.Context, resolver imageDigestResolver, out, s
 		_, _ = fmt.Fprintf(stderr, "%s: %s digest is stale%s\n  pinned ref:     %s\n  source tag:     %s\n  pinned digest:  %s\n  current digest: %s\n",
 			level, check.Name, note, check.PinnedRef, check.SourceTag, pinnedDigest, currentDigest)
 
-		return true, nil
+		return freshnessStale, nil
 	}
 
 	_, _ = fmt.Fprintf(out, "%s digest is current: %s\n", check.Name, pinnedDigest)
 
-	return false, nil
+	return freshnessCurrent, nil
 }

@@ -4,8 +4,13 @@
 package ociregistry
 
 import (
+	"crypto/tls"
+	"crypto/x509"
 	"fmt"
+	"net"
 	"net/http"
+	"net/url"
+	"os"
 	"syscall"
 	"testing"
 
@@ -30,7 +35,9 @@ func TestClassifyDeleteError(t *testing.T) {
 		"wrapped 405":    {err: fmt.Errorf("delete: %w", &transport.Error{StatusCode: http.StatusMethodNotAllowed}), want: errs.ErrUnsupported},
 		"denied":         {err: &transport.Error{StatusCode: http.StatusForbidden}, want: errs.ErrPermissionDenied},
 		"already absent": {err: &transport.Error{StatusCode: http.StatusNotFound}, want: errs.ErrMissingInput},
-		"unreachable":    {err: fmt.Errorf("dial: %w", syscall.ECONNREFUSED), want: errs.ErrDependencyUnavailable},
+		"unreachable":    {err: fmt.Errorf("dial: %w", &net.OpError{Op: "dial", Net: "tcp", Err: syscall.ECONNREFUSED}), want: errs.ErrDependencyUnavailable},
+		"certificate":    {err: &url.Error{Op: "Get", URL: "https://registry.example/v2/", Err: &tls.CertificateVerificationError{Err: x509.UnknownAuthorityError{}}}, want: errs.ErrValidation},
+		"credentials":    {err: &os.PathError{Op: "open", Path: "/auth.json", Err: syscall.EACCES}, want: errs.ErrValidation},
 	} {
 		require.ErrorIs(t, classifyDeleteError(tc.err), tc.want, name)
 	}
