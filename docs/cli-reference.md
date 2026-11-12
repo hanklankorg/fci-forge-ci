@@ -33,6 +33,8 @@ then the environment variables listed per flag, then the flag default.
 
 - [`init`](#forge-ci-init) — write a repository's first Forge CI files from an example
 - [`doctor`](#forge-ci-doctor) — check that a repository is configured correctly for forge-ci
+- [`setup status`](#forge-ci-setup-status) — list what is left before a first release, and the command for each step
+- [`docs`](#forge-ci-docs) — print the documentation shipped in this binary
 - [`config validate`](#forge-ci-config-validate) — validate .forge-ci/artifacts.yml against the schema
 - [`container login`](#forge-ci-container-login) — store container registry credentials
 - [`platform checkout`](#forge-ci-platform-checkout) — check out a repository without persisting credentials
@@ -45,6 +47,7 @@ then the environment variables listed per flag, then the flag default.
 - [`build`](#forge-ci-build) — toolchain build wrappers (go, cargo, maven, npm, gradle, gradle-android, xcode-ios)
 - [`config`](#forge-ci-config) — artifacts.yml schema helpers
 - [`container`](#forge-ci-container) — container-image helpers (name resolution, manifests, namespace policy, tag/label metadata, …)
+- [`docs`](#forge-ci-docs) — print the documentation shipped in this binary (artifacts.yml reference, forge guides, …)
 - [`doctor`](#forge-ci-doctor) — check local repository configuration for forge-ci
 - [`init`](#forge-ci-init) — write a repository's first Forge CI files from an example
 - [`lint`](#forge-ci-lint) — code-style lint wrappers (swift-format, swiftlint)
@@ -56,6 +59,7 @@ then the environment variables listed per flag, then the flag default.
 - [`report`](#forge-ci-report) — write step-summary blocks (build, publish, status, lifecycle)
 - [`sbom`](#forge-ci-sbom) — CISA-layered SBOM tooling (SPDX + CycloneDX via syft)
 - [`security`](#forge-ci-security) — security scanners and report converters
+- [`setup`](#forge-ci-setup) — show what is left before a first release, and do the manual steps (signers, secrets, release request)
 - [`toolchain`](#forge-ci-toolchain) — bootstrap and expose CI toolchains
 - [`validate`](#forge-ci-validate) — precondition, policy and signature checks for release workflows
 - [`version`](#forge-ci-version) — version-bump and tag-management helpers
@@ -150,6 +154,8 @@ EXAMPLES (as a workflow step):
 | `--retention-days` | retention in days (0 = forge default) | int | `0` | n/a |
 | `--if-no-files` | when nothing matches: error \| warn \| ignore | string | `"error"` | n/a |
 | `--include-hidden` | include dotfiles/hidden files (off by default, matching upload-artifact) | bool | `false` | n/a |
+| `--verify-readback` | download once and verify exact selected paths/content before emitting success (requires --if-no-files error; no --blob-store) | bool | `false` | n/a |
+| `--temp-dir` | existing directory for the --verify-readback download (default: the system temp) | string | `""` | `$CI_TEMP_DIR`, `$RUNNER_TEMP` |
 | `--blob-store` | with --dir: upload each OCI layout blob (blobs/sha256/<digest>, 1 MiB or more) as its own artifact <prefix>-<digest>-<owner>, skipped when the run already stores that digest; download with the same prefix | string | `""` | n/a |
 
 ## `forge-ci build`
@@ -160,13 +166,27 @@ toolchain build wrappers (go, cargo, maven, npm, gradle, gradle-android, xcode-i
 
 Cargo build helpers (artifact-first Rust projects)
 
+#### `forge-ci build cargo fetch`
+
+fetch locked Cargo dependencies without building or running tests
+
+```
+Runs cargo fetch --locked once by default. Explicit bounded retries use cancellation-aware linear waits; no compilation, artifact publication or signing is retried.
+```
+
+| Flag | Description | Type | Default | Env vars |
+|------|-------------|------|---------|----------|
+| `--working-dir` | directory containing the Cargo.toml file | string | `"."` | `$WORKING_DIRECTORY` |
+| `--attempts` | dependency fetch attempts (1–10) | int | `1` | n/a |
+| `--retry-delay` | linear retry delay (0–1m) | duration | `2s` | n/a |
+
 #### `forge-ci build cargo run`
 
 run the full Cargo release build (metadata, fetch, test, SBOM, compile, status)
 
 ```
 Runs the whole Cargo build sequence in one step: resolve metadata, fetch
-   deps, run tests under the admin enforcement policy, generate the Build SBOM with cargo-cyclonedx
+    deps, run mandatory native tests under the admin enforcement policy, generate the Build SBOM with cargo-cyclonedx
    (unless --no-build-sbom), and cross-compile per platform into dist/. The
    forge job wraps this with checkout + artifact upload only.
 
@@ -184,6 +204,7 @@ EXAMPLE:
 | `--commit` | prepared release commit exposed as FORGE_CI_COMMIT during compilation | string | `""` | `$CI_COMMIT`, `$CI_COMMIT_SHA`, `$COMMIT_SHA`, `$FORGEJO_SHA`, `$GITHUB_SHA` |
 | `--platforms` | comma/space/newline-separated GOOS/GOARCH targets to cross-compile (each must have a Rust target triple mapping) | string | `"linux/amd64"` | `$PLATFORMS` |
 | `--skip-tests` | legacy opt-out; true is refused: admin policy controls enforcement, tests still run | bool | `false` | `$SKIP_TESTS` |
+| `--test-selection-json` | administrator-owned individual Cargo bin/test executables with explicit application/policy gate (policy always blocks) | string | `""` | n/a |
 | `--build-sbom` | generate the cargo-cyclonedx Build SBOM (default true) | bool | `true` | `$ENABLE_BUILD_SBOM` |
 
 ### `forge-ci build go`
@@ -195,13 +216,18 @@ Go build helpers
 download Go module dependencies
 
 ```
+Runs once by default. Explicit retries use linear, cancellation-aware waits;
+only dependency reads are retried, never artifact publication or signing.
+
 EXAMPLE:
-   forge-ci build go download --working-dir .
+   forge-ci build go download --working-dir . --attempts 3 --retry-delay 2s
 ```
 
 | Flag | Description | Type | Default | Env vars |
 |------|-------------|------|---------|----------|
 | `--working-dir` | directory containing the go.mod file | string | `"."` | `$WORKING_DIRECTORY` |
+| `--attempts` | dependency download attempts (1–10) | int | `1` | n/a |
+| `--retry-delay` | linear retry delay (0–1m) | duration | `2s` | n/a |
 
 #### `forge-ci build go metadata`
 
@@ -247,6 +273,7 @@ EXAMPLE:
 | `--ldflags` | extra -ldflags appended after the version-injection block | string | `""` | `$LD_FLAGS` |
 | `--main-package` | main package import path relative to --working-dir | string | `"."` | `$MAIN_PACKAGE` |
 | `--skip-tests` | legacy opt-out; true is refused: admin policy controls enforcement, tests still run | bool | `false` | `$SKIP_TESTS` |
+| `--test-selection-json` | administrator-owned native Go test selection (packages, optional run, required application/policy gate); always uncached with race detection; policy always blocks | string | `""` | n/a |
 | `--build-sbom` | generate the CycloneDX Build SBOM (default true) | bool | `true` | `$ENABLE_BUILD_SBOM` |
 
 ### `forge-ci build gradle`
@@ -411,13 +438,12 @@ Runs the whole Maven build sequence in one step: install modules to the
    Build SBOM with the pinned cyclonedx-maven-plugin (unless --no-build-sbom),
    and write the summaries. The project POM/profile owns attached artifacts.
 
-   mvn executes in the current directory, not --working-dir: run this from the
-   project root, or cd into the module first (the forge job does, then wraps it
-   with checkout + artifact upload). --working-dir only locates the pom.xml for
-   metadata.
+   --working-dir selects the workspace-relative project for every metadata and
+   lifecycle invocation. Parent-directory steps and linked directories are
+   refused. Relative settings paths are resolved from that project directory.
 
 EXAMPLE:
-   cd module && forge-ci build maven run --build-type app --cli-opts "-B -ntp" --sbom-tool-version 2.9.3
+   forge-ci build maven run --working-dir module --build-type app --cli-opts "-B -ntp" --sbom-tool-version 2.9.3
 ```
 
 | Flag | Description | Type | Default | Env vars |
@@ -427,7 +453,7 @@ EXAMPLE:
 | `--dependency-token-file` | read-only package token file; defaults to $DEPENDENCY_TOKEN | string | `""` | n/a |
 | `--dependency-username` | username for the project's dependency repository settings | string | `""` | `$DEPENDENCY_USERNAME` |
 | `--settings-path` | consumer-owned Maven settings; required with private dependencies; reference DEPENDENCY_TOKEN and DEPENDENCY_USERNAME | string | `""` | `$MAVEN_SETTINGS_PATH` |
-| `--working-dir` | directory of the pom.xml to read for metadata; mvn itself runs in the current directory (cd in first) | string | `"."` | `$WORKING_DIRECTORY` |
+| `--working-dir` | workspace-relative project directory for metadata, lifecycle and SBOM generation | string | `"."` | `$WORKING_DIRECTORY` |
 | `--build-type` | lifecycle: "app" (clean package) or "lib" (compile/test/package with optional --profile; POM owns attached artifacts) | string | `""` | `$BUILD_TYPE` |
 | `--cli-opts` | extra args forwarded to mvn (whitespace-separated, e.g. "-B -ntp") | string | `""` | `$MAVEN_CLI_OPTS` |
 | `--profile` | Maven profile to activate for dependency resolution, metadata and the build lifecycle | string | `""` | `$MAVEN_PROFILE` |
@@ -584,6 +610,19 @@ see `plan release --help` for a checked command-substitution example.
 |------|-------------|------|---------|----------|
 | `--file` | path to the artifacts.yml file to parse (required) | string | `""` | `$ARTIFACTS_CONFIG` |
 
+### `forge-ci config schema`
+
+print the artifacts.yml JSON Schema of this binary, for editor completion
+
+```
+EXAMPLE:
+   forge-ci config schema > .forge-ci/artifacts.schema.json
+   # then, as the first line of .forge-ci/artifacts.yml:
+   # yaml-language-server: $schema=./artifacts.schema.json
+
+The schema checks structure; forge-ci config validate stays the authority.
+```
+
 ### `forge-ci config validate`
 
 validate an artifacts.yml against the schema
@@ -649,6 +688,140 @@ candidate images to immutable final base tags. Checkout and pinned-binary
 bootstrap remain owned by the caller.
 ```
 
+#### `forge-ci container base-images authenticate-parent`
+
+authenticate one exact published base and print its {ref,input_id} parent projection
+
+```
+Requires explicit registry auth and exactly one independently approved
+base-inputs-json entry: flavor, base_input_id and optional immediate parent_base.
+Verifies the final tag's signature, CycloneDX and SLSA evidence with the pinned
+public key and expected source/workflow, and requires its digest to equal
+expected-ref. A missing base is a refusal, never a build request. Prints one
+JSON {ref,input_id} only on success. The output is comparison data, not a portable
+authority token or approval of a child plan. Does not build, sign or promote.
+```
+
+| Flag | Description | Type | Default | Env vars |
+|------|-------------|------|---------|----------|
+| `--server-url` | forge server URL used to derive the registry host and expected source | string | `""` | `$CI_SERVER_URL`, `$FORGEJO_SERVER_URL`, `$FORGEJO_SERVER`, `$GITHUB_SERVER_URL` |
+| `--repository` | owner/repo used to derive the expected source and base-image repository | string | `""` | `$REPOSITORY`, `$CI_REPO`, `$CI_PROJECT_PATH`, `$FORGEJO_REPOSITORY`, `$FORGEJO_REPO`, `$GITHUB_REPOSITORY` |
+| `--repository-suffix` | optional suffix appended to the repository package name, e.g. -base | string | `""` | `$REPOSITORY_SUFFIX` |
+| `--expected-repository` | exact base-image repository allowed for tags/refs (default: host/lower(owner/repo)<suffix>); the registry login goes to its host | string | `""` | `$EXPECTED_REPOSITORY`, `$BASE_IMAGES_EXPECTED_REPOSITORY` |
+| `--expected-source` | source repository URL expected in SLSA lineage (default: <server-url>/<repository>) | string | `""` | `$EXPECTED_SOURCE`, `$BASE_IMAGES_EXPECTED_SOURCE` |
+| `--expected-workflow` | workflow filename expected in SLSA lineage | string | `""` | `$EXPECTED_WORKFLOW` |
+| `--registry` | the forge's own registry host, when it is not the host of --server-url (GitLab's $CI_REGISTRY); the login goes to the image repository's host, and a repository on any other host has its tags deleted through that registry | string | `""` | `$CONTAINER_REGISTRY` |
+| `--cosign-public-key-path` | relative path to the trusted Cosign public key in the consumer checkout | string | `""` | `$COSIGN_PUBLIC_KEY_PATH` |
+| `--cosign-public-key-sha256` | expected sha256 digest of the trusted Cosign public key | string | `""` | `$COSIGN_PUBLIC_KEY_SHA256` |
+| `--auth-file` | required explicit registry auth file; bounded private snapshot used for all reads | string | `""` | `$FORGE_CI_REGISTRY_AUTH_FILE` |
+| `--expected-ref` | exact independently approved digest-pinned parent reference (required) | string | `""` | n/a |
+| `--base-inputs-json` | one expected flavor/base_input_id and optional immediate parent_base {ref,input_id}; not producer-declared authority (required) | string | `""` | n/a |
+
+#### `forge-ci container base-images child-base`
+
+one cold child BASE stage: one image, or siblings on one parent; no graph scheduling, warm/cache or expected-parent promotion
+
+```
+The protected caller must independently verify the parent with Cosign, its trust key, source/workflow and input ID before supplying parent-base-json. The producer only binds that assertion to its registry input and unsigned lineage; it never authenticates the parent or traverses a graph.
+```
+
+##### `forge-ci container base-images child-base build`
+
+build the stage's child BASE images of one architecture using secret-free prepared parent inputs
+
+```
+Requires --inputs-dir from the existing release-images fetch-build-inputs boundary. No registry fetch credentials or parent authentication run in the builder.
+```
+
+| Flag | Description | Type | Default | Env vars |
+|------|-------------|------|---------|----------|
+| `--plan` | plan file release-images plan --output wrote (required) | string | `""` | n/a |
+| `--image-repository` | the one repository the plan publishes to; the plan is checked against it (required) | string | `""` | n/a |
+| `--release-tag` | release tag the plan was made for, e.g. v1.2.3 (required) | string | `""` | n/a |
+| `--release-sha` | release commit the images are built from and labelled with, unless the plan names a revision (required) | string | `""` | n/a |
+| `--server-url` | forge server URL the source labels name | string | `""` | `$CI_SERVER_URL`, `$FORGEJO_SERVER_URL`, `$FORGEJO_SERVER`, `$GITHUB_SERVER_URL` |
+| `--repository` | owner/repo the source labels name | string | `""` | `$REPOSITORY`, `$CI_REPO`, `$CI_PROJECT_PATH`, `$FORGEJO_REPOSITORY`, `$FORGEJO_REPO`, `$GITHUB_REPOSITORY` |
+| `--retry-attempts` | registry attempts | int | `3` | n/a |
+| `--arch` | architecture to build, the host's own: amd64 or arm64 (required) | string | `""` | n/a |
+| `--source-dir` | release checkout the plan's Containerfile and context paths are relative to | string | `"."` | n/a |
+| `--created` | org.opencontainers.image.created value: the release commit's time, so the label names the source, not the build (required) | string | `""` | n/a |
+| `--metadata-dir` | directory the staged <name>-arch-<arch> layouts are written under; keep it outside the build context (required) | string | `""` | n/a |
+| `--inputs-dir` | secret-free prepared inputs root, with a <name>-arch-<arch> fetch-build-inputs directory for every build | string | `""` | n/a |
+| `--image` | build only this planned image of --arch, for a job per image; an image the plan does not build on --arch is refused | string | `""` | n/a |
+| `--image-builder` | image builder type: buildah (default; rootless, needs user namespaces) or kaniko (for a pool that denies them; runs as root in the job image CI_IMAGE_BUILDER_JOB_IMAGE names, builds to a layout, exports a stage's files in local mode, no load mode, no build secrets). Set CI_IMAGE_BUILDER on the repository to select it. | string | `"buildah"` | `$CI_IMAGE_BUILDER` |
+| `--kaniko-executor` | path of the kaniko executor (default /kaniko/executor) | string | `""` | `$KANIKO_EXECUTOR` |
+| `--parent-base-json` | explicit caller-verified immediate parent as {ref: digest-pinned-ref, input_id: opaque-sha256-ID}; not producer authentication (required) | string | `""` | n/a |
+| `--stage-flavors` | the stage's flavors, separated by commas; a plan with another set of flavors is refused | string | `""` | n/a |
+
+##### `forge-ci container base-images child-base fetch`
+
+fetch the pinned parent of every build of the stage, without running consumer code
+
+```
+Admits the plan against --parent-base-json, then fetches each build's
+registry inputs into <inputs-dir>/<name>-arch-<arch>, the directory child-base
+build --inputs-dir reads. --inputs-dir must not hold a build's directory yet.
+```
+
+| Flag | Description | Type | Default | Env vars |
+|------|-------------|------|---------|----------|
+| `--plan` | plan file release-images plan --output wrote (required) | string | `""` | n/a |
+| `--image-repository` | the one repository the plan publishes to; the plan is checked against it (required) | string | `""` | n/a |
+| `--release-tag` | release tag the plan was made for, e.g. v1.2.3 (required) | string | `""` | n/a |
+| `--release-sha` | release commit the images are built from and labelled with, unless the plan names a revision (required) | string | `""` | n/a |
+| `--server-url` | forge server URL the source labels name | string | `""` | `$CI_SERVER_URL`, `$FORGEJO_SERVER_URL`, `$FORGEJO_SERVER`, `$GITHUB_SERVER_URL` |
+| `--repository` | owner/repo the source labels name | string | `""` | `$REPOSITORY`, `$CI_REPO`, `$CI_PROJECT_PATH`, `$FORGEJO_REPOSITORY`, `$FORGEJO_REPO`, `$GITHUB_REPOSITORY` |
+| `--retry-attempts` | registry attempts | int | `3` | n/a |
+| `--parent-base-json` | explicit caller-verified immediate parent as {ref: digest-pinned-ref, input_id: opaque-sha256-ID}; not producer authentication (required) | string | `""` | n/a |
+| `--auth-file` | required explicit registry auth file that may read the parent | string | `""` | `$FORGE_CI_REGISTRY_AUTH_FILE` |
+| `--inputs-dir` | relative run-scoped directory the builds' inputs are fetched under (required) | string | `""` | n/a |
+| `--stage-flavors` | the stage's flavors, separated by commas; a plan with another set of flavors is refused | string | `""` | n/a |
+
+##### `forge-ci container base-images child-base plan`
+
+admit one cold child BASE, or several siblings, against one explicit caller-verified parent
+
+```
+The layer passes its runner inputs with --runner-input, as release-images
+plan takes them; a build of a platform whose image build runner input has no
+value is refused here, before the plan is written. A base stage is never
+planned unchecked: without any --runner-input the plan is refused.
+```
+
+| Flag | Description | Type | Default | Env vars |
+|------|-------------|------|---------|----------|
+| `--plan` | plan file release-images plan --output wrote (required) | string | `""` | n/a |
+| `--image-repository` | the one repository the plan publishes to; the plan is checked against it (required) | string | `""` | n/a |
+| `--release-tag` | release tag the plan was made for, e.g. v1.2.3 (required) | string | `""` | n/a |
+| `--release-sha` | release commit the images are built from and labelled with, unless the plan names a revision (required) | string | `""` | n/a |
+| `--server-url` | forge server URL the source labels name | string | `""` | `$CI_SERVER_URL`, `$FORGEJO_SERVER_URL`, `$FORGEJO_SERVER`, `$GITHUB_SERVER_URL` |
+| `--repository` | owner/repo the source labels name | string | `""` | `$REPOSITORY`, `$CI_REPO`, `$CI_PROJECT_PATH`, `$FORGEJO_REPOSITORY`, `$FORGEJO_REPO`, `$GITHUB_REPOSITORY` |
+| `--retry-attempts` | registry attempts | int | `3` | n/a |
+| `--output` | admitted plan output file (required) | string | `""` | n/a |
+| `--runner-input` | runner input of the calling layer as it passed it, name=value, such as build-runs-on-linux-arm64=["arm64"] (repeatable, at least one); a planned build whose image build runner input has no value is refused | string | `""` | n/a |
+| `--image-builder` | image builder the build jobs will use; kaniko is refused here, before any parent is fetched | string | `""` | `$CI_IMAGE_BUILDER` |
+| `--parent-base-json` | explicit caller-verified immediate parent as {ref: digest-pinned-ref, input_id: opaque-sha256-ID}; not producer authentication (required) | string | `""` | n/a |
+| `--stage-flavors` | the stage's flavors, separated by commas; a plan with another set of flavors is refused | string | `""` | n/a |
+
+##### `forge-ci container base-images child-base publish`
+
+scan/gate every child layout of the stage and publish unsigned canonical evidence retaining parent lineage
+
+| Flag | Description | Type | Default | Env vars |
+|------|-------------|------|---------|----------|
+| `--plan` | plan file release-images plan --output wrote (required) | string | `""` | n/a |
+| `--image-repository` | the one repository the plan publishes to; the plan is checked against it (required) | string | `""` | n/a |
+| `--release-tag` | release tag the plan was made for, e.g. v1.2.3 (required) | string | `""` | n/a |
+| `--release-sha` | release commit the images are built from and labelled with, unless the plan names a revision (required) | string | `""` | n/a |
+| `--server-url` | forge server URL the source labels name | string | `""` | `$CI_SERVER_URL`, `$FORGEJO_SERVER_URL`, `$FORGEJO_SERVER`, `$GITHUB_SERVER_URL` |
+| `--repository` | owner/repo the source labels name | string | `""` | `$REPOSITORY`, `$CI_REPO`, `$CI_PROJECT_PATH`, `$FORGEJO_REPOSITORY`, `$FORGEJO_REPO`, `$GITHUB_REPOSITORY` |
+| `--retry-attempts` | registry attempts | int | `3` | n/a |
+| `--auth-file` | staging registry auth file; never signing/publication credentials | string | `""` | `$FORGE_CI_REGISTRY_AUTH_FILE` |
+| `--layouts-dir` | complete admitted native layout set (required) | string | `""` | n/a |
+| `--output-dir` | new canonical payload directory with an existing parent (required) | string | `""` | n/a |
+| `--parent-base-json` | explicit caller-verified immediate parent as {ref: digest-pinned-ref, input_id: opaque-sha256-ID}; not producer authentication (required) | string | `""` | n/a |
+| `--stage-flavors` | the stage's flavors, separated by commas; a plan with another set of flavors is refused | string | `""` | n/a |
+
 #### `forge-ci container base-images cleanup`
 
 delete promoted and stale staging base-image tags safely
@@ -679,6 +852,23 @@ Requires a forge implementing both container tag listing and tag deletion
 | `--base-inputs-json` | JSON array mapping flavors to content/base input IDs | string | `"[]"` | `$BASE_INPUTS_JSON` |
 | `--local-registry` | list and delete through a plain OCI registry (bases kept beside the runner) instead of the forge package API | bool | `false` | `$BASE_IMAGES_LOCAL_REGISTRY` |
 | `--auth-file` | registry auth file for final/staging digest checks | string | `""` | `$FORGE_CI_REGISTRY_AUTH_FILE` |
+
+#### `forge-ci container base-images declared-inputs`
+
+print the --base-inputs-json map a base-image ledger declares (read-only)
+
+```
+Admits the ledger and prints, as one JSON array, every flavor's
+base_input_id and, for a child, the parent_base its build recorded: the
+complete map "base-images promote --base-inputs-json" requires. It is the
+build's declared lineage, which promotion then requires in each image's own
+verified statement; it does not authenticate a parent.
+```
+
+| Flag | Description | Type | Default | Env vars |
+|------|-------------|------|---------|----------|
+| `--ledger` | base-image ledger to project (required) | string | `""` | n/a |
+| `--expected-repository` | exact base-image repository of every ledger ref and tag (required) | string | `""` | n/a |
 
 #### `forge-ci container base-images freshness`
 
@@ -736,9 +926,20 @@ verify base-image evidence and promote candidate refs to immutable final tags
 Verifies each image's signature, CycloneDX SBOM attestation and SLSA lineage
 with the trusted key, then makes its candidate the immutable final tag.
 
+Use --ledger to admit and project a publication base-image ledger directly,
+or --all-images-json for the existing metadata contract, never both.
+
 Every image must be in the one base-image repository, --expected-repository
 or the one derived from --server-url and --repository; the login goes to its
 registry.
+
+The required --base-inputs-json constrains every promoted flavor's own input
+ID and parent_base in the same verified SLSA statement. Its flavors must
+exactly match the target image flavors: missing and extra entries are rejected
+before login. "base-images declared-inputs" projects it from the build's
+ledger; a caller that authenticated the parent itself passes that parent.
+Independently verifying the parent (including cross-repository parents)
+remains the caller's duty.
 ```
 
 | Flag | Description | Type | Default | Env vars |
@@ -752,7 +953,9 @@ registry.
 | `--registry` | the forge's own registry host, when it is not the host of --server-url (GitLab's $CI_REGISTRY); the login goes to the image repository's host, and a repository on any other host has its tags deleted through that registry | string | `""` | `$CONTAINER_REGISTRY` |
 | `--cosign-public-key-path` | relative path to the trusted Cosign public key in the consumer checkout | string | `""` | `$COSIGN_PUBLIC_KEY_PATH` |
 | `--cosign-public-key-sha256` | expected sha256 digest of the trusted Cosign public key | string | `""` | `$COSIGN_PUBLIC_KEY_SHA256` |
+| `--ledger` | publication base-image ledger to admit and project; exclusive with --all-images-json | string | `""` | n/a |
 | `--all-images-json` | JSON array of base image metadata to verify/promote | string | `""` | `$ALL_IMAGES_JSON` |
+| `--base-inputs-json` | JSON array mapping every promoted flavor to expected base_input_id and expected parent_base {ref,input_id} (required) | string | `""` | `$BASE_INPUTS_JSON` |
 | `--base-input-id` | optional single sha256 base input ID expected for every image | string | `""` | `$BASE_INPUT_ID` |
 | `--registry-username` | registry username; the password is read from --registry-password-file or $REGISTRY_TOKEN / $REGISTRY_PASSWORD | string | `""` | `$REGISTRY_USER` |
 | `--registry-password-file` | file containing the registry password/token ("-" reads stdin); defaults to $REGISTRY_TOKEN then $REGISTRY_PASSWORD. The password never appears in argv. | string | `""` | n/a |
@@ -805,9 +1008,102 @@ EXAMPLE:
 | `--registry` | the forge's own registry host, when it is not the host of --server-url (GitLab's $CI_REGISTRY); the login goes to the image repository's host, and a repository on any other host has its tags deleted through that registry | string | `""` | `$CONTAINER_REGISTRY` |
 | `--release-images` | newline- or comma-separated digest-pinned release image refs whose bases must be kept | string | `""` | `$RELEASE_IMAGES` |
 | `--max-delete` | maximum unreferenced base-input IDs per pass; all flavor tags of each ID are removed (0 disables the bound) | int | `20` | `$BASE_IMAGES_MAX_DELETE` |
-| `--dry-run` | report what would be deleted without deleting it | bool | `true` | `$BASE_IMAGES_PRUNE_DRY_RUN` |
+| `--dry-run` | report what would be deleted without deleting it (default: true; pass --dry-run=false to delete) | bool | `true` | `$BASE_IMAGES_PRUNE_DRY_RUN` |
 | `--local-registry` | list and delete through a plain OCI registry (bases kept beside the runner) instead of the forge package API | bool | `false` | `$BASE_IMAGES_LOCAL_REGISTRY` |
 | `--auth-file` | registry auth file for attestation verification and registry access | string | `""` | `$FORGE_CI_REGISTRY_AUTH_FILE` |
+
+#### `forge-ci container base-images root-base`
+
+cold single-root native BASE boundary; no parent, mixed or warm graph support
+
+##### `forge-ci container base-images root-base build`
+
+build one admitted root base's native architecture without registry writes
+
+```
+Builds a plan admitted by root-base plan using the existing native builder. Parents, mixed/multiple images and warm caches are unsupported.
+```
+
+| Flag | Description | Type | Default | Env vars |
+|------|-------------|------|---------|----------|
+| `--plan` | plan file release-images plan --output wrote (required) | string | `""` | n/a |
+| `--image-repository` | the one repository the plan publishes to; the plan is checked against it (required) | string | `""` | n/a |
+| `--release-tag` | release tag the plan was made for, e.g. v1.2.3 (required) | string | `""` | n/a |
+| `--release-sha` | release commit the images are built from and labelled with, unless the plan names a revision (required) | string | `""` | n/a |
+| `--server-url` | forge server URL the source labels name | string | `""` | `$CI_SERVER_URL`, `$FORGEJO_SERVER_URL`, `$FORGEJO_SERVER`, `$GITHUB_SERVER_URL` |
+| `--repository` | owner/repo the source labels name | string | `""` | `$REPOSITORY`, `$CI_REPO`, `$CI_PROJECT_PATH`, `$FORGEJO_REPOSITORY`, `$FORGEJO_REPO`, `$GITHUB_REPOSITORY` |
+| `--retry-attempts` | registry attempts | int | `3` | n/a |
+| `--arch` | architecture to build, the host's own: amd64 or arm64 (required) | string | `""` | n/a |
+| `--source-dir` | release checkout the plan's Containerfile and context paths are relative to | string | `"."` | n/a |
+| `--created` | org.opencontainers.image.created value: the release commit's time, so the label names the source, not the build (required) | string | `""` | n/a |
+| `--metadata-dir` | directory the staged <name>-arch-<arch> layouts are written under; keep it outside the build context (required) | string | `""` | n/a |
+| `--inputs-dir` | secret-free prepared inputs root, with a <name>-arch-<arch> fetch-build-inputs directory for every build | string | `""` | n/a |
+| `--image` | build only this planned image of --arch, for a job per image; an image the plan does not build on --arch is refused | string | `""` | n/a |
+| `--image-builder` | image builder type: buildah (default; rootless, needs user namespaces) or kaniko (for a pool that denies them; runs as root in the job image CI_IMAGE_BUILDER_JOB_IMAGE names, builds to a layout, exports a stage's files in local mode, no load mode, no build secrets). Set CI_IMAGE_BUILDER on the repository to select it. | string | `"buildah"` | `$CI_IMAGE_BUILDER` |
+| `--kaniko-executor` | path of the kaniko executor (default /kaniko/executor) | string | `""` | `$KANIKO_EXECUTOR` |
+| `--stage-flavors` | the stage's flavors, separated by commas; a plan with another set of flavors is refused | string | `""` | n/a |
+
+##### `forge-ci container base-images root-base plan`
+
+admit a resolved consumer base stage plan, freeze it for native jobs and emit its builds and layouts outputs
+
+```
+The layer passes its runner inputs with --runner-input, as release-images
+plan takes them; a build of a platform whose image build runner input has no
+value is refused here, before the plan is written. A base stage is never
+planned unchecked: without any --runner-input the plan is refused.
+```
+
+| Flag | Description | Type | Default | Env vars |
+|------|-------------|------|---------|----------|
+| `--plan` | plan file release-images plan --output wrote (required) | string | `""` | n/a |
+| `--image-repository` | the one repository the plan publishes to; the plan is checked against it (required) | string | `""` | n/a |
+| `--release-tag` | release tag the plan was made for, e.g. v1.2.3 (required) | string | `""` | n/a |
+| `--release-sha` | release commit the images are built from and labelled with, unless the plan names a revision (required) | string | `""` | n/a |
+| `--server-url` | forge server URL the source labels name | string | `""` | `$CI_SERVER_URL`, `$FORGEJO_SERVER_URL`, `$FORGEJO_SERVER`, `$GITHUB_SERVER_URL` |
+| `--repository` | owner/repo the source labels name | string | `""` | `$REPOSITORY`, `$CI_REPO`, `$CI_PROJECT_PATH`, `$FORGEJO_REPOSITORY`, `$FORGEJO_REPO`, `$GITHUB_REPOSITORY` |
+| `--retry-attempts` | registry attempts | int | `3` | n/a |
+| `--output` | admitted plan output file (required) | string | `""` | n/a |
+| `--runner-input` | runner input of the calling layer as it passed it, name=value, such as build-runs-on-linux-arm64=["arm64"] (repeatable, at least one); a planned build whose image build runner input has no value is refused | string | `""` | n/a |
+| `--stage-flavors` | the stage's flavors, separated by commas; a plan with another set of flavors is refused | string | `""` | n/a |
+
+##### `forge-ci container base-images root-base publish`
+
+scan/gate all root layouts, publish unsigned candidates and write a canonical payload
+
+```
+Output is a new workspace containing dist/base-images.json and premade-sboms/. Transport and verify the entire workspace with release dist-digest/validate-dist --canonical-payload before trusted base-images import/sign/promote. No final tags or signatures are produced here.
+```
+
+| Flag | Description | Type | Default | Env vars |
+|------|-------------|------|---------|----------|
+| `--plan` | plan file release-images plan --output wrote (required) | string | `""` | n/a |
+| `--image-repository` | the one repository the plan publishes to; the plan is checked against it (required) | string | `""` | n/a |
+| `--release-tag` | release tag the plan was made for, e.g. v1.2.3 (required) | string | `""` | n/a |
+| `--release-sha` | release commit the images are built from and labelled with, unless the plan names a revision (required) | string | `""` | n/a |
+| `--server-url` | forge server URL the source labels name | string | `""` | `$CI_SERVER_URL`, `$FORGEJO_SERVER_URL`, `$FORGEJO_SERVER`, `$GITHUB_SERVER_URL` |
+| `--repository` | owner/repo the source labels name | string | `""` | `$REPOSITORY`, `$CI_REPO`, `$CI_PROJECT_PATH`, `$FORGEJO_REPOSITORY`, `$FORGEJO_REPO`, `$GITHUB_REPOSITORY` |
+| `--retry-attempts` | registry attempts | int | `3` | n/a |
+| `--auth-file` | staging registry auth file; never signing/publication credentials | string | `""` | `$FORGE_CI_REGISTRY_AUTH_FILE` |
+| `--layouts-dir` | complete admitted native layout set (required) | string | `""` | n/a |
+| `--output-dir` | new canonical payload directory with an existing parent (required) | string | `""` | n/a |
+| `--stage-flavors` | the stage's flavors, separated by commas; a plan with another set of flavors is refused | string | `""` | n/a |
+
+#### `forge-ci container base-images select-parent`
+
+print one flavor's {ref,input_id} from a verified parent projection map
+
+```
+Reads --parent-bases-file, the parent_bases_json object that validate
+--auth-file wrote, and prints the {ref,input_id} of --flavor. A flavor the map
+does not hold was not found or not verified and is a refusal. The map is the
+verifying job's; this command authenticates nothing.
+```
+
+| Flag | Description | Type | Default | Env vars |
+|------|-------------|------|---------|----------|
+| `--parent-bases-file` | file holding the parent_bases_json object of base-images validate --auth-file (required) | string | `""` | n/a |
+| `--flavor` | flavor of the parent (required) | string | `""` | n/a |
 
 #### `forge-ci container base-images sign`
 
@@ -848,6 +1144,7 @@ EXAMPLE:
 | `--repository` | owner/repo used to derive the expected source and base-image repository | string | `""` | `$REPOSITORY`, `$CI_REPO`, `$CI_PROJECT_PATH`, `$FORGEJO_REPOSITORY`, `$FORGEJO_REPO`, `$GITHUB_REPOSITORY` |
 | `--repository-suffix` | optional suffix appended to the repository package name, e.g. -base | string | `""` | `$REPOSITORY_SUFFIX` |
 | `--expected-repository` | exact base-image repository allowed for tags/refs (default: host/lower(owner/repo)<suffix>); the registry login goes to its host | string | `""` | `$EXPECTED_REPOSITORY`, `$BASE_IMAGES_EXPECTED_REPOSITORY` |
+| `--evidence-root` | verified canonical workspace root for producer-pinned SBOMs; ledger and provenance paths remain unchanged (no SBOM generation) | string | `""` | n/a |
 | `--registry` | the forge's own registry host, when it is not the host of --server-url (GitLab's $CI_REGISTRY); the login goes to the image repository's host, and a repository on any other host has its tags deleted through that registry | string | `""` | `$CONTAINER_REGISTRY` |
 | `--ledger` | base-image ledger JSON file: a bare array of image_kind=base entries ("-" reads stdin) (required) | string | `""` | `$BASE_IMAGES_LEDGER` |
 | `--workflow` | calling workflow filename/path, relative with no '..' step or control character; recorded as externalParameters.workflow, which base-image verification matches against --expected-workflow | string | `""` | n/a |
@@ -867,6 +1164,14 @@ EXAMPLE:
 
 validate existing immutable final base-image tags and report missing flavors
 
+```
+Outputs all_found, all_images_json and missing_flavors_json. With
+--auth-file it also outputs parent_bases_json, an object that maps each found
+flavor to the {ref,input_id} parent projection of the digest its signature,
+SBOM and lineage verified on: the same projection authenticate-parent prints
+for one exact ref. Without --auth-file the object is empty.
+```
+
 | Flag | Description | Type | Default | Env vars |
 |------|-------------|------|---------|----------|
 | `--server-url` | forge server URL used to derive the registry host and expected source | string | `""` | `$CI_SERVER_URL`, `$FORGEJO_SERVER_URL`, `$FORGEJO_SERVER`, `$GITHUB_SERVER_URL` |
@@ -880,7 +1185,7 @@ validate existing immutable final base-image tags and report missing flavors
 | `--cosign-public-key-sha256` | expected sha256 digest of the trusted Cosign public key | string | `""` | `$COSIGN_PUBLIC_KEY_SHA256` |
 | `--auth-file` | explicit registry auth file for digest, signature and attestation reads; omitted uses isolated anonymous access | string | `""` | `$FORGE_CI_REGISTRY_AUTH_FILE` |
 | `--base-input-id` | optional single sha256 base input ID expected for every flavor | string | `""` | `$BASE_INPUT_ID` |
-| `--base-inputs-json` | JSON array mapping flavors to sha256 base input IDs | string | `"[]"` | `$BASE_INPUTS_JSON` |
+| `--base-inputs-json` | JSON array mapping flavors to sha256 base input IDs and optional parent_base {ref,input_id} expectations | string | `"[]"` | `$BASE_INPUTS_JSON` |
 | `--flavors-file` | newline-delimited flavor list in the consumer checkout (required: the engine does not assume a repository layout) | string | `""` | `$FLAVORS_FILE` |
 
 ### `forge-ci container build`
@@ -938,6 +1243,7 @@ EXAMPLES:
 | `--digest-key` | OutputSink key for the pushed digest (push-by-digest mode) | string | `"digest"` | `$DIGEST_KEY` |
 | `--scan-severity` | blocking threshold for fixable findings (a level or comma-list whose lowest entry counts); the scan always reports down to HIGH | string | `"CRITICAL"` | `$SCAN_SEVERITY` |
 | `--trivy-version` | version embedded in the GitLab container-scanning report | string | `""` | `$TRIVY_VERSION` |
+| `--defer-scan` | oci mode only: export the layout unscanned for the publication-gating layout scan (security scan container --oci-layout), which runs where Trivy is baked in | bool | `false` | `$BUILD_DEFER_SCAN` |
 | `--image-builder` | image builder type: buildah (default; rootless, needs user namespaces) or kaniko (for a pool that denies them; runs as root in the job image CI_IMAGE_BUILDER_JOB_IMAGE names, builds to a layout, exports a stage's files in local mode, no load mode, no build secrets). Set CI_IMAGE_BUILDER on the repository to select it. | string | `"buildah"` | `$CI_IMAGE_BUILDER` |
 | `--kaniko-executor` | path of the kaniko executor (default /kaniko/executor) | string | `""` | `$KANIKO_EXECUTOR` |
 
@@ -1087,10 +1393,10 @@ exports --local-manifest, otherwise pulls --registry-digest-ref or
 before Trivy runs, because Trivy's
 --input mode does not select a platform from a manifest list.
 
-A Trivy scan that exits non-zero is run again, --trivy-attempts times in all,
+A Trivy scan the network stopped is run again, --trivy-attempts times in all,
 after attempt x --trivy-retry-delay-seconds: the vulnerability database
-download fails transiently. A scanner that cannot be started and a report that
-does not validate are not retried.
+download fails transiently. A scan that fails for another reason, a scanner
+that cannot be started and a report that does not validate are not retried.
 ```
 
 | Flag | Description | Type | Default | Env vars |
@@ -1349,6 +1655,7 @@ ledger promote operation.
 
 | Flag | Description | Type | Default | Env vars |
 |------|-------------|------|---------|----------|
+| `--evidence-root` | verified canonical workspace root for producer-pinned SBOMs; ledger and provenance paths remain unchanged (no SBOM generation) | string | `""` | n/a |
 | `--ledger` | ledger JSON file (a bare array; created if absent on add) | string | `"dist/release-images.json"` | `$RELEASE_IMAGES_PATH` |
 | `--tag` | release tag that final_tag (and candidate_tag) must be scoped to | string | `""` | `$TAG_NAME`, `$RELEASE_TAG`, `$REF_NAME`, `$CI_REF_NAME`, `$FORGEJO_REF_NAME`, `$GITHUB_REF_NAME` |
 | `--auth-file` | registry auth file for resolving each image before signing | string | `""` | `$FORGE_CI_REGISTRY_AUTH_FILE` |
@@ -1459,7 +1766,7 @@ manifests and multi-platform indexes alike.
 | Flag | Description | Type | Default | Env vars |
 |------|-------------|------|---------|----------|
 | `--ref` | registry image ref whose raw manifest digest should be computed (required) | string | `""` | `$IMAGE_REF`, `$MANIFEST_REF` |
-| `--digest-file` | optional Buildah digestfile to verify against the registry digest | string | `""` | `$MANIFEST_DIGEST_FILE` |
+| `--digest-file` | optional Buildah digestfile to verify against the registry digest; a named file that cannot be read or holds no digest fails the command | string | `""` | `$MANIFEST_DIGEST_FILE` |
 | `--auth-file` | registry auth file for registry digest verification | string | `""` | `$FORGE_CI_REGISTRY_AUTH_FILE` |
 | `--anonymous` | read without credentials; do not consult auth-file, ambient logins or credential helpers | bool | `false` | n/a |
 | `--retry-attempts` | registry digest read attempts | int | `3` | `$MANIFEST_DIGEST_RETRY_ATTEMPTS` |
@@ -1516,6 +1823,15 @@ checked against the exported OCI index. Push retries reuse that same index.
 | `--remove-local` | remove the local Buildah manifest after successful publication and digest verification | bool | `false` | `$MANIFEST_PUSH_REMOVE_LOCAL` |
 | `--retry-attempts` | push and registry digest read attempts | int | `3` | `$MANIFEST_PUSH_RETRY_ATTEMPTS` |
 | `--retry-delay-seconds` | base delay between retry attempts | int | `15` | `$MANIFEST_PUSH_RETRY_DELAY_SECONDS` |
+
+#### `forge-ci container manifest tag`
+
+expose an immutable manifest digest at validated repository tags
+
+| Flag | Description | Type | Default | Env vars |
+|------|-------------|------|---------|----------|
+| `--image-ref` | immutable image@sha256:digest reference (required) | string | `""` | `$IMAGE_REF` |
+| `--tags` | newline-separated fully qualified destination tags (required) | string | `""` | `$TAGS` |
 
 ### `forge-ci container materialize-build-secrets`
 
@@ -1704,6 +2020,11 @@ cannot be read stops the pass.
 even if its tag is old or absent. It requires exactly one --repository. A
 protected digest missing from the complete package inventory refuses the pass.
 
+--packages-json accepts {"include":[{"repository":"ghcr.io/owner/name","digest":"sha256:..."}]}.
+It groups all protected pins by repository before inventory work, preserving
+their union in one pass per package. It cannot be mixed with repository, prefix
+or keep-digest selectors. All declarations are validated before credentials.
+
 The token is $GITHUB_TOKEN with packages: write for packages linked to the
 repository, or a classic token with read:packages and delete:packages.
 
@@ -1716,6 +2037,7 @@ EXAMPLE:
 
 | Flag | Description | Type | Default | Env vars |
 |------|-------------|------|---------|----------|
+| `--packages-json` | protected inventory JSON with include rows of repository/digest; all pins for each package are kept together; exclusive with repository, prefix and keep-digest | string | `""` | n/a |
 | `--keep-digest` | consumer-pinned sha256 digest to preserve regardless of tag age; repeatable with one --repository | string | `""` | n/a |
 | `--repository` | package to prune, as ghcr.io/<owner>/<name>; repeatable | string | `""` | n/a |
 | `--repository-prefix` | prune every container package of the owner whose name starts with this, given as ghcr.io/<owner>/<name-prefix> | string | `""` | `$PACKAGE_RETENTION_PREFIX` |
@@ -1723,7 +2045,7 @@ EXAMPLE:
 | `--recent-tags` | regular expression of tags of which the newest --recent-count versions are kept | string | `"^sha-[0-9a-f]+$"` | `$PACKAGE_RETENTION_RECENT_TAGS` |
 | `--recent-count` | how many of the newest --recent-tags versions to keep | int | `10` | `$PACKAGE_RETENTION_RECENT_COUNT` |
 | `--max-delete` | refuse a package that would lose more versions than this (0 disables the bound) | int | `100` | `$PACKAGE_RETENTION_MAX_DELETE` |
-| `--dry-run` | report what would be deleted without deleting it | bool | `true` | `$PACKAGE_RETENTION_DRY_RUN` |
+| `--dry-run` | report what would be deleted without deleting it (default: true; pass --dry-run=false to delete) | bool | `true` | `$PACKAGE_RETENTION_DRY_RUN` |
 | `--token-file` | file holding the GitHub token (default: $GH_TOKEN, then $GITHUB_TOKEN) | string | `""` | n/a |
 | `--registry-username` | the user the token logs in to ghcr.io as, to read manifests | string | `""` | `$REGISTRY_USER` |
 
@@ -1737,6 +2059,10 @@ its suffix) to the output sink. --release-platforms, or RELEASE_PLATFORMS, narro
 declared --platforms to a subset; an undeclared, duplicated or malformed entry
 is refused.
 
+The layer passes its runner inputs with --runner-input, as release-images
+plan takes them; a planned platform whose image build runner input has no
+value is refused here, before any output is written.
+
 EXAMPLE:
    forge-ci container platform-plan --platforms "linux/amd64,linux/arm64" --release-platforms "$RELEASE_PLATFORMS"
 ```
@@ -1746,6 +2072,7 @@ EXAMPLE:
 | `--platforms` | comma/space/newline-separated build platforms (linux/amd64,linux/arm64) | string | `""` | `$PLATFORMS` |
 | `--platform` | single build platform; falls back to the first entry of --platforms | string | `""` | `$PLATFORM` |
 | `--release-platforms` | comma-separated subset of --platforms to build; empty builds them all | string | `""` | `$RELEASE_PLATFORMS` |
+| `--runner-input` | runner input of the calling layer as it passed it, name=value, such as build-runs-on-linux-arm64=["arm64"] (repeatable); a planned platform whose input has no value is refused; none passed checks nothing | string | `""` | n/a |
 
 ### `forge-ci container prepare-kaniko-action`
 
@@ -1874,6 +2201,8 @@ EXAMPLE:
 | `--source-dir` | release checkout the plan's Containerfile and context paths are relative to | string | `"."` | n/a |
 | `--created` | org.opencontainers.image.created value: the release commit's time, so the label names the source, not the build (required) | string | `""` | n/a |
 | `--metadata-dir` | directory the staged <name>-arch-<arch> layouts are written under; keep it outside the build context (required) | string | `""` | n/a |
+| `--inputs-dir` | secret-free prepared inputs root, with a <name>-arch-<arch> fetch-build-inputs directory for every build | string | `""` | n/a |
+| `--image` | build only this planned image of --arch, for a job per image; an image the plan does not build on --arch is refused | string | `""` | n/a |
 | `--image-builder` | image builder type: buildah (default; rootless, needs user namespaces) or kaniko (for a pool that denies them; runs as root in the job image CI_IMAGE_BUILDER_JOB_IMAGE names, builds to a layout, exports a stage's files in local mode, no load mode, no build secrets). Set CI_IMAGE_BUILDER on the repository to select it. | string | `"buildah"` | `$CI_IMAGE_BUILDER` |
 | `--kaniko-executor` | path of the kaniko executor (default /kaniko/executor) | string | `""` | `$KANIKO_EXECUTOR` |
 
@@ -1918,6 +2247,10 @@ delete release candidate tags after verified final/moving promotion
 #### `forge-ci container release-images fetch-build-inputs`
 
 fetch planned cache and pinned parents without running consumer code
+
+```
+--inputs-dir must not exist yet; its missing parents are created, so a build's inputs/<name>-arch-<arch> can be named directly.
+```
 
 | Flag | Description | Type | Default | Env vars |
 |------|-------------|------|---------|----------|
@@ -1991,8 +2324,10 @@ builds carry their own labels.
 
 With --output, the plan is written to that file instead, for release-images
 build and publish on a forge whose jobs take no multiline outputs, and only
-registry-user is emitted. --runner-archs then names the architectures a native
-build job exists for; a container building another is refused here.
+registry-user is emitted.
+
+The layer passes its runner inputs with --runner-input; a build of a platform
+whose image build runner input has no value is refused here.
 
 EXAMPLE:
    forge-ci container release-images plan --image-repository ghcr.io/owner/app --registry-username owner --release-tag v1.2.3
@@ -2009,7 +2344,7 @@ EXAMPLE:
 | `--release-platforms` | comma-separated subset of each container's platforms to build; empty builds every declared platform, linux/amd64 when a container declares none | string | `""` | `$RELEASE_PLATFORMS` |
 | `--label` | key=value label every image carries after the standard ones, such as org.opencontainers.image.licenses=MIT (repeatable); a standard provenance label is refused | string | `""` | n/a |
 | `--output` | write the builds/images plan to this file instead of the builds, images and image-names outputs | string | `""` | n/a |
-| `--runner-archs` | with --output: comma-separated architectures that have a native build job; empty admits every one | string | `""` | n/a |
+| `--runner-input` | runner input of the calling layer as it passed it, name=value, such as build-runs-on-linux-arm64=["arm64"] (repeatable); a planned platform whose input has no value is refused; none passed checks nothing | string | `""` | n/a |
 | `--registry-username` | user the registry token logs in as, written to the registry-user output; empty is the --repository owner on the forge's own registry and refused on another one | string | `""` | `$REGISTRY_USER` |
 
 #### `forge-ci container release-images promote`
@@ -2040,7 +2375,9 @@ scan, assemble and push every planned release image from its staged layouts, and
 ```
 Reads the plan file and admits --layouts-dir: it must hold exactly the
 planned <name>-arch-<arch> layouts, with no other entry and no link, and is
-only read. Then it verifies and scans every staged architecture layout of
+only read. Alternatively, repeat --layout-source arch=PATH to admit each native
+job's own root and read layouts directly, without a merged copy. These source
+modes are exclusive. Then it verifies and scans every staged architecture layout of
 every image, and only when all of them pass pushes each index under its
 staging candidate tag, as multiarch-image assemble --from-layouts does, and
 records it as ledger add does. The ledger
@@ -2062,8 +2399,11 @@ EXAMPLE:
 | `--repository` | owner/repo the source labels name | string | `""` | `$REPOSITORY`, `$CI_REPO`, `$CI_PROJECT_PATH`, `$FORGEJO_REPOSITORY`, `$FORGEJO_REPO`, `$GITHUB_REPOSITORY` |
 | `--retry-attempts` | registry attempts | int | `3` | n/a |
 | `--auth-file` | registry auth file that may push to --image-repository | string | `""` | `$FORGE_CI_REGISTRY_AUTH_FILE` |
-| `--layouts-dir` | directory holding the <name>-arch-<arch> layouts release-images build staged, and nothing else (required) | string | `""` | n/a |
+| `--layouts-dir` | directory holding the <name>-arch-<arch> layouts; exclusive with --layout-source | string | `""` | n/a |
+| `--layout-source` | native job artifact root as amd64=PATH or arm64=PATH (repeatable); admit/read without copying | string | `""` | n/a |
 | `--output-dir` | directory for release-images.json and the scan evidence; must not exist yet (required) | string | `""` | n/a |
+| `--prepublication-sboms` | retain release-image platform inventories and pin signer-ready index SBOM bytes | bool | `false` | n/a |
+| `--sbom-url-prefix` | public release download directory for inventory URLs; defaults to the source forge's release downloads with --prepublication-sboms | string | `""` | n/a |
 
 #### `forge-ci container release-images rollback`
 
@@ -2103,6 +2443,7 @@ sign and attest release images from the confined release-image ledger
 | `--registry-password-file` | file containing the registry password/token ("-" reads stdin); defaults to $REGISTRY_TOKEN then $REGISTRY_PASSWORD. The password never appears in argv. | string | `""` | n/a |
 | `--expected-image-repository` | optional exact image repository allowed for ledger refs/tags at the signer/publisher boundary | string | `""` | `$LEDGER_EXPECTED_IMAGE_REPOSITORY` |
 | `--allow-missing-ledger` | accept a release without images: when the default ledger <dist-dir>/release-images.json does not exist, say so and exit 0 before any credential read or registry login. The dist directory must exist, a ledger that exists is held to every rule, and a ledger named with --ledger must exist | bool | `false` | n/a |
+| `--evidence-root` | verified canonical workspace root for producer-pinned SBOMs; ledger and provenance paths remain unchanged (no SBOM generation) | string | `""` | n/a |
 | `--provenance-envelope` | in-toto statement JSON; defaults to <dist-dir>/slsa-provenance.intoto.json | string | `""` | `$SLSA_PROVENANCE_ENVELOPE` |
 | `--recursive` | pass --recursive to cosign sign for manifest-list children | bool | `false` | `$LEDGER_SIGN_RECURSIVE` |
 | `--expected-base-repository` | exact base image repository allowed for ledger base_ref values (default: <expected-image-repository>-base) | string | `""` | `$LEDGER_SIGN_EXPECTED_BASE_REPOSITORY` |
@@ -2120,9 +2461,17 @@ validate an existing digest-pinned release image before reusing it
 
 ```
 Checks Cosign signature, CycloneDX SBOM attestation, and SLSA
-provenance fields for a digest-pinned release image. With --allow-reattest, a
-provenance mismatch may still return status "reattestable" when the image is
-signed, SBOM-attested, and its OCI release labels match the expected identity.
+provenance fields for a digest-pinned release image. With --allow-reattest, an
+image the registry stores no SLSA provenance attestation for returns status
+"reattestable" when it is signed, SBOM-attested, and its OCI release labels
+match the expected identity. Whether it stores one is read from the registry
+(the OCI referrers of the digest and the sha256-<hex>.att tag), not taken from
+the failed verification. A stored provenance attestation that does not verify
+is refused with or without the flag, and so is signed provenance that verifies
+and names another release. A registry that cannot be read for the stored
+attestations fails the command as an unavailable dependency. The check guards
+against provenance that does not match and provenance that was changed, not
+against whoever controls the registry deleting it.
 The command prints one status token to stdout on success: verified or
 reattestable.
 ```
@@ -2138,11 +2487,11 @@ reattestable.
 | `--expected-workflow` | workflow path expected in SLSA workflow externalParameters.workflow.path (required) | string | `""` | `$EXPECTED_WORKFLOW` |
 | `--expected-base-ref` | optional digest-pinned base ref expected in SLSA base lineage | string | `""` | `$EXPECTED_BASE_REF` |
 | `--expected-base-input-id` | optional sha256 base input ID expected in SLSA base lineage | string | `""` | `$EXPECTED_BASE_INPUT_ID` |
-| `--allow-reattest` | allow signed/SBOM-attested images with matching OCI identity labels to be re-attested | bool | `false` | `$ALLOW_REATTEST` |
+| `--allow-reattest` | allow signed/SBOM-attested images with matching OCI identity labels and no stored provenance attestation to be re-attested | bool | `false` | `$ALLOW_REATTEST` |
 | `--identity-version` | OCI org.opencontainers.image.version expected for --allow-reattest; defaults to --expected-tag | string | `""` | n/a |
 | `--identity-ref-name` | OCI org.opencontainers.image.ref.name expected for --allow-reattest; defaults to --expected-tag | string | `""` | n/a |
 | `--identity-source` | OCI org.opencontainers.image.source expected for --allow-reattest; defaults to --expected-source | string | `""` | n/a |
-| `--auth-file` | Docker/containers auth config for registry label reads and cosign verification | string | `""` | `$FORGE_CI_REGISTRY_AUTH_FILE` |
+| `--auth-file` | Docker/containers auth config for registry label and attestation reads and cosign verification | string | `""` | `$FORGE_CI_REGISTRY_AUTH_FILE` |
 
 ### `forge-ci container release-labels`
 
@@ -2167,6 +2516,116 @@ buildah bud without reimplementing label policy in shell.
 | `--licenses` | org.opencontainers.image.licenses | string | `""` | `$OCI_LABEL_LICENSES` |
 | `--vendor` | org.opencontainers.image.vendor | string | `""` | `$OCI_LABEL_VENDOR` |
 | `--authors` | org.opencontainers.image.authors | string | `""` | `$OCI_LABEL_AUTHORS` |
+
+### `forge-ci container runtime-publication`
+
+source-bound native runtime publication
+
+#### `forge-ci container runtime-publication collect`
+
+download and validate native candidate metadata before emitting the smoke matrix
+
+| Flag | Description | Type | Default | Env vars |
+|------|-------------|------|---------|----------|
+| `--roster` | product-owned runtime roster JSON | string | `"containers/runtime/images.json"` | n/a |
+| `--platform-matrix` | matrix-json from container platform-plan (required) | string | `""` | n/a |
+| `--image-namespace` | destination registry/owner namespace (required) | string | `""` | n/a |
+| `--source-sha` | expected full product source commit (required) | string | `""` | n/a |
+| `--checked-out-sha` | observed checkout commit (required) | string | `""` | n/a |
+| `--run-id` | numeric run-attempt identity, for example 123-1 (required) | string | `""` | n/a |
+| `--publication-ref` | must be refs/heads/main (required) | string | `""` | n/a |
+
+#### `forge-ci container runtime-publication plan`
+
+validate the complete product roster and emit native build/image matrices
+
+| Flag | Description | Type | Default | Env vars |
+|------|-------------|------|---------|----------|
+| `--roster` | product-owned runtime roster JSON | string | `"containers/runtime/images.json"` | n/a |
+| `--platform-matrix` | matrix-json from container platform-plan (required) | string | `""` | n/a |
+| `--image-namespace` | destination registry/owner namespace (required) | string | `""` | n/a |
+| `--source-sha` | expected full product source commit (required) | string | `""` | n/a |
+| `--checked-out-sha` | observed checkout commit (required) | string | `""` | n/a |
+| `--run-id` | numeric run-attempt identity, for example 123-1 (required) | string | `""` | n/a |
+| `--publication-ref` | must be refs/heads/main (required) | string | `""` | n/a |
+| `--target` | project one admitted target as JSON instead of emitting workflow matrices | string | `""` | n/a |
+| `--arch` | with target: require and select one declared native architecture | string | `""` | n/a |
+| `--metadata-root` | with target: validate all selected native metadata under this directory before emitting candidate refs | string | `""` | n/a |
+
+#### `forge-ci container runtime-publication promote`
+
+verify native signatures and current main before promoting the exact runtime index to its source tag
+
+```
+Run from the downloaded evidence directory. Requires a provider with authenticated branch-head resolution (currently Forgejo). Writes published-ref.txt only after the destination serves the signed digest. No signing key is accepted.
+```
+
+| Flag | Description | Type | Default | Env vars |
+|------|-------------|------|---------|----------|
+| `--auth-file` | registry auth file used by buildah and the registry client; build-arch --stage pulls anonymously without one | string | `""` | `$FORGE_CI_IMAGE_AUTH_FILE` |
+| `--source-sha` | git commit SHA for the OCI revision label and default tag naming | string | `""` | `$SOURCE_SHA` |
+| `--server-url` | forge server URL used to derive the registry/repository | string | `""` | `$CI_SERVER_URL`, `$FORGEJO_SERVER_URL`, `$FORGEJO_SERVER`, `$GITHUB_SERVER_URL` |
+| `--repository` | owner/repo used to derive the image repository | string | `""` | `$REPOSITORY`, `$CI_REPO`, `$CI_PROJECT_PATH`, `$FORGEJO_REPOSITORY`, `$FORGEJO_REPO`, `$GITHUB_REPOSITORY` |
+| `--repository-suffix` | suffix for the derived image repository (e.g. -signer); unused with --image-repository | string | `""` | `$IMAGE_REPOSITORY_SUFFIX` |
+| `--image-repository` | full destination OCI repository without a tag or digest; overrides the derived destination, preserving source labels | string | `""` | `$IMAGE_REPOSITORY` |
+| `--tag-prefix` | prefix prepended to the source-SHA image and manifest tags (e.g. signer-) | string | `""` | `$IMAGE_TAG_PREFIX` |
+| `--tag` | explicit index tag name instead of tag-prefix + source-sha; architecture tags append -<arch>; mutually exclusive with tag-prefix | string | `""` | n/a |
+| `--name` | basename for the per-arch/manifest metadata files and dirs shared across the two phases | string | `"image"` | `$IMAGE_METADATA_NAME` |
+| `--cosign-public-key-path` | relative path to the trusted Cosign public key in the consumer checkout | string | `""` | `$COSIGN_PUBLIC_KEY_PATH` |
+| `--cosign-public-key-sha256` | expected sha256 digest of the trusted Cosign public key | string | `""` | `$COSIGN_PUBLIC_KEY_SHA256` |
+| `--archs` | newline-separated architectures to include | string | `"amd64\narm64"` | `$IMAGE_ARCHS` |
+
+#### `forge-ci container runtime-publication sign`
+
+verify retained runtime evidence, recursively sign its index and attest native SBOMs and source provenance
+
+```
+Run from the downloaded evidence directory containing image.json, sboms.sha256, sbom-<arch>.json and per-architecture metadata. All native SBOMs and the exact index are validated before the first signing mutation; no SBOM is generated here.
+```
+
+| Flag | Description | Type | Default | Env vars |
+|------|-------------|------|---------|----------|
+| `--auth-file` | registry auth file used by buildah and the registry client; build-arch --stage pulls anonymously without one | string | `""` | `$FORGE_CI_IMAGE_AUTH_FILE` |
+| `--source-sha` | git commit SHA for the OCI revision label and default tag naming | string | `""` | `$SOURCE_SHA` |
+| `--server-url` | forge server URL used to derive the registry/repository | string | `""` | `$CI_SERVER_URL`, `$FORGEJO_SERVER_URL`, `$FORGEJO_SERVER`, `$GITHUB_SERVER_URL` |
+| `--repository` | owner/repo used to derive the image repository | string | `""` | `$REPOSITORY`, `$CI_REPO`, `$CI_PROJECT_PATH`, `$FORGEJO_REPOSITORY`, `$FORGEJO_REPO`, `$GITHUB_REPOSITORY` |
+| `--repository-suffix` | suffix for the derived image repository (e.g. -signer); unused with --image-repository | string | `""` | `$IMAGE_REPOSITORY_SUFFIX` |
+| `--image-repository` | full destination OCI repository without a tag or digest; overrides the derived destination, preserving source labels | string | `""` | `$IMAGE_REPOSITORY` |
+| `--tag-prefix` | prefix prepended to the source-SHA image and manifest tags (e.g. signer-) | string | `""` | `$IMAGE_TAG_PREFIX` |
+| `--tag` | explicit index tag name instead of tag-prefix + source-sha; architecture tags append -<arch>; mutually exclusive with tag-prefix | string | `""` | n/a |
+| `--name` | basename for the per-arch/manifest metadata files and dirs shared across the two phases | string | `"image"` | `$IMAGE_METADATA_NAME` |
+| `--method` | signing backend: sigstore (keyless cosign + OIDC) or kms (cosign + --key). gpg is rejected — it cannot sign OCI images. | string | `""` | `$SIGN_METHOD` |
+| `--key` | cosign --key for --method=kms: KMS/PKCS#11 URI (awskms://, gcpkms://, hashivault://, azurekms://, pkcs11:), env://VAR, or file path. Forbidden for --method=sigstore. | string | `""` | `$SIGN_KEY` |
+| `--oidc-issuer` | OIDC issuer URL for --method=sigstore (default: cosign auto-detect). Forbidden for --method=kms. | string | `""` | `$SIGN_OIDC_ISSUER` |
+| `--fulcio-url` | certificate authority for --method=sigstore (default: public Sigstore). Set this for a self-hosted Sigstore: --oidc-issuer alone does not redirect it, so the token is minted by your issuer and then presented to the public CA. Forbidden for --method=kms. | string | `""` | `$SIGN_FULCIO_URL` |
+| `--trusted-root` | trust material cosign verifies the new signature against, as produced by "cosign trusted-root create" (default: cosign's own). Required for a self-hosted CA: cosign verifies the certificate it was just issued and cannot learn a private root any other way. Forbidden for --method=kms. | string | `""` | `$SIGN_TRUSTED_ROOT` |
+| `--rekor-url` | transparency log for --method=sigstore (default: public Sigstore). Where to publish, not whether: see FORGE_CI_COSIGN_TRANSPARENCY for that. Forbidden for --method=kms. | string | `""` | `$SIGN_REKOR_URL` |
+| `--archs` | newline-separated architectures to include | string | `"amd64\narm64"` | `$IMAGE_ARCHS` |
+| `--flavor` | product runtime target recorded in the source provenance (required) | string | `""` | n/a |
+
+#### `forge-ci container runtime-publication verify-cli`
+
+verify downloaded or baked CLI bytes against the source checksum without executing them
+
+| Flag | Description | Type | Default | Env vars |
+|------|-------------|------|---------|----------|
+| `--arch` | amd64 or arm64 (required) | string | `""` | n/a |
+| `--workspace` | source checkout containing .engine/bin checksum recordings | string | `"."` | n/a |
+| `--file` | downloaded CLI file (exclusive with image-ref) | string | `""` | n/a |
+| `--image-ref` | digest-pinned retained runtime image (exclusive with file) | string | `""` | n/a |
+| `--auth-file` | Sets auth file. | string | `""` | `$FORGE_CI_REGISTRY_AUTH_FILE` |
+
+#### `forge-ci container runtime-publication verify-smoke`
+
+verify a native smoke receipt matches the exact source and candidate digest
+
+| Flag | Description | Type | Default | Env vars |
+|------|-------------|------|---------|----------|
+| `--receipt` | downloaded smoke receipt JSON file (required) | string | `""` | n/a |
+| `--source-sha` | expected full product source commit (required) | string | `""` | n/a |
+| `--target` | expected product runtime target (required) | string | `""` | n/a |
+| `--arch` | expected native architecture, amd64 or arm64 (required) | string | `""` | n/a |
+| `--image-ref` | expected digest-pinned candidate image (required) | string | `""` | n/a |
 
 ### `forge-ci container setup-buildah`
 
@@ -2208,6 +2667,33 @@ EXAMPLE:
 | `--container-tmpdir` | job-local temp directory (default: $RUNNER_TEMP/container-tmp) | string | `""` | `$CONTAINER_TMPDIR` |
 | `--temp-dir` | existing scratch parent for a private storage directory; job-specific when storage overrides are set (required) | string | `""` | `$CI_TEMP_DIR`, `$RUNNER_TEMP` |
 | `--env-file` | runner env file receiving CONTAINERS_STORAGE_CONF and TMPDIR | string | `""` | `$FORGEJO_ENV`, `$GITHUB_ENV` |
+
+### `forge-ci container setup-image-builder`
+
+set up Buildah or admit a digest-pinned native Kaniko job image
+
+```
+Reuses setup-buildah for local storage and package setup. Kaniko is already provisioned in the job image: verify its digest, native architecture and engine source/title labels without installing Buildah.
+```
+
+| Flag | Description | Type | Default | Env vars |
+|------|-------------|------|---------|----------|
+| `--extra-packages` | whitespace-separated additional apt packages to install | string | `""` | `$SETUP_BUILDAH_EXTRA_PACKAGES` |
+| `--install-packages` | install missing buildah/fuse-overlayfs/netavark/aardvark-dns/extra packages with apt-get | bool | `true` | `$SETUP_BUILDAH_INSTALL_PACKAGES` |
+| `--probe-build` | validate storage with a layered build probe that writes into a directory its base image owns | bool | `true` | `$SETUP_BUILDAH_PROBE_BUILD` |
+| `--print-store` | print selected buildah storage details after setup | bool | `false` | `$CONTAINER_STORAGE_PRINT_STORE` |
+| `--summary` | append selected storage details to the step summary | bool | `false` | `$CONTAINER_STORAGE_SUMMARY` |
+| `--storage-conf` | containers storage config path (default: $RUNNER_TEMP/containers-storage.conf) | string | `""` | `$CONTAINERS_STORAGE_CONF` |
+| `--storage-root` | containers storage root path (default: $RUNNER_TEMP/containers-storage) | string | `""` | `$CONTAINER_STORAGE_ROOT` |
+| `--container-tmpdir` | job-local temp directory (default: $RUNNER_TEMP/container-tmp) | string | `""` | `$CONTAINER_TMPDIR` |
+| `--temp-dir` | existing scratch parent for a private storage directory; job-specific when storage overrides are set (required) | string | `""` | `$CI_TEMP_DIR`, `$RUNNER_TEMP` |
+| `--env-file` | runner env file receiving CONTAINERS_STORAGE_CONF and TMPDIR | string | `""` | `$FORGEJO_ENV`, `$GITHUB_ENV` |
+| `--require-job-image` | require a digest-pinned job image for either backend (GitLab release policy) | bool | `false` | n/a |
+| `--image-builder` | image builder type: buildah (default; rootless, needs user namespaces) or kaniko (for a pool that denies them; runs as root in the job image CI_IMAGE_BUILDER_JOB_IMAGE names, builds to a layout, exports a stage's files in local mode, no load mode, no build secrets). | string | `"buildah"` | `$CI_IMAGE_BUILDER` |
+| `--job-image` | Kaniko job image pinned by digest | string | `""` | `$CI_IMAGE_BUILDER_JOB_IMAGE` |
+| `--arch` | architecture the Kaniko job image must serve: the job's build architecture (default: this binary's) | string | `"amd64"` | n/a |
+| `--engine-repository` | trusted engine source repository HTTPS URL | string | `""` | `$FORGE_CI_REPOSITORY_URL` |
+| `--auth-file` | registry auth file for Kaniko job-image inspection | string | `""` | `$FORGE_CI_REGISTRY_AUTH_FILE` |
 
 ### `forge-ci container sign`
 
@@ -2267,6 +2753,16 @@ build one frozen artifact with the existing ecosystem CLI, or prepare its alread
 | `--output-dir` | Sets output dir. | string | `"_snapshot-artifacts"` | n/a |
 | `--from-artifact` | exact downloaded artifact directory; skips the ecosystem build | string | `""` | n/a |
 
+#### `forge-ci container snapshot-images build-files`
+
+build one planned file output with the existing ecosystem CLI and write its unsigned bundle, the built files and their receipt; no uploads
+
+| Flag | Description | Type | Default | Env vars |
+|------|-------------|------|---------|----------|
+| `--plan` | Sets plan. (required) | string | `""` | n/a |
+| `--name` | Sets name. (required) | string | `""` | n/a |
+| `--output-dir` | Sets output dir. | string | `"snapshot-files"` | n/a |
+
 #### `forge-ci container snapshot-images collect`
 
 require exactly every planned image receipt and emit immutable digest references
@@ -2305,9 +2801,11 @@ pin source and plan declared native snapshot images; no implicit root image
 | `--file` | Sets file. | string | `".forge-ci/artifacts.yml"` | n/a |
 | `--branch` | logical source branch (also for detached/manual checkouts) (required) | string | `""` | n/a |
 | `--source-sha` | Sets source sha. (required) | string | `""` | n/a |
-| `--image-repository` | full base OCI repository; configured image-name overrides its repository using the existing name rules (required) | string | `""` | n/a |
+| `--image-repository` | full base OCI repository, required when the plan publishes an image; configured image-name overrides its repository using the existing name rules | string | `""` | n/a |
 | `--output` | Sets output. (required) | string | `""` | n/a |
-| `--publish` | enable declared images (false emits an empty disabled plan) | bool | `true` | n/a |
+| `--publish` | enable declared images (false plans no image) | bool | `true` | n/a |
+| `--publish-files` | keep the built files of every declared artifact its ecosystem builds outside an image as unsigned file outputs | bool | `false` | n/a |
+| `--runner-input` | runner input of the calling layer as it passed it, name=value, such as build-runs-on-linux-arm64=["arm64"] (repeatable, at least one on a forge); a planned platform whose input has no value is refused | string | `""` | n/a |
 
 #### `forge-ci container snapshot-images prepare-inputs`
 
@@ -2403,6 +2901,7 @@ EXAMPLE:
 |------|-------------|------|---------|----------|
 | `--path` | Containerfile path or glob (e.g. Containerfile, src/*Containerfile) (required) | string | `""` | `$CONTAINERFILE` |
 | `--context` | also require this context and the resolved Containerfile to stay inside the current source directory | string | `""` | n/a |
+| `--source-dir` | also require this directory to be a relative path with no '..' segment (repeatable) | string | `""` | n/a |
 
 #### `forge-ci container validate namespace`
 
@@ -2440,6 +2939,36 @@ EXAMPLE:
 | `--digest` | sha256:… digest written into the per-arch marker file | string | `""` | `$DIGEST` |
 | `--digests-dir` | directory where the marker file is written | string | `"/tmp/digests"` | `$DIGESTS_DIR` |
 
+## `forge-ci docs`
+
+print the documentation shipped in this binary (artifacts.yml reference, forge guides, …)
+
+```
+Without a page, lists the pages this binary carries. With one, prints that
+page as Markdown; a unique prefix is enough ("artifacts" finds
+artifacts-reference). The pages are the docs of the release this binary was
+built from, so they describe the behaviour of this binary.
+
+EXAMPLES:
+   # What is there:
+   forge-ci docs
+
+   # Every artifacts.yml field:
+   forge-ci docs artifacts-reference | less
+
+   # One section, as a page's links name it:
+   forge-ci docs forgejo#quick-start
+
+   # The same page on the web, at this binary's release:
+   forge-ci docs artifacts-reference --web
+```
+
+**Usage:** `forge-ci docs [page]`
+
+| Flag | Description | Type | Default | Env vars |
+|------|-------------|------|---------|----------|
+| `--web` | print the page's web address at this binary's release instead of the page | bool | `false` | n/a |
+
 ## `forge-ci doctor`
 
 check local repository configuration for forge-ci
@@ -2460,7 +2989,8 @@ EXAMPLES:
 
 Exit codes:
    0   — all checks pass or are warnings
-   1   — at least one FAIL check (ExitCodeValidation)
+   1   — at least one FAIL check
+   66  — the --root directory does not exist
 ```
 
 | Flag | Description | Type | Default | Env vars |
@@ -2608,6 +3138,95 @@ EXAMPLE:
 | `--version` | release version forwarded to each publish component | string | `""` | `$VERSION` |
 | `--output` | destination path for the child pipeline (default: stdout) | string | `""` | `$OUTPUT_FILE` |
 
+### `forge-ci plan gitlab-release-pipeline`
+
+plan the GitLab release child pipeline's version and build jobs from artifacts.yml
+
+```
+Plans the release's version bump and builds from the declaration, as
+   'plan release' does, and writes what the GitLab release jobs read:
+
+   --output               the generated part of the release child pipeline:
+                          one "Prepare: version <family>" job per toolchain
+                          family whose projects the plan bumps with their
+                          native tool, one "Build: <family>" job per family it
+                          builds, and "Publish: npm packages" when an npm
+                          project lists forge-packages. Each extends its
+                          hidden job in templates/release-jobs.yml and carries
+                          nothing else.
+                          A planned family needs its --runtime-image-<family>.
+   --prepare-plan-output  the prepare-stage plan JSON, for 'version bump-plan'
+                          and 'release validate-tag --prepare-plan-file'.
+   --artifacts-output     with --family, the names of the artifacts that
+                          family's build job builds, one a line.
+   --job-names-output     the names of the generated jobs, one a line, for
+                          the jobs that check every planned job ran.
+   --project-type-output  with --family, the project type that family's
+                          version job bumps with its native tool; a family
+                          the plan bumps no project of is refused.
+   --base-stages          adds the jobs of each stage of the policy's base
+                          image graph: plan, build, publish, and sign and
+                          promote, a child's parent job, and one gate.
+   --packages-output      the directories of the npm projects the release publishes
+                          to the project's package registry, one a line.
+
+   Without --file and without .forge-ci/artifacts.yml the release has no
+   planned bump and no family; a file named by --file must exist. With
+   --output, a sign.method or signing key the GitLab release does not use is
+   warned about, in the log and the job summary, with the key it signs with
+   instead, and so is a sign.transparency, which the release's
+   transparency-log input decides.
+
+EXAMPLE:
+   forge-ci plan gitlab-release-pipeline \
+     --runtime-image-java "registry.example.com/team/forge-ci-runtime-java-25@sha256:<digest>" \
+     --output release-families.yml
+```
+
+| Flag | Description | Type | Default | Env vars |
+|------|-------------|------|---------|----------|
+| `--file` | artifacts.yml of the release (default: .forge-ci/artifacts.yml, which may be absent) | string | `""` | n/a |
+| `--runtime-image-java` | runtime image of the java family (Maven, Gradle) | string | `""` | n/a |
+| `--runtime-image-node` | runtime image of the node family (npm) | string | `""` | n/a |
+| `--runtime-image-go` | runtime image of the go family | string | `""` | n/a |
+| `--runtime-image-rust` | runtime image of the rust family (Cargo) | string | `""` | n/a |
+| `--runtime-image-android` | runtime image of the android family (Gradle Android) | string | `""` | n/a |
+| `--output` | file to write the generated release jobs to | string | `""` | n/a |
+| `--prepare-plan-output` | file to write the prepare-stage plan JSON to | string | `""` | n/a |
+| `--family` | family whose artifacts --artifacts-output lists or whose project type --project-type-output names: java, node, go, rust or android | string | `""` | n/a |
+| `--artifacts-output` | file to write --family's artifact names to, one a line | string | `""` | n/a |
+| `--job-names-output` | file to write the generated jobs' names to, one a line | string | `""` | n/a |
+| `--project-type-output` | file to write --family's version project type to | string | `""` | n/a |
+| `--base-stages` | the policy's base image graph: stages separated by spaces, each <flavor> for a root or <flavor>[+<flavor>...]:<parent> for the children of one parent built by an earlier stage | string | `""` | n/a |
+| `--image-builder` | the policy's image builder; a child base stage is refused with kaniko | string | `"buildah"` | n/a |
+| `--packages-output` | file to write the directories of the npm projects published to forge-packages to, one a line | string | `""` | n/a |
+
+### `forge-ci plan gitlab-snapshot-pipeline`
+
+render a native GitLab snapshot child pipeline from its frozen image plan
+
+| Flag | Description | Type | Default | Env vars |
+|------|-------------|------|---------|----------|
+| `--plan` | Sets plan. | string | `""` | n/a |
+| `--output` | Sets output. | string | `""` | n/a |
+| `--project` | Sets project. | string | `""` | n/a |
+| `--engine-sha` | Sets engine sha. | string | `""` | n/a |
+| `--server-url` | Sets server url. | string | `""` | n/a |
+| `--registry` | Sets registry. | string | `""` | n/a |
+| `--pipeline-id` | Sets pipeline id. | string | `""` | n/a |
+| `--context-job` | Sets context job. | string | `""` | n/a |
+| `--job-image` | Sets job image. | string | `""` | n/a |
+| `--build-image` | Sets build image. | string | `""` | n/a |
+| `--image-builder` | Sets image builder. | string | `""` | n/a |
+| `--builder-job-image` | Sets builder job image. | string | `""` | n/a |
+| `--runtime-image-go` | Sets runtime image go. | string | `""` | n/a |
+| `--runtime-image-java` | Sets runtime image java. | string | `""` | n/a |
+| `--runtime-image-node` | Sets runtime image node. | string | `""` | n/a |
+| `--runtime-image-rust` | Sets runtime image rust. | string | `""` | n/a |
+| `--runner-tags` | JSON string array of runner tags | string | `"[]"` | n/a |
+| `--amd64-tags` | JSON string array of runner tags | string | `"[]"` | n/a |
+| `--arm64-tags` | JSON string array of runner tags | string | `"[]"` | n/a |
+
 ### `forge-ci plan pr`
 
 compose typed pull-request quality plan contracts
@@ -2639,10 +3258,16 @@ This example composes a plan for a public repository; use the actual visibility.
 EXAMPLE:
    config_output="$(forge-ci --runner local --json config parse-artifacts --file .forge-ci/artifacts.yml)" &&
    config_plan="$(printf '%s\n' "$config_output" | jq -er '."config-plan-json"')" &&
-   CONFIG_PLAN_JSON="$config_plan" forge-ci --runner local --json plan release \
+   CONFIG_PLAN_JSON="$config_plan" forge-ci --provider local --runner local --json plan release \
      --tag v1.2.3 --branch main --repository-visibility public
 
 Composition does not execute a release or establish signing/publication readiness.
+
+The layer passes its runner inputs with --runner-input. The plan is then
+refused when a platform its containers build, or its Xcode jobs, has no
+runner: the input of that role and platform has no value. On a forge a
+release is never planned unchecked: without any --runner-input the plan is
+refused. A --provider local run, as above, has no runners and passes none.
 ```
 
 | Flag | Description | Type | Default | Env vars |
@@ -2658,9 +3283,89 @@ Composition does not execute a release or establish signing/publication readines
 | `--release-draft` | create the GitHub Release as a draft | bool | `false` | `$RELEASE_DRAFT` |
 | `--release-sboms` | sboms enum gating which CISA layers the release attaches | string | `"all"` | `$RELEASE_SBOMS` |
 | `--release-sign-artifacts` | sign release artifacts with the release GPG key | bool | `true` | `$RELEASE_SIGN_ARTIFACTS` |
-| `--changelog-creator` | tool that generates the changelog (git-cliff, …) | string | `""` | `$CHANGELOG_CREATOR` |
+| `--changelog-creator` | changelog renderer: git-cliff, the only one the GitHub release runs, or empty for no changelog | string | `""` | `$CHANGELOG_CREATOR` |
 | `--changelog-skip-version-bump` | skip the version-bump commit (caller already committed) | bool | `false` | `$CHANGELOG_SKIP_VERSION_BUMP` |
 | `--release-platforms` | comma-separated subset of each container's platforms this run builds; empty plans every declared platform | string | `""` | `$RELEASE_PLATFORMS` |
+| `--runner-input` | runner input of the calling layer as it passed it, name=value, such as build-runs-on-linux-arm64=["arm64"] (repeatable, at least one on a forge); a planned platform whose input has no value is refused | string | `""` | n/a |
+
+### `forge-ci plan release-exports`
+
+admit native export jobs or print whether an architecture is selected
+
+| Flag | Description | Type | Default | Env vars |
+|------|-------------|------|---------|----------|
+| `--enabled` | Sets enabled. | string | `"false"` | n/a |
+| `--job-image` | Sets job image. | string | `""` | n/a |
+| `--release-platforms` | Sets release platforms. | string | `""` | n/a |
+| `--arm64-tags` | Sets arm64 tags. | string | `"[]"` | n/a |
+| `--commands-file` | JSON export commands, data only | string | `"-"` | n/a |
+| `--image-plan` | optional release image plan file | string | `""` | n/a |
+| `--selected-arch` | print true/false for this native architecture instead of admitting export jobs | string | `""` | n/a |
+
+### `forge-ci plan release-file-signing`
+
+say whether the Forgejo or GitLab release signs its checksums and SBOMs with GPG or with its Cosign key
+
+```
+Reads the declaration and sets the output release-file-signing: gpg
+   when sign.method or sign.files-method is gpg, and cosign otherwise, also
+   without a sign block and without the file. The Forgejo and GitLab releases
+   sign the checksums and SBOMs the way that output says. The provenance
+   statement, the evidence and the images are signed with the Cosign key
+   either way.
+
+   Without --file and without .forge-ci/artifacts.yml the answer is cosign; a
+   file named by --file must exist.
+
+EXAMPLE:
+   forge-ci plan release-file-signing --file .forge-ci/artifacts.yml
+```
+
+| Flag | Description | Type | Default | Env vars |
+|------|-------------|------|---------|----------|
+| `--file` | artifacts.yml of the release (default: .forge-ci/artifacts.yml, which may be absent) | string | `""` | n/a |
+
+### `forge-ci plan release-versions`
+
+plan a release's version bump and its per-family version jobs from artifacts.yml
+
+```
+Plans the release's version bump from the declaration, as
+   'plan gitlab-release-pipeline' does, and writes what the release's version
+   jobs read:
+
+   --matrix-output        the version jobs as one-line JSON for strategy.matrix:
+                          one {"family", "project-type"} row per toolchain
+                          family whose projects the plan bumps with their
+                          native tool, [] for none. A planned family needs
+                          its --runtime-image-<family>.
+   --families-output      the same families' names, one a line, for the job
+                          that joins their patches.
+   --prepare-plan-output  the prepare-stage plan JSON, for 'version bump-plan'
+                          and 'release validate-tag --prepare-plan-file'.
+
+   Without --file and without .forge-ci/artifacts.yml the release has no
+   planned bump; a file named by --file must exist. With --matrix-output, a
+   sign.method or signing key the Forgejo release does not use is warned
+   about, in the log and the job summary, with the key it signs with instead,
+   and so is a sign.transparency, which the release's transparency-log input
+   decides.
+
+EXAMPLE:
+   forge-ci plan release-versions \
+     --runtime-image-java "registry.example.com/team/forge-ci-runtime-java-25@sha256:<digest>" \
+     --matrix-output versions.json
+```
+
+| Flag | Description | Type | Default | Env vars |
+|------|-------------|------|---------|----------|
+| `--file` | artifacts.yml of the release (default: .forge-ci/artifacts.yml, which may be absent) | string | `""` | n/a |
+| `--runtime-image-java` | runtime image of the java family, whose Maven projects it bumps | string | `""` | n/a |
+| `--runtime-image-node` | runtime image of the node family, whose npm projects it bumps | string | `""` | n/a |
+| `--runtime-image-rust` | runtime image of the rust family, whose Cargo projects it bumps | string | `""` | n/a |
+| `--matrix-output` | file to write the version jobs' matrix JSON to | string | `""` | n/a |
+| `--families-output` | file to write the planned version families to, one a line | string | `""` | n/a |
+| `--prepare-plan-output` | file to write the prepare-stage plan JSON to | string | `""` | n/a |
 
 ### `forge-ci plan snapshot-release`
 
@@ -2676,6 +3381,9 @@ EXAMPLE:
    config_plan="$(printf '%s\n' "$config_output" | jq -er '."config-plan-json"')" &&
    CONFIG_PLAN_JSON="$config_plan" forge-ci --runner local --json plan snapshot-release \
      --project-type go --branch main
+
+Pass --runner-input name=value for each runner input of the calling layer.
+The plan refuses a planned image or Xcode platform without its own runner.
 ```
 
 | Flag | Description | Type | Default | Env vars |
@@ -2690,7 +3398,7 @@ EXAMPLE:
 | `--java-version` | JDK version installed by the publish job (Maven/Gradle paths) | string | `""` | `$JAVA_VERSION` |
 | `--node-version` | Node.js version installed by the publish job (npm path) | string | `""` | `$NODE_VERSION` |
 | `--rust-toolchain` | Rust toolchain installed by the publish job (cargo path) | string | `"stable"` | `$RUST_TOOLCHAIN` |
-| `--registry` | registry forwarded to the snapshot plan context (snapshot flow builds no containers) | string | `""` | `$REGISTRY` |
+| `--registry` | registry forwarded to the snapshot plan context | string | `""` | `$REGISTRY` |
 | `--forge-ci-binary-ref` | git ref of the forge-ci binary used in the plan | string | `""` | `$FORGE_CI_BINARY_REF` |
 | `--npm-registry` | npm registry URL the dev tarball is published to | string | `""` | `$NPM_REGISTRY` |
 | `--scope` | npm package scope (e.g. @examplescope) routed to the registry | string | `""` | `$SCOPE`, `$PACKAGE_SCOPE` |
@@ -2698,6 +3406,17 @@ EXAMPLE:
 | `--publish-npm` | include the npm dev-publish step in the plan | bool | `true` | `$PUBLISH_NPM` |
 | `--publish-maven-snapshots` | opt into Maven-format snapshot publication for Maven, Gradle JVM and Android libraries | bool | `false` | `$PUBLISH_MAVEN_SNAPSHOTS` |
 | `--use-ci-token` | use the CI platform token in place of an explicit registry password | bool | `true` | `$USE_CI_TOKEN` |
+| `--runner-input` | runner input of the calling layer as it passed it, name=value, such as build-runs-on-linux-arm64=["arm64"] (repeatable); a planned platform whose input has no value is refused; none passed checks nothing | string | `""` | n/a |
+
+### `forge-ci plan validate-test-selections`
+
+validate complete administrator-owned Go/Cargo mappings against the release build-stage plan before fanout
+
+| Flag | Description | Type | Default | Env vars |
+|------|-------------|------|---------|----------|
+| `--build-stage-plan-json` | Sets build stage plan json. (required) | string | `""` | n/a |
+| `--go-test-selections-json` | Sets go test selections json. | string | `""` | n/a |
+| `--cargo-test-selections-json` | Sets cargo test selections json. | string | `""` | n/a |
 
 ### `forge-ci plan write`
 
@@ -2776,6 +3495,22 @@ EXAMPLE:
 | `--action-repository` | the calling action's repository (printed in the debug block) | string | `""` | `$ACTION_REPOSITORY` |
 | `--action-ref` | the calling action's ref (printed in the debug block) | string | `""` | `$ACTION_REF` |
 
+### `forge-ci platform dependency`
+
+admit one exact or namespace-qualified job from serialized workflow needs
+
+```
+Requires exactly one matching local job ID and an admitted result (success by default). A requested output must be a nonempty single-line string. No provider calls or workflow expressions are evaluated. Use this in an always-running facts job before reusable calls consume its outputs.
+```
+
+| Flag | Description | Type | Default | Env vars |
+|------|-------------|------|---------|----------|
+| `--needs-json` | serialized workflow needs object (required) | string | `""` | `$NEEDS_JSON` |
+| `--job` | local job ID, with no namespace prefix (required) | string | `""` | n/a |
+| `--result` | admitted result (repeatable); defaults to success | string | `""` | n/a |
+| `--output` | return this string output instead of the dependency JSON object | string | `""` | n/a |
+| `--allow-missing-output` | allow absent/empty output after result admission; only for explicitly optional paths | bool | `false` | n/a |
+
 ### `forge-ci platform request-runner`
 
 ask a lender for one ephemeral runner before a job that builds container images
@@ -2845,11 +3580,14 @@ administrator check policy: inspect it and run gates under it
 
 run full Nanolinter SARIF and independently gate lint and vulnerability findings
 
-**Usage:** `forge-ci policy nanolinter -- <nanolinter verify --report sarif --out - command>`
+**Usage:** `forge-ci policy nanolinter [typed verify flags] or -- <nanolinter verify --report sarif --out - command>`
 
 | Flag | Description | Type | Default | Env vars |
 |------|-------------|------|---------|----------|
 | `--sarif-file` | write the invocation's security-only SARIF for provider upload | string | `""` | n/a |
+| `--required-lints` | typed verify mode: mandatory check IDs; explicitly empty selects no floor | string | `"secrets,sast"` | n/a |
+| `--disable-checks` | typed verify mode: check IDs excluded from this invocation | string | `""` | n/a |
+| `--offline` | typed verify mode: exactly true or false; true uses Nanolinter's offline checks | string | `"false"` | n/a |
 
 ### `forge-ci policy show`
 
@@ -2945,6 +3683,67 @@ EXAMPLE:
 | `--profile` | optional project-owned Maven publication profile; also used for snapshot version preflight | string | `""` | `$MAVEN_PROFILE` |
 | `--working-dir` | packed npm tarball, Maven build handoff or exported Gradle publication directory | string | `"."` | `$WORKING_DIRECTORY` |
 | `--npm-tag` | required for npm: release-{version}, release.{version}, release-<packed-version> or release.<packed-version>; latest, next and movable channel tags are forbidden | string | `""` | `$NPM_TAG` |
+
+#### `forge-ci publish forge-packages distro-packages`
+
+publish a signed release's .deb, .rpm and .apk files to the forge's Debian, RPM and Alpine registries
+
+```
+Publishes the .deb, .rpm and .apk files the finalized release manifest names
+   to the forge's own package registries, when artifacts.yml declares
+   distro-packages; without the block it publishes nothing and succeeds. The
+   places come from the block: distribution and component for Debian, the
+   group for RPM, branch and repository for Alpine.
+
+   Each file is sent as the release holds it, after the release's checksums
+   are verified against it, and the registry is then read back: it has to
+   serve that file's SHA-256 at its place. A package an earlier run published
+   is left as it is when its content is this file's; the same package version
+   with other content fails. Nothing is replaced or deleted.
+
+   The registry and its token are the detected forge's (override with
+   --provider). Forgejo has these registries; another forge is refused.
+
+   With --admit nothing is sent and no token is read: the release is checked
+   before it is signed and published. The output distro-packages says
+   whether the block is declared. --token-configured false refuses a
+   declared block, and with --manifest, which may be the unsigned one, every
+   package among the release's files has to be publishable and the forge's
+   registry has to be one a package is sent to: HTTPS.
+
+EXAMPLE:
+   forge-ci publish forge-packages distro-packages --manifest dist/release-files.json --dist-dir dist
+   forge-ci publish forge-packages distro-packages --admit --token-configured true
+   forge-ci publish forge-packages distro-packages --admit --manifest dist/release-files.json --dist-dir dist
+```
+
+| Flag | Description | Type | Default | Env vars |
+|------|-------------|------|---------|----------|
+| `--file` | declaration that holds the distro-packages block | string | `".forge-ci/artifacts.yml"` | n/a |
+| `--manifest` | release file manifest: the finalized one of the signed release, required without --admit | string | `""` | n/a |
+| `--dist-dir` | directory holding the release's files | string | `"dist"` | n/a |
+| `--admit` | check that the release can publish its packages, and send nothing | bool | `false` | n/a |
+| `--token-configured` | with --admit: true or false, whether the package token is configured | string | `""` | n/a |
+
+#### `forge-ci publish forge-packages npm-tarballs`
+
+name each npm project's packed tarball in a dist directory, refusing any other
+
+```
+Prints, one a line and in the order of --project-dir, the name of the
+   *.tgz at the root of --dist-dir whose packed package.json carries the name
+   and version of that project's package.json in the current directory. It
+   fails when a project has no tarball, or the directory holds a *.tgz of no
+   project: a release publishes exactly the packages its plan names.
+
+EXAMPLE:
+   forge-ci publish forge-packages npm-tarballs --dist-dir dist --project-dir frontend
+```
+
+| Flag | Description | Type | Default | Env vars |
+|------|-------------|------|---------|----------|
+| `--dist-dir` | directory holding the packed tarballs at its root (required) | string | `""` | n/a |
+| `--project-dir` | npm project directory, relative to the current directory; repeat for each (required) | string | `""` | n/a |
 
 ### `forge-ci publish google-play`
 
@@ -3187,6 +3986,7 @@ EXAMPLE:
 
 | Flag | Description | Type | Default | Env vars |
 |------|-------------|------|---------|----------|
+| `--acquisition-dir` | fresh external producer tree from release download-artifacts --isolated; source checkout is attachment-only | string | `""` | `$ACQUISITION_DIR` |
 | `--config-plan-json` | typed config plan JSON emitted by config parse-artifacts (required) | string | `""` | `$CONFIG_PLAN_JSON` |
 | `--artifact-transfer-plan-json` | typed artifact-transfer plan JSON used by release download-artifacts (required) | string | `""` | `$ARTIFACT_TRANSFER_PLAN_JSON` |
 | `--attach-artifacts` | comma/newline-separated workspace-relative extra release asset globs | string | `""` | `$ATTACH_ARTIFACTS` |
@@ -3220,7 +4020,7 @@ EXAMPLE:
 | `--path` | directory to assemble and digest | string | `"dist/"` | `$DIST_DIR` |
 | `--ledger-files` | newline-separated ledger files or directories to merge after artifact download | string | `""` | `$LEDGER_FILES` |
 | `--ledger-expected-count` | when greater than zero, require the merged release image ledger to contain exactly this many entries | int | `0` | `$LEDGER_EXPECTED_COUNT` |
-| `--release-images-path` | merged release image ledger path | string | `"dist/release-images.json"` | `$RELEASE_IMAGES_PATH` |
+| `--release-images-path` | merged release image ledger path (default: <path>/release-images.json) | string | `""` | `$RELEASE_IMAGES_PATH` |
 | `--prune-dirs` | whether to remove top-level directories before digesting: true\|false | string | `"false"` | `$PRUNE_DIRS` |
 | `--run-id` | run the artifact belongs to (default: current run) | string | `""` | `$CI_RUN_ID`, `$FORGEJO_RUN_ID`, `$GITHUB_RUN_ID` |
 | `--repository` | owner/repo the run belongs to (default: current repo) | string | `""` | `$REPOSITORY`, `$CI_REPO`, `$CI_PROJECT_PATH`, `$FORGEJO_REPOSITORY`, `$FORGEJO_REPO`, `$GITHUB_REPOSITORY` |
@@ -3252,9 +4052,9 @@ EXAMPLE:
 |------|-------------|------|---------|----------|
 | `--repository` | "owner/repo" whose releases to trim (required) | string | `""` | `$REPOSITORY`, `$CI_REPO`, `$CI_PROJECT_PATH`, `$FORGEJO_REPOSITORY`, `$FORGEJO_REPO`, `$GITHUB_REPOSITORY` |
 | `--keep` | how many of the newest published releases keep every file (required) | int | `0` | `$RELEASE_ASSET_RETENTION` |
-| `--keep-files` | regular expression of the file names older releases keep | string | `"(?i)(checksums\\.txt\|sha256sums)\|\\.(bundle\|sig\|asc\|pem\|intoto\\.jsonl?)$\|\\.(sbom\|cyclonedx\|spdx)\\.json$"` | `$RELEASE_ASSET_RETENTION_KEEP_FILES` |
+| `--keep-files` | regular expression of the file names older releases keep | string | `"(?i)(checksums\\.txt\|sha256sums)\|\\.(bundle\|sig\|asc\|pem\|intoto\\.jsonl?)$\|\\.(sbom\|cdx\|cyclonedx\|spdx)\\.json$\|^(sbom-[a-z0-9][a-z0-9._-]*\|release-plan)\\.json$"` | `$RELEASE_ASSET_RETENTION_KEEP_FILES` |
 | `--max-delete` | refuse a pass that would delete more files than this (0 disables the bound) | int | `200` | `$RELEASE_ASSET_RETENTION_MAX_DELETE` |
-| `--dry-run` | report what would be deleted without deleting it | bool | `true` | `$RELEASE_ASSET_RETENTION_DRY_RUN` |
+| `--dry-run` | report what would be deleted without deleting it (default: true; pass --dry-run=false to delete) | bool | `true` | `$RELEASE_ASSET_RETENTION_DRY_RUN` |
 
 ### `forge-ci release attachments`
 
@@ -3280,6 +4080,9 @@ EXAMPLE:
 expand a glob pattern and attach matching files to the platform release (gh release upload --clobber)
 
 ```
+A file that fails to upload does not stop the others. The command then
+fails and names each file the release lacks.
+
 EXAMPLE:
    forge-ci release attachments upload --tag v1.2.3 --pattern "dist/*.zip"
 ```
@@ -3326,6 +4129,7 @@ EXAMPLE:
 
 | Flag | Description | Type | Default | Env vars |
 |------|-------------|------|---------|----------|
+| `--canonical-payload` | admit a workspace containing dist/ and optional premade-sboms/; use the stable '.' manifest prefix | bool | `false` | n/a |
 | `--dist-dir` | directory whose release hand-off digest is printed | string | `"dist"` | n/a |
 | `--manifest-root` | path prefix written into the sha256sum manifest (defaults to --dist-dir) | string | `""` | n/a |
 
@@ -3345,6 +4149,7 @@ EXAMPLE (as a workflow step):
 
 | Flag | Description | Type | Default | Env vars |
 |------|-------------|------|---------|----------|
+| `--isolated` | acquire into a fresh directory outside the checkout; emit acquisition-dir for assembly (runner cleans it at job end) | bool | `false` | n/a |
 | `--artifact-transfer-plan-json` | typed transfer plan JSON listing which CI artifacts to download | string | `""` | `$ARTIFACT_TRANSFER_PLAN_JSON` |
 | `--run-id` | CI run ID artifacts are downloaded from | string | `""` | `$CI_RUN_ID`, `$FORGEJO_RUN_ID`, `$GITHUB_RUN_ID` |
 | `--repository` | "owner/repo" the run belongs to | string | `""` | `$REPOSITORY`, `$CI_REPO`, `$CI_PROJECT_PATH`, `$FORGEJO_REPOSITORY`, `$FORGEJO_REPO`, `$GITHUB_REPOSITORY` |
@@ -3387,6 +4192,17 @@ collect publishable release assets from GoReleaser metadata and signed sidecars
 | `--dist-dir` | dist directory containing GoReleaser artifacts.json and release files; use a workspace-relative path for manifest/asset operations | string | `"dist"` | n/a |
 | `--manifest` | release file manifest path; a manifest named here must exist | string | `"dist/release-files.json"` | `$RELEASE_FILES_MANIFEST` |
 | `--output` | output JSON file ('-' for stdout) | string | `"-"` | n/a |
+
+#### `forge-ci release files compare`
+
+compare exact reproducible release subjects with caller-owned expected inventory
+
+| Flag | Description | Type | Default | Env vars |
+|------|-------------|------|---------|----------|
+| `--reference` | Sets reference. (required) | string | `""` | n/a |
+| `--dist-dir` | Sets dist dir. (required) | string | `""` | n/a |
+| `--expected` | one glob per required subject (required) | string | `""` | n/a |
+| `--inventory-pattern` | glob selecting candidate subjects, including unexpected extras (required) | string | `""` | n/a |
 
 #### `forge-ci release files declare`
 
@@ -3455,6 +4271,13 @@ set is kept and the provenance statement, its bundle and the <file>.bundle and
 refused. Without a manifest at the default path, or with --assets-json, writes
 a fresh manifest from GoReleaser discovery; a manifest named with --manifest
 must exist, so a fresh write to another path uses --output.
+
+With --unsigned, preserve the producer's existing file set and add explicit
+--evidence-file paths before signing. Refuses existing signatures, provenance,
+duplicate paths and reclassification; does not read GoReleaser metadata.
+Optional --release-images-ledger requires the complete producer-pinned native
+final-image index/platform SBOM set; ordinary legacy/base evidence calls do not
+opt into this flat-dist contract.
 ```
 
 | Flag | Description | Type | Default | Env vars |
@@ -3463,6 +4286,9 @@ must exist, so a fresh write to another path uses --output.
 | `--manifest` | release file manifest path; a manifest named here must exist | string | `"dist/release-files.json"` | `$RELEASE_FILES_MANIFEST` |
 | `--output` | output manifest file (defaults to --manifest; '-' for stdout) | string | `""` | n/a |
 | `--assets-json` | release files collect JSON to reuse instead of re-collecting ('-' for stdin) | string | `""` | n/a |
+| `--unsigned` | extend an existing unsigned manifest with evidence without rediscovering producer metadata | bool | `false` | n/a |
+| `--evidence-file` | additional file to publish and sign as evidence; requires --unsigned (repeatable) | string | `""` | n/a |
+| `--release-images-ledger` | require the exact pinned native final-image SBOM evidence from this ledger; requires --unsigned | string | `""` | n/a |
 
 #### `forge-ci release files validate`
 
@@ -3495,6 +4321,17 @@ validate that the checksums file names and matches every public release asset ex
 | `--dist-dir` | dist directory containing GoReleaser artifacts.json and release files; use a workspace-relative path for manifest/asset operations | string | `"dist"` | n/a |
 | `--manifest` | release file manifest path; a manifest named here must exist | string | `"dist/release-files.json"` | `$RELEASE_FILES_MANIFEST` |
 | `--checksums-file` | checksums file to validate (defaults to release files checksum-file) | string | `""` | `$CHECKSUMS_FILE` |
+
+### `forge-ci release gather-exports`
+
+validate and join pre-manifest export trees without overwriting any top-level path
+
+| Flag | Description | Type | Default | Env vars |
+|------|-------------|------|---------|----------|
+| `--source` | Sets source. (required) | string | `""` | n/a |
+| `--path` | Sets path. (required) | string | `""` | n/a |
+| `--allow-missing` | Sets allow missing. | bool | `false` | n/a |
+| `--enabled` | Sets enabled. | string | `"true"` | n/a |
 
 ### `forge-ci release gpg`
 
@@ -3749,6 +4586,7 @@ EXAMPLE:
 | `--rekor-url` | transparency log for --method=sigstore (default: public Sigstore). Where to publish, not whether: see FORGE_CI_COSIGN_TRANSPARENCY for that. Forbidden for --method=gpg/kms. | string | `""` | `$SIGN_REKOR_URL` |
 | `--private-key-file` | path to the armored GPG private key for --method=gpg ("-" for stdin; defaults to $GPG_PRIVATE_KEY). Lets the key be passed via file/stdin instead of the environment. Forbidden for --method=sigstore/kms. | string | `""` | n/a |
 | `--passphrase-file` | path to the GPG passphrase for --method=gpg ("-" for stdin; defaults to $GPG_PASSPHRASE). Forbidden for --method=sigstore/kms. | string | `""` | n/a |
+| `--fingerprint` | primary-key fingerprint the GPG key must have for --method=gpg, 40 uppercase hex digits; a key with another is refused before anything is signed. Forbidden for --method=sigstore/kms. | string | `""` | n/a |
 
 ### `forge-ci release sign`
 
@@ -3793,6 +4631,7 @@ EXAMPLES:
 | `--rekor-url` | transparency log for --method=sigstore (default: public Sigstore). Where to publish, not whether: see FORGE_CI_COSIGN_TRANSPARENCY for that. Forbidden for --method=gpg/kms. | string | `""` | `$SIGN_REKOR_URL` |
 | `--private-key-file` | path to the armored GPG private key for --method=gpg ("-" for stdin; defaults to $GPG_PRIVATE_KEY). Lets the key be passed via file/stdin instead of the environment. Forbidden for --method=sigstore/kms. | string | `""` | n/a |
 | `--passphrase-file` | path to the GPG passphrase for --method=gpg ("-" for stdin; defaults to $GPG_PASSPHRASE). Forbidden for --method=sigstore/kms. | string | `""` | n/a |
+| `--fingerprint` | primary-key fingerprint the GPG key must have for --method=gpg, 40 uppercase hex digits; a key with another is refused before anything is signed. Forbidden for --method=sigstore/kms. | string | `""` | n/a |
 
 ### `forge-ci release sign-publish-context`
 
@@ -3850,6 +4689,14 @@ EXAMPLE:
 | `--git-commit-sign` | additionally write commit.gpgsign=true | bool | `false` | `$GIT_COMMIT_GPGSIGN` |
 | `--git-config-global` | use --global on the git config writes (env $FORGE_CI_GIT_CONFIG_GLOBAL — NOT git's reserved $GIT_CONFIG_GLOBAL, which is a path) | bool | `false` | `$FORGE_CI_GIT_CONFIG_GLOBAL` |
 
+### `forge-ci release validate-assembly`
+
+validate unsigned assembly inputs, checksum membership and asset bytes before loading signing keys
+
+| Flag | Description | Type | Default | Env vars |
+|------|-------------|------|---------|----------|
+| `--assembly` | unsigned release assembly manifest path | string | `".forge-ci/release-assembly.json"` | `$RELEASE_ASSEMBLY` |
+
 ### `forge-ci release validate-changelog`
 
 validate the generated changelog artifact for this release exists and print a preview
@@ -3873,6 +4720,10 @@ non-regular entries, or has control characters in any path, then
 recomputes its canonical digest and fails on mismatch. The digest
 algorithm is shared with release dist-digest.
 
+With --stage-dir, copy into private staging, verify those copied bytes and install
+them into a new destination only on success. --digest-file reads the producer's
+bare lowercase SHA-256 recording and is exclusive with --expected-digest.
+
 Set --manifest-root to override the path prefix written into the manifest during
 digest recomputation; use --manifest-root . for artifact contents that are
 staged under different directory names by producer and verifier.
@@ -3883,9 +4734,60 @@ EXAMPLE:
 
 | Flag | Description | Type | Default | Env vars |
 |------|-------------|------|---------|----------|
+| `--canonical-payload` | admit and verify the entire dist/ plus premade-sboms/ workspace; fixes manifest prefix to '.' | bool | `false` | n/a |
 | `--dist-dir` | directory to verify | string | `"dist"` | n/a |
 | `--expected-digest` | expected dist digest (from the build job) | string | `""` | `$EXPECTED_DIGEST`, `$DIST_DIGEST` |
+| `--digest-file` | regular producer digest recording; exclusive with --expected-digest | string | `""` | n/a |
+| `--stage-dir` | privately copy, verify staged bytes and install into this new directory before success | string | `""` | n/a |
 | `--manifest-root` | path prefix written into the sha256sum manifest during digest recomputation (defaults to --dist-dir) | string | `""` | n/a |
+
+### `forge-ci release validate-published`
+
+read the published release back from the forge and compare its files with the planned ones
+
+```
+Run after "release publish", with the input that named its files: the
+finalized --manifest, the --assembly, or the --asset values. The planned
+files are the ones publish uploads from that input, signatures and the
+provenance statement included; no separate list is kept.
+
+The command only reads, so the token needs no more than read access to the
+repository's releases, unless the release is a draft. It fails, naming each
+file, when a planned file is not on the release or has another size there
+(GitLab reports no size, so only the name is compared), or another SHA-256
+digest where the forge reports one (GitHub; Forgejo and GitLab report
+none), when GitHub reports no SHA-256 digest for it, when the tag has no
+release, or on GitHub two, and when the release is still a draft without
+--draft. Only that one release is read.
+
+A file on the release that the plan does not name is a warning, not a
+failure: "release attachments upload" and a repository's own jobs add files
+to a published release.
+
+A draft is compared like any other release. A forge hides a draft from a
+token that cannot write to the repository's releases, so read a draft back
+with the token that published it: with --draft a release that is not
+visible fails the command, as without it.
+
+EXAMPLES:
+   # The files of the finalized release file manifest
+   forge-ci release validate-published --tag=v1.2.3 --repository=examplescope/myapp \
+       --manifest=dist/release-files.json
+
+   # The files of an assembly manifest
+   forge-ci release validate-published --tag=v1.2.3 --repository=examplescope/myapp \
+       --assembly=.forge-ci/release-assembly.json
+```
+
+| Flag | Description | Type | Default | Env vars |
+|------|-------------|------|---------|----------|
+| `--tag` | tag of the published release (e.g. v1.2.3) (required) | string | `""` | `$TAG_NAME`, `$RELEASE_TAG`, `$REF_NAME`, `$CI_REF_NAME`, `$FORGEJO_REF_NAME`, `$GITHUB_REF_NAME` |
+| `--repository` | "owner/repo" release repository (required) | string | `""` | `$REPOSITORY`, `$CI_REPO`, `$CI_PROJECT_PATH`, `$FORGEJO_REPOSITORY`, `$FORGEJO_REPO`, `$GITHUB_REPOSITORY` |
+| `--draft` | the release was published as a draft and may still be one; the token must be able to read drafts | bool | `false` | `$RELEASE_DRAFT`, `$DRAFT` |
+| `--asset` | planned release file (repeatable); defaults to the assets of the finalized --manifest | string | `""` | n/a |
+| `--assembly` | release assembly manifest whose assets were published (--strategy=recreate) | string | `""` | `$RELEASE_ASSEMBLY` |
+| `--dist-dir` | dist directory containing GoReleaser artifacts.json and release files; use a workspace-relative path for manifest/asset operations | string | `"dist"` | n/a |
+| `--manifest` | release file manifest path; a manifest named here must exist | string | `"dist/release-files.json"` | `$RELEASE_FILES_MANIFEST` |
 
 ### `forge-ci release validate-request`
 
@@ -3922,9 +4824,10 @@ EXAMPLE:
 | `--release-sha` | commit the release is built from | string | `""` | `$RELEASE_SHA` |
 | `--tag` | release tag (e.g. v1.2.3) | string | `""` | `$TAG_NAME`, `$RELEASE_TAG`, `$REF_NAME`, `$CI_REF_NAME`, `$FORGEJO_REF_NAME`, `$GITHUB_REF_NAME` |
 | `--repo-url` | remote repository URL for ls-remote (defaults to origin) | string | `""` | `$REPO_URL` |
-| `--expected-parent` | require the release commit to be the single child of this commit (the authorised release-request source) | string | `""` | `$RELEASE_REQUEST_SHA` |
+| `--expected-parent` | require the single child of this authorised source SHA and freshly bind the exact remote release-request/<tag> object and peeled commit; signed-request authorization remains separate | string | `""` | `$RELEASE_REQUEST_SHA` |
 | `--changelog-only` | require exactly a CHANGELOG.md change from --expected-parent, and bind release-request/<tag> to that tested commit | bool | `false` | n/a |
-| `--version-bump` | with --changelog-only, also admit this project type's version bump (maven/npm/cargo), checked as a version substitution to the tag's version | string | `""` | n/a |
+| `--request-is-release` | explicit no-bump route: require release-sha to equal expected-parent, retaining remote request binding; incompatible with prepared-change profiles | bool | `false` | `$RELEASE_REQUEST_IS_RELEASE` |
+| `--prepare-plan-file` | with --changelog-only, also admit the version bump of this prepare-stage plan JSON file: each planned project's changelog copy and version files, native ones checked as a version substitution to the tag's version | string | `""` | n/a |
 | `--token-file` | Read token for a private repository. Read from a file ("-" for stdin); trailing CR/LF is trimmed. Explicit input overrides environment credentials; empty content supplies no token. Omit for environment selection, with runner-issued tokens scoped to their server. | string | `""` | n/a |
 
 ## `forge-ci report`
@@ -4334,6 +5237,7 @@ EXAMPLES:
 | `--container-image` | container image to analyze (required for the analyzed-container layer) | string | `""` | n/a |
 | `--create-zip` | additionally bundle the layers into a release-attached zip | bool | `false` | n/a |
 | `--plan` | typed config-plan JSON: assemble one layer set per artifact in the plan (from "config parse-artifacts") | string | `""` | `$CONFIG_PLAN_JSON` |
+| `--acquisition-dir` | plan mode: use only this fresh producer tree for build BOMs, artifact scans, and generated outputs; requires --version | string | `""` | `$ACQUISITION_DIR` |
 | `--sboms` | plan mode: sboms enum ("all", "build,source", …) selecting which layers to produce per artifact | string | `"all"` | `$SBOMS` |
 | `--image-name` | container mode: base image name without tag/digest; with --image-digest forms the syft target | string | `""` | `$IMAGE_NAME` |
 | `--image-digest` | container mode: sha256:… digest pinning the exact image manifest | string | `""` | `$IMAGE_DIGEST` |
@@ -4485,11 +5389,17 @@ EXAMPLES:
    # Write the trivy JSON for a downstream step
    forge-ci security scan container --image-ref ghcr.io/owner/app:v1.2.3 \
      --json-file dist/trivy.json
+
+   # Gate an exported, not yet published layout (a container build --defer-scan)
+   forge-ci security scan container --image-ref ghcr.io/owner/app \
+     --oci-layout "$RUNNER_TEMP/image-layout" --platform linux/arm64
 ```
 
 | Flag | Description | Type | Default | Env vars |
 |------|-------------|------|---------|----------|
 | `--image-ref` | fully-qualified image (registry/owner/name@sha256:…) to scan (required) | string | `""` | `$IMAGE_REF` |
+| `--oci-layout` | local OCI layout directory to scan instead of pulling --image-ref, which stays the report identity | string | `""` | `$CONTAINER_OCI_LAYOUT` |
+| `--platform` | os/arch to select from a multi-platform input, e.g. linux/arm64; empty leaves the choice to Trivy | string | `""` | `$CONTAINER_PLATFORM` |
 | `--json-file` | destination path for the raw trivy JSON findings | string | `"trivy-results.json"` | `$CONTAINER_JSON_FILE` |
 | `--sarif-file` | destination path for the trivy SARIF findings | string | `"trivy-results.sarif"` | `$CONTAINER_SARIF_FILE` |
 | `--gitlab-report-file` | destination path for the GitLab container-scanning report | string | `"gl-container-scanning-report.json"` | `$CONTAINER_GITLAB_REPORT_FILE` |
@@ -4517,6 +5427,107 @@ severity-gated scanner.
 | `--attempts` | scan attempts before failing | int | `3` | `$SCAN_CONTAINER_IMAGE_ATTEMPTS` |
 | `--retry-delay-seconds` | base delay between scan retry attempts | int | `20` | `$SCAN_CONTAINER_IMAGE_RETRY_DELAY_SECONDS` |
 | `--scanners` | comma-separated Trivy scanners | string | `"vuln"` | `$SCAN_CONTAINER_IMAGE_SCANNERS` |
+
+## `forge-ci setup`
+
+show what is left before a first release, and do the manual steps (signers, secrets, release request)
+
+```
+Start with forge-ci setup status: it lists the steps from no Forge CI files
+to a first release, marks the ones the repository shows are done, and names
+the command for each. The other subcommands do the steps a person does by hand.
+
+EXAMPLES:
+   # Where am I?
+   forge-ci setup status
+
+   # Trust your key and the release bot's key for signed release tags:
+   forge-ci setup signer --principal you@example.org --public-key ~/.ssh/id_ed25519.pub
+   forge-ci setup signer --principal release-bot@example.org --public-key release-bot.pub
+
+   # Which secrets to create, and the command that stores each:
+   forge-ci setup secrets
+
+   # Check your signing setup and print the commands that request v1.0.0:
+   forge-ci setup release-request v1.0.0
+```
+
+### `forge-ci setup release-request`
+
+check your signing setup for a release request and print the git commands that make it
+
+```
+A release starts when a signed release-request/vX.Y.Z tag is pushed; the
+release workflow, not you, then creates vX.Y.Z. This checks that git signs
+tags with an SSH key the repository's allowed-signers file lists, and that
+neither tag exists in this clone (fetch the tags first: it does not ask
+the remote), then prints the two git commands. It does not run them.
+It exits 1 while a check fails.
+```
+
+**Usage:** `forge-ci setup release-request <version>`
+
+| Flag | Description | Type | Default | Env vars |
+|------|-------------|------|---------|----------|
+| `--root` | repository root | string | `"."` | n/a |
+| `--remote` | git remote to push the request tag to | string | `"origin"` | n/a |
+
+### `forge-ci setup secrets`
+
+list the secrets the release workflows need, what each must allow, and the command that stores it
+
+```
+Reads the release workflows in the repository, like forge-ci doctor
+--requirements, and lists the credentials to create on the forge. It cannot
+see the forge's secrets, so it says what to create, not what is missing.
+```
+
+| Flag | Description | Type | Default | Env vars |
+|------|-------------|------|---------|----------|
+| `--root` | repository root | string | `"."` | n/a |
+
+### `forge-ci setup signer`
+
+add an SSH public key to the allowed-signers file the release verifies signed tags against
+
+```
+Appends "<principal> <key-type> <key>" to the repository's allowed-signers
+file, creating it when needed, and validates it. Add the key of each person
+who requests releases, and the release bot's key (the public half of
+RELEASE_SSH_SIGNING_KEY) with the bot-email of the release workflow as its
+principal. Commit the file; the release reads it from the default branch.
+
+The file is .forge-ci/allowed_signers, or .forgejo/release-allowed-signers in
+a repository with only Forgejo workflows (the Forgejo examples' default).
+GitLab takes the text as the request-allowed-signers input: use --dry-run and
+paste the line.
+
+To make a key for the release bot:
+   ssh-keygen -t ed25519 -C release-bot -N '' -f release-bot
+   (store the private half, release-bot, as RELEASE_SSH_SIGNING_KEY; then delete it)
+```
+
+| Flag | Description | Type | Default | Env vars |
+|------|-------------|------|---------|----------|
+| `--root` | repository root | string | `"."` | n/a |
+| `--principal` | the signer's email: your git user.email, or the release workflow's bot-email (required) | string | `""` | n/a |
+| `--public-key` | OpenSSH public key file (.pub) (required) | string | `""` | n/a |
+| `--file` | allowed-signers file relative to --root (default: as described above) | string | `""` | n/a |
+| `--dry-run` | print the line without writing it | bool | `false` | n/a |
+
+### `forge-ci setup status`
+
+list the steps to a first release, which are done, and the command for each
+
+```
+Reads the same checks as forge-ci doctor, so the two agree about what is
+done. Steps the repository cannot show (secrets on the forge, a merged pull
+request) are marked [?] for you to check.
+```
+
+| Flag | Description | Type | Default | Env vars |
+|------|-------------|------|---------|----------|
+| `--root` | repository root | string | `"."` | n/a |
 
 ## `forge-ci toolchain`
 
@@ -4855,7 +5866,7 @@ EXAMPLE:
 
 | Flag | Description | Type | Default | Env vars |
 |------|-------------|------|---------|----------|
-| `--method` | verification method: sigstore or kms. gpg is rejected — OpenPGP cannot verify OCI signatures. | string | `""` | `$SIGN_METHOD` |
+| `--method` | verification method: sigstore or kms. gpg is rejected — OpenPGP cannot verify OCI signatures. (required) | string | `""` | `$SIGN_METHOD` |
 | `--cert-identity-regexp` | regexp the Fulcio cert identity must match for --method=sigstore (matched against the full identity URL; example: ^https://github\.com/<owner>/<repo>/) | string | `""` | `$CERT_IDENTITY_REGEXP` |
 | `--cert-oidc-issuer` | OIDC issuer URL the Fulcio cert must claim for --method=sigstore | string | `""` | `$CERT_OIDC_ISSUER` |
 | `--key` | cosign --key reference for --method=kms verification: KMS URI or local pubkey file path | string | `""` | `$SIGN_KEY` |
@@ -4911,8 +5922,10 @@ access to signing secrets (those belong only to the separately-trusted signing
 job), and every actions/checkout step must set persist-credentials: false.
 
 When --sign-job is set, additional Forgejo release-signing invariants are
-checked: prepare release identity outputs, signer secret enumeration, dist-digest
-handoff wiring, prepare-secret-before-checkout ordering, and cache-free
+checked: the prepare job calls the layer's prepare-release.yml, the signer takes
+release-tag, release-sha, artifacts-config and dist-digest each as the bare
+${{ needs.<job>.outputs.<name> }} expression under its exact key, signer secret
+enumeration, prepare-secret-before-checkout ordering, and cache-free
 setup-toolchain use. --single-pin-subject additionally enforces that every
 matching cross-repo reference in the workflow directory uses one commit pin.
 --single-pin-input names the input through which the subject's reusable
@@ -4941,7 +5954,7 @@ EXAMPLE:
 | `--workflow` | path to the workflow file to check (required) | string | `""` | n/a |
 | `--build-job` | the artifact-producing job that must not see signing secrets | string | `"build"` | n/a |
 | `--sign-job` | cross-repo signing workflow call-site job; enables Forgejo release-signing channel checks | string | `""` | n/a |
-| `--prepare-job` | job that emits release-tag/release-sha and may check signing-secret presence before checkout | string | `""` | n/a |
+| `--prepare-job` | job that calls prepare-release.yml for release-tag, release-sha and artifacts-config, required when --sign-job is set | string | `""` | n/a |
 | `--dist-digest-output` | build job output carrying the dist-digest passed to the signer | string | `""` | n/a |
 | `--single-pin-subject` | subject whose @<sha> refs must agree across the workflow directory (for example, example/provider-workflows) | string | `""` | n/a |
 | `--single-pin-input` | input of the subject's reusable workflows that repeats their commit pin (for example, forge-ci-sha); needs --single-pin-subject | string | `""` | n/a |
@@ -5232,11 +6245,13 @@ apply every artifact mutation in a prepare-stage plan to one working tree
 | `--plan-json` | typed release prepare-stage plan JSON (required) | string | `""` | `$PREPARE_STAGE_PLAN_JSON` |
 | `--patch` | native version changes produced by a separate key-free job; never run native tools in this mode | string | `""` | n/a |
 | `--patch-sha256` | expected sha256 reported by the key-free patch job | string | `""` | n/a |
+| `--paths-file` | with --patch, file the paths the bump wrote besides CHANGELOG.md are written to, one per line, for commit-changelog-release --include-paths-file | string | `""` | n/a |
 | `--release-policy` | accepted release versions: stable or stable-prerelease | string | `"stable"` | `$RELEASE_POLICY` |
 | `--version` | release version without a leading v (required) | string | `""` | `$VERSION` |
 | `--changelog-file` | full changelog copied into each planned artifact directory | string | `"CHANGELOG.md"` | `$CHANGELOG_FILE` |
 | `--xcode-version-file` | xcconfig file holding MARKETING_VERSION | string | `""` | `$XCODE_VERSION_FILE` |
 | `--maven-cli-opts` | extra args forwarded to mvn | string | `""` | `$MAVEN_CLI_OPTS` |
+| `--project-type` | run the native tools of this project type alone (maven, npm or cargo), for a key-free job with one toolchain; repeatable, and not with --patch | string | `""` | n/a |
 
 ### `forge-ci version commit-changelog-release`
 

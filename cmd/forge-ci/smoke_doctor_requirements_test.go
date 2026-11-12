@@ -1,6 +1,6 @@
 //go:build smoke
 
-// SPDX-FileCopyrightText: The Forge CI Authors
+// SPDX-FileCopyrightText: 2026 Digg - Agency for Digital Government
 // SPDX-License-Identifier: EUPL-1.2 OR GPL-3.0-or-later
 
 package main_test
@@ -48,7 +48,7 @@ func TestBinary_Doctor_Requirements(t *testing.T) {
 				t.Fatalf("requirements changed normal checks: exit=%d, stderr=%q\n%s", code, stderr, stdout)
 			}
 
-			for _, want := range []string{"Release setup requirements (not remote readiness)", forge, "RELEASE_TOKEN", "unverified", "Next: review docs/setup-requirements.md"} {
+			for _, want := range []string{"Release setup requirements (not remote readiness)", forge, "RELEASE_TOKEN", "unverified", "see forge-ci docs setup-requirements"} {
 				if !strings.Contains(stdout, want) {
 					t.Errorf("text report missing %q:\n%s", want, stdout)
 				}

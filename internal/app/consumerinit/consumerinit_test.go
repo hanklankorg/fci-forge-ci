@@ -155,7 +155,7 @@ func checkFilled(t *testing.T, forge provider.ForgeAPI, mirror, example string) 
 			}
 
 			if !strings.HasPrefix(p.Token, "FIXME") && !slices.Contains([]string{
-				"PIN_MAVEN_IMAGE_DIGEST", "my-cli", "my-service", "my-app",
+				"PIN_MAVEN_IMAGE_DIGEST", "PIN_RUST_IMAGE_DIGEST", "my-cli", "my-service", "my-app",
 				"com.example.myapp", "com.example.myapp.demo",
 			}, p.Token) {
 				t.Errorf("%s:%d still holds %s", file, p.Line, p.Token)
@@ -613,4 +613,23 @@ func snapshotProject(t *testing.T, dir string) map[string]projectEntry {
 	}
 
 	return entries
+}
+
+type unreachableRemote struct{ fakeRemote }
+
+func (unreachableRemote) VersionTags(context.Context, string) ([]string, error) {
+	return nil, errors.New("git ls-remote: exit status 128")
+}
+
+// A URL git cannot read says what it has to be: off github.com, the
+// organization's mirror. The cause stays wrapped.
+func TestRunSaysWhatTheURLMustBeWhenItCannotBeRead(t *testing.T) {
+	t.Parallel()
+
+	_, err := appinit.Run(t.Context(), appinit.Input{
+		Remote: unreachableRemote{}, URL: "https://forge.example/org/forge-ci", Dir: t.TempDir(), Example: "go-cli",
+	})
+	if err == nil || !strings.Contains(err.Error(), "Forge CI mirror") || !strings.Contains(err.Error(), "exit status 128") {
+		t.Fatalf("err = %v", err)
+	}
 }
