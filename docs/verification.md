@@ -4,10 +4,37 @@ How to verify the artifacts these workflows produce (checksums,
 signatures, SBOM attestations, and SLSA provenance), and how the
 matching guarantees are generated on the producing side.
 
-> **Current source versus release pins:** `v0.90.0` examples identify a historical
-> baseline, not the current source revision. Confirm matching workflows, CLI
-> assets and runtime images before adoption. For unreleased changes, follow
+> **Which version to pin:** snippets here pin `v0.90.0`; replace it with the
+> release you install, as [Which version to pin](README.md#documentation-index)
+> describes. For unreleased changes, follow
 > [Branch Testing](runtime-images.md#branch-testing).
+
+## Verify the forge-ci CLI before you install it
+
+Each forge-ci release signs its `checksums.txt` keyless; the Sigstore bundle
+is `checksums.txt.bundle`. Verify the bundle with
+[cosign](https://docs.sigstore.dev/cosign/system_config/installation/), then
+check the archive against the verified checksums:
+
+```bash
+VERSION=v0.93.1   # the release you install
+gh release download "$VERSION" --repo diggsweden/forge-ci \
+  -p "forge-ci_${VERSION#v}_linux_amd64.tar.gz" -p checksums.txt -p checksums.txt.bundle
+
+cosign verify-blob \
+  --bundle checksums.txt.bundle \
+  --certificate-identity "https://github.com/diggsweden/forge-ci/.github/workflows/release-binary.yml@refs/tags/release-request/${VERSION}" \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  checksums.txt
+
+sha256sum --check --ignore-missing checksums.txt
+```
+
+Both commands must succeed before you unpack the archive. Without `gh`,
+download the same three files from the release page. The identity is the
+workflow that built the release, at the signed request tag that started it.
+The binary's provenance is checked the same way; see
+[Verify the binary SLSA provenance](#verify-the-binary-slsa-provenance-portable-cosign).
 
 ## GitHub CLI signing boundary
 
@@ -257,7 +284,9 @@ Original causes remain available through Go error unwrapping for `errors.Is` and
 `errors.As`; they are not sanitized for display. Render the outer error rather
 than logging recovered causes. This protects ordinary app diagnostics, not the
 process argument list: the current macOS security commands still receive signing
-passwords in argv. Signing-state teardown is a separate, unfinished guarantee.
+passwords in argv. When the build exits, it deletes the
+run's keychain, restores the keychain search list and removes the staged
+certificate and profile.
 
 Xcode release outputs are create-only. `build/app.xcarchive` must be absent before
 the build; signed `build/export` must be absent or an empty real directory.
@@ -266,8 +295,8 @@ nonempty regular file directly under `build/export` with a lowercase `.ipa`
 suffix, matching the shipped upload pattern. Nested/uppercase, multiple, missing
 and linked results are refused before job-output publication. Unrelated build
 siblings are preserved, and standalone informational listing is unchanged.
-Archive internals, effective native bundle identity and signing-state teardown
-are not established by this output gate; failed builds may leave their new
+Archive internals and effective native bundle identity are not established by
+this output gate; failed builds may leave their new
 outputs for explicit owner cleanup before retry.
 
 Canonical ConfigPlans used by assembly, artifact-SBOM generation, prerequisites
@@ -309,6 +338,25 @@ the expected identity, source and builder constraints as well as valid evidence.
 
 The cosign methods share infrastructure: cosign 3.x is baked into the runtime image and emits the [Sigstore v3 bundle format](https://docs.sigstore.dev/cosign/key_management/overview/) (one JSON file containing signature, optional Fulcio cert, and Rekor proof) regardless of backend.
 
+Which method signs a release's files depends on the forge's release:
+
+- The GitHub release orchestrator signs them by `sign.method`. Without a
+  `sign` block it uses the default, `gpg`.
+- The Forgejo and GitLab releases sign the checksums and SBOMs with their
+  OpenPGP key for `sign.method: gpg` and for `sign.files-method: gpg`, and
+  with the organization's Cosign key, `RELEASE_COSIGN_PRIVATE_KEY`, for any
+  other method and for a declaration without a `sign` block. The provenance
+  is signed with the Cosign key either way
+  ([Forgejo signing](forgejo.md#signing), [GitLab signing](gitlab.md#signing)).
+
+One declaration often serves several forges, so neither release refuses a
+`sign.method` or signing key it does not use. Where a declaration names one,
+such as `sigstore` or a `sign.key` other than `env://COSIGN_KEY`, the
+release plan warns in its job summary which key signs instead, and
+`forge-ci doctor` warns about the sign block for that forge. Neither release
+reads `sign.transparency` either: its `transparency-log` input decides, and
+a declaration that sets it gets the same warning.
+
 ### `--method=gpg`: long-lived OpenPGP key (default)
 
 ```yaml
@@ -320,11 +368,25 @@ sign:
 The release orchestrators read the key from the `RELEASE_GPG_PRIVATE_KEY` and
 `RELEASE_GPG_PASSPHRASE` secrets (GitHub, Forgejo) or protected variables
 (GitLab) and pass them to their signing steps themselves. A direct
-`forge-ci release sign` call reads `GPG_PRIVATE_KEY` and `GPG_PASSPHRASE`.
+`forge-ci release sign` call reads `GPG_PRIVATE_KEY` and `GPG_PASSPHRASE`,
+and with `--fingerprint` refuses a key whose fingerprint is another.
 
 Produces `<artifact>.asc`. Consumer verifies with `gpg --verify <art>.asc <art>` against an out-of-band-distributed public key, or with `forge-ci validate artifact-signature --artifact <art> --public-key-file pubkey.asc`.
 
 This is the lowest-friction backend for downstream consumers, because gpg is in every distro. It also has the heaviest operator burden. The long-lived private key requires rotation discipline, swap-page-safe handling (see [Swap policy](#swap-policy)), and a distribution mechanism for the matching pubkey.
+
+The Forgejo and GitLab releases sign the checksums and SBOMs with GPG only
+when the declaration says `sign.method: gpg` or `sign.files-method: gpg`. A
+declaration without a `sign` section, and one with another method, has them
+signed with the Cosign key. With
+`gpg`, the sign job signs them apart from its other signing: on Forgejo in
+a step of its own whose environment holds only the three `RELEASE_GPG_*`
+secrets, and on GitLab in a subshell that holds the same three and unsets
+the job's other signing and publishing secrets and its job token. Either
+pins the key to `RELEASE_GPG_FINGERPRINT`, dates the signatures at the
+release commit's time, and needs a runner with swap off; the provenance
+statement, the evidence and the images are signed with the Cosign key. See
+[Forgejo signing](forgejo.md#signing) and [GitLab signing](gitlab.md#signing).
 
 ### `--method=sigstore`: Sigstore-keyless via OIDC + Fulcio + Rekor
 
@@ -382,6 +444,12 @@ backends in separate releases and document which verifier applies; do not imply
 that a GPG verifier authenticates a Sigstore bundle.
 The [Sigstore-keyless example](../examples/signing/sigstore-keyless/) keeps the
 concrete workflow identity and separate SSH Git-signing setup together.
+
+A release with files and images need not move its files: on GitHub, Forgejo
+and GitLab, `sign.files-method: gpg` beside `sign.method: sigstore` or `kms`
+keeps the `.asc` signatures and `gpg --verify` for the files, while the
+images get Cosign signatures and SLSA provenance. See
+[`sign.files-method`](artifacts-reference.md#signfiles-method).
 
 ### `--method=kms`: cosign with explicit key reference
 
@@ -615,6 +683,9 @@ attestor    (KMS sign creds ONLY here, ephemeral)  ──signed provenance──
             .github/workflows/slsa-attestor.yml
 ```
 
+- **Runtime:** the job runs in the `runtime-image` digest the caller pins, the
+  forge-ci base runtime image, where forge-ci and the pinned cosign are
+  baked in; the selected runner must run job containers.
 - **Signer:** `forge-ci container attest --method=kms --key <kms-uri>`. Works
   with any cosign KMS (`hashivault://` OpenBao/Vault, `awskms://`, `gcpkms://`,
   `azurekms://`, PKCS#11/HSM). `--builder-id` sets the provenance `builder.id` to
@@ -644,7 +715,10 @@ operator's platform. The caller-supplied `builder.id` is not that evidence.
 
 A repo can switch backends by changing one line in `artifacts.yml`. No swap-policy implications on the cosign branches (the decrypted private key never enters our process).
 
-**Default when `sign.method` is unset:** `gpg`, unchanged. This preserves the pre-cosign contract for existing repos. New projects should set `method: sigstore` explicitly rather than rely on the fallback. The recommendation lives here and in the example projects, not in a silent default flip. Such a flip would change behaviour for every repo that never configured signing.
+**Default when `sign.method` is unset:** `gpg`, unchanged, for the engine
+and the GitHub release. The Forgejo and GitLab releases sign the files of
+such a declaration with the Cosign key. The GPG fallback keeps existing repos
+signing as they did before the Cosign methods existed. New projects should set `method: sigstore` explicitly rather than rely on the fallback. The recommendation lives here and in the example projects, not in a silent default flip. Such a flip would change behaviour for every repo that never configured signing.
 
 ### Signing the release commit & tag (git objects)
 
@@ -699,8 +773,9 @@ The engine input `release.requireallowlistedsigner` defaults to **false** so the
 # .github/workflows/release-workflow.yml
 jobs:
   release:
-    uses: diggsweden/forge-ci/.github/workflows/release-orchestrator.yml@v0.90.0
+    uses: diggsweden/forge-ci/.github/workflows/release-orchestrator.yml@PIN_FORGE_CI_SHA # v0.90.0
     with:
+      # Engine commit and image digests: see the Advanced Pinning Recipe.
       branch: main
       release.requireallowlistedsigner: true   # org default; override only for private repos
 ```
@@ -814,6 +889,38 @@ git cat-file tag v1.2.3 | gpg --status-fd 1 --verify 2>/dev/null | grep VALIDSIG
 - **The allowlist is missing but the gate is off**: tolerated, but **loudly**. A `::warning::` annotation and a summary callout flag that the release ran with no allowlist. The project hasn't opted in; turn on `require-authorization: true` or `release.requireallowlistedsigner: true` (the org default) to enforce.
 - **Fingerprints-only list, signer's key not available**: with the gate **on**, a signature that can't be verified against any allowed key fails closed (exit 77). Commit the signer's public key to `allowed_gpg_keys.asc`. With the gate **off**, it's a loud warning, not a failure.
 - **The GPG allowlist is present but is not a key bundle**: refused as malformed input (exit 65) before any signature is checked, with the gate on or off. A truncated or hand-edited bundle is a broken policy file, not an unverifiable signature.
+
+### Binding the release to its request
+
+The release commit P is prepared from the request commit Q that the signed
+`release-request/vX.Y.Z` tag names. `forge-ci release validate-tag
+--expected-parent Q` checks that the two belong together:
+
+1. P differs from Q and has exactly one parent, Q.
+2. The local `release-request/<tag>` points to Q.
+3. The request tag object on the remote is the same object as the local one,
+   so a replaced annotation is refused even when it still points to Q.
+4. The remote request tag points to Q.
+
+The remote is the same `--repo-url` (or `origin`) as for the final-tag check,
+and the request tag name comes from the validated version, never from a
+payload. `--changelog-only` allows only `CHANGELOG.md` to differ between Q
+and P. With `--prepare-plan-file`, it also allows the version bumps the
+release plan names: each planned project's changelog and version files, and
+nothing else. `--request-is-release` is the planned no-bump route: P must
+equal Q, and the remote request is still checked.
+
+This check does not verify signatures. The signed-request and final-tag
+signature checks still run separately with the allowlist. On GitHub, the
+signing and publishing jobs repeat both just before the private key is set
+up and again just before publication, from separate metadata checkouts at
+Q (trust files) and P. Q must be a full 40- or 64-character lowercase
+commit; anything else fails without falling back to another value. A
+revoked or retagged request, a moved final tag or a newer final tag stops
+the release before the next private step.
+
+These checks read the remote at that moment; they are not a lock against a
+later change.
 
 ## Secret-handling model
 
@@ -985,7 +1092,7 @@ What this design does NOT defend against:
 **No setting skips the check quietly.** The fix is at the runner. The two overrides are described below, and each says in the log that it was used: the `--debug-allow-swap` flag, and the test hook `FORGE_CI_PROC_SWAPS`, which replaces only the file that is read. The error message lists:
 
 1. The one-line runner fix: `sudo swapoff -a` (persist in `/etc/fstab`).
-2. That a hosted runner is no exception. GitHub-hosted runners have swap on, so the GitHub release layer signs on the plain runner and turns swap off first; a job container could not, because it starts before the first step. On self-hosted runners, any forge, swap is turned off in the host setup.
+2. That a hosted runner is no exception. GitHub-hosted runners have swap on, so the GitHub release layer's GPG signing job runs on the plain runner, with the canonical CLI delivered for the run, and turns swap off first; a job container could not, because it starts before the first step. Sigstore and KMS signing hold no long-lived key in process and run in the admitted runtime image. On self-hosted runners, any forge, swap is turned off in the host setup.
 3. Alternatives for operators who genuinely cannot disable swap: **Sigstore keyless** (`cosign sign` + OIDC; no long-lived private key) or forge-ci's **KMS-backed signing** (`sign.method: kms`; AWS KMS, GCP KMS, Azure Key Vault, OpenBao/Vault, or PKCS#11). The key remains in the provider; provider authentication and reachability are operator responsibilities.
 
 **Debug-only override.** Local debugging sometimes needs to exercise the signing path on a developer laptop where swap is on for unrelated reasons. The narrow escape hatch is the `--debug-allow-swap` CLI flag:
@@ -1048,20 +1155,17 @@ This is operative, not aspirational:
 `container: image:` references in workflow YAML come from inputs
 (caller-controlled), never hardcoded. There used to be one exception
 (`lint-swift.yml`) which now reads from the standard `runtime-image`
-input. The default values for those inputs are tied to this repo's own
-release version (bumped at release time, not by Renovate).
+input. Those inputs have no defaults: the caller passes each image by digest.
 
 ### Trust boundaries
 
 What's left after Renovate is one named choice, not a silent gap:
 
 - **Self-published GHCR images** (`ghcr.io/diggsweden/forge-ci-runtime-*`)
-  are referenced by tag (`:v0.90.0`), not by digest. These tags come from
-  workflow input defaults that this repo bumps at release time, not from
-  Renovate. The trust model is registry-side immutability of our own
-  org's tagged releases: we do not rewrite tags. Adopters who need
-  stricter determinism may pin to a digest (`@sha256:…`) on their
-  override of `runtime-image-*` inputs.
+  are passed by digest (`@sha256:…`). The first job of each workflow that
+  runs one refuses a tag or an empty value, so the content a job runs is the
+  content its caller reviewed; the caller reads each digest from the release
+  it calls.
 
 For the full picture of trust boundaries (consumer code, build extensions,
 multi-tenant secret reuse, etc.), see [docs/threat-model.md](threat-model.md).
@@ -1084,6 +1188,7 @@ who owns them, and migration from legacy consumer opt-outs.
 | **Artifact-presence verification** in publish-container | Required | Drop the `from:` entry in artifacts.yml so the verify step is skipped |
 | **JVM reproducibility settings** (Maven `outputTimestamp`, Gradle archive task settings, checked statically) | Required invocation, report-only findings by default | Explicit `enforce-reproducible-builds: true` blocks missing settings; there is no per-artifact execution opt-out |
 | **Cargo lockfile + toolchain pin** | Required | None. `Cargo.lock` and either `rust-toolchain.toml` or `rust-toolchain` are mandatory for every Cargo artifact |
+| **Published release readback** (`release validate-published`, the last step of each forge's `Publish: release` job) | Required for a published and for a draft release. A published release is read with the run's read-only token. A draft, which a forge hides from that token, is read with `RELEASE_TOKEN`, which created it (GitHub `release.draft: true`, Forgejo any `release-draft` but `false`; GitLab has no drafts) | None. A release that is not visible, a planned release file missing from the forge, or one of another size where the forge reports one (GitHub and Forgejo; GitLab reports none, so the name alone is compared), or of another SHA-256 digest where the forge reports one (GitHub alone: the release APIs of Forgejo and GitLab report no digest, so a file of the same size with other bytes is not found there), or a file GitHub reports without a SHA-256 digest, fails the run |
 
 A passing pipeline must be read alongside its selected checks, native execution
 reports and administrator-policy decisions. A report-only pass can retain real
@@ -1105,7 +1210,7 @@ reproducibility evidence.
 Run `just verify-reproducible` from a clean committed checkout with the pinned
 Go and GoReleaser tools already on PATH and modules already cached. It builds
 committed HEAD twice as unsigned snapshots in temporary clones with separate
-Go build caches, then compares all four Linux/macOS amd64/arm64 tarballs.
+Go build caches, then compares all three linux/amd64, linux/arm64 and darwin/arm64 tarballs.
 The caller's `dist/` is untouched. Missing artifacts, wrong targets and differing
 bytes fail; failures retain both clones and print their location for diffoscope.
 Successful temporary builds are removed. The command prints the source and tool
@@ -1136,7 +1241,7 @@ modules with downloads disabled. This is a release-version build, not a snapshot
 
 After the publishing build creates its archives, SBOMs and checksum manifest,
 GoReleaser invokes `scripts/ci/sign-reproducible-release.sh`. The wrapper requires
-`FORGE_CI_RELEASE_REFERENCE`, compares all four nonempty release tarballs against
+`FORGE_CI_RELEASE_REFERENCE`, compares all three nonempty release tarballs against
 that separate reference, and verifies the generated manifest against the files
 on disk before calling the existing checksum-only signer. Missing, mismatched
 or incomplete archives stop signing and upload. Every expected archive must have

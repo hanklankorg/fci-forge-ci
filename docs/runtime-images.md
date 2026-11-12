@@ -10,17 +10,10 @@ GitHub workflows and GitLab CI components use these images to select their
 execution tools. An image digest pins image content for a selected platform;
 it does not pin the runner environment or dependencies fetched during a job.
 
-> **Current source versus release pins:** `v0.90.0` examples identify a historical
-> baseline, not the current source revision. Confirm matching workflows, CLI
-> assets and runtime images before adoption. Maintainers test unreleased changes
-> with reviewed source and its published images; see [Branch Testing](#branch-testing).
+Replace the pins in the snippets with the release you install, as
+[Which version to pin](README.md#documentation-index) describes.
 
 ## Image roster
-
-For a configurable Forgejo-to-GHCR example, see
-[Forgejo runtime publication](#forgejo-runtime-publication). The GitHub
-workflow below is the upstream publication path; another forge does not execute
-`.github/workflows/`.
 
 Toolchain names identify their intended release line (e.g. `runtime-java-25`,
 `runtime-node-24`). The current build targets and exact tool pins live in the
@@ -29,8 +22,8 @@ the table below summarizes the shipped families.
 
 | Image | Inherits from | Adds |
 |---|---|---|
-| `forge-ci-runtime-base` | `debian:13-slim` (Trixie) | `forge-ci`, `bash`, `ca-certificates`, `curl`, `git`, `gnupg`, `gzip`, `jq`, `openssh-client` (`ssh-keygen` verifies SSH-signed tags), `tar`, `unzip`, `xz`, `zip`, `yq`, `git-cliff`, `gh`, `glab`, `mise`, `publiccode-parser`, `cosign`, `templates/`, bootstrap installers |
-| `forge-ci-runtime` (full) | `runtime-base` | `syft`, `trivy` |
+| `forge-ci-runtime-base` | `debian:13-slim` (Trixie) | `forge-ci`, `bash`, `ca-certificates`, `curl`, `git`, `gnupg`, `gzip`, `jq`, `openssh-client` (`ssh-keygen` verifies SSH-signed tags), `tar`, `unzip`, `xz`, `zip`, `yq`, `git-cliff`, `gh`, `glab`, `mise`, `publiccode-parser`, `cosign`, `syft`, `templates/`, bootstrap installers |
+| `forge-ci-runtime` (full) | `runtime-base` | `trivy` |
 | `forge-ci-runtime-rust-stable` | `runtime-base` | Pinned Rust stable release + `cargo-cyclonedx` |
 | `forge-ci-runtime-go-1.27` | `runtime-base` | Go 1.27.3, `cyclonedx-gomod`, GCC, libc development headers and gettext |
 | `forge-ci-runtime-java-25` | `runtime-base` | Eclipse Temurin JDK 25 LTS + Maven 3.10.x + Gradle 8.x |
@@ -99,22 +92,19 @@ go to the job's home.
 The Go, Cargo and Gradle workflows ask the image where its caches are (`go env
 GOMODCACHE GOCACHE`, `CARGO_HOME`, `GRADLE_USER_HOME`, each defaulting under
 `HOME`) before caching them, so a `runtime-image` older or newer than the
-workflow still restores its caches; images up to `v0.90.0` keep modules in
-`/go` and crates in `/usr/local/cargo`. Maven's `~/.m2/repository` is Maven's
+workflow still restores its caches. Maven's `~/.m2/repository` is Maven's
 fixed default.
 
-No workflow or component names a runtime image release, so a release cut has
-none to move. GitHub workflows take the images of the release that
-`forge-ci-binary-ref` selects, under the serving repository's namespace;
-GitLab components require `runtime-image`. A guard test refuses a
-`forge-ci-runtime-*` tag written into either.
+GitHub workflows and GitLab components take every runtime image as an input
+pinned by digest (`image@sha256:<64 hex>`), with no default, and refuse a tag
+before the job starts.
 
 ## Workflow → image mapping
 
 | Workflow | Image | Notes |
 |---|---|---|
-| `lint-nanolinter` | nanolinter flavour image (external, `ghcr.io/itiquette/nanolinter:<flavour>`; verify publication and pin the served digest as described in [components](components.md#lint-nanolinteryml-default)) | Runs `nanolinter verify` against the consumer's `nanolinter.toml`, in the `nanolinter-image` the caller pins by digest. The image bakes nanolinter + its check toolchain (opengrep, osv-scanner, …). forge-ci is installed at runtime, cosign-verified, for SARIF enrich/upload only |
-| `lint-megalinter` | MegaLinter image (external, `oxsecurity/megalinter`) | Runs MegaLinter against the consumer's `.mega-linter.yml` on a standard runner; the alternative `lint-engine` |
+| `lint-nanolinter` | nanolinter flavour image (external, `ghcr.io/itiquette/nanolinter:<flavour>`; verify publication and pin the served digest as described in [components](components.md#lint-nanolinteryml-default)) | Runs `nanolinter verify` against the consumer's `nanolinter.toml`, in the `nanolinter-image` the caller pins by digest. The image bakes nanolinter + its check toolchain (opengrep, osv-scanner, …). forge-ci is the canonical CLI of the run, received before the checkout (`consume-canonical-cli`, profile `host`), for the checkout, policy and SARIF commands |
+| `lint-megalinter` | MegaLinter image (external, `oxsecurity/megalinter`) | Runs MegaLinter against the consumer's `.mega-linter.yml` on a standard runner; the alternative `lint-engine`. forge-ci is the canonical CLI of the run, received before the checkout, for the SARIF commands |
 | Orchestrator/stage planning and summary jobs | `runtime-base` | Run the Go CLI's config, plan and report commands; dispatched build/publish jobs select their own toolchain images |
 | `release-create-github`, `release-snapshot-publish-stage`'s `generate-snapshot-sboms` | `runtime` (full) | Needs syft for SBOM aggregation |
 | `generate-changelog`, `validate-release-prerequisites` | `runtime-base` normally; `runtime-rust-stable` when Cargo artifacts are present | git-cliff / gh + gpg are in base; Cargo prerequisite validation also checks `cargo --version` |
@@ -124,189 +114,80 @@ GitLab components require `runtime-image`. A guard test refuses a
 | `build-gradle-android` | `runtime-android-35` | JDK + Android SDK; amd64 only |
 | `publish-google-play` | `runtime-base` | Upload action is JS-only; no Android tooling needed |
 | `build-npm`, `publish-snapshot-npm` | `runtime-node-24` | Node + npm + corepack baked |
-| `publish-container` | host + Buildah and OCI registry adapter | The CLI builds and pushes on the host; this workflow does not use a runtime job container |
-| `security-openssf-scorecard` | host + third-party Docker action | The workflow selects a hosted runner for the Scorecard action |
-| `build-xcode-ios`, `publish-apple-appstore` | macOS host + bootstrap installer from `forge-ci-binary-ref` | Tagged releases use verified archives; branch/full commit refs build from a [detached source checkout](DEVELOPMENT.md#source-checkout) |
+| `publish-maven-github` | `runtime-java-25` for maven, gradle and gradle-android; `runtime-node-24` for npm | The caller selects the image by package type; the publication runs with the image's JDK/Maven/Gradle or Node |
+| `publish-container` | `runtime-base` (prep, publish-images, merge: cosign baked), `runtime` full (scan-layouts: Trivy; image-evidence: syft and cosign); host build legs | Buildah needs the host, so each build leg is a host job that receives the canonical CLI built in the run from the approved engine commit (`consume-canonical-cli`, profile `host`); the other jobs run in the admitted digests and install nothing |
+| `snapshot-images` | `runtime-base` (plan, prepare-context, collect), `runtime` full (publish: Trivy and syft), the toolchain image of each producer's project type; host build legs | The same shape as `publish-container`: the Buildah legs receive the canonical CLI of the run (`consume-canonical-cli`, profile `host`), every other job runs the forge-ci baked into its image |
+| `security-openssf-scorecard` | host + third-party Docker action (analysis); `runtime-base` (publish-sarif) | The Scorecard action needs a hosted runner; the SARIF upload runs in the admitted base image with its baked forge-ci |
+| `slsa-attestor` | `runtime-base` | forge-ci and the pinned cosign are baked in; the caller-selected runner must run job containers |
+| `lint-swift`, `build-xcode-ios`, `publish-apple-appstore` | macOS host; forge-ci built from the engine checkout | Canonical delivery builds Linux files in a Linux builder image with Linux tool profiles, so it serves no darwin job. Each macOS job checks the engine out at the full commit `forge-ci-binary-ref` names and runs `.github/actions/build-darwin-cli` from that checkout: the Go toolchain `go.mod` names through setup-go, then `go build ./cmd/forge-ci`. Nothing else is installed |
 
 ## Forgejo runtime publication
 
-The opt-in [`runtime-images.yml`](../examples/forgejo/runtime-images.yml) example
-uses the same Containerfile and smoke checks as the GitHub publisher. Copy it
-into a Forge CI mirror's `.forgejo/workflows/`, replace the `forge.example/owner`
-URL and `FORGE_CI_COMMIT` with a published immutable layer revision, and configure
-the settings below. Registry location does not determine the source forge.
-Once installed, it runs on relevant `main` pushes, a weekly schedule and manual
-dispatch from `main`. It does not run on pull requests or publish a CLI release.
+[`examples/forgejo/runtime-images.yml`](../examples/forgejo/runtime-images.yml)
+publishes the runtime images from a Forge CI mirror on Forgejo, with the same
+Containerfile and smoke checks as the GitHub publisher. It is opt-in: copy it
+into the mirror's `.forgejo/workflows/`, and it runs on pushes to `main` that
+touch the image sources, weekly and by manual dispatch. It does not run on
+pull requests and publishes no CLI release.
+
+Static tests check the workflow, but no live test has run it yet, so keep a
+production publisher and its published pins until one has.
 
 ### Configuration
 
+Replace the placeholders in the file: `OWNER` and `FORGE_CI_COMMIT` with the
+mirror and its pinned commit, `REGISTRY` with the registry that holds the
+signer and Go build images, `PIN_SIGNER_DIGEST` with the signer image,
+`PIN_GO_IMAGE_DIGEST` with a Go build image matching the Go release in
+`go.mod`, and `PIN_COSIGN_PUBLIC_KEY_SHA256` with the reviewed SHA-256 of the
+organization's public key file. Then set:
+
 | Setting | Purpose |
 |---|---|
-| `RUNTIME_IMAGE_NAMESPACE` | Reviewed GHCR destination, for example `ghcr.io/owner` |
-| `CI_SIGNER_IMAGE` | Published trusted signer image pinned by digest; never a candidate |
-| `CI_GO_BUILD_IMAGE` | Digest-pinned Go build image matching the release in `go.mod` |
-| `CI_RUNNER_LABEL` | JSON labels for ordinary jobs and native amd64 smoke jobs |
-| `CI_RUNNER_LABEL_ARM64` | Preferred ordinary native arm64 pool; when absent, smoke jobs use `CI_RUNNER_LABEL_CONTAINER_ARM64` and request fresh lent runners if lending is configured |
-| `RELEASE_PLATFORMS` | Both `linux/amd64,linux/arm64` by default; optionally select just `linux/amd64` or `linux/arm64`. The existing engine planner validates the selection |
-| `CI_IMAGE_BUILDER` | Existing builder selector: `buildah` or `kaniko` |
-| `CI_IMAGE_BUILDER_JOB_IMAGE` | Digest-pinned kaniko job image on restricted pools |
-| `CI_RUNNER_LABEL_CONTAINER`, `CI_RUNNER_LABEL_CONTAINER_ARM64` | Optional architecture-specific build pools; otherwise use the ordinary native pools |
-| `CI_RUNNER_LENDER`, `CI_RUNNER_LENDER_REPOSITORY` | Optional existing runner-lending configuration; one request per native build leg |
-| `RELEASE_REGISTRY_USER` | GHCR account paired with the registry token |
-| `COSIGN_PUBLIC_KEY`, `COSIGN_PUBLIC_KEY_SHA256` | Organization public key and independently reviewed SHA-256 digest of its newline-terminated file |
+| `RUNTIME_IMAGE_NAMESPACE` | Destination, for example `ghcr.io/owner` |
+| `CI_RUNNER_LABEL` | JSON labels for ordinary jobs, the signer and the amd64 smoke test |
+| `CI_RUNNER_LABEL_ARM64` | The arm64 pool for the arm64 smoke test; without it the smoke test runs on `CI_RUNNER_LABEL_CONTAINER_ARM64` |
+| `CI_RUNNER_LABEL_CONTAINER`, `CI_RUNNER_LABEL_CONTAINER_ARM64` | Optional build runners per architecture; otherwise the pools build |
+| `RELEASE_PLATFORMS` | `linux/amd64,linux/arm64` by default, or one of them; Android is left out of an arm64-only run |
+| `CI_IMAGE_BUILDER`, `CI_IMAGE_BUILDER_JOB_IMAGE` | `kaniko` and its job image on a pool without user namespaces; see [runners](runners.md#building-on-the-pool-with-kaniko) |
+| `CI_RUNNER_LENDER`, `CI_RUNNER_LENDER_REPOSITORY` | Optional [runner lending](runners.md#runner-lending), one request per build leg |
+| `RELEASE_REGISTRY_USER` | The registry account paired with the registry token |
+| `COSIGN_PUBLIC_KEY` | The organization's public key |
 
-Secrets: `RELEASE_REGISTRY_TOKEN` for GHCR writes; `RELEASE_COSIGN_PRIVATE_KEY`
-and `RELEASE_COSIGN_PASSPHRASE` for the isolated signer; optionally
-`CI_RUNNER_LENDER_TOKEN` for runner lending. The lender token reaches only
-the requester, and signing keys reach only the signer. GHCR pull credentials
-in the smoke job's `container.credentials` belong to the runner, not the
-candidate's process environment. Keep the forge's automatic job token
-read-default. Forks change their namespace, helper pin, signer digest and public
-key digest in the self-workflow, not in the reusable layer or runtime scripts.
+Secrets: `RELEASE_REGISTRY_TOKEN` for registry writes,
+`RELEASE_COSIGN_PRIVATE_KEY` and `RELEASE_COSIGN_PASSPHRASE` for the signer,
+and optionally `CI_RUNNER_LENDER_TOKEN`. The signing key reaches only the
+signer job. Private packages and a private source repository both work: the
+registry token pulls the candidates, the forge's job token reads the source.
 
-Private runtime packages are supported: candidate pulls and publication
-verification use the registry credential. Source checkouts and the final
-current-branch lookup use the forge's own job token, so the source repository
-can be private too. These credentials remain separate and are not placed in
-Git URLs or command arguments.
+### What a run does
 
-The shared planner selects each architecture separately. The runtime roster
-omits Android for arm64-only runs because Android's Linux SDK is amd64-only.
-The build runner is native to its leg. Buildah capability, kaniko selection
-and runner lending remain independent of the platform selection. A kaniko
-build does not imply that the runner can execute nested Podman tests.
+1. Rebuilds the CLI from the source commit and requires its bytes to match the
+   recorded checksum.
+2. Builds each runtime image per architecture natively and pushes it as a
+   candidate.
+3. Runs the smoke script in each candidate as a native job container.
+4. After all smoke tests pass, extracts the CLI from each candidate and
+   compares it with the recorded checksum, scans each image, generates its
+   SBOM and assembles the index. Findings are reported; with the workflow's
+   `enforce-vulnerabilities: true` a `CRITICAL` finding not approved in
+   `.trivyignore.yaml` blocks, and a scanner failure always does.
+5. Signs the index and its children with the organization's key, with no
+   transparency log, and attests each SBOM and the SLSA provenance.
+6. Verifies the signatures, refuses a `main` that has moved on, and tags the
+   signed index `sha-<full-source-commit>`. Pin its digest.
 
-### Publication sequence and evidence
-
-1. Rebuild the CLI from the exact source commit with the Go release in
-   `go.mod`, fresh module/build caches and the existing engine-binary recipe.
-   Require each architecture's bytes to match its recorded checksum.
-   These are the Forgejo layer's `engine-layer` binaries, identified by their
-   checksums; runtime publication does not create versioned CLI release archives.
-2. Build each selected runtime/platform through the existing builder adapter.
-   Publish uniquely run/attempt-scoped architecture candidates to GHCR and
-   transfer only their digest metadata through Forgejo artifacts.
-3. Start each exact candidate digest as a native job container and run the
-   shared smoke script. Its installed-CLI checksum check is diagnostic only.
-   This needs no nested container engine or user namespaces.
-   If ARM64 uses only a container/lender pool, request new single-use smoke
-   runners after the builds; the build runners have already been consumed.
-4. After **all** smoke jobs pass, pull each child digest into an OCI layout
-   in the trusted utility job, extract its CLI with the existing engine
-   extractor and compare its bytes with the recorded source checksum. No
-   candidate executable or hashing tool participates in this independent gate.
-   Scan every child digest, generate its CycloneDX SBOM and assemble the
-   complete index. Vulnerability findings
-   remain advisory, matching the existing GitHub runtime workflow; scanner
-   failures block. Retain the reports with the native digest metadata.
-5. In the pinned trusted signer, with no source checkout or tool installation,
-   verify index/platform/source binding and the organization's signing key.
-   Sign the index and children, attest each child's SBOM and attest the
-   index's SLSA provenance. Forgejo uses the organization's key with no public
-   transparency log, rather than GitHub's OIDC identity.
-6. After **all** signing jobs pass, independently verify signatures and
-   attestations, reject a stale `main`, and copy the unchanged signed index to
-   `sha-<full-source-commit>`. Record the digest reference consumers must pin.
-
-The final availability check reads the promoted tag with the configured
-registry credential and requires its exact manifest digest to match the signed
-candidate. This works for both private and public packages. Private consumers
-need registry read access; for anonymous distribution, make the packages public
-and additionally verify anonymous access. Visibility changes are an operator
-choice, not a prerequisite for smoke testing. Candidate tags are not consumer pins.
-
-Assembly reads each uploaded evidence bundle back into a fresh temporary
-directory and verifies the file inventory and SHA-256 checksums against the
-local originals. A successful upload response alone is insufficient: unreadable,
-missing, changed or extra files fail assembly before signing. This adds one
-evidence download per flavour; it does not repair server storage or guarantee
-that the artifact remains available later.
-
-The Forgejo artifact client opts GET/HEAD requests into bounded HTTP 500 retries
-using the shared transport: at most four attempts with exponential backoff and
-jitter, within the existing request timeout and delay budgets. Upload and
-finalization requests are not automatically replayed. A recovered read must
-still pass the same content checks; persistent errors fail the handoff with
-artifact/file context. This client behavior requires a published engine
-containing the retry change and a helper pin selecting that engine.
-
-Each successful smoke job uploads a `runtime-smoke-<flavour>-<architecture>`
-receipt for its exact container digest and source commit. Assembly checks these
-receipts against all architecture candidates before scanning or creating an
-index. Rebuilding a candidate does not reuse a green smoke result for different
-bytes: rerun collection and the smoke jobs for the rebuilt digests. A receipt
-is current-run workflow evidence, not a replacement for isolated signing or
-independent inspection of the candidate's embedded CLI.
-
-The final digest is authoritative: rebuilding the same source can incorporate
-updated distribution packages and change `sha-<commit>`. The example does not
-move upstream's rolling CLI release or manufacture semver runtime tags before
-a corresponding release exists. Product releases, checksum-addressed engine
-packages and trusted signer publication require their own configured workflows.
-Signing/promotion is gated across the matrix, but multiple registry tag writes
-are not an atomic transaction. Failed runs may leave staging images. Registry
-retention is a separate reviewed operation; protect pinned digests and their
-signatures/evidence when using the existing package-retention tooling.
-
-The opt-in [`package-retention.yml`](../examples/forgejo/package-retention.yml)
-example runs a weekly/manual **preview only** after being installed and configured.
-Replace its forge URL and engine revision, set `RUNTIME_IMAGE_NAMESPACE`, and
-provide `PACKAGE_RETENTION_MATRIX` as an `include` matrix of package names and
-reviewed consumer digests.
-The preview uses the pinned published engine; it needs no Forge CI source
-checkout or Go compiler in the consumer repository.
-Its reviewed matrix is the retention policy: release tags remain, the ten newest
-commit-tagged versions remain, and each listed consumer digest remains regardless
-of age, together with its platforms and signing evidence. Update that matrix
-when supported consumers move pins. The preview reuses the publisher's existing
-`RELEASE_REGISTRY_USER` and `RELEASE_REGISTRY_TOKEN`; that token must be able to
-read package versions and manifests. The workflow never applies deletion.
-
-After reviewing a complete pin set and the preview, an operator can apply the
-same rule with the existing command:
-
-```bash
-forge-ci container package-retention --repository ghcr.io/owner/runtime \
-  --keep-digest sha256:REVIEWED_CONSUMER_DIGEST --recent-count 10 --max-delete 100 \
-  --registry-username PUBLISHER_USER
-```
-
-Repeat `--keep-digest` for every supported consumer pin. A missing protected
-digest stops the pass. The command is dry-run by default; `--dry-run=false`
-applies the reviewed rule with package-deletion credentials. Release-file and
-base-image retention keep their existing separate commands and policies.
-
-Local guard and orchestration tests establish structure, refusal paths and
-platform selection. Activation still requires a successful destination-forge publication
-run, native smoke results, verified GHCR signatures and consumer access with
-the intended credentials (or anonymously for public distribution).
-See [Forge migration review](forge-migration.md) for the cross-provider checks.
-
-## Why some images aren't built
-
-- **`forge-ci-runtime-android-35-ndk`**: Not built today. NDK is ~3 GB and only needed for projects with native (JNI) code, the minority. The current `forge-ci-runtime-android-35` image covers typical Android library and app builds without NDK.
-- **Multiple LTS lines simultaneously** (`runtime-java-21` *and* `runtime-java-25`, etc.): not built today.
-  Adding or retaining another line requires explicit Containerfile and workflow
-  matrix support. A versioned name identifies the targeted line; it does not
-  establish a future maintenance or upstream-EOL commitment.
+A rebuild of the same commit can give a new digest, because distribution
+packages move on. A failed run may leave candidate images behind; see
+[GHCR package retention previews](forgejo.md#ghcr-package-retention-previews).
 
 ## Pinning convention
 
 Exact versions are pinned in the Containerfile or bootstrap helper, with
 Renovate updates made through source changes. The defaults below identify the
 release lines, not a request to install the latest version on each rebuild.
-
-`yq` and `publiccode-parser` are built from source in an unpublished
-`go-tools` stage, with the same Go release the Go image ships, rather than
-installed as upstream release binaries. A release binary carries the Go
-standard library its project last released with, so a Go security fix reached
-the image only with the next upstream release; built here, the next Go bump
-rebuilds both. The versions remain the bootstrap helpers' pins
-(`scripts/bootstrap/install-yq.sh` and `install-publiccode-parser.sh`), which
-plain-runner jobs still install as SHA-256-verified release binaries. The
-image build fetches the module source through the Go module proxy and verifies
-it against the Go checksum database, and refuses a module that asks for a newer
-Go than the pinned one.
+`yq` and `publiccode-parser` are built from source with the image's Go
+release, so a Go security fix reaches them with the next Go bump.
 
 | Toolchain | Default in image | Selection/override |
 |---|---|---|
@@ -346,11 +227,9 @@ can resolve different packages or tool/build environments; a scheduled rebuild
 does not itself update committed version pins. Use a verified image digest when
 the same image bytes are required.
 
-Consumers can omit `runtime-image*` inputs to use the defaults declared by the
-pinned workflow. Check those values when updating workflow versions; they are
-explicit configuration, not derived automatically from the caller's workflow ref.
-The GitHub workflow guards check that declared runtime tags and binary-ref
-defaults share a modeled version; they do not establish publication availability.
+The workflows declare no default `runtime-image*` value, so the caller passes
+each image by digest. Update those digests when you update the workflow ref;
+they are not derived from it.
 
 ## OCI labels
 
@@ -362,78 +241,82 @@ a runtime image bundles many differently-licensed tools.
 
 ## CLI binary channels
 
-Within a runtime-image workflow run, `build-cli.yml` builds the linux/darwin ×
-amd64/arm64 archives and hands them to later jobs as `cli-dist`. Each image job
-bakes the matching Linux architecture's binary and compares its bytes with that
-same-run payload. The rolling CLI publisher uploads those archives after image
-manifest publication succeeds. Stable release archives are built separately by
-`release-binary.yml`; this is not one shared build across every release channel.
+Jobs never install a published CLI archive. Container jobs use the binary
+baked into their image, Linux plain-runner jobs receive the CLI their run
+builds from `forge-ci-binary-ref` ([engine delivery](engine-delivery.md)),
+and macOS jobs build it from a checkout of that commit. The archives are for
+people who download the CLI:
 
-Container jobs use the baked binary. Plain-runner jobs (e.g. macOS swift/iOS)
-select an archive with `forge-ci-binary-ref`:
-
-| `forge-ci-binary-ref` | Channel | Use |
+| Channel | Signed by | Use |
 |---|---|---|
-| `vX.Y.Z` | Release tarball, cosign-pinned to `release-binary.yml@refs/tags/release-request/vX.Y.Z` | Versioned production channel |
-| `v0.90.0-pre` | Rolling pre-release from the configured prerelease branch, cosign-pinned to `build-cli.yml@refs/heads/…` | Moving test channel, not for production |
+| `vX.Y.Z` release tarball | `release-binary.yml@refs/tags/release-request/vX.Y.Z` | Versioned production channel |
+| `v0.90.0-pre` rolling pre-release from the configured prerelease branch | `build-cli.yml@refs/heads/…` | Moving test channel, not for production |
 
-Both verify by SHA-256 + Sigstore. The pre-release channel is a separate, opt-in trust
-domain and never relaxes the release identity pin. Images and CLI release assets
-are published in separate steps, so their availability is not atomic.
-For a release-semver ref, any asset download, checksum, or Sigstore failure terminates
-the install. Source installation is used only for non-release refs or when
-`FORGE_CI_USE_GO_INSTALL=1` is explicitly set.
+Both verify by SHA-256 and Sigstore. The pre-release channel has its own
+signing identity and never relaxes the release identity pin. Images and CLI
+archives are published in separate steps, so one can exist without the other.
+There is no darwin/amd64 CLI.
 
 ## Advanced Pinning Recipe
 
-After the required images have been published, use runtime overrides for digest
-pinning, mirrors or branch testing. This is an input-override fragment for an
-existing release caller; retain its [permissions and secret bindings](reference.md):
+After the required images have been published, pin a release caller. The
+release orchestrator requires three of its inputs as exact IDs and admits them
+in its first job, before any image starts: `forge-ci-binary-ref` is the full
+engine commit the run builds its canonical CLI from, and `runtime-image` and
+`canonical-builder-image` are `@sha256:` digests (a tag is refused). Every
+other `runtime-image*` input is a digest too, admitted by the workflow that
+runs it before the job starts; pass the ones the release's artifacts use. This
+is an input fragment for an existing release caller; retain its
+[permissions and secret bindings](reference.md):
 
-Treat the workflow revision, runtime image digests, plain-runner CLI ref and
+Treat the workflow revision, runtime image digests, engine commit and
 artifacts schema as one reviewed selection. A newer workflow does not update a
 binary baked into an older image. Obtain the schema from that same selected
 source revision, as described in [the schema guide](artifacts-reference.md#json-schema).
-The version labels below illustrate the selection; replace them with verified
+The placeholders below illustrate the selection; replace them with verified
 coordinates for the revision you intend to run.
 
 ```yaml
 # .github/workflows/release.yml in a consumer repo
 jobs:
   release:
-    uses: diggsweden/forge-ci/.github/workflows/release-orchestrator.yml@v0.90.0
+    uses: diggsweden/forge-ci/.github/workflows/release-orchestrator.yml@<full-commit> # vX.Y.Z
     with:
       branch: main
       artifacts-config: .forge-ci/artifacts.yml
-      # Optional: override every runtime image family used by the orchestrator.
-      # Omit overrides to use the defaults declared by the pinned workflow.
-      runtime-image: ghcr.io/diggsweden/forge-ci-runtime-base:v0.90.0
-      runtime-image-full: ghcr.io/diggsweden/forge-ci-runtime:v0.90.0
-      runtime-image-java: ghcr.io/diggsweden/forge-ci-runtime-java-25:v0.90.0
-      runtime-image-node: ghcr.io/diggsweden/forge-ci-runtime-node-24:v0.90.0
-      runtime-image-rust: ghcr.io/diggsweden/forge-ci-runtime-rust-stable:v0.90.0
-      runtime-image-go: ghcr.io/diggsweden/forge-ci-runtime-go-1.27:v0.90.0
-      runtime-image-android: ghcr.io/diggsweden/forge-ci-runtime-android-35:v0.90.0
-      forge-ci-binary-ref: v0.90.0
-      # Renovate-friendly: bump the @v0.90.0, :v0.90.0, and binary ref in lockstep.
+      # The same full commit the workflow ref names: required.
+      forge-ci-binary-ref: <full-commit>
+      # Admitted by digest before any job runs: required.
+      runtime-image: ghcr.io/diggsweden/forge-ci-runtime-base@sha256:<digest>
+      canonical-builder-image: ghcr.io/diggsweden/forge-ci-runtime-go-1.27@sha256:<digest>
+      # Release assembly runs in the full image on every native release.
+      runtime-image-full: ghcr.io/diggsweden/forge-ci-runtime@sha256:<digest>
+      # The family image of each artifact type the release builds; leave out
+      # the others.
+      runtime-image-java: ghcr.io/diggsweden/forge-ci-runtime-java-25@sha256:<digest>
+      runtime-image-node: ghcr.io/diggsweden/forge-ci-runtime-node-24@sha256:<digest>
+      runtime-image-rust: ghcr.io/diggsweden/forge-ci-runtime-rust-stable@sha256:<digest>
+      runtime-image-go: ghcr.io/diggsweden/forge-ci-runtime-go-1.27@sha256:<digest>
+      runtime-image-android: ghcr.io/diggsweden/forge-ci-runtime-android-35@sha256:<digest>
 ```
 
-For direct workflow calls that take one `runtime-image:` input, choose the
-matching family from the [roster](#image-roster). For example, a Java job uses:
+Read a published tag's digest with the registry client you have, for example
+`docker buildx imagetools inspect ghcr.io/diggsweden/forge-ci-runtime-base:vX.Y.Z --format '{{.Manifest.Digest}}'`,
+and the tag's commit with `git rev-parse vX.Y.Z^{commit}` in a forge-ci
+checkout. Self Release pins the same way: it reads this commit's image digests
+once the images exist and passes `github.sha` as the engine commit.
+
+A workflow called on its own takes one `runtime-image:` input: the digest of
+the matching family from the [roster](#image-roster), with the same
+`forge-ci-binary-ref`. For example, a Java job passes:
 
 ```yaml
-runtime-image: ghcr.io/diggsweden/forge-ci-runtime-java-25:v0.90.0
-```
-
-For a content pin, substitute the verified image digest:
-
-```yaml
+forge-ci-binary-ref: <full-commit>
 runtime-image: ghcr.io/diggsweden/forge-ci-runtime-java-25@sha256:<digest>
 ```
 
-Moving to another toolchain line requires a reviewed workflow/default or image
-override change. Pinning the workflow ref preserves its declared defaults;
-pinning the image digest preserves the selected image content.
+Moving to another toolchain line means passing another image digest; the
+workflow ref, the engine commit and the image digests move together.
 
 ### Renovate
 
@@ -452,75 +335,44 @@ using Renovate can pick up image bumps automatically. Example `renovate.json`:
 }
 ```
 
-Renovate-driven bumps in the consumer repo + the workflow ref bump
-(`uses: …@v0.90.1`) should land in the same PR for atomic version moves.
+Move the workflow commit, `forge-ci-binary-ref` and the image digests in the
+same pull request.
 
 ## Branch Testing
 
-Consumers wait for the `v0.90.0` tag: its publication produces the runtime
-images and the release CLI that the `@v0.90.0` pins in the examples name.
-Maintainers test unreleased workflow changes with the `sha-<short-commit>`
-runtime images that the `Self Runtime Container` workflow
+Consumers pin a release. Maintainers test unreleased workflow changes with the
+`sha-<short-commit>` runtime images that `Self Runtime Container`
 (`.github/workflows/self-runtime-container.yml`) publishes for every push to
-the configured `FORGE_CI_PRERELEASE_BRANCH` (default `main`); see
-[Tag convention](#tag-convention). A workflow branch alone changes neither its
-runtime-image defaults nor the CLI the plain-runner jobs install.
-
-Testing unreleased forge-ci workflow changes from a consumer repository
-requires coordinated selections:
+the configured `FORGE_CI_PRERELEASE_BRANCH` (default `main`), or when it is
+dispatched there with `publish=true`; see [Tag convention](#tag-convention).
+A workflow branch alone changes neither the images its caller pins nor the
+commit the run builds its CLI from. A test from a consumer repository needs
+three matching selections:
 
 1. A reviewed workflow commit (`uses: diggsweden/forge-ci/.github/workflows/...@<sha>`).
-2. Published runtime images for that revision and the required platforms.
-3. A matching CLI ref for plain-runner jobs.
+2. The runtime images published for that commit, by digest.
+3. The same full commit as `forge-ci-binary-ref`.
 
-For Linux containerized jobs, run `Self Runtime Container` with `publish=true`
-on the configured `FORGE_CI_PRERELEASE_BRANCH` (default `main`). Manual
-manifest/tag publication is gated to that branch; a dispatch on another branch
-does not publish the merged tags even if per-architecture builds succeed.
-Confirm the required tags/digests from the successful publication before using
-them in a consumer. The fragment below uses source-revision labels for discovery;
-replace them with verified digests when exact image content is required:
+Read the digest each tag serves:
 
-```yaml
-# Input overrides for an existing release caller; retain its permissions/secrets.
-jobs:
-  release:
-    uses: diggsweden/forge-ci/.github/workflows/release-orchestrator.yml@abcdef0123456789abcdef0123456789abcdef01
-    with:
-      branch: main
-      artifacts-config: .forge-ci/artifacts.yml
-      forge-ci-binary-ref: abcdef0123456789abcdef0123456789abcdef01
-      runtime-image: ghcr.io/diggsweden/forge-ci-runtime-base:sha-abcdef0
-      runtime-image-full: ghcr.io/diggsweden/forge-ci-runtime:sha-abcdef0
-      runtime-image-java: ghcr.io/diggsweden/forge-ci-runtime-java-25:sha-abcdef0
-      runtime-image-node: ghcr.io/diggsweden/forge-ci-runtime-node-24:sha-abcdef0
-      runtime-image-rust: ghcr.io/diggsweden/forge-ci-runtime-rust-stable:sha-abcdef0
-      runtime-image-go: ghcr.io/diggsweden/forge-ci-runtime-go-1.27:sha-abcdef0
-      runtime-image-android: ghcr.io/diggsweden/forge-ci-runtime-android-35:sha-abcdef0
+```bash
+docker buildx imagetools inspect ghcr.io/diggsweden/forge-ci-runtime-base:sha-abcdef0 --format '{{.Manifest.Digest}}'
 ```
 
-The plain-runner jobs (container publish and macOS workflows) do not use the
-runtime image. They install the binary selected by `forge-ci-binary-ref`, so
-that value must point at the same forge-ci commit as the workflow and runtime
-images being tested. Branch/full commit refs use a detached Git checkout and
-`go install ./cmd/forge-ci`, without a version-suffixed module query. Both
-40-character SHA-1 and 64-character SHA-256 commit IDs are accepted. Host jobs
-bind the build to their bootstrap checkout; PR and snapshot orchestrators
-resolve source branches once. Commit IDs avoid source-ref drift across runs.
-The corresponding image labels
-can still be rewritten by a rerun; a digest is the content pin.
+Then pass them as in the [Advanced Pinning Recipe](#advanced-pinning-recipe),
+with that commit as the workflow ref and `forge-ci-binary-ref`. A rerun can
+move a `sha-<short>` tag; the digest is the content pin.
 
 ## Testing consumer configuration
 
-After copying an [example](../examples/README.md), check its YAML syntax:
+After copying an [example](../examples/README.md), validate the configuration
+against the schema:
 
 ```bash
-pip install yamllint
-yamllint .forge-ci/artifacts.yml
+forge-ci config validate
 ```
 
-Syntax validation does not establish that the artifact configuration is valid
-or that publication works. For a branch-only snapshot, create
+That does not prove publication works. For a branch-only snapshot, create
 `.github/workflows/release-snapshot-workflow.yml`:
 
 ```yaml
@@ -530,10 +382,19 @@ on:
 
 jobs:
   snapshot-release:
-    uses: diggsweden/forge-ci/.github/workflows/release-snapshot-orchestrator.yml@v0.90.0
+    uses: diggsweden/forge-ci/.github/workflows/release-snapshot-orchestrator.yml@PIN_FORGE_CI_SHA # v0.90.0
     with:
       branch: ${{ github.ref_name }}
-      forge-ci-binary-ref: v0.90.0
+      # The full commit the workflow ref above names; the snapshot route runs
+      # the CLI built in this run from exactly this commit.
+      forge-ci-binary-ref: PIN_FORGE_CI_SHA # v0.90.0
+      # Pinned by digest and admitted before any job runs; replace FIXME with
+      # the digests of the release you call (docs/runtime-images.md).
+      runtime-image: ghcr.io/diggsweden/forge-ci-runtime-base@sha256:0000000000000000000000000000000000000000000000000000000000000000 # FIXME v0.90.0 digest
+      canonical-builder-image: ghcr.io/diggsweden/forge-ci-runtime-go-1.27@sha256:0000000000000000000000000000000000000000000000000000000000000000 # FIXME v0.90.0 digest
+      runtime-image-full: ghcr.io/diggsweden/forge-ci-runtime@sha256:0000000000000000000000000000000000000000000000000000000000000000 # FIXME v0.90.0 digest
+      # Add the family image of each artifact type the snapshot builds, such
+      # as runtime-image-java for Maven.
       artifacts-config: .forge-ci/artifacts.yml
     permissions:
       actions: read
@@ -543,8 +404,6 @@ jobs:
     # registry-password explicitly only for another registry.
 ```
 
-The 0.90.0 references are prospective; before publication, apply the reviewed
-workflow/binary/runtime-image pins from [Branch Testing](#branch-testing).
 Push the selected test branch to trigger that configured snapshot workflow:
 
 ```bash
@@ -566,51 +425,17 @@ wanted; see [release policy](workflows.md#stable-and-prerelease-policy).
 
 ## Releasing new image versions
 
-The image workflow is triggered by matching version-tag pushes, excluding the
-rolling `*-pre` tag:
-
-1. Cut a normal forge-ci release (`chore(release): vX.Y.Z`).
-2. The release-orchestrator pushes the `vX.Y.Z` git tag.
-3. `self-runtime-container.yml` attempts the configured runtime builds from that
-   commit. Successful publication applies `:vX.Y.Z` and, for stable versions,
-   the moving `:vX.Y` and `:vX` aliases.
-4. Publish legs build natively for the platforms in the [roster](#image-roster),
-   including the Android amd64-only exception.
-
-This is a separate workflow run from stable CLI archive publication. Confirm
-both completed and that the caller's explicit runtime/binary defaults select
-the intended outputs; a shared source commit does not make publication atomic.
-
-The path filter on the `push` trigger is intentionally absent for tag
-pushes, so a matching tag schedules the image builds even if the tagged commit
-didn't touch the runtime files. Prerequisite or build failures can still prevent
-publication.
-
-## Build pipeline
-
-[`self-runtime-container.yml`](../.github/workflows/self-runtime-container.yml)
-uses independent matrix legs over the internal Containerfile stages. Each target
-publishes to its own image name under the repository owner's GHCR namespace
-(`ghcr.io/diggsweden/` upstream). Stage inheritance determines what each build
-includes; it is not a dependency on another matrix job publishing a base image.
-
-The verify matrix builds and smoke-tests on an amd64 runner using Buildah and
-Podman. Publication then builds the declared native architecture legs, pushes
-by digest, and merges their digests into tagged indexes. The baked-binary check
-also uses Docker to extract the CLI and compare it with the same-run archive.
-The verify job is not a separate ARM64 smoke-test pass.
+A forge-ci release tag `vX.Y.Z` starts `self-runtime-container.yml`, which
+builds the images from that commit natively for the platforms in the
+[roster](#image-roster) and tags them `:vX.Y.Z`, and for a stable version
+also `:vX.Y` and `:vX`. The tag push builds the images even when the tagged
+commit did not touch the runtime files. The CLI archives are published by a
+separate run, so check that both completed.
 
 ## GitLab compatibility building blocks
 
 Every image lives on GHCR, which is reachable from GitLab CI runners. The GitLab
-components under `templates/` use these images as their defaults. For sovereign
-GitLab installations that must not pull from `ghcr.io`, mirror the images to the
-consumer's own GitLab Container Registry and override the component's image
-input with the mirror.
-
-For macOS workflows, the equivalent ref input is `forge-ci-binary-ref`.
-Those workflows run on a macOS VM instead of using the Linux runtime image.
-Published semver tags install the cosign- and SHA-256-verified release archive;
-branch/SHA refs, or an explicit `FORGE_CI_USE_GO_INSTALL=1` override, install
-from a detached Git checkout with `go install ./cmd/forge-ci`; see the
-[source checkout requirements](DEVELOPMENT.md#source-checkout).
+components under `templates/` have no default image: the caller passes one by
+digest. For sovereign GitLab installations that must not pull from `ghcr.io`,
+mirror the images to the consumer's own GitLab Container Registry and pass the
+mirror's digest instead.

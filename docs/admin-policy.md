@@ -47,7 +47,7 @@ the others, in any letter case), refuses to run instead of ignoring it. On
 GitLab every project, group and instance variable reaches the job's
 environment, so a variable set there to relax a gate stops it, visibly.
 
-### A flag is not yet administrator policy
+### A flag alone is not administrator policy
 
 The engine cannot tell who wrote its command line, and neither can the
 workflows, actions and components: each takes the settings as inputs, and
@@ -57,8 +57,7 @@ gets a green job. A setting is the administrator's only when it is written in
 an **entry point the consumer cannot change** and that entry point's jobs are
 the ones the forge requires. For organisation-mandated policy, the consumer's
 own files do not supply these settings and its own jobs are not the required
-gate. The examples, demos and
-`forge-ci init` output set none; a guard keeps it so.
+gate. The examples and `forge-ci init` output set none.
 
 | Forge | The administrator's entry point | Where the settings are written |
 |---|---|---|
@@ -101,26 +100,12 @@ An external CI configuration path that names the policy project's file is
 weaker. The project's own `.gitlab-ci.yml` does not run, but a project
 maintainer can change the path back, and a consumer file the policy includes
 is merged into the same configuration: a job it defines with a gate's name is
-merged under the gate's. Include the consumer's file **before** the gate
-components, and keep the gates the policy's own includes, not the consumer
-file's. The source-only `check`, lint and `build-*` gates explicitly replace
-earlier `rules`, `needs`, `cache`, `allow_failure`, `before_script`, `script`
-and `after_script` values. They run on success whenever included and explicitly
-declare `needs: []` and `cache: []`. Native source jobs explicitly
-request a checkout; `check` keeps its own verified checkout instead.
-
-Select pipeline events in the administrator's `workflow: rules` or
-`include: rules`, rather than relying on an earlier same-named job to select or
-disable a gate. Included gates also participate in merge-request pipelines;
-signing-enabled builds belong only in the policy's authorized event includes.
-Any required build dependencies or caches must be declared in the
-administrator-owned job configuration, not inherited from the consumer.
-Mapping keys still deep-merge: unrelated job variables and
-other omitted keys survive, and higher-precedence project/pipeline variables
-are not sealed by these declarations. Conflicting remaining keys may also make
-a merged pipeline invalid. This hardens the declared gate fields; it does not
-turn include-mode merging into configuration isolation or make the external CI
-configuration path immutable. Use policy injection for that authority boundary.
+merged with the gate. Include the consumer's file **before** the gate
+components. The gates set their own `rules`, `needs`, `cache`,
+`allow_failure` and scripts, so those keys from an earlier job of the same
+name do not survive, but other keys and project variables still merge in.
+Select events in the policy's `workflow: rules` or `include: rules`. Prefer
+inject mode where the tier allows it.
 
 The release component already has this shape: the policy includes it, every
 `enforce-*` input defaults to `false`, and each job assigns them to read-only values
@@ -145,6 +130,7 @@ jobs:
   quality:
     uses: diggsweden/forge-ci/.github/workflows/pullrequest-orchestrator.yml@PIN_SHA
     with:
+      # Engine commit and image digests: see the Advanced Pinning Recipe.
       project-type: maven
       enforce-lint: true
       enforce-vulnerabilities: true
@@ -169,12 +155,12 @@ to the layer. Forgejo cannot separate a consumer maintainer who may change the
 branch protection or the code owners from these settings: such a maintainer
 can relax a gate, as they could remove it.
 
-An organization that records its values in a policy repository of its own
-needs there: the four values per forge and road, the entry point that writes
-them (the GitLab policy YAML, the GitHub ruleset workflow, the Forgejo code
-owners and branch protection), a check that the consumer repositories' files
-set no `enforce-*`, and the receipts it expects (`source=flag` with those
-values, see below).
+An organization that keeps its settings in a policy repository records
+there: the four values for each forge, the entry point that writes them (the
+GitLab policy YAML, the GitHub ruleset workflow, the Forgejo code owners and
+branch protection), a check that consumer repositories set no `enforce-*`,
+and the log lines it expects (`source=flag` with those values, see
+[Effective policy output](#effective-policy-output)).
 
 ### Commands a job runs from its inputs
 
@@ -200,44 +186,51 @@ digests together. A malformed embedded policy fails gates closed; omitted
 keys default to `false`; unknown keys, duplicate keys and non-boolean values
 are refused.
 
-## The receipt
+## Release test selections (Go and Cargo, GitHub)
 
-### Live harness administrator inputs
+Release tests always run: `skip-tests: true` is refused. Without a selection,
+Go runs `go test ./...` and Cargo runs `cargo test --locked --all-targets`.
+A project whose full suite must not run on hosted runners lists the tests to
+run instead, and the administrator reviews that list.
 
-The live controller passes the same four settings independently, all `false` by
-default. Each controller variable accepts exactly `true` or `false`:
+The GitHub release orchestrator takes `go-test-selections-json` and
+`cargo-test-selections-json`, JSON objects keyed by artifact name; the
+`build-go` and `build-cargo` workflows take `test-selection-json`. Set them in
+the **administrator's protected entry point**, like the enforcement settings;
+they are never read from `artifacts.yml`, the environment or consumer
+scripts. A map must name exactly the release's artifacts of that ecosystem;
+`{}`, missing or extra names and empty entries are refused before any build
+runs.
 
-| Existing administrator input | Live controller variable |
-|---|---|
-| `enforce-lint` | `FORGE_CI_LIVE_ADMIN_LINT` |
-| `enforce-vulnerabilities` | `FORGE_CI_LIVE_ADMIN_VULNERABILITIES` |
-| `enforce-application-tests` | `FORGE_CI_LIVE_ADMIN_APPLICATION_TESTS` |
-| `enforce-reproducible-builds` | `FORGE_CI_LIVE_ADMIN_REPRODUCIBLE_BUILDS` |
+A Go selection names packages, an optional `-run` pattern and a gate:
 
-For a single scenario, use invocation-only assignments:
-
-```bash
-FORGE_CI_LIVE_ADMIN_LINT=true \
-FORGE_CI_LIVE_ADMIN_APPLICATION_TESTS=true \
-just test-live '^TestGitLabRelease_MinimalSignedArtifacts$'
+```json
+{"packages":["./internal/...","./cmd/..."],"run":"TestSafe","gate":"policy"}
 ```
 
-The other two settings remain report-only. These variables belong to the controller;
-it translates them into the existing literal inputs/flags, not job variables.
+The tests run as `go test -json -count=1 -race -buildvcs=false`. Packages must
+be paths inside the workspace.
 
-The controller writes literal inputs in the Forgejo/GitHub wrappers it generates
-and the independent GitLab policy projects it pins. It reads the called engine's
-input declarations, so a leaf receives only the settings it supports. A copied
-consumer wrapper that already supplies an enforcement setting is refused. Ordinary
-GitLab consumer CI rendering carries no enforcement settings; the controller owns
-the separately rendered and pinned gate policy instead. Source checkouts and the
-engine's embedded default are not edited. There is no additional policy mode.
+A Cargo selection lists each test executable, as `package-bin` or
+`package-test`, with its package, exact name and gate; `"ignored": true` runs
+that executable's ignored tests:
 
-These scratch wrappers exercise input propagation. GitHub organization-required
-workflow enforcement and Forgejo administrator protection remain the deployment
-requirements above; a successful scratch wrapper is not proof of either.
+```json
+{"runs":[
+  {"kind":"package-bin","package":"my-cli","name":"my-cli","gate":"application"},
+  {"kind":"package-test","package":"my-cli","name":"config_schema","gate":"policy"},
+  {"kind":"package-test","package":"my-cli","name":"slow_network","gate":"policy","ignored":true}
+]}
+```
 
-### Effective policy output
+Each entry runs as its own `cargo test --locked --package NAME --bin NAME` or
+`--test NAME`. The gate is `application` or `policy`: only application
+assertion failures can be report-only; **policy failures always block**. Each
+invocation must run at least one test and produce a complete summary;
+anything else blocks. Review the list when the project's test executables
+change.
+
+## Effective policy output
 
 Inspect the effective policy with:
 
@@ -253,8 +246,38 @@ prints the check class, actual findings, whether enforcement is enabled and
 where that came from:
 
 ```text
-Enforcement policy default-sha256:<digest>: lint result=findings count=3 enforcement=false source=flag
+Enforcement policy default-sha256:<digest>: lint result=findings count=3 enforcement=false source=flag blocking-count=3
 ```
+
+`count` is the total observed findings; `blocking-count` is the subset eligible
+for the gate. `result=clean` means no observed findings, not merely no blocking
+ones. Container scans retain their severity and fixability rules: two unfixed
+HIGH findings at a CRITICAL threshold produce `result=findings count=2` and
+`blocking-count=0`, even with enforcement enabled. Only eligible findings can
+block when enforcement is enabled; report-only mode still reports that subset.
+Other gates using a single count treat all their findings as eligible. Raw JSON
+and its derived SARIF/GitLab reports retain the scan findings independently.
+A derived report that cannot be written fails the scan with enforcement on
+or off: the reports are the evidence the step hands on.
+
+A lint-runner check that could not complete is not a finding and is never
+waived: its gate prints `result=incomplete` with
+`could-not-complete=<check ids>` unless the gate has findings, and the command
+fails after the findings of the other checks are reported and the security
+SARIF is written. A security check the runner reports as skipped, whether for
+a network outage or in offline mode, could not complete either. One that does
+not apply to the repository passes and is listed as
+`not-applicable=<check ids>`; the gate prints `result=not-applicable` when
+none of its checks ran. The gate reads the status of each check's row in the
+runner's SARIF and nothing else: a check with nothing to scan must be
+reported `n/a`, not `skip`. Nanolinter does not report skipped checks, so a
+skipped or inapplicable check is absent from its report and neither fails nor
+is listed.
+
+A job that cannot run a security check leaves it out with the lint job's
+`disable-checks` input, on each forge. The organisation's required checks
+(`required-lints`) win over it: a check named there runs and blocks whatever
+`disable-checks` says.
 
 `flag` records that the value was given on the engine's command line, by
 whatever wrote it; that the writer was the administrator's entry point is the
@@ -263,7 +286,7 @@ pipeline's to show. The digest identifies the embedded default only: with a
 
 ## Boundaries that stay
 
-The legacy `skip-tests=true` input is refused, including `SKIP_TESTS=true`;
+The `skip-tests=true` input is refused, including `SKIP_TESTS=true`;
 report-only tests must still run. Maven options that skip,
 ignore or narrow tests (`skipTests`, `maven.test.skip[.exec]`,
 `maven.test.failure.ignore`, fail-never, rerunning failed tests, and test
@@ -299,12 +322,10 @@ OSV, Trivy filesystem, Go vulnerability and Rust audit findings use
 Unclassified security or external findings conservatively require both policies
 to allow continuation. Disabling lint therefore cannot waive an independently
 enforced vulnerability gate. Nanolinter configuration/runtime failures and a
-failed invocation without classified findings remain blocking.
-Structured operational-failure categories and the supported older report's
-`tool failed` diagnostics remain blocking even if Nanolinter itself exits `1`.
-The optional SARIF destination contains security results for existing provider upload steps;
-its previous regular-file report is retired before execution, so a failed run
-cannot upload that stale report as current evidence.
+failed invocation without classified findings remain blocking, as do
+operational failures such as `tool failed`, even when Nanolinter exits `1`.
+The `--sarif-file` holds the security results for the forge's upload step; an
+old file there is removed before the run, so a failed run cannot upload it.
 
 The check-selection floor still belongs in the administrator's trusted caller.
 Enforcement is not proof that a consumer's test code is honest, that its chosen

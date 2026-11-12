@@ -2,9 +2,9 @@
 
 Complete reference for the artifacts config format.
 
-> **Current source versus release pins:** `v0.90.0` examples identify a historical
-> baseline, not the current source revision. Confirm matching workflows, CLI
-> assets and runtime images before adoption. For unreleased changes, follow
+> **Which version to pin:** snippets here pin `v0.90.0`; replace it with the
+> release you install, as [Which version to pin](README.md#documentation-index)
+> describes. For unreleased changes, follow
 > [Branch Testing](runtime-images.md#branch-testing).
 
 ---
@@ -27,7 +27,7 @@ Co-located with the other forge-ci files:
 
 ### JSON Schema
 
-[`.forge-ci/artifacts.schema.json`](../.forge-ci/artifacts.schema.json) is a Draft 2020-12 schema for editor completion and structural checks. Most editors honour the `# yaml-language-server: $schema=…` directive at the top of a YAML file:
+[`.forge-ci/artifacts.schema.json`](../.forge-ci/artifacts.schema.json) is a Draft 2020-12 schema for editor completion and structural checks. `forge-ci config schema > .forge-ci/artifacts.schema.json` writes the one your binary validates against. Most editors honour the `# yaml-language-server: $schema=…` directive at the top of a YAML file:
 
 ```yaml
 # yaml-language-server: $schema=./artifacts.schema.json
@@ -108,10 +108,56 @@ or provider.
 `gpg`, `sigstore`, `kms`
 <!-- /schema-values:sign.method -->
 
+On Forgejo and GitLab, `gpg` signs the release's checksums and SBOMs with
+the OpenPGP key, as does [`sign.files-method: gpg`](#signfiles-method), and
+the provenance, the evidence and the images with the Cosign key. A
+declaration there without a `sign` section, or with another method, has
+all of them signed with the Cosign key; see
+[Forgejo signing](forgejo.md#signing) and
+[GitLab signing](gitlab.md#signing). A method or signing key a forge's release does
+not use is not refused: the release plan and `doctor` warn about it, and name
+the key that signs instead
+([signing methods](verification.md#signing-methods-for-release-artifacts)).
+
+### `sign.files-method`
+
+`gpg`, or omitted.
+
+Omitted, `sign.method` signs the release files and the container images
+alike. Set to `gpg`, the release files get OpenPGP `.asc` signatures, and
+`sign.method` signs the images and their SLSA provenance alone:
+
+```yaml
+sign:
+  method: sigstore    # images: Cosign signatures and SLSA provenance
+  files-method: gpg   # release files: .asc, nothing in the transparency log
+```
+
+- `sign.method` must then be `sigstore` or `kms`. Beside `gpg`, written or by
+  default, the field is refused: that method signs the files with GPG already.
+- No other value is accepted. A second Cosign method for files would need a
+  key, issuer and transparency choice of its own.
+- `sign.key`, `sign.oidc-issuer` and `sign.transparency` keep describing
+  `sign.method`, so here they apply to the images.
+- The release needs the `RELEASE_GPG_*` secrets for the files beside whatever
+  `sign.method` needs for the images. On the GitHub release, a declaration
+  without a container then signs nothing with Cosign, and its plan asks for
+  no id-token, Cosign key or Sigstore endpoint. The Forgejo and GitLab
+  releases sign the provenance and the evidence with the Cosign key all the
+  same, so their Cosign secrets stay required.
+- The GitHub, Forgejo and GitLab releases sign the files with GPG. The
+  Forgejo and GitLab releases sign the images with their Cosign key,
+  whatever `sign.method` says.
+
 ### `sign.transparency`
 <!-- schema-values:sign.transparency -->
 `public`, `none`
 <!-- /schema-values:sign.transparency -->
+
+The GitHub release reads it from the declaration. The GitLab and Forgejo
+releases do not: their `transparency-log` input decides, `none` by default.
+A declaration that sets `sign.transparency` is not refused there, and their
+release plans and `doctor` warn that the value is not used.
 
 ### `git-signing.method`
 <!-- schema-values:git-signing.method -->
@@ -183,7 +229,7 @@ requirements and incompatible fields.
 - **Behavior:**
   - `application`: Builds with `mvn package`
   - `library`: Selects the compile/test/package lifecycle and optional Maven profile. The project POM/profile owns attached sources and javadoc artifacts; forge-ci does not invoke source or javadoc plugin goals. Maven Central validation later requires both JARs.
-  - Android `library`: Builds a release AAR, exports native Maven publications, and bumps `version` rather than application `versionName`/`versionCode`. It uses neither an Android keystore nor Google Play. See [Android libraries](gradle-publishing.md#android-libraries).
+  - Android `library`: Builds a release AAR, exports native Maven publications, and bumps `version` rather than application `versionName`/`versionCode`. It uses neither an Android keystore nor Google Play. See [Android libraries](publishing.md#android-libraries).
 
 #### `require-authorization`
 
@@ -596,13 +642,9 @@ and Google Play publisher agree.
 - **Example:** `export-options-var: EXPORT_OPTIONS_BASE64`
 - **Note:** Variable should contain base64-encoded exportOptions.plist for IPA export
 
-#### `config.macos-version`
-
-- **Type:** `string`
-- **Description:** macOS runner version
-- **Default:** `macos-26`
-- **Valid values:** `macos-15`, `macos-26`
-- **Example:** `macos-version: macos-26`
+The macOS runner is not an artifact setting: the caller's workflow names it
+with the `runs-on-darwin-arm64` input of the orchestrator, default
+`["macos-26"]`. See [Runners](runners.md#github-runners).
 
 #### Direct Xcode workflow destination
 
@@ -807,7 +849,7 @@ Containers reference artifacts via the `from:` field and are built after all art
 - **Type:** `boolean`
 - **Description:** Generate SLSA build-provenance attestation for this container. The per-container value propagates through the typed plan to `publish-container.yml`; set to `false` to opt this specific image out of provenance.
 - **Default:** `true`
-- **Requires:** release artifact signing enabled and `sign.method: sigstore` or `sign.method: kms`; production planning rejects enabled pushed provenance when signing is disabled or uses GPG. Keyless Sigstore also requires `id-token: write`; the orchestrator supplies workflow permissions.
+- **Requires:** release artifact signing enabled and `sign.method: sigstore` or `sign.method: kms`; production planning rejects enabled pushed provenance when signing is disabled or uses GPG. To keep GPG signatures on the release files, add [`sign.files-method: gpg`](#signfiles-method) beside the Cosign method. Keyless Sigstore also requires `id-token: write`; the orchestrator supplies workflow permissions.
 - **Example:** `enable-slsa: true`
 
 #### Unsupported container `enable-sbom`
@@ -973,10 +1015,14 @@ containers:
 - **Direct caller equivalent** (when invoking `publish-container.yml` directly, bypassing the orchestrator):
 
   ```yaml
-  uses: diggsweden/forge-ci/.github/workflows/publish-container.yml@v0.90.0
+  uses: diggsweden/forge-ci/.github/workflows/publish-container.yml@PIN_FORGE_CI_SHA # v0.90.0
   with:
+    runtime-image: ghcr.io/diggsweden/forge-ci-runtime-base@sha256:0000000000000000000000000000000000000000000000000000000000000000 # FIXME v0.90.0 digest
+    runtime-image-full: ghcr.io/diggsweden/forge-ci-runtime@sha256:0000000000000000000000000000000000000000000000000000000000000000 # FIXME v0.90.0 digest
     branch: main
-    forge-ci-binary-ref: v0.90.0
+    # plus runtime-image, runtime-image-full and the canonical-* inputs of a
+    # canonical-cli-bootstrap.yml job in the same run; see publishing.md
+    forge-ci-binary-ref: <full-engine-commit>
     artifact-types: cargo
     build-args: |
       RUST_VERSION=1.94
@@ -1045,8 +1091,9 @@ containers:
   ```yaml
   jobs:
     release:
-      uses: diggsweden/forge-ci/.github/workflows/release-orchestrator.yml@v0.90.0
+      uses: diggsweden/forge-ci/.github/workflows/release-orchestrator.yml@PIN_FORGE_CI_SHA # v0.90.0
       with:
+        # Engine commit and image digests: see the Advanced Pinning Recipe.
         branch: main
       secrets:
         # ... your usual secret forwards ...
@@ -1068,14 +1115,60 @@ containers:
 
 ---
 
+## Distro Packages Section
+
+`distro-packages` is a block of the whole release, not of one artifact.
+When the block is present, every `.deb`, `.rpm` and `.apk` file of the
+release is published to the forge's Debian, RPM and Alpine registries, each
+file as the release built and signed it. The block holds only the places;
+`distro-packages: {}` publishes with the defaults.
+
+```yaml
+distro-packages:
+  debian:
+    distribution: stable
+    component: main
+  rpm:
+    group: rocky/el9
+  alpine:
+    branch: stable
+    repository: main
+```
+
+| Field | Default | Meaning |
+|---|---|---|
+| `debian.distribution` | `stable` | The distribution a `.deb` is published to, as in an apt source line. |
+| `debian.component` | `main` | Its component. |
+| `rpm.group` | `stable` | The group an `.rpm` is published to; it may have several steps, such as `rocky/el9`. |
+| `alpine.branch` | `stable` | The branch an `.apk` is published to. |
+| `alpine.repository` | `main` | Its repository. |
+
+A name is lower-case letters and digits, with single `.`, `_` or `-`
+between them, at most 64 characters; only the RPM group takes `/` between
+such names, and is at most 128 characters. Forgejo keeps a package's place
+in a 255-character column, which two names and an architecture fit. An
+unknown field is refused, and so is a place that is empty or no string.
+
+A bare `distro-packages:`, without a value, is refused and not read as an
+absent block: write `distro-packages: {}` for the defaults.
+
+The Forgejo release publishes them; see
+[Distro packages in the owner's registries](forgejo.md#distro-packages-in-the-owners-registries)
+for the job, the token, installation and what is refused. The GitHub and
+GitLab releases refuse a declaration with this block when they are planned,
+since neither forge has registries that fit.
+
+---
+
 ## Publishing Targets
 
 ### `forge-packages`
 
 - **Description:** GitHub Packages registry
 - **Requirements:** `GITHUB_TOKEN` (automatic)
-- **Applies to:** Maven libraries, npm packages, and [Gradle JVM/Android-library publications](gradle-publishing.md). Maven apps are not supported by this target.
+- **Applies to:** Maven libraries, npm packages, and [Gradle JVM/Android-library publications](publishing.md#gradle-jvm-and-android-libraries). Maven apps are not supported by this target.
 - **Registry:** `maven.pkg.github.com/<owner>/<repo>` (Maven), `npm.pkg.github.com` (NPM). Container registries are configured separately under `containers`.
+- **npm name:** GitHub Packages takes an npm package only under the scope of the repository's owner, so `package.json` names it `@<owner>/<name>`, the owner in lower case. An unscoped name is answered with 404 and another owner's scope with 403.
 
 ### `maven-central`
 
@@ -1086,8 +1179,8 @@ containers:
   - `build-type: library` (required)
 - **Authorization:** Requires an allowlisted signed `release-request/vMAJOR.MINOR.PATCH` and the exact prepared release SHA, even when general release authorization is disabled.
 - **Package signing:** Requires `RELEASE_GPG_PRIVATE_KEY` and `RELEASE_GPG_PUBLIC_KEY`, plus `RELEASE_GPG_PASSPHRASE` for a protected key, independently of the release artifact signing method. See [publisher credentials](components.md#artifact-publishers).
-- **Applies to:** Maven and [Gradle JVM/Android-library publications](gradle-publishing.md).
-- **Snapshots:** Explicit snapshot mode uses ordinary CI credentials; the signed-request and GPG-key requirements above apply to stable releases. See [snapshot publication](gradle-publishing.md#snapshots).
+- **Applies to:** Maven and [Gradle JVM/Android-library publications](publishing.md#gradle-jvm-and-android-libraries).
+- **Snapshots:** Explicit snapshot mode uses ordinary CI credentials; the signed-request and GPG-key requirements above apply to stable releases. See [snapshot publication](publishing.md#snapshots).
 - **Note:** Requires Sonatype account and approved groupId
 
 ### `npmjs`
@@ -1130,10 +1223,16 @@ artifacts:
 ```yaml
 jobs:
   release:
-    uses: diggsweden/forge-ci/.github/workflows/release-orchestrator.yml@v0.90.0
+    uses: diggsweden/forge-ci/.github/workflows/release-orchestrator.yml@PIN_FORGE_CI_SHA # v0.90.0
     with:
       branch: main
-      forge-ci-binary-ref: v0.90.0
+      # The full commit the workflow ref above names; every plain-runner job
+      # runs the CLI built in this run from exactly this commit.
+      forge-ci-binary-ref: PIN_FORGE_CI_SHA # v0.90.0
+      # Pinned by digest and admitted before any job runs; replace FIXME with
+      # the digests of the release you call (runtime-images.md).
+      runtime-image: ghcr.io/diggsweden/forge-ci-runtime-base@sha256:0000000000000000000000000000000000000000000000000000000000000000 # FIXME v0.90.0 digest
+      canonical-builder-image: ghcr.io/diggsweden/forge-ci-runtime-go-1.27@sha256:0000000000000000000000000000000000000000000000000000000000000000 # FIXME v0.90.0 digest
       artifacts-config: .forge-ci/artifacts.yml
       release-publisher: github-cli
 ```
@@ -1251,7 +1350,6 @@ artifacts:
       configuration: Release
       enable-code-signing: true
       export-options-var: EXPORT_OPTIONS_BASE64
-      macos-version: macos-26
 ```
 
 **Required Secrets:**
@@ -1298,7 +1396,6 @@ artifacts:
       configuration: Release
       enable-code-signing: true
       export-options-var: EXPORT_OPTIONS_BASE64
-      macos-version: macos-26
 ```
 
 Use `project` or `workspace` alongside XcodeGen so version detection and archive steps target the generated Xcode project explicitly.
@@ -1376,12 +1473,18 @@ containers:
     from: [backend]
     container-file: java-backend/Containerfile
     context: .
+    tag-suffix: -backend
 
   - name: frontend
     from: [frontend]
     container-file: frontend/Containerfile
     context: .
+    tag-suffix: -frontend
 ```
+
+A release publishes every container to one image repository, so separate
+containers each carry a `tag-suffix`; without it the release-image plan
+refuses two containers that would publish the same tag.
 
 ### Combined Container (Multiple Artifacts → One Container)
 
@@ -1408,7 +1511,7 @@ containers:
 **`Containerfile`**
 ```dockerfile
 FROM registry.access.redhat.com/ubi9/openjdk-21-runtime:latest
-COPY target/*.jar app.jar
+COPY java-backend/target/*.jar app.jar
 COPY dist/ /app/static/
 CMD ["java", "-jar", "app.jar"]
 ```
@@ -1429,7 +1532,7 @@ permissions:
 
 jobs:
   release:
-    uses: diggsweden/forge-ci/.github/workflows/release-orchestrator.yml@v0.90.0
+    uses: diggsweden/forge-ci/.github/workflows/release-orchestrator.yml@PIN_FORGE_CI_SHA # v0.90.0
     permissions:
       contents: write
       packages: write
@@ -1445,7 +1548,13 @@ jobs:
       RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
     with:
       branch: main
-      forge-ci-binary-ref: v0.90.0
+      # The full commit the workflow ref above names; every plain-runner job
+      # runs the CLI built in this run from exactly this commit.
+      forge-ci-binary-ref: PIN_FORGE_CI_SHA # v0.90.0
+      # Pinned by digest and admitted before any job runs; replace FIXME with
+      # the digests of the release you call (runtime-images.md).
+      runtime-image: ghcr.io/diggsweden/forge-ci-runtime-base@sha256:0000000000000000000000000000000000000000000000000000000000000000 # FIXME v0.90.0 digest
+      canonical-builder-image: ghcr.io/diggsweden/forge-ci-runtime-go-1.27@sha256:0000000000000000000000000000000000000000000000000000000000000000 # FIXME v0.90.0 digest
       artifacts-config: .forge-ci/artifacts.yml
       changelog-creator: git-cliff
       release-publisher: github-cli
@@ -1474,13 +1583,16 @@ declared once as `project-type: maven`, `build-type: application`,
 `working-directory: .`, with an application container referencing that artifact.
 
 `publish-container.yml` downloads and unpacks outputs into its build workspace.
-The original source working directories are not necessarily preserved; inspect
-the workflow artifact layout before writing complex COPY paths. Typical paths
-for the combined Maven/Gradle/NPM example are:
+A Maven or Gradle artifact is restored in its `working-directory`, so its jar
+is under `<working-directory>/target/` or `<working-directory>/build/libs/` as
+on Forgejo and GitLab. The npm output is unpacked at the repository root, in
+`dist/`. Typical paths for the combined Maven/Gradle/NPM example, with the
+Maven module in `services/api` and the Gradle project in `services/worker`,
+are:
 
 ```dockerfile
-COPY target/*api*.jar /app/api.jar
-COPY build/libs/*worker*.jar /app/worker.jar
+COPY services/api/target/*api*.jar /app/api.jar
+COPY services/worker/build/libs/*worker*.jar /app/worker.jar
 COPY dist /app/web
 ```
 

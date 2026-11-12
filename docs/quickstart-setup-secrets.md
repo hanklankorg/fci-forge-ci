@@ -6,56 +6,42 @@ secret names to them. Configure only the secrets your chosen delivery layer
 and release features require. See [Secrets and permissions](reference.md) and
 the [Forgejo secret contract](forgejo.md#secrets-and-tokens).
 
-SSH and OpenPGP secret inputs accept the complete armored key or one standard
-padded Base64 encoding of those same bytes. Cosign's explicitly selected
-`env://` key secret accepts the same Base64 envelope around its PEM material;
-Cosign still parses and decrypts the key. File and KMS references keep their own
-Cosign interface. ASCII spaces, tabs and CR/LF wrapping are tolerated, and decoded
-signing material is bounded to 16 MiB. Base64 is transport encoding, not encryption.
-Keep public-key trust inputs and their pinned digests in the exact format their
-workflow declares.
+SSH, OpenPGP and Cosign key secrets accept the armored key or its standard
+Base64 encoding. Base64 is an encoding, not encryption. Keep public-key trust
+inputs and their pinned digests in the exact format their workflow declares.
 
 This guide creates keys locally. It does not grant repository permissions,
 configure a runner, publish a release, or create API/registry tokens.
 For a local inventory of release credential names and caller mappings, run
 `forge-ci doctor --requirements`; see [coverage and limitations](setup-requirements.md).
 
+**Short path:** in your repository, `forge-ci setup secrets` lists the
+secrets your release workflows need, what each must allow, and the command
+that stores it; `forge-ci setup signer` adds a public key to the allowed
+signers. Use this guide for the keys those secrets hold.
+
 ## Prefer non-exportable keys or short-lived signing identities
 
-For a production setup, prefer these approaches over copying long-lived private
-keys into CI:
+For a production setup, prefer these over copying long-lived private keys
+into CI:
 
-- **Hardware-backed keys:** use a hardware token, HSM, or a KMS configured with
-  a non-exportable, hardware-backed key where supported. Human release-request
-  signing is a good fit for a hardware token requiring presence or a PIN.
-  Automated signing needs a supported device/service integration with narrowly
-  scoped signing authority. A smartcard stub or an SSH security-key handle is
-  not an ordinary private key that an unattended runner can import and use.
-- **Sigstore keyless signing:** where the forge's workload identity is trusted,
-  use OIDC with **Fulcio** for short-lived signing certificates and **Rekor**
-  for transparency evidence. Verifiers must constrain both the trusted issuer
-  and the intended workflow identity. Public Rekor entries are permanent and
-  can disclose signing identity and artifact metadata; choose that policy
-  deliberately.
+- **Hardware-backed keys:** a hardware token, HSM or KMS key that cannot be
+  exported. A hardware token that asks for presence or a PIN suits the person
+  who signs release requests.
+- **Sigstore keyless signing:** short-lived certificates from **Fulcio** for
+  the forge's workload identity, logged in **Rekor**. Public Rekor entries are
+  permanent and show the signing identity.
 
-These reduce long-lived key exposure; they do not make an untrusted release
-workflow safe. Hardware-backed signing and keyless signing are different
-approaches, not requirements to combine into one mechanism.
+What each forge supports: the GitHub layer offers keyless artifact signing,
+and the CLI can sign with KMS or PKCS#11. The Forgejo workflows sign with
+organization-held keys and take no KMS input; public Fulcio does not trust a
+Forgejo issuer. On Forgejo, `transparency-log: public` logs signatures made
+with the Cosign key; it does not switch to keyless signing. Neither approach
+makes an untrusted release workflow safe.
 
-**Current support matters:** the GitHub layer offers keyless artifact signing,
-and the CLI has explicit KMS/PKCS#11 signing paths. The current Forgejo reusable
-workflows use organization-held keys and expose no KMS input. Public Fulcio
-does not trust an arbitrary Forgejo issuer. A Forgejo keyless deployment needs
-a trusting Sigstore service and a separately integrated workflow and verifier;
-the commands below do not configure that. Setting Forgejo's
-`transparency-log: public` logs signatures made with the existing Cosign key;
-it does not switch the workflow to keyless signing.
-
-See [Signing methods](verification.md#signing-methods-for-release-artifacts),
-[the Forgejo signing boundary](forgejo.md#signing), and the
-[OpenBao example](../examples/signing/openbao-kms/README.md). Keyless artifact
-signing does not replace the current SSH Git-object signing or OpenPGP package
-signatures automatically.
+See [Choosing a method](verification.md#choosing-a-method),
+[Forgejo signing](forgejo.md#signing) and the
+[OpenBao example](../examples/signing/openbao-kms/README.md).
 
 ## 1. Prepare a private directory
 
@@ -164,7 +150,9 @@ old public keys so existing releases remain verifiable.
 This key is needed when the selected release flow signs distro packages with
 OpenPGP. In the Forgejo layer, `sign-distro-packages: 'true'` requires the three
 GPG secrets; an archive-only consumer can explicitly disable that feature in
-both preparation and signing.
+both preparation and signing. A Forgejo declaration that says
+`sign.method: gpg` requires them too: the same key signs the checksums and
+SBOMs.
 
 Use a dedicated keyring, not your personal GPG keyring:
 
@@ -243,7 +231,5 @@ Before the first release, confirm:
 
 Keep encrypted backups of keys, passphrases and recovery material. Do not
 commit private files, print them in CI logs, or paste them into chat or issues.
-Passphrases protect stored files; placing a private key and its passphrase in
-the same CI secret store does not prevent a compromised signing job from using
-them. This is why non-exportable hardware-backed keys or appropriately trusted
-keyless signing are preferable when the integration supports them.
+A passphrase protects a stored file, not a key whose passphrase sits in the
+same CI secret store: a compromised signing job can use both.

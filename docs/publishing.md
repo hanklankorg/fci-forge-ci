@@ -6,37 +6,18 @@ Play. Per-target sections cover prerequisites, the `artifacts.yml`
 fields and secrets each one needs, and the consumer-side fetch
 commands.
 
-> **Current source versus release pins:** `v0.90.0` examples identify a historical
-> baseline, not the current source revision. Confirm matching workflows, CLI
-> assets and runtime images before adoption. For unreleased changes, follow
-> [Branch Testing](runtime-images.md#branch-testing).
+Snippets pin `v0.90.0`; see [Which version to pin](README.md#documentation-index).
 
-## Check enforcement before publication
-
-The [administrator's check enforcement settings](admin-policy.md) control whether
-recognized lint, vulnerability, application-test and reproducible-build findings
-block progression. All four default to report-only; explicit `true` enables
-enforcement. Legacy `skip-tests: true` (including
-`SKIP_TESTS=true`) is refused, and exported/published OCI layouts are always
-scanned. SBOM selection is separate from
-this vulnerability scan.
-
-To report recognized findings without blocking, the administrator sets the
-matching input to `false` in its own entry point; see
-[who sets them](admin-policy.md#who-sets-them-and-how). Checks still run and findings remain visible. Tool startup, invalid reports,
-compilation, packaging, credentials, signatures and source/digest identity
-failures remain blocking; a report-only publication is not a scan-clean receipt.
+The [administrator's check enforcement](admin-policy.md) decides whether lint,
+vulnerability, test and reproducible-build findings block a publication. All
+four report without blocking by default; the checks still run.
 
 ## Release-file manifests
 
-The build producer supplies `dist/release-files.json` before handing its
-distribution to signing. This versioned contract names the public `assets`
-and classifies `checksums`, `sboms`, `evidence` and `provenance`; every classified
-file also belongs in `assets`. Each entry has a relative `path` under `dist/`,
-its basename as `name`, and a nonempty `source` label. Exactly one checksums
-file is required. Producers can use any build tool and file naming convention.
-
-For example, a JAR producer can supply:
+The build hands its files to signing in `dist/release-files.json`. The
+manifest lists the public `assets` and marks which of them are `checksums`
+(exactly one file), `sboms`, `evidence` and `provenance`. Each entry has a
+`path` under `dist/`, its basename as `name`, and a `source` label:
 
 ```json
 {
@@ -52,97 +33,25 @@ For example, a JAR producer can supply:
 }
 ```
 
-`forge-ci release files declare` writes that hand-off for a producer that
-names its files: the checksums file over every `--asset` and `--sbom` file,
-then the manifest. A path may be a glob pattern, which the command expands, so
-`--asset 'dist/*/*'` declares the per-platform binaries of `build go run` or
-`build cargo run`. It refuses a pattern that names no file, an existing
-manifest or checksums file, and a dist that already holds a signature or the
-provenance statement. `release files import-goreleaser` is the same step for a
-GoReleaser build.
+The commands, in the order a release runs them:
 
-`forge-ci release files validate` checks the manifest. Signing uses its
-classified sections. `release sign --checksums-from-manifest` and
-`release provenance --checksums-from-manifest` take the manifest's single
-checksums file instead of a named one, and first check that it lists every
-checksum subject exactly once with its actual SHA-256 digest; on a refusal
-nothing is signed and no statement is written. The provenance statement is the
-one `--checksums-file` produces from the same file. After signing, `forge-ci release files manifest`
-finalizes that same declared file set, adding the required SLSA provenance and
-its bundle, plus `.bundle` and `.sig` companions of declared assets. It preserves
-the producer's classifications and reads no build-tool metadata.
-When `release publish --strategy=reconcile` selects assets through a manifest,
-it requires a finalized manifest: one that declares the provenance statement,
-its bundle and the bundle of every `evidence` file. A producer's manifest is
-refused before upload. Explicit `--asset` values instead select files directly;
-`--strategy=recreate` uses a release assembly. See the
-[publish command reference](cli-reference.md#forge-ci-release-publish).
+1. `forge-ci release files declare` writes the checksums file and the manifest
+   from `--asset` and `--sbom` paths, which may be glob patterns
+   (`--asset 'dist/*/*'`). For a GoReleaser build, use
+   `release files import-goreleaser` instead.
+2. `forge-ci release files validate --unsigned` checks the manifest and
+   refuses a `dist/` that already holds signatures or provenance, so every
+   signature comes from the signing job.
+3. `release sign` and `release provenance` with `--checksums-from-manifest`
+   check every checksum against its file, then sign.
+4. `forge-ci release files manifest` adds the provenance and the signatures
+   to the manifest. When `release publish` picks files through a manifest, it
+   accepts only such a finished one.
 
-For manifest-driven selection, a manifest named with `--manifest` or
-`RELEASE_FILES_MANIFEST` must exist. Only an absent default
-`dist/release-files.json` selects GoReleaser discovery, and a manifest that
-exists but cannot be read or validated is refused.
-
-### What covers each published file
-
-Every file in the manifest's `assets` is published. The validate/sign/finalize
-flow must establish the following coverage before publication:
-
-| File | Covered by |
-|---|---|
-| a declared asset, an SBOM included | its line in the checksums file |
-| the checksums file | its signature bundle |
-| an `evidence` file | its own signature bundle, which finalization requires |
-| the provenance statement | its signature bundle, which finalization requires |
-| `<declared file>.bundle`, `<declared file>.sig` | it is the signature of that file |
-
-Finalization checks file presence and classification, including the required
-provenance and evidence bundles. It does not verify signature contents or
-recheck checksum digests, and it does not require a checksums bundle. Complete
-the checksum validation and configured signing steps before finalization;
-successful finalization alone does not establish the coverage in this table.
-
-The checksums file is written by the producer, before evidence is signed and
-before the provenance statement exists, so it lists neither. Nothing else is
-exempt: a file is a checksum subject whatever it is named, and a `.bundle` or
-`.sig` file is a signature only next to the declared file it signs. The
-`provenance` section admits one path, `<dist>/slsa-provenance.intoto.json`,
-which the engine writes.
-
-Finalization cannot tell a signature the signer wrote from a file that was in
-the dist before signing, so the producer hands over an unsigned dist and the
-signing job checks that first:
-
-```bash
-forge-ci release files validate --unsigned
-```
-
-It refuses a manifest that declares provenance or a signature, and a dist that
-already holds the provenance statement or a `.bundle` or `.sig` of a declared
-file. Run it before the first signing verb; after signing those files exist by
-design. The signing verbs replace the sidecars of the files they sign.
-
-### Importing GoReleaser output
-
-Consumers using GoReleaser can convert its metadata to this contract after the
-build, adding explicit evidence before signing:
-
-```bash
-forge-ci release files import-goreleaser --evidence-file dist/release-plan.json
-```
-
-Import creates `dist/release-files.json` from the publishable GoReleaser
-artifacts and the explicitly named evidence files. Repeat `--evidence-file` for
-additional evidence. Files must be regular files under the distribution directory;
-an evidence file cannot reclassify an existing GoReleaser asset. Import
-refuses an existing manifest to preserve its classifications, and a dist that
-is not unsigned in the sense above: a signature GoReleaser wrote next to an
-imported file is not the release signer's and is not published as one.
-
-For flows without a producer manifest, `release files collect` and fresh
-`release files manifest` writes retain their GoReleaser discovery behavior.
-The `--assets-json` input reuses that collected asset list. Build-tool-neutral
-producers provide the classified manifest directly instead of using discovery.
+Every published file is covered: an asset by its line in the checksums file,
+the checksums file, each evidence file and the provenance by their own
+signature bundles. See the [CLI reference](cli-reference.md#forge-ci-release-files)
+for each command's flags.
 
 ## Targets at a glance
 
@@ -154,47 +63,21 @@ producers provide the classified manifest directly instead of using discovery.
 | Container registries      | Container images   | `GITHUB_TOKEN` or registry-password |
 | Apple App Store           | iOS / macOS apps   | App Store Connect API v2    |
 | Google Play Store         | Android apps       | Service Account JSON        |
+| Forgejo Debian, RPM and Alpine registries | `.deb`, `.rpm` and `.apk` release files | `RELEASE_REGISTRY_TOKEN`; see [Distro packages in the owner's registries](forgejo.md#distro-packages-in-the-owners-registries) |
 
----
-
-### NPM
-
-Publishing requires an explicit version-specific `config.npm-tag`, normally
-`release-{version}`. There is no movable default channel. See the
-[npm publication policy](ecosystems.md#npm-artifact-first).
-
-`forge-ci publish npm validate-tarball` reads packed metadata without executing
-package code. CLI packages declaring `bin` retain the historical `dist/cli.js`
-requirement. Libraries may declare a literal `exports` string naming an
-unescaped canonical `./` file target, or a relative `main` path to a regular
-file when `exports` is absent/null. Exports targets cannot contain backslashes,
-percent-encoded paths, query/fragment syntax, empty/dot/parent segments or
-`node_modules` segments. Conditional/subpath objects, arrays, other non-string
-exports values, bare targets and noncanonical paths are refused rather than
-guessed or replaced by `main`. The selected entry must exist as a regular file;
-this bounded validation does not prove every export works. Keep a fresh
-installed-package oracle for actual package behavior.
-
-```bash
-# Configure npm to use GitHub Packages
-npm config set @your-github-org:registry https://npm.pkg.github.com
-npm config set //npm.pkg.github.com/:_authToken YOUR_GITHUB_TOKEN
-```
-
-#### Containers
-
-```bash
-# Pull image
-podman pull ghcr.io/<owner>/<repo>:v1.0.0
-```
+A Maven library published to GitHub Packages carries the exact POM, main,
+sources and Javadoc bytes of its build job (`publish forge-packages deploy
+--from-build`); the project lifecycle does not run again. It refuses
+profile-selected reactor modules and a `finalName` that does not resolve to
+a plain file name.
 
 ---
 
 ## Maven Central
 
 Gradle uses exported Maven-layout files with separate signing and upload; see
-[Gradle JVM package publishing](gradle-publishing.md). The Maven profile setup
-below applies to Maven projects.
+[Gradle JVM and Android libraries](#gradle-jvm-and-android-libraries). The
+Maven profile setup below applies to Maven projects.
 
 ### Prerequisites
 
@@ -373,23 +256,21 @@ config:
 
 ### Release Process
 
-1. **Request a release**: push a SIGNED request tag:
+1. **Request a release**: push a signed request tag:
 
    ```bash
    git tag -s release-request/v1.0.0 -m "Release v1.0.0"
    git push origin release-request/v1.0.0
    ```
 
-   forge-ci verifies your signature (against the committed allowlist, when
-   enabled), bumps the version + changelog, then **creates the immutable
-   `v1.0.0` release tag once** at the bump commit. No tag is force-pushed or
-   mutated. Your signed `release-request/v1.0.0` tag remains as the
-   authorisation anchor, and the bot's release commit records you as the
-   original tagger (`Release-Authorized-By` / `Co-authored-by` trailers).
-
-   The forge-ci example release workflows trigger on `release-request/v*`.
-   (SNAPSHOT/dev builds are a separate `workflow_dispatch` flow, described by
-   the snapshot orchestrator, and do not use release-request tags.)
+   forge-ci verifies the signature, bumps the version and changelog, and
+   creates the final `v1.0.0` tag once; see
+   [Request → promote](verification.md#request--promote-release-tags-are-immutable).
+   Every target on this page is released this way. The example release
+   workflows trigger on `release-request/v*`.
+   Snapshot builds use the snapshot orchestrator instead: its example callers
+   run on pushes to `develop` and `feature/**` and on `workflow_dispatch`,
+   and use no release-request tag.
 
 2. **Build and deployment:**
    - Runs the library lifecycle/profile; the project POM attaches sources and javadoc
@@ -421,15 +302,231 @@ No additional configuration needed - Maven Central is included by default.
 
 #### Snapshot channel
 
-The release flow defaults to stable versions; `release-policy: stable-prerelease`
-also admits immutable beta/RC releases with the same signed-request gate.
-Branch snapshots use `release-snapshot-orchestrator.yml` and do not create
-release tags or GitHub Releases. They support content-addressed npm versions
-and opt-in Maven-format snapshots through `publish-maven-snapshots: true`.
-Maven snapshots use ordinary CI authorization; immutable Central releases
-require an allowlisted signed request.
-See [snapshot publication](gradle-publishing.md#snapshots) for Maven, Gradle JVM
-and Android-library usage and the separate Central snapshot endpoint.
+Branch snapshots publish Maven-format snapshots when
+`publish-maven-snapshots: true`; see [Snapshots](#snapshots). For prereleases,
+see [release policy](workflows.md#stable-and-prerelease-policy).
+
+---
+
+## Gradle JVM and Android libraries
+
+Gradle libraries are published from files that Gradle's `maven-publish`
+plugin exports. Signing and upload happen in separate jobs.
+
+### Supported scope
+
+The publisher supports JVM JAR, Android-library AAR and POM publications produced
+by Gradle's native `maven-publish` plugin. Multiple publications and subprojects
+must have unique coordinates. Stable releases use `MAJOR.MINOR.PATCH`, with every
+publication matching the authorized release version. Snapshot mode accepts only
+`MAJOR.MINOR.PATCH-SNAPSHOT`; see [Snapshots](#snapshots).
+
+Kotlin Multiplatform formats beyond JAR/AAR/POM and arbitrary remote publishing
+task overrides are outside this publication contract.
+
+The CLI exports the entire Gradle build by default. Use `--project :lib` to
+export only that exact Gradle project's publications (or `--project :` for the
+root project). Android workflows and components pass `build-module` as this
+selector. All publications of the selected project are included; a product flavor
+does not select a publication. Declare only the variants intended for publication
+in that module's `publishing` configuration.
+
+### Configure the project
+
+Apply `java-library` and `maven-publish`, declare a publication from the Java
+component, and set the project's group and version. For Central, attach sources
+and javadoc and provide POM name, description, URL, license, developer and SCM
+metadata. A conventional Kotlin DSL publication is:
+
+```kotlin
+plugins {
+    `java-library`
+    `maven-publish`
+}
+java {
+    withSourcesJar()
+    withJavadocJar()
+}
+publishing {
+    publications {
+        create<MavenPublication>("library") {
+            from(components["java"])
+            pom {
+                name.set("Example library")
+                description.set("An example JVM library")
+                url.set("https://example.org/library")
+                licenses { license {
+                    name.set("Apache-2.0")
+                    url.set("https://www.apache.org/licenses/LICENSE-2.0")
+                } }
+                developers { developer { id.set("maintainer") } }
+                scm { url.set("https://example.org/library.git") }
+            }
+        }
+    }
+}
+```
+
+The build needs no remote publishing repository or signing plugin. Forge CI adds
+a temporary file repository for stable export and uses a private Maven-local
+repository for snapshot export. Publishing jobs consume those exported files.
+They do not execute the consumer's Gradle/Maven project or its publishing tasks.
+Snapshot upload uses a pinned Maven `deploy-file` goal in an empty directory to
+handle timestamp allocation and remote metadata merging.
+
+### GitHub release configuration
+
+Use the [Gradle example](../examples/gradle-app/) with a library artifact:
+
+```yaml
+artifacts:
+  - name: my-library
+    project-type: gradle
+    build-type: library
+    publish-to: [forge-packages, maven-central]
+    require-authorization: true
+    config:
+      gradle-tasks: build
+      gradle-version-file: gradle.properties
+```
+
+Selecting Central requires an allowlisted signed release request even when
+`require-authorization` is omitted. The builder exports a separate
+`<artifact>-maven-publications` workflow artifact, preserving the existing build
+JAR/SBOM artifact layouts. Every exported POM is checked against the release
+version. Missing publication inputs fail before the build; produced metadata
+and file sets are validated immediately after export.
+
+Central requires its token username/password and the release GPG private/public
+key, plus the passphrase when the key is encrypted. Git authorization is checked
+again in the publishing job before importing keys, and before deployment. The
+public key is also the trust root for every exported artifact's `.asc` signature.
+
+### GitLab and Forgejo
+
+GitLab `build-gradle` and `build-gradle-android` support `export-publications`,
+`version`, `snapshot-publication` and `central-publication`. Select `library: true`
+for an Android library. Pass the exported directory through native
+`needs:`/`dependencies:` into `publish-forge-packages` or `publish-maven-central`
+with `project-type: gradle`. For forge packages, set `working-directory` to the
+exported directory. For Central, `publication-directory` is relative to the
+source `working-directory`, and `release-sha` must name the prepared checkout.
+Fetch the request and final tags for authorization.
+Both publisher components accept `snapshot: true` for ordinary CI snapshot
+publication without a signed release request.
+
+The publish child pipelines GitLab generates from a plan cannot hand over the
+exported publications; wire the components by hand as above.
+
+On Forgejo, compose the same CLI steps in your own trusted jobs:
+`build gradle export-publications`, then the chosen publisher. The uploader
+takes the Maven endpoint from the forge; no GitHub URL is built in.
+
+### Central lifecycle and recovery
+
+The exported-file path validates and signs files with armored OpenPGP signatures,
+then verifies every signature and its MD5, SHA-1, SHA-256 and SHA-512 checksum
+sidecars before bundling. The weak hashes are Maven compatibility metadata;
+OpenPGP supplies authenticity. `publish maven-central bundle`
+submits exactly once. By default it waits for validation and requires manual
+release in the Portal; `--automatic` waits for `PUBLISHED`. `VALIDATED` or
+`PUBLISHING` at the deadline is a failure to confirm publication, never success.
+
+Keep the printed deployment ID. Resume observation without uploading again:
+
+```text
+forge-ci publish maven-central wait --deployment-id <id> --automatic
+```
+
+If submission failed without returning an ID, inspect the Central Portal before
+retrying: the upload may have been accepted. Native forge uploads likewise report
+how many files completed before a partial failure; they never delete existing
+package versions or automatically replay uploads.
+
+With the Maven-profile path, a successful exit means the profile finished,
+not that Central has published.
+
+Native Maven deployment runs trusted consumer project code with credentials.
+Its secret-free `--validate-only` preflight is an early check; actual deployment
+also resolves and validates the reactor with the deployment environment before
+running `deploy`, including the same `skipTests` property. This catches profiles
+activated by publication credentials. It does not sandbox Maven extensions or
+plugins, nor prevent project code from changing files or versions during the
+lifecycle. Use exported-file publication when that stronger boundary is required.
+
+### Android libraries
+
+Use the existing Android project type with an explicit library build:
+
+```yaml
+artifacts:
+  - name: android-library
+    project-type: gradle-android
+    build-type: library
+    publish-to: [forge-packages, maven-central]
+    sboms: build
+    config:
+      build-module: lib
+      gradle-version-file: gradle.properties
+```
+
+Apply `com.android.library` and `maven-publish` in the library module, configure
+`android.publishing.singleVariant("release")` with sources/javadoc, and publish
+`components["release"]` with the same POM metadata as the JVM example. Configure
+the project's AGP, Gradle wrapper and JDK/SDK runtime as a compatible set.
+
+Library mode selects the module's release AAR, uses the Maven `version` property,
+and does not increment application `versionCode` or change `versionName`.
+APK/AAB signing and Google Play are application features: explicitly selecting
+them for a library is rejected. The library's default SBOM selection is `build`;
+unsupported analyzed-artifact requests are rejected before building.
+
+### Snapshots
+
+The existing snapshot orchestrator can publish Maven-format snapshots when
+explicitly enabled:
+
+```yaml
+with:
+  publish-maven-snapshots: true
+```
+
+This covers configured Maven, Gradle JVM and Android-library Maven targets.
+Normal repository CI authorization and registry credentials are sufficient;
+there is no allowlisted human release-request requirement for snapshots.
+Stable releases still require that signed request. Every resolved module must
+be a snapshot when using the snapshot route, so it cannot accidentally release a
+stable version. Independently versioned snapshot modules are permitted.
+
+For an exported Gradle project:
+
+```sh
+forge-ci build gradle export-publications --snapshot --output publication
+forge-ci publish forge-packages deploy --project-type gradle --snapshot --working-dir publication
+# Or use Central's snapshot repository:
+forge-ci publish maven-central snapshot --working-dir publication
+```
+
+Snapshot upload requires Maven 3.9+ and uses the pinned deploy plugin to produce
+timestamped filenames and merge repository metadata. It runs outside the consumer
+checkout, refuses redirects, and disables transport/deployment retries. A failed
+upload reports partial progress; inspect the repository before repeating it.
+
+For Maven projects using the modern Central plugin:
+
+```sh
+forge-ci publish maven-central deploy --snapshot --profile central-release --settings-path settings.xml
+```
+
+The plugin supports snapshots from version 0.7.0. Forge CI validates the effective
+reactor before deployment and sets `gpg.skip=true` for snapshots; release signing
+keys are not required. The Maven profile still owns the native project lifecycle.
+
+Central must have snapshots enabled for the namespace. Its snapshot repository
+is `https://central.sonatype.com/repository/maven-snapshots/`; stable bundles use
+the Publisher API. The modern Maven plugin routes between them automatically.
+Snapshots are mutable and subject to retention. These Maven semantics do not
+change npm's required version-specific tags.
 
 ---
 
@@ -438,11 +535,16 @@ and Android-library usage and the separate Central snapshot endpoint.
 NPM publishing goes to `npm.pkg.github.com` and authenticates with the
 auto-provided `GITHUB_TOKEN`; no separate npm token is needed. The
 package name must use the `@<owner>/` scope, with `<owner>` matching
-the lowercased GitHub repository owner.
+the lowercased GitHub repository owner. Configuration validation refuses the
+`npmjs` `publish-to` value.
 
-Public-registry publishing to `npmjs.org` is not implemented today.
-The `npmjs` `publish-to` value is reserved in the schema; current
-config validation rejects it.
+Publishing requires an explicit version-specific `config.npm-tag`, normally
+`release-{version}`; there is no movable default channel. See the
+[npm publication policy](ecosystems.md#npm-artifact-first). Before publishing,
+`forge-ci publish npm validate-tarball` reads the packed metadata without
+running package code: a package with `bin` needs `dist/cli.js`, and a library
+needs a literal `exports` string naming a plain `./` file, or a `main` path
+when `exports` is absent. Other `exports` forms are refused.
 
 ### Configuration
 
@@ -488,12 +590,8 @@ Your `package.json` must include:
 
 ### Release Process
 
-1. **Tag your release:**
-
-   ```bash
-   git tag -s release-request/v1.0.0 -m "Release v1.0.0"
-   git push origin release-request/v1.0.0
-   ```
+1. **Request the release** with a signed `release-request/v1.0.0` tag, as in
+   [the Maven Central release process](#release-process).
 
 2. **Workflow automatically:**
     - Runs `npm run build` when a `build` script exists
@@ -506,9 +604,11 @@ Your `package.json` must include:
 
 ### Consuming Published Package
 
-Users install with:
+Point npm at GitHub Packages, then install:
 
 ```bash
+npm config set @your-github-org:registry https://npm.pkg.github.com
+npm config set //npm.pkg.github.com/:_authToken YOUR_GITHUB_TOKEN
 npm install @your-github-org/my-package
 ```
 
@@ -568,11 +668,28 @@ destination names together for your project. For the custom GHCR destination,
 configure `REGISTRY_USER` as a variable and `REGISTRY_TOKEN` as a secret
 authorized to publish under `my-custom-org`.
 
+A direct caller supplies what the release orchestrator supplies: the
+canonical CLI of the same run. `canonical-cli-bootstrap.yml` builds it from
+the full engine commit in a pinned Go builder image (the image the
+orchestrator's `canonical-builder-image` input takes); the host build legs
+of `publish-container.yml` receive it, and its other jobs run in the
+`runtime-image` and `runtime-image-full` digests. Tags are refused there.
+
 ```yaml
 jobs:
+  canonical-cli:
+    permissions:
+      contents: read
+      actions: read
+    uses: diggsweden/forge-ci/.github/workflows/canonical-cli-bootstrap.yml@PIN_FORGE_CI_SHA # v0.90.0
+    with:
+      engine-repository: diggsweden/forge-ci
+      engine-commit: <full-engine-commit> # the commit the pinned forge-ci tag points at
+      runtime-image: <go-builder-image>@sha256:<digest>
+      receive-runtime-image: ghcr.io/diggsweden/forge-ci-runtime-base@sha256:<digest>
   publish-container:
-    needs: build-maven
-    uses: diggsweden/forge-ci/.github/workflows/publish-container.yml@v0.90.0
+    needs: [build-maven, canonical-cli]
+    uses: diggsweden/forge-ci/.github/workflows/publish-container.yml@PIN_FORGE_CI_SHA # v0.90.0
     permissions:
       contents: read
       packages: write
@@ -580,7 +697,16 @@ jobs:
       actions: read
     with:
       branch: main
-      forge-ci-binary-ref: v0.90.0
+      forge-ci-binary-ref: <full-engine-commit>
+      runtime-image: ghcr.io/diggsweden/forge-ci-runtime-base@sha256:<digest>
+      runtime-image-full: ghcr.io/diggsweden/forge-ci-runtime@sha256:<digest>
+      canonical-artifact-id: ${{ needs.canonical-cli.outputs.artifact-id }}
+      canonical-artifact-name: ${{ needs.canonical-cli.outputs.artifact-name }}
+      canonical-producer-run-id: ${{ needs.canonical-cli.outputs.producer-run-id }}
+      canonical-producer-run-attempt: ${{ needs.canonical-cli.outputs.producer-run-attempt }}
+      canonical-producer-engine-repository: ${{ needs.canonical-cli.outputs.engine-repository }}
+      canonical-producer-engine-commit: ${{ needs.canonical-cli.outputs.engine-commit }}
+      canonical-producer-result: ${{ needs.canonical-cli.result }}
       container-file: Containerfile
       artifact-types: maven
       registry: ghcr.io
@@ -606,34 +732,19 @@ podman pull ghcr.io/my-custom-org/my-app:v1.0.0
 Requires a Docker Hub access token. Configure `DOCKERHUB_USERNAME` as a
 repository or organization variable and `DOCKERHUB_TOKEN` as a secret.
 
-The release orchestrator publishes containers to GHCR. For Docker
-Hub, call `publish-container.yml` directly after the build job, set
-the Docker Hub image name explicitly, and pass registry credentials
-through the `registry-username` input and the `registry-password`
-secret:
+The release orchestrator publishes containers to GHCR. For Docker Hub, call
+`publish-container.yml` directly, as in the custom-namespace example above,
+with the `canonical-cli` job and every input it shows. Change only these
+lines of the `publish-container` job:
 
 ```yaml
-jobs:
-  publish-container:
-    needs: build-maven
-    uses: diggsweden/forge-ci/.github/workflows/publish-container.yml@v0.90.0
-    permissions:
-      contents: read
-      packages: write
-      id-token: write
-      actions: read
     with:
-      branch: main
-      forge-ci-binary-ref: v0.90.0
-      container-file: Containerfile
-      artifact-types: maven
+      # ...the other inputs as in the custom-namespace example
       registry: docker.io
       image-name: docker.io/dockerhub-org/my-app
       enforce-namespace: dockerhub-org
       registry-username: ${{ vars.DOCKERHUB_USERNAME }}
       use-ci-token: false
-      sign-image: true
-      sign-method: sigstore
     secrets:
       registry-password: ${{ secrets.DOCKERHUB_TOKEN }}
 ```
@@ -647,29 +758,17 @@ docker.io/dockerhub-org/my-app:v1.0.0
 ### Custom Registry
 
 Configure `REGISTRY_USER` as a variable and `REGISTRY_TOKEN` as a secret
-authorized for the destination. This example retains the source owner's
-namespace and repository name, producing `registry.example.com/source-org/my-app`.
+authorized for the destination. Use the custom-namespace example above,
+leave out its `image-name` and `enforce-namespace` lines, and change these.
+Without `image-name`, the image keeps the source owner's namespace and
+repository name: `registry.example.com/source-org/my-app`.
 
 ```yaml
-jobs:
-  publish-container:
-    needs: build-maven
-    uses: diggsweden/forge-ci/.github/workflows/publish-container.yml@v0.90.0
-    permissions:
-      contents: read
-      packages: write
-      id-token: write
-      actions: read
     with:
-      branch: main
-      forge-ci-binary-ref: v0.90.0
-      container-file: Containerfile
-      artifact-types: maven
+      # ...the other inputs as in the custom-namespace example
       registry: registry.example.com
       registry-username: ${{ vars.REGISTRY_USER }}
       use-ci-token: false
-      sign-image: true
-      sign-method: sigstore
     secrets:
       registry-password: ${{ secrets.REGISTRY_TOKEN }}
 ```
@@ -712,10 +811,6 @@ config:
   enable-code-signing: false  # Build archive only; release publish skips App Store upload
 ```
 
-**Note:** iOS apps use `publish-to: []` because they don't publish to package
-registries like Maven Central or npm. The App Store upload happens automatically
-for signed Xcode artifacts and is skipped for unsigned archive-only builds.
-
 ### Configuration
 
 ```yaml
@@ -734,7 +829,6 @@ artifacts:
       configuration: Release
       enable-code-signing: true   # Enables IPA export and App Store Connect upload
       export-options-var: EXPORT_OPTIONS_BASE64
-      macos-version: macos-26
       # App Store Connect upload options
       submit-for-review: false  # Summary intent only; submit review manually in App Store Connect
       skip-validation: false    # Validate IPA before upload (recommended)
@@ -799,12 +893,8 @@ base64 < exportOptions.plist > exportOptions.txt
 
 ### Release Process
 
-1. **Tag your release:**
-
-   ```bash
-   git tag -s release-request/v1.0.0 -m "Release v1.0.0"
-   git push origin release-request/v1.0.0
-   ```
+1. **Request the release** with a signed `release-request/v1.0.0` tag, as in
+   [the Maven Central release process](#release-process).
 
 2. **Workflow automatically:**
    - Builds iOS app with Xcode
@@ -887,8 +977,8 @@ artifacts:
       debug-symbols: ""                    # Native debug symbols path
 ```
 
-Android requires an explicit supported SBOM selection: APK/AAB
-`analyzed-artifact` scanning is not implemented. See
+Android needs an explicit SBOM selection, since APK/AAB files get no
+`analyzed-artifact` SBOM. See
 [Android SBOM selection](sbom.md#defaults).
 
 ### Required Secrets
@@ -949,7 +1039,7 @@ android {
 
 ### Staged Rollouts
 
-For gradual releases, use `inProgress` status with `user-fraction`:
+For gradual releases, use `inProgress` status with `google-play-user-fraction`:
 
 ```yaml
 config:
@@ -979,12 +1069,8 @@ config:
 
 ### Release Process
 
-1. **Tag your release:**
-
-   ```bash
-   git tag -s release-request/v1.0.0 -m "Release v1.0.0"
-   git push origin release-request/v1.0.0
-   ```
+1. **Request the release** with a signed `release-request/v1.0.0` tag, as in
+   [the Maven Central release process](#release-process).
 
 2. **Workflow automatically:**
    - Builds Android app with Gradle
@@ -996,17 +1082,3 @@ config:
    - Internal track: Immediately after upload
    - Alpha/Beta: After processing (~minutes)
    - Production: After review (first release) or immediately (updates)
-
----
-
-## Security Features
-
-Published artifacts can include these security features, depending on artifact
-type and enabled workflow inputs:
-
-- **GPG Signing** - Release checksums and package artifacts when signing is enabled
-- **SBOM Generation** - CycloneDX/SPDX outputs for supported `sboms` layers
-- **SLSA Provenance** - signed SLSA v1.0 provenance via cosign on compatible registries when signing and provenance are enabled; a signature alone does not establish a SLSA build level
-- **Namespace Validation** - Confines image names to the configured destination namespace; registry authorization is separate
-
-For verification instructions, see [Artifact Verification Guide](verification.md).

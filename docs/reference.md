@@ -5,16 +5,6 @@ reusable workflows. For other forges, see the [GitLab](gitlab.md#secrets-and-tok
 and [Forgejo](forgejo.md#secrets-and-tokens) guides.
 For the generated command surface, see [CLI Reference](cli-reference.md).
 
-## Repeated CLI pairs
-
-Flags taking repeated `key=value` pairs preserve commas inside each value.
-Repeat the flag to pass another pair, for example
-`--label 'example.features=one,two' --label 'example.owner=team'`;
-do not comma-join separate pairs into one flag argument. This also applies
-to build arguments, required image labels, report job rows and literal-input
-constraints. The isolation validator's separate `--signing-secret` name list
-continues to accept both repeated flags and comma-separated names.
-
 ## Canonical command environment names
 
 These names are consumed by the CLI inside a job. Repository variables do
@@ -30,17 +20,11 @@ release workflows map their repository variable `RELEASE_REGISTRY_USER` to it.
 | Changelog file | `CHANGELOG_FILE` | `CHANGELOG.md` for rendering/commit operations; validation requires a file |
 | Whitespace-separated mise tool selection | `TOOLSET_TOOLS` | The tools declared by the project |
 
-The former names `REGISTRY_USERNAME`, `RELEASE_IMAGES_LEDGER`,
-`CHANGELOG_PATH`, `TOOLS_SUBSET` and `MISE_TOOLS` are no longer CLI sources.
-Update custom step environments with the engine pin; there are no fallback
-aliases. CLI flag names are unchanged. Explicit flags take precedence; a
-plan-backed flag resolves flag, plan field, environment, then default.
-
-The repository-level pair `RELEASE_REGISTRY_USER` / `RELEASE_REGISTRY_TOKEN`
-still maps to the CLI's `REGISTRY_USER` / `REGISTRY_TOKEN` only in the jobs
-that need it. `REGISTRY_PASSWORD` remains an alternative password input;
-it is not a second required secret. Base-image and release credentials may
-have different permissions and are not combined by this naming cleanup.
+Explicit flags take precedence; a plan-backed flag resolves flag, plan field,
+environment, then default. The repository pair `RELEASE_REGISTRY_USER` /
+`RELEASE_REGISTRY_TOKEN` maps to the CLI's `REGISTRY_USER` / `REGISTRY_TOKEN`
+only in the jobs that need it. `REGISTRY_PASSWORD` is an alternative password
+input, not a second required secret.
 
 ## Environment Variables Matrix
 
@@ -55,7 +39,7 @@ have different permissions and are not combined by this naming cleanup.
 | **MAVEN_CENTRAL_USERNAME** | Maven Central publishing | Presence in preflight; authentication during deploy | Sonatype publishing username | Configure the project's Maven settings/plugin for deployment |
 | **MAVEN_CENTRAL_PASSWORD** | Maven Central publishing | Presence in preflight; authentication during deploy | Sonatype publishing token | Not the account password |
 | **CODE_SCANNING_TOKEN** | Optional Code Scanning upload | SARIF upload | Token with Code Scanning write access | Scan execution and report upload are separate |
-| **NPM_TOKEN** | Future npmjs.org publishing | Not checked by current production release | npmjs.org auth token | Reserved; current NPM publishing uses GitHub Packages and `GITHUB_TOKEN` |
+| **NPM_TOKEN** | Unused: `publish-to: npmjs` is refused | Not checked | — | npm publishing uses GitHub Packages and `GITHUB_TOKEN` |
 
 Requirements follow the selected signing methods and publishing targets. A
 workflow secret declared `required: false` can still be required by a selected
@@ -129,24 +113,8 @@ publishing path uses them; SSH Git-object signing uses
 `RELEASE_SSH_SIGNING_KEY`. Sigstore/KMS artifact signing has its own
 [backend requirements](verification.md#signing-methods-for-release-artifacts).
 
-Orgs that manage these secrets centrally typically expose them as
-organization-level secrets and grant per-repository access. In that
-setup a repo maintainer asks the org admin for the names the repo
-actually needs:
-
-- Release token → `RELEASE_TOKEN`
-- GPG signing → `RELEASE_GPG_PRIVATE_KEY`, `RELEASE_GPG_PASSPHRASE`, `RELEASE_GPG_PUBLIC_KEY`
-- SSH Git-object signing → `RELEASE_SSH_SIGNING_KEY`
-- Maven Central → `MAVEN_CENTRAL_USERNAME`, `MAVEN_CENTRAL_PASSWORD`
-- Code Scanning upload → `CODE_SCANNING_TOKEN`
-
-Other publishers have their own [credential requirements](publishing.md).
-`NPM_TOKEN` is reserved; configuring it does not enable npmjs.org publishing.
-
-The repo workflows then pass them by name in an explicit `secrets:`
-mapping at the caller. Adopters
-outside such an org configure the same names as repository or
-organization secrets in their own GitHub setup.
+The caller passes them by name in an explicit `secrets:` mapping. Other
+publishers have their own [credential requirements](publishing.md).
 
 ### RELEASE_TOKEN
 
@@ -192,30 +160,12 @@ Results appear in the Code Scanning tab grouped by category:
 
 The two lint categories are the `sarif-category` defaults of `lint-nanolinter.yml` and `lint-megalinter.yml`. The Scorecard and container-scan SARIF files are also saved as workflow artifacts (`sarif-scorecard`, `sarif-container-scan-<name>-<arch>`) regardless of whether the token is configured; the lint engines upload their SARIF to Code Scanning without saving it as an artifact.
 
----
-
-## Local Testing
-
-The release workflow validation surface is exposed through the `forge-ci`
-binary. Run `forge-ci validate --help` for the validation commands, or see
-[CLI Reference](cli-reference.md) for the generated command reference.
-
----
-
 ## Version Tag Format
 
-**Tags for releases:**
-- Production: `v1.0.0`, `v2.3.4`
-
-With the default `release-policy: stable`, the production flow accepts signed
-`release-request/vMAJOR.MINOR.PATCH` requests and creates immutable stable tags.
-The explicit `stable-prerelease` policy also admits immutable SemVer beta/RC
-versions through the same signing flow; it does not advance stable aliases.
-Build metadata is not a separate release identity. Mutable Maven `-SNAPSHOT`
-publication belongs to the snapshot path, not immutable production publication.
-See [release policies](workflows.md#stable-and-prerelease-policy)
-for policy, destination and promotion limits. Branch snapshots use the separate
-snapshot orchestrator and do not create production release tags.
+A release is requested with a signed `release-request/vMAJOR.MINOR.PATCH` tag
+and produces the final `vMAJOR.MINOR.PATCH` tag. Prereleases need
+`release-policy: stable-prerelease`; see
+[release policies](workflows.md#stable-and-prerelease-policy).
 
 ---
 
@@ -232,21 +182,9 @@ Configuration parsing and release-request validation are separate setup steps:
    references. YAML decoding rejects unknown keys and wrong value types.
 3. **Resolve defaults** - Derive SBOM selections and container fields. See
    [Artifacts Reference](artifacts-reference.md) for defaults and constraints.
-4. **Validate the release request** - Production setup requires
-   `release-request/vMAJOR.MINOR.PATCH`; prerelease, build, snapshot and unrelated
-   tags fail before mutation. This is not a rule imposed by the config parser.
+4. **Validate the release request** - With the default `release-policy: stable`,
+   only `release-request/vMAJOR.MINOR.PATCH` is accepted; `stable-prerelease`
+   also admits numbered beta and RC versions. Any other tag fails before
+   anything is changed.
 
 The selected release preflight checks are described in the matrix above.
-
----
-
-## Best Practices
-
-1. **Use semantic artifact names** - `backend-api` not `app1`
-2. **Select reviewed workflow and runtime references** - Follow [Runtime Images](runtime-images.md)
-3. **Configure supported security features** - Select compatible signing/SBOM layers and keep required scan gates enabled; see [Verification](verification.md) and [SBOM selection](sbom.md)
-4. **Build the platforms your deliverables support** - Check [ecosystem support](ecosystems.md) before selecting targets
-5. **Require authorized release signers according to policy** - Configure the [committed allowlist](verification.md#release-authorisation)
-6. **Use settings-path for credentials** - Don't hardcode in pom.xml
-
----

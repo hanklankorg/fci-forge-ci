@@ -1,9 +1,9 @@
 # Checked multi-architecture images
 
-The consumer owns its platform selection, native runner routing, product smoke
-tests, release names and base-image policy. Forge CI owns immutable image
-validation, registry-only index assembly and checksum-bound SBOM composition.
-The commands are provider-neutral and contain no consumer-specific policy.
+These commands check images built on native runners per architecture, write
+the multi-architecture index to the registry and compose its SBOM. They work
+on every forge. Your project chooses its platforms, runners, smoke tests,
+release names and base images.
 
 ## Builder identity and cache inputs
 
@@ -22,12 +22,9 @@ or an identity-record schema. Operator configuration selects the backend through
 Capture it on each native build runner, because executable bytes can differ
 between architectures. No builder is run, installed, or probed, and no registry
 is contacted. `--format=json` additionally emits the ID and backend details for
-provenance or diagnostics; consumers need not interpret those details. The ID
-identifies bytes and backend selection; it is not a signature verification.
-
-Keep the approved job-image digest and engine pin as explicit provenance inputs
-too. This command does not replace job-image admission, source identity,
-dependency selection or the consumer's base-graph policy.
+provenance or diagnostics. The ID identifies bytes and backend selection; it
+is not a signature check. Keep the job-image digest and engine pin as cache
+inputs too.
 
 For bounded whole-architecture reuse, `build-arch --stage --cache-tag <slot>`
 accepts repeated `--require-label` checks. A hit is copied by immutable digest
@@ -42,8 +39,8 @@ registry-backed intermediate-layer caching, and cache slots are not signed bases
 
 `container multiarch-image build-arch` and `assemble` accept `--tag` for an
 explicit index tag name. Architecture tags append `-<arch>`. Without `--tag`,
-the existing `--tag-prefix` plus source-commit naming remains unchanged.
-`--tag` and `--tag-prefix` cannot be combined.
+the name is `--tag-prefix` plus the source commit. `--tag` and `--tag-prefix`
+cannot be combined.
 
 Each producing job builds and checks its own architecture. Run `assemble` only
 after **every selected build, scan and smoke job succeeds**. Metadata is not
@@ -93,11 +90,8 @@ metadata alone are not an authenticated release or a replacement for label check
 The registry adapter writes only the index: it reuses the children already in
 the repository. The served index digest must equal the locally constructed
 index's digest. `--manifest-output` retains the exact checked bytes, without
-JSON re-encoding or an added newline, for the offline SBOM step.
-The snapshot path must not alias authentication inputs, architecture metadata,
-or the generated image metadata file. Parent-directory aliases are resolved even
-when the destination file does not yet exist. Directory outputs, final-component
-symlinks and unresolved links are refused.
+JSON re-encoding or an added newline, for the offline SBOM step. An output
+path that aliases an input, a directory or a symlink is refused.
 
 ## Verify a reused index
 
@@ -131,8 +125,7 @@ served index to compose the index BOM without re-pulling images. It emits
 and must not overwrite authentication or staged image inputs. The shared
 `release-images.yml` uses this path for every release image.
 
-For evidence produced separately, the existing offline command below remains
-available.
+For evidence produced separately, use the offline command below.
 
 Keep each native CycloneDX document unchanged. Supply a version-1 manifest such
 as `platform-sboms.json` alongside the verified `index.json` and native BOMs in
@@ -197,53 +190,9 @@ Both `--manifest-output` and `sbom index --output` require file destinations.
 The stdout sentinel `-` is rejected before any output is written. Stdout remains
 the machine-readable reference or checksum channel, separate from artifact bytes.
 
-## Verification scope
+## What the checks do not establish
 
-Regression cases cover complete and incomplete architecture sets, duplicate
-requests, wrong OS/digests, label mismatches, conflicting tags, read-back drift,
-single-manifest substitution, deterministic SBOM links, native document drift,
-unsafe paths, malformed manifests and credential-bearing URLs. Staged failures
-are checked before registry writes using an in-process registry fixture.
-
-These checks do not establish runner isolation, native smoke success, hosted
-credential sharing, public URL availability or a production release's signing
-authority. Those remain caller and hosted-acceptance responsibilities.
-
-### Staged evidence scenarios
-
-The provider-free suite exercises the actual application and workflow shell:
-
-| Scenario | Required result |
-| --- | --- |
-| One selected platform or AMD64 + ARM64 metadata | Every scanned layout has an unchanged inventory bound to its child digest in the checked index BOM. No second image pull or scan. |
-| Distroless, Alpine and arbitrary flavor names | Evidence paths follow the ledger's flavor/role policy, independently of the build name. |
-| Multiple images in one workflow | Exact named artifacts retain each image's platform inventories, index snapshot and index BOM without changing their bytes. |
-| One platform fails the scan/gate or produces no SBOM | No image upload and no index BOM; existing complete-set publication tests remain mandatory. |
-| Missing inventory/index/URL inputs; unsafe public URL | Refuse before scanners or registry writes. |
-| Colliding paths, symlink aliases, auth/metadata/layout overwrite | Refuse before scanners or registry writes. |
-| Different inventory paths with the same public download filename | Refuse before scanners or registry writes; platform inventory filenames must be distinct. |
-| Scanned release ledger has no index-BOM checksum | Refuse to record the release image. |
-| Container declares `enable-scan` | Refused by strict parsing: exported/published layouts are always scanned; administrator report-only enforcement retains findings and does not remove SBOM requirements. |
-| Base image | Retain all inventories and the existing first-platform premade signing contract. |
-
-Existing index-SBOM and signer tests cover missing/duplicate platforms, wrong
-child/index digests, changed inventory bytes and ledger checksum mismatches.
-Dual-platform fixtures construct OCI metadata only; they do not execute foreign
-architecture code. Live rollout acceptance remains a separate native profile:
-verify original scans, published child/index digests, retained inventory hashes,
-runtime evidence and exact-document signing through the guarded scratch workflow.
-
-### Native mechanism acceptance
-
-Run the guarded `TestForgejoLayer_ResolvedImagePlan` against the exact engine
-and workflow revision selected for adoption. Exercise cold, one-sibling reuse
-and fully warm cache phases with two small base images and a final-release
-canary. Use actual build/cache logs as the cache oracle; digest equality alone
-does not establish reuse.
-
-Check retained scans/inventories, registry-served child/index digests, marker
-bytes, index-BOM platform/digest/URL/hash bindings and the ledger's exact BOM
-checksum. Retain the run evidence and exact-resource cleanup receipt. Acceptance
-is specific to the native platform and mechanism tested; it does not establish
-other architecture execution or complete consumer release acceptance.
-Consumer adoption requires a published, reviewed engine/workflow tuple.
+These checks do not establish runner isolation, native smoke success, shared
+credentials on hosted runners, public URL availability or a release's signing
+authority. Those stay with the caller. Checks of two-platform metadata do not
+run the other architecture's code.

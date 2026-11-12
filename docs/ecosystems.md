@@ -1,38 +1,17 @@
 # Ecosystem support
 
-This document explains forge-ci's ecosystem patterns and records current
-support in per-ecosystem capability matrices. The linked workflows define
-their direct-call contracts; [Artifacts Reference](artifacts-reference.md)
-defines the orchestrator configuration.
+This page explains forge-ci's two build patterns and lists what each
+ecosystem supports. The linked workflows define their direct-call inputs;
+[Artifacts Reference](artifacts-reference.md) defines `artifacts.yml`.
+forge-ci supports Maven, npm, Gradle, Gradle Android, Xcode iOS, Go, Cargo
+and `meta`; Python is not supported, and `project-type: python` fails
+validation.
 
-Build gates use [administrator-owned check enforcement](admin-policy.md).
-Legacy `skip-tests: true` inputs (including `SKIP_TESTS=true`) are refused.
-Exported/published OCI layouts are always vulnerability-scanned; there is no
-consumer switch to skip it. With an administrator setting at `false`, the gate still runs checks
-and reports recognized findings; operational failures, credentials, signatures
-and source/digest identity errors remain blocking. A successful report-only job
-is not a findings-free result.
+Tests and other build checks follow
+[administrator-owned enforcement](admin-policy.md); `skip-tests: true` is
+refused, and exported or published images are always scanned.
 
 ## How forge-ci classifies ecosystems
-
-### Maven HTTPS trust in job images
-
-Maven uses JVM trust roots independently of Go, curl and the OS certificate
-bundle. When `CI_SERVER_TLS_CA_FILE` is set (or, as a fallback, `SSL_CERT_FILE`),
-the Maven adapter validates that file as public PEM CA certificates and copies
-the selected Java runtime's `jssecacerts` or `cacerts` into a private temporary
-directory. The runtime's `keytool` adds those CAs to the copy. Maven receives
-the copy through `MAVEN_OPTS`; the directory is removed after that invocation.
-This covers builds, model queries and isolated snapshot deployment from build
-artifacts. The job image needs Java and keytool, with the standard `changeit`
-truststore password. `JAVA_HOME` selects the runtime; otherwise the adapter
-resolves `java` from PATH.
-
-Existing JVM options and installed roots are retained. An explicit caller JVM
-truststore combined with an explicit PEM CA is refused rather than overridden.
-Use a `TMPDIR` without whitespace or quotes for Maven's launcher. With no
-explicit CA environment variable, the adapter leaves JVM trust unchanged,
-including for public GitHub jobs. No host or installed Java truststore is edited.
 
 Different language ecosystems have different deliverable shapes, so
 forge-ci handles them in two complementary patterns. The pattern is
@@ -78,20 +57,11 @@ belongs for compiled-native code.
 
 ### Why two patterns
 
-Forcing compiled-native ecosystems into artifact-first would require
-cross-compile machinery in CI (cargo-zigbuild, cross-rs, native-apt
-sysroots), which is significant complexity for a problem that split-runner
-multi-arch (`ubuntu-26.04` for amd64 + `ubuntu-26.04-arm` for arm64)
-already solves inside the Containerfile. container-first accepts that the
-container IS the build environment and orchestrates accordingly. The
-naming reflects this: `build-<lang>.yml` for artifact-first (produces the
-artifact), `sbom-<lang>.yml` for container-first (handles platform-agnostic
-side-concerns; SBOM is one of them).
-
-When a future language has both patterns available (e.g., python with
-wheel as artifact-first or pyproject manifest SBOM as container-first), forge-ci
-picks the pattern that matches how the language actually ships in
-practice.
+Building compiled-native code artifact-first for every platform would need
+cross-compile tooling in CI, while a native build per architecture already
+does it inside the Containerfile. Hence `build-<lang>.yml` for artifact-first,
+which produces the artifact, and `sbom-<lang>.yml` for container-first, which
+only produces the SBOM beside the container build.
 
 ### SBOM placement reflects the pattern
 
@@ -110,19 +80,12 @@ features, which can differ from the actual build. See [Cargo SBOM scope](sbom.md
 
 ### Container-first reproducibility
 
-`publish-container.yml` uses the supplied `source-date-epoch` or derives it once
-from `git log -1 --format=%ct HEAD` in `prep`, then passes it as `SOURCE_DATE_EPOCH` on both the main
-build and the optional `extract.binary` build. buildah (`--timestamp`) uses it
-to normalize the image-config `created` field and layer timestamps. Identical
-digests also require controlled base images, labels, build inputs and generated
-content; a fixed tag and timestamp alone are insufficient. See
+`publish-container.yml` sets the image timestamps from `SOURCE_DATE_EPOCH`,
+the commit time unless you pass `source-date-epoch`; see
 [Container reproducibility](verification.md#container-reproducibility-whats-stable-what-isnt).
-
-What the env does NOT do: it doesn't auto-propagate as a Docker build-arg
-into the build sandbox. The compile step inside the Containerfile (cargo
-build, go build, …) won't see `SOURCE_DATE_EPOCH` unless the Containerfile
-explicitly declares it. This is deliberate: it keeps forge-ci out of
-caller policy decisions about what gets embedded in the binary.
+The compile step inside the Containerfile does not see `SOURCE_DATE_EPOCH`
+unless the Containerfile declares it, so what gets embedded in the binary
+stays your decision.
 
 **Container-first Go:** omit date-injecting ldflags unless the caller owns a
 separate injection mechanism. `artifacts.yml` is parsed literally, so a
@@ -141,9 +104,6 @@ guarantee for arbitrary Cargo projects.
 
 ## Per-ecosystem support matrices
 
-Future ecosystem reviews should use the Cargo matrix structure so support can
-be compared at a glance.
-
 ---
 
 ### Cargo (dual-mode)
@@ -153,7 +113,6 @@ be compared at a glance.
 | Pattern | dual-mode (artifact-first OR container-first per artifact) |
 | project-type identifier | `cargo` |
 | Canonical tool | cargo (Rust's universal package manager + build tool) |
-| Status | Supported in the 0.90.0 baseline (container-first and artifact-first) |
 
 Cargo mirrors Go's dual-mode shape: a Cargo artifact picks `build-mode:
 artifact-first` or `build-mode: container-first`. Omitted defaults to
@@ -195,7 +154,7 @@ opt-in.
 | Multi-binary in one container | ✅ | `extract.binary.names: [a, b]` | E.g., `worker` + `admin-tool`; basenames suffixed with `-linux-${arch}` to avoid release-asset collision |
 | Workspace (multi-crate) | ✅ | sbom-cargo `--all`; bump-version `[workspace.package]` | One bump per release |
 | Single-crate | ✅ | Same workflows; bump-version `[package].version` | |
-| Version-bump (Cargo.toml + Cargo.lock) | ✅ | `forge-ci version bump --project-type cargo --version 1.2.3` | `cargo update --workspace` syncs lockfile |
+| Version-bump (Cargo.toml + Cargo.lock) | ✅ | `forge-ci version bump --project-type cargo --version 1.2.3` | `cargo update --workspace` syncs the lockfile; an existing `Cargo.lock` it cannot refresh fails the bump |
 | Release prerequisite checks | ✅ | `validate-release-prerequisites.yml` | Cargo.lock + toolchain pin; validation runs in the Rust runtime when Cargo artifacts are present |
 | Publish: container to ghcr | ✅ | `publish-container.yml` | SLSA provenance + scan + analyzed-container SBOM |
 | Publish: container to other OCI registries | ✅ | `publish-container.yml` | Signed SLSA provenance is portable, subject to OCI/cosign registry compatibility. It requires pushed images, enabled SLSA and artifact signing with `sign.method: sigstore` or `kms`. |
@@ -237,15 +196,11 @@ opt-in.
 | project-type identifier | `maven` |
 | Canonical tool | Maven |
 | Supported versions | **3.9.x and newer** |
-| Status | Production |
-| Tracked since | 0.90.0 baseline |
 
 Maven 3.9 is the floor; the JDK runtime image
-(`forge-ci-runtime-java-25`) ships Maven 3.10.x. Older Maven is not tested
-and not supported. The floor is not cosmetic: 3.9 is where the deploy plugin
-moved to the Maven Resolver native transport, so behaviour a pipeline depends
-on. Transport selection, and therefore how TLS and proxy settings are
-honoured, differs from 3.8 and earlier.
+(`forge-ci-runtime-java-25`) ships Maven 3.10.x. Older Maven is not
+supported: 3.9 moved deploys to the Maven Resolver native transport, which
+changes how TLS and proxy settings apply.
 
 A build in the runtime image gets Maven 3.10's stricter defaults: POM problems
 3.9 only warned about (duplicate dependencies or plugins, malformed versions or
@@ -255,6 +210,14 @@ forge-ci writes for a forge registry deploy names no origin, which Maven 3.10
 accepts with a warning. The
 [Maven 3.10.0 release notes](https://maven.apache.org/docs/3.10.0/release-notes.html)
 list the opt-out for each change.
+
+When `CI_SERVER_TLS_CA_FILE` (or else `SSL_CERT_FILE`) names a PEM CA file,
+forge-ci adds those CAs to a private copy of the Java runtime's truststore and
+hands Maven the copy through `MAVEN_OPTS`, for builds and snapshot deploys.
+The job image then needs Java and `keytool`, with the standard `changeit`
+truststore password, and a `TMPDIR` without whitespace or quotes. An explicit
+JVM truststore in your options together with such a CA file is refused.
+Without either variable, JVM trust is left as it is.
 
 #### Capabilities
 
@@ -276,7 +239,6 @@ list the opt-out for each change.
 | Release prerequisite checks | ✅ | `validate-release-prerequisites.yml` | Confirms `MAVEN_CENTRAL_USERNAME`/`PASSWORD` set when publishing there; validates GPG availability when sign.method=gpg. |
 | Publish: Maven Central | ✅ | `publish-maven-central.yml` | Sonatype Central Portal (the `central-publishing-maven-plugin`); requires `MAVEN_CENTRAL_USERNAME`, `MAVEN_CENTRAL_PASSWORD`, `RELEASE_GPG_PRIVATE_KEY`, `RELEASE_GPG_PASSPHRASE`. |
 | Publish: GitHub Packages | ✅ | `publish-maven-github.yml` | Uses auto-provided `GITHUB_TOKEN`; respects `<distributionManagement>` in pom.xml. |
-| Publish: other OCI / private repo | partial | extend `publish-maven-github.yml` pattern | Not wired today; would need a per-repo `<settings.xml>` injection. |
 
 #### Caller responsibilities
 
@@ -291,7 +253,7 @@ list the opt-out for each change.
 
 - [Maven config fields](artifacts-reference.md#configuration-fields-mavengradle)
 - [Maven example](../examples/maven-app/)
-- [Maven Central publishing setup](verification.md#release-authorisation)
+- [Maven Central publishing setup](publishing.md#maven-central)
 
 ---
 
@@ -302,8 +264,6 @@ list the opt-out for each change.
 | Pattern | artifact-first (platform-agnostic deliverable) |
 | project-type identifier | `npm` |
 | Canonical tool | npm (dominant package manager for the Node.js ecosystem) |
-| Status | Production |
-| Tracked since | 0.90.0 baseline |
 
 #### Capabilities
 
@@ -320,7 +280,7 @@ list the opt-out for each change.
 | Build reproducibility | ✅ | npm ≥ 10 (npm/cli#3536 fix) | Runtime image pins Node 24 LTS; uses npm 10+. `package-lock.json` checked in is required. |
 | Library shape (no build script) | ✅ | `npm pack` produces the publishable tarball directly | Matches scoped npm-package conventions. |
 | App shape (build script writes dist/) | ✅ | Explicit application build before SBOM generation and `npm pack` | Configure the package's file selection to include the desired build output in the tarball. |
-| Version-bump (package.json + package-lock.json) | ✅ | `forge-ci version bump --project-type npm --version 1.2.3` | Updates both files; preserves lockfile coherence. |
+| Version-bump (package.json + package-lock.json or npm-shrinkwrap.json) | ✅ | `forge-ci version bump --project-type npm --version 1.2.3` | Updates the manifest and its lockfile; preserves lockfile coherence. |
 | Release prerequisite checks | shared release checks | `validate-release-prerequisites.yml` | No npm-specific token, lockfile or Node-pin validator. The build uses `npm ci`; registry authentication is configured in the publisher. |
 | Publish: npmjs.com | snapshot only | `publish-snapshot-npm.yml` | Set `registry: https://registry.npmjs.org`, `use-ci-token: false` and the `registry-password` secret. Production `publish-to: npmjs` remains unsupported. |
 | Publish: GitHub Packages | ✅ | `publish-maven-github.yml` (also handles npm scoped to `npm.pkg.github.com`) | Uses auto-provided `GITHUB_TOKEN`. |
@@ -358,14 +318,12 @@ list the opt-out for each change.
 | Pattern | artifact-first (platform-agnostic deliverable) |
 | project-type identifier | `gradle` |
 | Canonical tool | Gradle |
-| Status | Production |
-| Tracked since | 0.90.0 baseline |
 
 #### Capabilities
 
 | Concern | Status | Workflow / Mechanism | Notes |
 |---|---|---|---|
-| Build (standalone deliverable) | ✅ | `build-gradle-app.yml` (wrapper, default `test assemble`) | `config.gradle-tasks` selects tasks. The workflow uploads JARs from root/subproject `build/libs/`; WAR/distZip outputs need a caller-owned upload path. |
+| Build (standalone deliverable) | ✅ | `build-gradle-app.yml` (wrapper, default `test assemble`) | `config.gradle-tasks` selects tasks. The workflow uploads JARs from root/subproject `build/libs/`, not those of `buildSrc`; WAR/distZip outputs need a caller-owned upload path. |
 | Lint | external | caller's `test.yml` | detekt / ktlint / checkstyle belong in the consumer repo. |
 | Test | mandatory release-build invocation + external PR gate | separate Gradle test invocation before selected packaging tasks + caller's `test.yml` | Packaging task overrides do not remove the test invocation. Inspect Gradle outcomes: cached, up-to-date and `NO-SOURCE` tasks do not prove physical test execution. |
 | SBOM: build layer | ✅ | cyclonedx-gradle-plugin via init script | A separate SBOM invocation follows the selected tasks. See [Build tools](sbom.md#per-language-build-tools). |
@@ -376,9 +334,9 @@ list the opt-out for each change.
 | Build reproducibility | prerequisite check | `validate jvm-reproducibility` checks `preserveFileTimestamps = false` AND `reproducibleFileOrder = true` on `AbstractArchiveTask` | Missing either setting is a `reproducible-builds` finding (report-only by default; blocking with explicit `enforce-reproducible-builds: true`); supports both Kotlin and Groovy DSL forms. |
 | Gradle wrapper required | ✅ | `gradlew` checked in | Pinned-version wrapper guarantees the same Gradle across CI and developer machines. |
 | Version-bump (build.gradle / gradle.properties) | ✅ | `forge-ci version bump --project-type gradle --version 1.2.3` | Updates `version =` in build.gradle{,.kts} or `version=` in gradle.properties. |
-| Release prerequisite checks | ✅ | `validate-release-prerequisites.yml` | Confirms JDK toolchain pin + wrapper presence. |
-| Publish: Maven Central | ✅ JVM libraries | exported Maven-layout files, separate signing and Central API upload | Native `maven-publish`, immutable release version, sources/javadoc and Central metadata required; see [Gradle publishing](gradle-publishing.md). |
-| Publish: GitHub Packages | ✅ JVM libraries | exported Maven-layout files, forge-native repository upload | `publish-to: [forge-packages]`; no Gradle execution in the publishing job. GitLab/Forgejo composition limits are documented in the [guide](gradle-publishing.md#gitlab-and-forgejo). |
+| Release prerequisite checks | ✅ | `validate-release-prerequisites.yml` | The JVM reproducibility check above. |
+| Publish: Maven Central | ✅ JVM libraries | exported Maven-layout files, separate signing and Central API upload | Native `maven-publish`, immutable release version, sources/javadoc and Central metadata required; see [Gradle publishing](publishing.md#gradle-jvm-and-android-libraries). |
+| Publish: GitHub Packages | ✅ JVM libraries | exported Maven-layout files, forge-native repository upload | `publish-to: [forge-packages]`; no Gradle execution in the publishing job. GitLab/Forgejo composition limits are documented in the [guide](publishing.md#gitlab-and-forgejo). |
 
 #### Caller responsibilities
 
@@ -401,15 +359,13 @@ list the opt-out for each change.
 | Pattern | artifact-first (applications: APK / AAB; libraries: AAR) |
 | project-type identifier | `gradle-android` |
 | Canonical tool | Gradle + Android SDK |
-| Status | Production |
-| Tracked since | 0.90.0 baseline |
 
 #### Capabilities
 
 | Concern | Status | Workflow / Mechanism | Notes |
 |---|---|---|---|
-| Build (standalone deliverable) | ✅ | `build-gradle-android.yml` (`gradle assemble`) | Produces release APK (signed if `enable-signing: true`) and AAB (if `include-aab: true`, default). |
-| Library build/publication | ✅ | `build-type: library`, native `maven-publish` export | Produces a release AAR; stable and snapshot publication to Central or forge packages uses exported files. See [Android libraries](gradle-publishing.md#android-libraries). |
+| Build (standalone deliverable) | ✅ | `build-gradle-android.yml` (`gradle assemble`) | Produces release APK (signed if `config.enable-android-signing: true`) and AAB (if `include-aab: true`, default). |
+| Library build/publication | ✅ | `build-type: library`, native `maven-publish` export | Produces a release AAR; stable and snapshot publication to Central or forge packages uses exported files. See [Android libraries](publishing.md#android-libraries). |
 | Lint | external | caller's `test.yml` | Android Lint + detekt belong in the consumer repo. |
 | Test | mandatory module-bound unit-test invocation + external PR gate | release builder's module test aggregate + caller's `test.yml` | The module-bound aggregate remains selected even with packaging task overrides. Cache/`NO-SOURCE` outcomes are not physical execution evidence. Instrumented tests require a separate emulator fixture. |
 | SBOM: build layer | ✅ | cyclonedx-gradle-plugin | Uses the Gradle init-script generator; see [Build tools](sbom.md#per-language-build-tools). |
@@ -421,7 +377,7 @@ list the opt-out for each change.
 | Build-type subset | ✅ | `build-types: debug,release` (default) | Pick which variants to build. |
 | Version-bump (Android `versionName` / `versionCode`) | ✅ | `forge-ci version bump --project-type gradle-android --version 1.2.3` | Bumps `versionName` and increments `versionCode` together. |
 | GitHub Release selection | Application AAB or library AAR | release artifact-transfer plan | Applications require release/AAB selection; libraries use their AAR artifact. APK uploads remain run artifacts. |
-| Release prerequisite checks | ✅ | `validate-release-prerequisites.yml` | Confirms keystore secrets present when `enable-signing: true`. |
+| Release prerequisite checks | ✅ | `validate-release-prerequisites.yml` | The JVM reproducibility check; the keystore secrets are not checked there. |
 | Publish: Google Play | ✅ | `publish-google-play.yml` | Track-aware (`internal` / `alpha` / `beta` / `production`); supports staged rollouts. |
 | Whats-new notes | ✅ | `whats-new-directory` config field | Localised release notes. |
 | Mapping file (Proguard / R8) | ✅ | `mapping-file` config field | Symbolicated stack traces in Play Console. |
@@ -431,7 +387,7 @@ list the opt-out for each change.
 #### Caller responsibilities
 
 - **Application signing keystore**: set as repo/org secret per the declared inputs (`ANDROID_KEYSTORE`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD`). Libraries do not use an Android keystore.
-- **Explicit Android SBOM policy**: exclude `analyzed-artifact` until APK/AAB scanning is implemented.
+- **Explicit Android SBOM policy**: exclude `analyzed-artifact`; APK/AAB analyzed SBOMs are not supported.
 - **Signing policy**: enable Android signing for distributable release outputs. forge-ci does not reject an unsigned release APK/AAB or the `google-play` combination at config-parse time.
 - **Service-account JSON** for Google Play (`GOOGLE_PLAY_SERVICE_ACCOUNT_JSON`): required when publishing.
 - **`build-module`** config field: multi-module Android projects need this to point at the app module (Gradle's task tree isn't auto-discovered).
@@ -442,7 +398,7 @@ list the opt-out for each change.
 
 - [Gradle Android config fields](artifacts-reference.md#configuration-fields-gradle-android)
 - [Android app example](../examples/android-app/)
-- [Android-library configuration and snapshots](gradle-publishing.md#android-libraries)
+- [Android-library configuration and snapshots](publishing.md#android-libraries)
 - [Google Play workflow](../.github/workflows/publish-google-play.yml)
 
 ---
@@ -454,9 +410,7 @@ list the opt-out for each change.
 | Pattern | artifact-first (iOS/macOS-specific deliverable: IPA) |
 | project-type identifier | `xcode-ios` |
 | Canonical tool | Xcode + xcodebuild |
-| Status | Production |
-| Tracked since | v0.90.0 |
-| Runner requirement | macOS (`macos-26` by default; override via `macos-version` config field) |
+| Runner requirement | macOS arm64 (`macos-26` by default; the GitHub `runs-on-darwin-arm64` input chooses the build and lint runner) |
 
 #### Capabilities
 
@@ -467,12 +421,12 @@ list the opt-out for each change.
 | Test | external | caller's `test.yml` | `xcodebuild test` belongs in the consumer repo. |
 | SBOM: build layer | ❌ | not implemented | Defaults to `sboms: none`; explicitly requesting the Build layer fails assembly. |
 | Code signing (DER cert + provisioning profile) | ✅ | base64-encoded secrets imported into ephemeral keychain | `build xcode-ios run` deletes the keychain and removes the staged certificate, profile and xcconfig on every exit, including failures. |
-| Ephemeral keychain isolation | ✅ | keychain password minted per run; nothing to provision | The run's keychain is appended to the user search list, not substituted for it, and the prior list is restored afterwards. `security(1)` takes passwords only as argv, so the run mints its own rather than exposing an operator secret there. The workflows still declare a `KEYCHAIN_PASSWORD` secret so existing callers keep parsing; nothing reads it. |
+| Ephemeral keychain isolation | ✅ | keychain password minted per run; nothing to provision | The run's keychain is appended to the user search list, not substituted for it, and the prior list is restored afterwards. `security(1)` takes passwords only as argv, so the run mints its own rather than exposing an operator secret there. |
 | xcconfig overrides | ✅ | base64-encoded `XCCONFIG_BASE64` secret | For team ID, bundle ID, app group, etc. |
 | Workspace vs project | ✅ | `workspace` and `project` config fields | One must be set; forge-ci doesn't auto-detect. |
 | Scheme selection | ✅ | `scheme` config field | Required; `.xcscheme` must be shared in the project. |
 | Version-bump | ✅ (marketing version) | `forge-ci version bump --project-type xcode-ios --version 1.2.3` | Creates/updates `MARKETING_VERSION` in `versions.xcconfig` by default. It does not increment `CURRENT_PROJECT_VERSION`. |
-| Release prerequisite checks | ✅ | `validate-release-prerequisites.yml` | Confirms App Store Connect secrets present when publishing. |
+| Release prerequisite checks | shared release checks | `validate-release-prerequisites.yml` | No Xcode-specific check; the App Store Connect secrets are not checked there. |
 | Publish: App Store Connect | ✅ | `publish-apple-appstore.yml` | Validates unless skipped, then uploads the IPA with `xcrun altool`. The `submit-for-review` value records intent in the summary only. |
 | App Store review submission | manual | App Store Connect | The workflow does not submit a build for review; `submit-for-review: true` only changes the post-upload guidance. |
 
@@ -492,32 +446,6 @@ list the opt-out for each change.
 
 ---
 
-### Python (not currently supported)
-
-| Property | Value |
-|---|---|
-| Pattern | TBD |
-| project-type identifier | `python` (rejected at config-parse time) |
-| Status | Not supported. Setting `project-type: python` in artifacts.yml fails validation with "must be one of: maven, npm, gradle, gradle-android, xcode-ios, go, cargo, meta". |
-
-The `projecttype.Python` constant exists in the Go codebase as
-scaffolding for future support (file-pattern detection, SBOM dispatch,
-release-name resolution) but is intentionally **omitted from
-`ValidProjectTypes`** in `internal/domain/config/schema.go` until a
-build/publish workflow ships. The previous "Reserved but recognised"
-state silently produced nothing at release time, replaced with
-loud failure now that the alternative is worse than fixing the typo
-or removing the artifact.
-
-Python's build-tool landscape (pip, poetry, uv, hatch, flit, setuptools)
-has no canonical winner, so the eventual choice between artifact-first
-(build wheel, COPY into container) and container-first (manifest-based
-SBOM only, container does the build) depends on the first real caller's
-shape. Re-enabling Python is a one-line change to `ValidProjectTypes`
-(and the JSON Schema enum) once an implementation lands.
-
----
-
 ### Go (artifact-first or container-first)
 
 | Property | Value |
@@ -525,8 +453,6 @@ shape. Re-enabling Python is a one-line change to `ValidProjectTypes`
 | Pattern | Explicit per artifact: `artifact-first` for standalone binaries, `container-first` for services built inside Containerfile |
 | project-type identifier | `go` |
 | Canonical tool | go (Go's universal build tool) |
-| Status | Production |
-| Tracked since | 0.90.0 baseline (container-first and artifact-first) |
 
 Go's `config.build-mode` tells the orchestrator whether to run
 `build-go.yml` in the build stage or `sbom-go.yml` in the publish stage.
@@ -549,7 +475,7 @@ for every other ecosystem, the pattern is fixed by the deliverable shape.
 | Multi-binary per container | n/a (one artifact = one binary) | ✅ `extract.binary.names: [a, b]` |
 | Reproducibility | ✅ `-trimpath` + `SOURCE_DATE_EPOCH`-derived ldflags (`-X main.date={{.CommitDate}}`); Go module/build cache | Container image timestamps are pinned by Buildah; binary flags and timestamps are Containerfile-owned |
 | Test selection | Release-build test invocation required; legacy `config.skip-tests: true` refused | Containerfile owns its test commands; engine policy does not prove the Containerfile runs tests |
-| Version-bump (go.mod doesn't store version) | partial, no version-bump-go workflow, uses tag-only | partial, same |
+| Version-bump | n/a: the tag is the Go module version | n/a, same |
 | Release prerequisite checks | ✅ `validate-release-prerequisites.yml` | ✅ same |
 | Publish: standalone release binaries | ✅ via `release-create-github` (named binaries attached to GitHub Release) | n/a |
 | Publish: container to ghcr | optional, wrap the artifact-first binary in a container | ✅ primary path |
@@ -589,15 +515,10 @@ for every other ecosystem, the pattern is fixed by the deliverable shape.
 |---|---|
 | Pattern | n/a, no artifact to build |
 | project-type identifier | `meta` |
-| Status | Production |
-| Tracked since | v0.90.0 |
 
 The `meta` project-type exists for repositories that have a release
 cadence (changelog generation, tagged GitHub Releases, signed release
-commits) but **no buildable artifact**. Used internally by
-`forge-ci`'s own `self-release.yml`. The actual binaries come
-from a separate `release-binary.yml` (goreleaser); the orchestrator
-handles changelog + GitHub Release creation.
+commits) but **no buildable artifact**.
 
 External use cases:
 - Documentation-only repos that publish versioned docs but don't build software
@@ -621,7 +542,7 @@ External use cases:
 #### Caller responsibilities
 
 - **`artifacts.yml`** with at least one artifact of `project-type: meta`. No `config:` block (none would apply).
-- **Changelog tooling** if used (git-cliff or another `changelog-creator`).
+- **Changelog tooling** if used: `changelog-creator: git-cliff` and its configuration; empty skips the changelog and the version bump.
 - **A meaningful release notes flow**: the value of a meta release is the human-readable changelog + the signed tag.
 
 ---
@@ -644,6 +565,3 @@ When adding support for a new ecosystem:
 6. Add a working example under `examples/<ecosystem>-app/`: its
    `artifacts.yml` and README, and a `github/`, `gitlab/` or `forgejo/`
    directory for each forge that builds it.
-
-The matrix structure is uniform on purpose: a reader comparing two
-ecosystems can scan the same row labels and immediately see what differs.
