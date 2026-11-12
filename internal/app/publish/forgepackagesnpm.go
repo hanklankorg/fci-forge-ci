@@ -67,8 +67,17 @@ func ForgePackagesNPMPublish(ctx context.Context, ops NPMPublishOps, resolver pr
 		return err
 	}
 
-	if meta.PublishConfig.Registry != "" && strings.TrimRight(meta.PublishConfig.Registry, "/") != strings.TrimRight(reg.Registry, "/") {
-		return fmt.Errorf("packed publishConfig.registry conflicts with the selected registry: %w", errs.ErrInvalidConfig)
+	// npm publishes a scoped package to its scope's registry before any
+	// other, so every registry the package names is held to the forge's.
+	for key, registry := range meta.PublishConfig {
+		if key != "registry" && !strings.HasSuffix(strings.ToLower(key), ":registry") {
+			continue
+		}
+
+		named, isString := registry.(string)
+		if !isString || strings.TrimRight(named, "/") != strings.TrimRight(reg.Registry, "/") {
+			return fmt.Errorf("packed publishConfig.%s conflicts with the selected registry: %w", key, errs.ErrInvalidConfig)
+		}
 	}
 
 	npmrcPath, cleanup, err := writeTempSecretFile("forge-ci-npmrc-*", reg.RenderNPMRC())
@@ -78,8 +87,23 @@ func ForgePackagesNPMPublish(ctx context.Context, ops NPMPublishOps, resolver pr
 
 	defer cleanup()
 
-	if err := checkNPMTagBinding(ctx, ops, dir, userConfig{npmrcPath, reg.Registry}, meta, tag); err != nil {
+	config := userConfig{npmrcPath, reg.Registry, reg.Token}
+
+	bound, err := checkNPMTagBinding(ctx, ops, dir, stderr, config, meta, tag)
+	if err != nil {
 		return err
+	}
+
+	// The tag already names this version: an earlier run published it. That
+	// is this release's package only with this tarball's content.
+	if bound {
+		if err := npmVersionPublished(ctx, ops, dir, stderr, config, meta, tarball); err != nil {
+			return err
+		}
+
+		_, _ = fmt.Fprintf(stdout, "%s@%s is already published with tag %s and this content to %s\n", meta.Name, meta.Version, tag, reg.Registry)
+
+		return nil
 	}
 
 	_, _ = fmt.Fprintf(stdout, "Publishing %s@%s with tag %s to %s\n", meta.Name, meta.Version, tag, reg.Registry)
@@ -120,7 +144,7 @@ func prepareNPMPublication(tarball, setting string, stderr io.Writer) (npmPacked
 		meta.Version = canonical
 	}
 
-	if meta.PublishConfig.Tag != "" && meta.PublishConfig.Tag != tag {
+	if packed, named := meta.PublishConfig["tag"]; named && packed != tag {
 		return meta, "", fmt.Errorf("packed publishConfig.tag conflicts with required version-specific tag %q: %w", tag, errs.ErrInvalidConfig)
 	}
 
@@ -128,12 +152,9 @@ func prepareNPMPublication(tarball, setting string, stderr io.Writer) (npmPacked
 }
 
 type npmPackedMetadata struct {
-	Name          string `json:"name"`
-	Version       string `json:"version"`
-	PublishConfig struct {
-		Tag      string `json:"tag"`
-		Registry string `json:"registry"`
-	} `json:"publishConfig"`
+	Name          string         `json:"name"`
+	Version       string         `json:"version"`
+	PublishConfig map[string]any `json:"publishConfig"`
 }
 
 var npmPackageNamePattern = regexp.MustCompile(`^(?:@[a-z0-9][a-z0-9._-]*/)?[a-z0-9][a-z0-9._-]*$`)
@@ -157,9 +178,30 @@ func packedNPMMetadata(tarball string) (npmPackedMetadata, error) {
 	return meta, nil
 }
 
-type userConfig struct{ path, registry string }
+type userConfig struct{ path, registry, token string }
 
-func checkNPMTagBinding(ctx context.Context, ops NPMPublishOps, dir string, config userConfig, meta npmPackedMetadata, tag string) error {
+// npmReadFailed ends a registry read npm failed. npm's own error output is
+// printed, without the credential should npm ever repeat it, and the
+// failure takes the class of npm's error code: a registry that could not
+// be reached is unavailable, and every other failure stays npm's.
+func npmReadFailed(stderr io.Writer, said, token, what string, err error) error {
+	if token != "" {
+		said = strings.ReplaceAll(said, token, "***")
+	}
+
+	_, _ = io.WriteString(stderr, said)
+
+	class := errs.NPMFailure(said)
+	if !errs.Retriable(class) || !errors.Is(err, errs.ErrValidation) {
+		return fmt.Errorf("%s: %w", what, err)
+	}
+
+	return fmt.Errorf("%s: %s: %w", what, strings.TrimSuffix(err.Error(), ": "+errs.ErrValidation.Error()), class)
+}
+
+// checkNPMTagBinding refuses a tag that names another version, and reports
+// whether it already names this one.
+func checkNPMTagBinding(ctx context.Context, ops NPMPublishOps, dir string, said io.Writer, config userConfig, meta npmPackedMetadata, tag string) (bool, error) {
 	var stdout, stderr npmRegistryOutput
 
 	// Read package-wide bindings: view implicitly selects latest, which need not
@@ -167,22 +209,23 @@ func checkNPMTagBinding(ctx context.Context, ops NPMPublishOps, dir string, conf
 	err := ops.RunInherit(ctx, dir, &stdout, &stderr, "dist-tag", "ls", meta.Name, "--userconfig", config.path, "--registry", config.registry)
 	if err != nil {
 		if isNPMNotFound(stderr.String()) || npmHasNoDistTags(stderr.String(), meta.Name) {
-			return nil
+			return false, nil
 		}
 
-		return fmt.Errorf("read npm distribution tags before publishing: %w", err)
+		return false, npmReadFailed(said, stderr.String(), config.token, "read npm distribution tags before publishing", err)
 	}
 
 	tags, err := parseNPMDistTags(stdout.String())
 	if err != nil {
-		return err
+		return false, err
 	}
 
-	if version, exists := tags[tag]; exists && version != meta.Version {
-		return fmt.Errorf("npm tag %q already names version %q; refusing to move it to %q: %w", tag, version, meta.Version, errs.ErrValidation)
+	version, exists := tags[tag]
+	if exists && version != meta.Version {
+		return false, fmt.Errorf("npm tag %q already names version %q; refusing to move it to %q: %w", tag, version, meta.Version, errs.ErrValidation)
 	}
 
-	return nil
+	return exists, nil
 }
 
 func parseNPMDistTags(output string) (map[string]string, error) {

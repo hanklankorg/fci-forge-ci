@@ -60,7 +60,7 @@ func New() *Repo { return &Repo{} }
 
 // Run executes `git <args...>` and returns its trimmed stdout. Errors
 // are classified through safeexec.WrapError so missing-on-PATH maps to
-// ExitCodeUnavailable and non-zero exit maps to ExitCodeValidation;
+// ExitCodeConfiguration and non-zero exit maps to ExitCodeValidation;
 // git's own diagnostic output is appended for operator context.
 func (r *Repo) Run(ctx context.Context, args ...string) (string, error) {
 	bin := r.GitBin

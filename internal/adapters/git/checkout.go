@@ -6,8 +6,10 @@ package git
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"strings"
 
 	"github.com/diggsweden/forge-ci/internal/domain/errs"
@@ -42,6 +44,10 @@ func (r *Repo) runEnv(ctx context.Context, extraEnv []string, args ...string) er
 }
 
 // runEnvOutput is runEnv for commands whose stdout is part of the result.
+//
+// Every command that talks to a remote runs here. One that ends on git's or
+// ssh's own statement that the remote's host was not reached is the
+// dependency being unavailable (errs.GitReport).
 func (r *Repo) runEnvOutput(ctx context.Context, extraEnv []string, args ...string) (string, error) {
 	bin := r.GitBin
 	if bin == "" {
@@ -58,6 +64,10 @@ func (r *Repo) runEnvOutput(ctx context.Context, extraEnv []string, args ...stri
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		wrapped := safeexec.WrapError(err, bin, firstGitArg(args))
+		if _, ok := errors.AsType[*exec.ExitError](err); ok {
+			wrapped = safeexec.ExitFailure(err, bin, firstGitArg(args), errs.GitReport(string(out)))
+		}
+
 		if len(out) == 0 {
 			return "", wrapped
 		}

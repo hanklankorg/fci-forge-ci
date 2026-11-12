@@ -7,11 +7,14 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
+	"net"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
+	"syscall"
 	"testing"
 
 	apprelease "github.com/diggsweden/forge-ci/internal/app/release"
@@ -150,77 +153,84 @@ func TestUploadAttachments_RejectsMissingTag(t *testing.T) {
 // partial case below needs its own double.
 type partialUploader struct {
 	failBasenames map[string]bool
+	refused       bool
 	attempted     []string
 }
 
 func (p *partialUploader) UploadReleaseAsset(_ context.Context, _ string, file string) error {
 	p.attempted = append(p.attempted, filepath.Base(file))
 	if p.failBasenames[filepath.Base(file)] {
+		if p.refused {
+			return fmt.Errorf("HTTP 403: %w", errs.ErrPermissionDenied)
+		}
+
 		return errUploadNetworkDown
 	}
 
 	return nil
 }
 
-// TestUploadAttachments_FailureIsFatalOnlyWhenEveryUploadFails covers the
-// documented rule in both directions: a per-file failure is a warning as long
-// as something landed, and only a run where nothing landed fails.
-//
-// The old test was named for the partial case and exercised the total one --
-// its own inline comment admitted it ("All uploads fail in this fake
-// configuration → fatal"), so the branch the name described had no test.
-func TestUploadAttachments_FailureIsFatalOnlyWhenEveryUploadFails(t *testing.T) {
-	t.Run("one failure among several is a warning", func(t *testing.T) {
-		dir := t.TempDir()
-		writeFile(t, dir, "a.tgz")
-		writeFile(t, dir, "b.tgz")
+// A release that lacks one of its files is not published: any failed upload
+// fails the command, after the remaining files were attempted, and the error
+// names each file the release lacks.
+func TestUploadAttachments_AnyFailedUploadFailsAfterAttemptingTheRest(t *testing.T) {
+	for name, failing := range map[string][]string{
+		"one failure among several": {"a.tgz.sig"},
+		"every upload failing":      {"a.tgz", "a.tgz.sig", "b.tgz"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			writeFile(t, dir, "a.tgz")
+			writeFile(t, dir, "a.tgz.sig")
+			writeFile(t, dir, "b.tgz")
 
-		uploader := &partialUploader{failBasenames: map[string]bool{"a.tgz": true}}
+			uploader := &partialUploader{failBasenames: map[string]bool{}}
+			for _, file := range failing {
+				uploader.failBasenames[file] = true
+			}
 
-		var stderr bytes.Buffer
+			var stderr bytes.Buffer
 
-		err := apprelease.UploadAttachments(context.Background(), uploader, &bytes.Buffer{},
-			output.NewAnnotator(&stderr, output.FormatGitHub), apprelease.UploadAttachmentsInput{
-				Tag:        "v1.0.0",
-				Pattern:    "*.tgz",
-				WorkingDir: dir,
-			})
-		if err != nil {
-			t.Fatalf("err = %v, want nil — one upload landed", err)
-		}
+			err := apprelease.UploadAttachments(context.Background(), uploader, &bytes.Buffer{},
+				output.NewAnnotator(&stderr, output.FormatGitHub), apprelease.UploadAttachmentsInput{Tag: "v1.0.0", Pattern: "*.tgz,*.sig", WorkingDir: dir})
+			if !errors.Is(err, errs.ErrDependencyUnavailable) {
+				t.Fatalf("err = %v, want ErrDependencyUnavailable", err)
+			}
 
-		// The survivor was still attempted: a failure must not abort the loop.
-		if want := []string{"a.tgz", "b.tgz"}; !slices.Equal(uploader.attempted, want) {
-			t.Errorf("attempted = %v, want %v", uploader.attempted, want)
-		}
+			// A failure must not abort the loop.
+			if want := []string{"a.tgz", "a.tgz.sig", "b.tgz"}; !slices.Equal(uploader.attempted, want) {
+				t.Errorf("attempted = %v, want %v", uploader.attempted, want)
+			}
 
-		// Warned, not silent: the operator has to learn that an asset is
-		// missing from the release.
-		if !strings.Contains(stderr.String(), "Failed to upload") || !strings.Contains(stderr.String(), "a.tgz") {
-			t.Errorf("stderr = %q, want a warning naming the failed file", stderr.String())
-		}
-	})
+			for _, file := range []string{"a.tgz", "a.tgz.sig", "b.tgz"} {
+				failed := slices.Contains(failing, file)
+				if named := strings.Contains(err.Error(), filepath.Join(dir, file)+",") || strings.Contains(err.Error(), filepath.Join(dir, file)+":"); named != failed {
+					t.Errorf("%s named as failed = %t, want %t: %v", file, named, failed, err)
+				}
 
-	t.Run("every upload failing is fatal", func(t *testing.T) {
-		dir := t.TempDir()
-		writeFile(t, dir, "a.tgz")
-		writeFile(t, dir, "b.tgz")
+				if failed && !strings.Contains(stderr.String(), "Failed to upload "+filepath.Join(dir, file)+":") {
+					t.Errorf("no warning for %s: %s", file, stderr.String())
+				}
+			}
+		})
+	}
+}
 
-		uploader := &partialUploader{failBasenames: map[string]bool{"a.tgz": true, "b.tgz": true}}
+// An upload the forge refused is not an unavailable dependency: the next
+// attempt is refused too.
+func TestUploadAttachments_ARefusedUploadIsNotUnavailable(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "a.tgz")
 
-		err := apprelease.UploadAttachments(context.Background(), uploader, &bytes.Buffer{}, output.Annotator{},
-			apprelease.UploadAttachmentsInput{Tag: "v1.0.0", Pattern: "*.tgz", WorkingDir: dir})
-
-		// ErrDependencyUnavailable, and the individual causes are summarised
-		// rather than chained -- the count is what the message carries.
-		if !errors.Is(err, errs.ErrDependencyUnavailable) || !strings.Contains(err.Error(), "all 2 uploads failed") {
-			t.Fatalf("err = %v, want ErrDependencyUnavailable saying every attempt failed", err)
-		}
-	})
+	err := apprelease.UploadAttachments(context.Background(), &partialUploader{failBasenames: map[string]bool{"a.tgz": true}, refused: true}, &bytes.Buffer{},
+		output.NewAnnotator(&bytes.Buffer{}, output.FormatGitHub), apprelease.UploadAttachmentsInput{Tag: "v1.0.0", Pattern: "*.tgz", WorkingDir: dir})
+	if !errors.Is(err, errs.ErrValidation) || errors.Is(err, errs.ErrDependencyUnavailable) {
+		t.Fatalf("err = %v, want a failure that is not unavailable", err)
+	}
 }
 
 // Named so the double returns an identity rather than an ad-hoc message.
-var errUploadNetworkDown = errors.New("network down")
+var errUploadNetworkDown error = &net.OpError{Op: "dial", Net: "tcp", Err: syscall.ECONNREFUSED}
 
 func TestUploadAttachments_SkipsDirectories(t *testing.T) {
 	dir := t.TempDir()

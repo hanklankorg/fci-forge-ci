@@ -102,7 +102,7 @@ func (r *Repo) HasStagedChanges(ctx context.Context) (bool, error) {
 			return true, nil // exit 1: there is a diff
 		}
 
-		return false, fmt.Errorf("git diff --cached --quiet: exit %d\n%s: %w", exitErr.ExitCode(), exitErr.Stderr, errs.ErrDependencyUnavailable)
+		return false, fmt.Errorf("git diff --cached --quiet: exit %d\n%s: %w", exitErr.ExitCode(), exitErr.Stderr, errs.ErrValidation)
 	}
 
 	return false, safeexec.WrapError(err, bin, "diff")

@@ -419,7 +419,7 @@ func TestForgePackages_FailedPublishRemovesOnlyItsCredentialFile(t *testing.T) {
 	}
 }
 
-func writeNPMPackage(t *testing.T, filename, name, version string) {
+func writeNPMPackage(t *testing.T, filename, name, version string, publishConfig ...map[string]string) {
 	t.Helper()
 
 	file, err := os.Create(filename)
@@ -430,7 +430,12 @@ func writeNPMPackage(t *testing.T, filename, name, version string) {
 	gz := gzip.NewWriter(file)
 	tw := tar.NewWriter(gz)
 
-	body, err := json.Marshal(map[string]string{"name": name, "version": version})
+	manifest := map[string]any{"name": name, "version": version}
+	if len(publishConfig) == 1 {
+		manifest["publishConfig"] = publishConfig[0]
+	}
+
+	body, err := json.Marshal(manifest)
 	if err != nil {
 		t.Fatal(err)
 	}

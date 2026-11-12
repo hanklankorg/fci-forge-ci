@@ -25,6 +25,7 @@ func filesGroup() *cli.Command {
 prefix. Run manifest/asset operations from the workspace root, for example with
 --dist-dir dist and an asset path of dist/app.tar.gz.`,
 		Commands: []*cli.Command{
+			filesCompareCmd(),
 			filesCollectCmd(),
 			filesImportGoReleaserCmd(),
 			filesDeclareCmd(),
@@ -86,7 +87,7 @@ func filesCollectCmd() *cli.Command {
 
 func filesImportGoReleaserCmd() *cli.Command {
 	flags := append(releaseFilesFlags(),
-		&cli.StringSliceFlag{Name: "evidence-file", Usage: "additional dist file to sign and publish as evidence (repeatable)"},
+		&cli.StringSliceFlag{Name: flagEvidenceFile, Usage: "additional dist file to sign and publish as evidence (repeatable)"},
 	)
 
 	return &cli.Command{
@@ -101,7 +102,7 @@ checks it.`,
 		Action: func(_ context.Context, cmd *cli.Command) error {
 			_, err := apprelease.ImportGoReleaserFileManifest(apprelease.ImportGoReleaserFileManifestInput{
 				FilesInput:    releaseFilesInput(cmd),
-				EvidenceFiles: cmd.StringSlice("evidence-file"),
+				EvidenceFiles: cmd.StringSlice(flagEvidenceFile),
 			})
 
 			return err
@@ -114,9 +115,9 @@ func filesDeclareCmd() *cli.Command {
 	flags := []cli.Flag{
 		&cli.StringFlag{Name: flagDistDir, Value: defaultDistDir, Usage: "workspace-relative dist directory containing the declared files"},
 		&cli.StringFlag{Name: flagManifest, Value: apprelease.DefaultReleaseFilesManifest, Sources: cli.EnvVars("RELEASE_FILES_MANIFEST"), Usage: "release file manifest to write; it must not exist"},
-		&cli.StringSliceFlag{Name: "asset", Usage: "dist file to publish, as a path or a glob pattern the command expands; directories a pattern matches are skipped (repeatable)"},
+		&cli.StringSliceFlag{Name: flagAsset, Usage: "dist file to publish, as a path or a glob pattern the command expands; directories a pattern matches are skipped (repeatable)"},
 		&cli.StringSliceFlag{Name: "sbom", Usage: "dist file to publish and classify as an SBOM, as a path or a glob pattern (repeatable)"},
-		&cli.StringSliceFlag{Name: "evidence-file", Usage: "additional dist file to sign and publish as evidence (repeatable)"},
+		&cli.StringSliceFlag{Name: flagEvidenceFile, Usage: "additional dist file to sign and publish as evidence (repeatable)"},
 		&cli.StringFlag{Name: flagChecksumsFile, Usage: "checksums file to write; it must not exist (default: checksums.txt in --dist-dir)"},
 	}
 
@@ -139,9 +140,9 @@ EXAMPLE:
 		Action: func(_ context.Context, cmd *cli.Command) error {
 			manifest, err := apprelease.DeclareReleaseFiles(apprelease.DeclareReleaseFilesInput{
 				FilesInput:    releaseFilesInput(cmd),
-				Assets:        cmd.StringSlice("asset"),
+				Assets:        cmd.StringSlice(flagAsset),
 				SBOMs:         cmd.StringSlice("sbom"),
-				EvidenceFiles: cmd.StringSlice("evidence-file"),
+				EvidenceFiles: cmd.StringSlice(flagEvidenceFile),
 				ChecksumsFile: cmd.String(flagChecksumsFile),
 			})
 			if err != nil {
@@ -159,6 +160,9 @@ func filesManifestCmd() *cli.Command {
 	flags := append(releaseFilesFlags(),
 		&cli.StringFlag{Name: flagOutput, Usage: "output manifest file (defaults to --manifest; '-' for stdout)"},
 		&cli.StringFlag{Name: "assets-json", Usage: "release files collect JSON to reuse instead of re-collecting ('-' for stdin)"},
+		&cli.BoolFlag{Name: "unsigned", Usage: "extend an existing unsigned manifest with evidence without rediscovering producer metadata"},
+		&cli.StringSliceFlag{Name: flagEvidenceFile, Usage: "additional file to publish and sign as evidence; requires --unsigned (repeatable)"},
+		&cli.StringFlag{Name: "release-images-ledger", Usage: "require the exact pinned native final-image SBOM evidence from this ledger; requires --unsigned"},
 	)
 
 	return &cli.Command{
@@ -169,13 +173,23 @@ set is kept and the provenance statement, its bundle and the <file>.bundle and
 <file>.sig of declared files are added. An evidence file without its bundle is
 refused. Without a manifest at the default path, or with --assets-json, writes
 a fresh manifest from GoReleaser discovery; a manifest named with --manifest
-must exist, so a fresh write to another path uses --output.`,
+must exist, so a fresh write to another path uses --output.
+
+With --unsigned, preserve the producer's existing file set and add explicit
+--evidence-file paths before signing. Refuses existing signatures, provenance,
+duplicate paths and reclassification; does not read GoReleaser metadata.
+Optional --release-images-ledger requires the complete producer-pinned native
+final-image index/platform SBOM set; ordinary legacy/base evidence calls do not
+opt into this flat-dist contract.`,
 		Flags: flags,
 		Action: func(_ context.Context, cmd *cli.Command) error {
 			input := apprelease.WriteReleaseFileManifestInput{
-				FilesInput:     releaseFilesInput(cmd),
-				OutputFile:     cmd.String(flagOutput),
-				AssetsJSONFile: cmd.String("assets-json"),
+				FilesInput:          releaseFilesInput(cmd),
+				OutputFile:          cmd.String(flagOutput),
+				AssetsJSONFile:      cmd.String("assets-json"),
+				Unsigned:            cmd.Bool("unsigned"),
+				EvidenceFiles:       cmd.StringSlice(flagEvidenceFile),
+				ReleaseImagesLedger: cmd.String("release-images-ledger"),
 			}
 
 			_, err := apprelease.WriteReleaseFileManifest(input)

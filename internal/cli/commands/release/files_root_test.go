@@ -262,6 +262,17 @@ func TestReleaseRoot_PublishRequiresAFinalizedManifest(t *testing.T) {
 	dist.provenance = nil
 	dist.write(t)
 
+	// Finalized, but no signing step signed the checksums: nothing would
+	// authenticate the files they list.
+	require.NoError(t, runReleaseFilesRoot(t, "manifest"))
+
+	err = publish(t)
+	require.ErrorIs(t, err, errs.ErrValidation)
+	require.ErrorContains(t, err, "declares dist/SHA256SUMS without its signature, dist/SHA256SUMS.bundle or dist/SHA256SUMS.asc")
+
+	dist.plant(t, "SHA256SUMS.bundle")
+	dist.write(t)
+
 	require.NoError(t, runReleaseFilesRoot(t, "manifest"))
 	require.NoError(t, publish(t))
 }

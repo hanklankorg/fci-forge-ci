@@ -261,7 +261,7 @@ func NPMCheckVersion(ctx context.Context, npm NPMOps, sink ci.OutputSink, out io
 		return nil
 	}
 
-	return err
+	return npmReadFailed(out, stderr, "", "read "+name+"@"+in.Version+" from the registry", err)
 }
 
 func setAlreadyPublished(ctx context.Context, sink ci.OutputSink, value string) error {

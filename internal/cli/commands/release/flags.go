@@ -8,6 +8,7 @@ package release
 // provenance) stay under goconst's budget and rename in one place.
 const (
 	flagOutput                   = "output"
+	flagAsset                    = "asset"
 	flagVersion                  = "version"
 	flagAssembly                 = "assembly"
 	flagReleaseArtifactsDir      = "release-artifacts-dir"
@@ -20,6 +21,7 @@ const (
 	flagOIDCIssuer               = "oidc-issuer"
 	flagPrivateKeyFile           = "private-key-file"
 	flagPassphraseFile           = "passphrase-file"
+	flagFingerprint              = "fingerprint"
 	flagManifest                 = "manifest"
 	flagChecksumsFile            = "checksums-file"
 	flagChecksumsFromManifest    = "checksums-from-manifest"
@@ -28,6 +30,8 @@ const (
 	flagRefName                  = "ref-name"
 	flagSourceSHA                = "source-sha"
 	flagArtifactTransferPlanJSON = "artifact-transfer-plan-json"
+	flagPath                     = "path"
+	flagEvidenceFile             = "evidence-file"
 )
 
 // Shared flag defaults and credential labels, declared once for the same

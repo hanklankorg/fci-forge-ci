@@ -226,3 +226,33 @@ func TestGPGKeyAndPassphrase_RefusedWhenBothReadStdin(t *testing.T) {
 		})
 	}
 }
+
+// On a runner with swap the GPG signing verbs refuse before they read the
+// key: the key file named here does not exist, so a read would fail with
+// another error first.
+func TestGPGSigning_RefusesSwapBeforeReadingTheKey(t *testing.T) {
+	t.Chdir(t.TempDir())
+
+	swaps := filepath.Join(t.TempDir(), "swaps")
+	if err := os.WriteFile(swaps, []byte("Filename\tType\tSize\tUsed\tPriority\n/swapfile\tfile\t1024\t0\t-2\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("FORGE_CI_PROC_SWAPS", swaps)
+
+	if err := os.WriteFile("app.tgz", []byte("fixture"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	missing := filepath.Join(t.TempDir(), "no-such-key.asc")
+
+	for _, command := range []string{
+		"sign --method gpg --file app.tgz",
+		"sbom-zip --sign --method gpg --project-name app --version 1.2.3 --sbom-dir .",
+	} {
+		err := New().Run(t.Context(), append(append([]string{New().Name}, strings.Fields(command)...), "--private-key-file", missing))
+		if err == nil || !strings.Contains(err.Error(), "swap is enabled on this runner") {
+			t.Errorf("%s: err = %v, want the swap refusal before the key is read", command, err)
+		}
+	}
+}

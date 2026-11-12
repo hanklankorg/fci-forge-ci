@@ -26,8 +26,6 @@ import (
 	"github.com/diggsweden/forge-ci/internal/pathsafe"
 )
 
-const defaultReleaseImagesPath = "dist/release-images.json"
-
 // AssembleDistInput drives `forge-ci release assemble-dist`, the Forgejo CI
 // signer hand-off fan-in: download run artifacts, optionally merge image
 // ledgers, prune directories on request, and emit the canonical dist digest.
@@ -64,32 +62,24 @@ type distWorkspace interface {
 // AssembleDist performs the release dist/ hand-off assembly formerly owned by
 // forgejo-ci's assemble-release-dist.sh.
 func AssembleDist(ctx context.Context, dl provider.RunArtifactDownloader, workspace distWorkspace, sink domainci.OutputSink, stderr io.Writer, in AssembleDistInput) (AssembleDistResult, error) {
-	path := defaultIfEmpty(in.Path, "dist/")
-	releaseImagesPath := defaultIfEmpty(in.ReleaseImagesPath, defaultReleaseImagesPath)
-
-	if err := validateSingleLineValue(path, "path"); err != nil {
+	path, releaseImagesPath, err := assembleDistPaths(workspace, in)
+	if err != nil {
 		return AssembleDistResult{}, err
-	}
-
-	if err := workspace.ContainDistPath(path); err != nil {
-		return AssembleDistResult{}, err
-	}
-
-	if err := validateSafeRelativePath(releaseImagesPath, "release-images-path"); err != nil {
-		return AssembleDistResult{}, err
-	}
-
-	// The ledger is a file the release publishes. "-" would send it to stdout
-	// and report success with nothing on disk.
-	if releaseImagesPath == cliio.StdSentinel {
-		return AssembleDistResult{}, fmt.Errorf("release-images-path must be a file path, not %q: %w", cliio.StdSentinel, errs.ErrUsage)
 	}
 
 	if err := downloadAssembleArtifacts(ctx, dl, stderr, in.ArtifactNames, in.ArtifactTransferPlanJSON, path, in.RunID, in.Repository); err != nil {
 		return AssembleDistResult{}, err
 	}
 
+	if err := ctx.Err(); err != nil {
+		return AssembleDistResult{}, err
+	}
+
 	if err := mergeReleaseImageLedgers(stderr, in.LedgerFiles, releaseImagesPath, in.LedgerExpectedCount); err != nil {
+		return AssembleDistResult{}, err
+	}
+
+	if err := ctx.Err(); err != nil {
 		return AssembleDistResult{}, err
 	}
 
@@ -98,8 +88,16 @@ func AssembleDist(ctx context.Context, dl provider.RunArtifactDownloader, worksp
 		return AssembleDistResult{}, err
 	}
 
+	if err := ctx.Err(); err != nil {
+		return AssembleDistResult{}, err
+	}
+
 	digest, err := DistDigest(digestDir)
 	if err != nil {
+		return AssembleDistResult{}, err
+	}
+
+	if err := ctx.Err(); err != nil {
 		return AssembleDistResult{}, err
 	}
 
@@ -114,6 +112,57 @@ func AssembleDist(ctx context.Context, dl provider.RunArtifactDownloader, worksp
 	}
 
 	return AssembleDistResult{Digest: digest}, nil
+}
+
+// assembleDistPaths admits the dist directory inside the workspace and the
+// release image ledger path the assembly writes.
+func assembleDistPaths(workspace distWorkspace, in AssembleDistInput) (string, string, error) {
+	path := defaultIfEmpty(in.Path, "dist/")
+
+	if err := validateSingleLineValue(path, "path"); err != nil {
+		return "", "", err
+	}
+
+	if err := workspace.ContainDistPath(path); err != nil {
+		return "", "", err
+	}
+
+	releaseImagesPath, err := assembleReleaseImagesPath(path, in.ReleaseImagesPath)
+	if err != nil {
+		return "", "", err
+	}
+
+	if err := validateSafeRelativePath(releaseImagesPath, "release-images-path"); err != nil {
+		return "", "", err
+	}
+
+	// The ledger is a file the release publishes. "-" would send it to stdout
+	// and report success with nothing on disk.
+	if releaseImagesPath == cliio.StdSentinel {
+		return "", "", fmt.Errorf("release-images-path must be a file path, not %q: %w", cliio.StdSentinel, errs.ErrUsage)
+	}
+
+	return path, releaseImagesPath, nil
+}
+
+func assembleReleaseImagesPath(distPath, override string) (string, error) {
+	if override != "" {
+		return override, nil
+	}
+
+	if filepath.IsAbs(distPath) {
+		workspace, err := os.Getwd()
+		if err != nil {
+			return "", err
+		}
+
+		distPath, err = filepath.Rel(workspace, distPath)
+		if err != nil {
+			return "", err
+		}
+	}
+
+	return filepath.Join(distPath, "release-images.json"), nil
 }
 
 func downloadAssembleArtifacts(ctx context.Context, dl provider.RunArtifactDownloader, stderr io.Writer, artifactNames, planJSON, path, runID, repository string) error {
@@ -195,6 +244,14 @@ func downloadAssembleArtifact(ctx context.Context, dl provider.RunArtifactDownlo
 		RunID:      runID,
 		Repository: repository,
 	})
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return ctxErr
+	}
+
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return err
+	}
+
 	if err == nil {
 		if stderr != nil {
 			_, _ = fmt.Fprintf(stderr, "Downloaded %s -> %s\n", name, dir)

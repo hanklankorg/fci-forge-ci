@@ -220,3 +220,69 @@ func TestRemoteTagParsers_AcceptWhatARealRemoteSends(t *testing.T) {
 		})
 	}
 }
+
+// splitSignedTag must cut where git does: at the last line that starts a
+// signature. A PGP block quoted earlier in the message is signed payload,
+// so a tag whose real signature is SSH offers no PGP signature to verify,
+// and armor text inside a line is prose.
+func TestSplitSignedTag_CutsAtTheLastSignatureLine(t *testing.T) {
+	t.Parallel()
+
+	const (
+		header = "object 0123456789abcdef0123456789abcdef01234567\ntype commit\ntag v1.0.0\ntagger A <a@example.invalid> 1700000000 +0000\n\n"
+		pgp    = "-----BEGIN PGP SIGNATURE-----\n\nAAAA\n-----END PGP SIGNATURE-----\n"
+		ssh    = "-----BEGIN SSH SIGNATURE-----\nBBBB\n-----END SSH SIGNATURE-----\n"
+		prose  = "Release v1.0.0, not -----BEGIN PGP SIGNATURE----- here\n"
+	)
+
+	for _, test := range []struct {
+		name, body, payload, signature string
+	}{
+		{"pgp", header + prose + pgp, header + prose, pgp},
+		{"quoted pgp then ssh", header + prose + pgp + ssh, header + prose + pgp, ssh},
+		{"unsigned", header + prose, header + prose, ""},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			payload, signature := splitSignedTag([]byte(test.body))
+			if string(payload) != test.payload || string(signature) != test.signature {
+				t.Fatalf("split = (%q, %q), want (%q, %q)", payload, signature, test.payload, test.signature)
+			}
+		})
+	}
+}
+
+// stripCompatibilitySignature removes what git's remove_signature removes,
+// as measured against git 2.53: the last gpgsig or gpgsig-sha256 header
+// with its continuation lines, and nothing in the message.
+func TestStripCompatibilitySignature_RemovesWhatGitRemoves(t *testing.T) {
+	t.Parallel()
+
+	const (
+		head = "object 0123456789abcdef0123456789abcdef01234567\ntype commit\ntag v1.0.0\ntagger A <a@example.invalid> 1700000000 +0000\n"
+		sig  = " -----BEGIN PGP SIGNATURE-----\n \n AAAA\n -----END PGP SIGNATURE-----\n"
+		body = "\nRelease\n"
+	)
+
+	for _, test := range []struct {
+		name, payload, want string
+	}{
+		{"no header", head + body, head + body},
+		{"gpgsig", head + "gpgsig" + sig + body, head + body},
+		{"gpgsig-sha256", head + "gpgsig-sha256" + sig + body, head + body},
+		{"only the last of two", head + "gpgsig" + sig + "gpgsig-sha256" + sig + body, head + "gpgsig" + sig + body},
+		{"another algorithm's name", head + "gpgsig-sha1" + sig + body, head + "gpgsig-sha1" + sig + body},
+		{"no space after the name", head + "gpgsig\n a\n" + body, head + "gpgsig\n a\n" + body},
+		{"in the message", head + body + "gpgsig" + sig, head + body + "gpgsig" + sig},
+		{"continuation of another header", head + "foo bar\n cont\n" + body, head + "foo bar\n cont\n" + body},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := string(stripCompatibilitySignature([]byte(test.payload))); got != test.want {
+				t.Fatalf("strip = %q, want %q", got, test.want)
+			}
+		})
+	}
+}

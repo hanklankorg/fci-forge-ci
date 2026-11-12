@@ -22,6 +22,7 @@ import (
 	"github.com/diggsweden/forge-ci/internal/cli/planfile"
 	"github.com/diggsweden/forge-ci/internal/cli/secret"
 	"github.com/diggsweden/forge-ci/internal/cli/signflags"
+	"github.com/diggsweden/forge-ci/internal/docslink"
 	domainbuild "github.com/diggsweden/forge-ci/internal/domain/build"
 	"github.com/diggsweden/forge-ci/internal/domain/errs"
 	domainrelease "github.com/diggsweden/forge-ci/internal/domain/release"
@@ -31,19 +32,23 @@ import (
 // debugSwapWarning is the Warning annotation text emitted when the
 // --debug-allow-swap flag bypasses the swap policy. The exact tokens
 // "--debug-allow-swap" and "swap" are pinned by the integration test.
-//
-//nolint:gosec // G101 false positive: the substring "key material" is operator-facing warning text, not a credential literal.
-const debugSwapWarning = "swap policy bypassed via --debug-allow-swap — decrypted key material may be paged to disk. DO NOT USE FOR PRODUCTION RELEASES; see https://github.com/diggsweden/forge-ci/blob/main/docs/verification.md#swap-policy."
+func debugSwapWarning() string {
+	return "swap policy bypassed via --debug-allow-swap — decrypted key material may be paged to disk. DO NOT USE FOR PRODUCTION RELEASES; see " + docslink.URL("verification.md#swap-policy") + "."
+}
 
 // undeterminedSwapNotice is emitted when swap state cannot be read, so the
 // skip is in the log rather than inferred from its absence. Deliberately a
 // Notice, not a Warning: on a restricted container or a non-Linux runner the
 // indeterminacy is structural and there is nothing for the operator to fix.
-const undeterminedSwapNotice = "swap state could not be determined (/proc/swaps unreadable) — the swap policy did not run; signing proceeded with only the process hardening (RLIMIT_CORE, PR_SET_DUMPABLE), which does not keep memory out of swap. See https://github.com/diggsweden/forge-ci/blob/main/docs/verification.md#swap-policy."
+func undeterminedSwapNotice() string {
+	return "swap state could not be determined (/proc/swaps unreadable) — the swap policy did not run; signing proceeded with only the process hardening (RLIMIT_CORE, PR_SET_DUMPABLE), which does not keep memory out of swap. See " + docslink.URL("verification.md#swap-policy") + "."
+}
 
 // A Notice like the undetermined case: the black-box suite sets the override on
 // purpose, but the pass is not the kernel's answer and the log has to say so.
-const overriddenSwapNotice = "swap state was read from $FORGE_CI_PROC_SWAPS, not /proc/swaps — no active swap area was reported there, so the swap policy passed on an injected answer. See https://github.com/diggsweden/forge-ci/blob/main/docs/verification.md#swap-policy."
+func overriddenSwapNotice() string {
+	return "swap state was read from $FORGE_CI_PROC_SWAPS, not /proc/swaps — no active swap area was reported there, so the swap policy passed on an injected answer. See " + docslink.URL("verification.md#swap-policy") + "."
+}
 
 // debugAllowSwapFlag is the operator's opt-out from the swap-refusal
 // policy. Flag-only, so the override must reappear in argv each
@@ -51,7 +56,7 @@ const overriddenSwapNotice = "swap state was read from $FORGE_CI_PROC_SWAPS, not
 func debugAllowSwapFlag() cli.Flag {
 	return &cli.BoolFlag{
 		Name:  "debug-allow-swap",
-		Usage: "DEBUG ONLY — bypass the swap-refusal policy when /proc/swaps reports an active swap area; emits a loud Warning annotation. NOT FOR PRODUCTION RELEASES; the supported fix is to disable swap on the runner. See https://github.com/diggsweden/forge-ci/blob/main/docs/verification.md#swap-policy.",
+		Usage: "DEBUG ONLY — bypass the swap-refusal policy when /proc/swaps reports an active swap area; emits a loud Warning annotation. NOT FOR PRODUCTION RELEASES; the supported fix is to disable swap on the runner. See " + docslink.URL("verification.md#swap-policy") + ".",
 	}
 }
 
@@ -74,11 +79,11 @@ func requireNoSwapWithWarning(cmd *cli.Command) error {
 
 	switch state {
 	case safeexec.SwapBypassed:
-		deps.Annotator(cmd).Warningf("%s", debugSwapWarning)
+		deps.Annotator(cmd).Warningf("%s", debugSwapWarning())
 	case safeexec.SwapUndetermined:
-		deps.Annotator(cmd).Noticef("%s", undeterminedSwapNotice)
+		deps.Annotator(cmd).Noticef("%s", undeterminedSwapNotice())
 	case safeexec.SwapOverridden:
-		deps.Annotator(cmd).Noticef("%s", overriddenSwapNotice)
+		deps.Annotator(cmd).Noticef("%s", overriddenSwapNotice())
 	case safeexec.SwapAbsent:
 	}
 
@@ -151,6 +156,11 @@ func signMethodFlags(planScope string) []cli.Flag {
 			Sources: signSources(planScope, flagPassphraseFile),
 			Usage:   "path to the GPG passphrase for --method=gpg (\"-\" for stdin; defaults to $GPG_PASSPHRASE). Forbidden for --method=sigstore/kms.",
 		},
+		&cli.StringFlag{
+			Name:    flagFingerprint,
+			Sources: signSources(planScope, flagFingerprint),
+			Usage:   "primary-key fingerprint the GPG key must have for --method=gpg, 40 uppercase hex digits; a key with another is refused before anything is signed. Forbidden for --method=sigstore/kms.",
+		},
 	)
 }
 
@@ -161,10 +171,10 @@ func signMethodFlags(planScope string) []cli.Flag {
 //
 // NewCosignSigner captures method, keyref and issuer once, so a
 // multi-artifact loop signs with the same configuration throughout.
-func buildSigner(cmd *cli.Command, errOut io.Writer) (apprelease.Signer, domainrelease.SignMethod, error) {
+func buildSigner(cmd *cli.Command, errOut io.Writer) (apprelease.Signer, error) {
 	method, err := domainrelease.ParseSignMethod(cmd.String("method"))
 	if err != nil {
-		return nil, "", err
+		return nil, err
 	}
 
 	keyRef := cmd.String(flagKey)
@@ -172,13 +182,13 @@ func buildSigner(cmd *cli.Command, errOut io.Writer) (apprelease.Signer, domainr
 	keyFile := cmd.String(flagPrivateKeyFile)
 	passFile := cmd.String(flagPassphraseFile)
 
-	if err := validateSignFlags(method, keyRef, oidcIssuer, keyFile, passFile); err != nil {
-		return nil, "", err
+	if err := validateSignFlags(method, keyRef, oidcIssuer, keyFile, passFile, cmd.String(flagFingerprint)); err != nil {
+		return nil, err
 	}
 
 	switch method {
 	case domainrelease.SignMethodGPG:
-		return buildGPGSigner(cmd, method)
+		return buildGPGSigner(cmd)
 	case domainrelease.SignMethodSigstore:
 		if apprelease.KeylessNeedsIssuer(oidcIssuer, deps.CapabilitiesForDetected().PublicFulcioTrusted) {
 			deps.Annotator(cmd).Warningf(
@@ -192,7 +202,7 @@ func buildSigner(cmd *cli.Command, errOut io.Writer) (apprelease.Signer, domainr
 		return buildKMSSigner(method, keyRef, errOut)
 	default:
 		// Unreachable: ParseSignMethod rejects anything else.
-		return nil, "", fmt.Errorf("sign: method %q unsupported: %w", method, errs.ErrInvalidConfig)
+		return nil, fmt.Errorf("sign: method %q unsupported: %w", method, errs.ErrInvalidConfig)
 	}
 }
 
@@ -202,36 +212,51 @@ func buildSigner(cmd *cli.Command, errOut io.Writer) (apprelease.Signer, domainr
 // $GPG_PASSPHRASE, keeping the key out of the environment (clig.dev
 // §Environment variables: prefer credential files/stdin for secrets).
 // Same input contract as `release gpg import`.
-func buildGPGSigner(cmd *cli.Command, method domainrelease.SignMethod) (apprelease.Signer, domainrelease.SignMethod, error) {
+//
+// GPG is the only method with decrypted key material in this process:
+// sigstore uses an ephemeral key in cosign and KMS leaves the key with the
+// provider. So the swap policy runs after the flags are checked and before
+// the key is read, and a runner with swap never has the key in memory.
+func buildGPGSigner(cmd *cli.Command) (apprelease.Signer, error) {
 	if err := gpgSingleStdin(cmd); err != nil {
-		return nil, "", err
+		return nil, err
+	}
+
+	if err := requireNoSwapWithWarning(cmd); err != nil {
+		return nil, err
 	}
 
 	privateKey, err := secret.Resolve(cmd.String(flagPrivateKeyFile), "GPG_PRIVATE_KEY")
 	if err != nil {
-		return nil, "", err
+		return nil, err
 	}
 
 	if privateKey == "" {
-		return nil, "", errs.CredentialRequired(errs.Credential{What: credentialGPGPrivateKey, Flag: flagPrivateKeyFile, Env: "GPG_PRIVATE_KEY"})
+		return nil, errs.CredentialRequired(errs.Credential{What: credentialGPGPrivateKey, Flag: flagPrivateKeyFile, Env: "GPG_PRIVATE_KEY"})
 	}
 
 	passphrase, err := secret.Resolve(cmd.String(flagPassphraseFile), "GPG_PASSPHRASE")
 	if err != nil {
-		return nil, "", err
+		return nil, err
 	}
 
 	createdAt, err := signingCreationTime(cmd.String("source-date-epoch"))
 	if err != nil {
-		return nil, "", err
+		return nil, err
 	}
 
 	signer, err := openpgp.NewSignerFromArmorAt([]byte(privateKey), passphrase, createdAt)
 	if err != nil {
-		return nil, "", err
+		return nil, err
 	}
 
-	return signer, method, nil
+	// The pin binds the key a secret holds to the fingerprint the caller
+	// reviewed, as `release gpg sign-packages --fingerprint` does.
+	if want := cmd.String(flagFingerprint); want != "" && signer.Fingerprint() != want {
+		return nil, fmt.Errorf("sign: the GPG key's fingerprint is %s, not the pinned --%s %s: %w", signer.Fingerprint(), flagFingerprint, want, errs.ErrValidation)
+	}
+
+	return signer, nil
 }
 
 func signingCreationTime(raw string) (time.Time, error) {
@@ -247,7 +272,7 @@ func signingCreationTime(raw string) (time.Time, error) {
 // signing config, which replaces cosign's own, TUF-distributed one wholesale.
 // With none named, cosign signs against its public defaults and finds the
 // runner's token itself.
-func buildSigstoreSigner(method domainrelease.SignMethod, oidcIssuer string, endpoints signflags.Endpoints, errOut io.Writer) (apprelease.Signer, domainrelease.SignMethod, error) {
+func buildSigstoreSigner(method domainrelease.SignMethod, oidcIssuer string, endpoints signflags.Endpoints, errOut io.Writer) (apprelease.Signer, error) {
 	signer, err := apprelease.NewCosignSigner(cosign.New(), apprelease.CosignSignerInput{
 		Method:          method,
 		OIDCIssuer:      oidcIssuer,
@@ -256,23 +281,23 @@ func buildSigstoreSigner(method domainrelease.SignMethod, oidcIssuer string, end
 		TrustedRootPath: endpoints.TrustedRootPath,
 	}, errOut)
 	if err != nil {
-		return nil, "", err
+		return nil, err
 	}
 
-	return signer, method, nil
+	return signer, nil
 }
 
 // buildKMSSigner constructs a cosign-KMS signer against keyRef.
-func buildKMSSigner(method domainrelease.SignMethod, keyRef string, errOut io.Writer) (apprelease.Signer, domainrelease.SignMethod, error) {
+func buildKMSSigner(method domainrelease.SignMethod, keyRef string, errOut io.Writer) (apprelease.Signer, error) {
 	signer, err := apprelease.NewCosignSigner(cosign.ForKeyRef(keyRef), apprelease.CosignSignerInput{
 		Method: method,
 		KeyRef: keyRef,
 	}, errOut)
 	if err != nil {
-		return nil, "", err
+		return nil, err
 	}
 
-	return signer, method, nil
+	return signer, nil
 }
 
 // signFlagRule is one cell of the sign-method flag matrix: a flag the
@@ -309,6 +334,7 @@ func signFlagRules() map[domainrelease.SignMethod]struct {
 				{flag: flagKey, why: "keyless OIDC has no key"},
 				{flag: flagPrivateKeyFile, why: whyGPGOnly},
 				{flag: flagPassphraseFile, why: whyGPGOnly},
+				{flag: flagFingerprint, why: whyGPGOnly},
 			},
 		},
 		domainrelease.SignMethodKMS: {
@@ -319,6 +345,7 @@ func signFlagRules() map[domainrelease.SignMethod]struct {
 				{flag: flagOIDCIssuer},
 				{flag: flagPrivateKeyFile, why: whyGPGOnly},
 				{flag: flagPassphraseFile, why: whyGPGOnly},
+				{flag: flagFingerprint, why: whyGPGOnly},
 			},
 		},
 	}
@@ -334,15 +361,17 @@ func parenthesise(why string) string {
 }
 
 // validateSignFlags checks the per-method invariants on --key,
-// --oidc-issuer, and the GPG --private-key-file/--passphrase-file inputs
-// against signFlagRules(). Illegal combinations are rejected before signing
-// starts, rather than surfacing later as a cosign-argv error.
-func validateSignFlags(method domainrelease.SignMethod, keyRef, oidcIssuer, keyFile, passFile string) error {
+// --oidc-issuer, and the GPG --private-key-file/--passphrase-file/
+// --fingerprint inputs against signFlagRules(). Illegal combinations are
+// rejected before signing starts, rather than surfacing later as a
+// cosign-argv error.
+func validateSignFlags(method domainrelease.SignMethod, keyRef, oidcIssuer, keyFile, passFile, fingerprint string) error {
 	given := map[string]string{
 		flagKey:            keyRef,
 		flagOIDCIssuer:     oidcIssuer,
 		flagPrivateKeyFile: keyFile,
 		flagPassphraseFile: passFile,
+		flagFingerprint:    fingerprint,
 	}
 
 	rules := signFlagRules()[method]
@@ -402,18 +431,11 @@ EXAMPLES:
    forge-ci release sign --method=kms --key hashivault://transit/keys/release`,
 		Flags: flags,
 		Action: func(ctx context.Context, cmd *cli.Command) error {
-			signer, method, err := buildSigner(cmd, os.Stderr)
+			// The GPG branch applies the swap policy before it reads
+			// the key (buildGPGSigner).
+			signer, err := buildSigner(cmd, os.Stderr)
 			if err != nil {
 				return err
-			}
-
-			// GPG is the only branch with decrypted key material
-			// in our heap: sigstore uses an ephemeral key and KMS
-			// leaves the key with the provider.
-			if method == domainrelease.SignMethodGPG {
-				if err := requireNoSwapWithWarning(cmd); err != nil {
-					return err
-				}
 			}
 
 			return apprelease.SignArtifacts(ctx, signer, os.Stderr, apprelease.SignInput{
@@ -441,6 +463,7 @@ func downloadArtifactsCmd() *cli.Command {
 EXAMPLE (as a workflow step):
    forge-ci release download-artifacts --run-id 123456 --repository org/app`,
 		Flags: []cli.Flag{
+			&cli.BoolFlag{Name: "isolated", Usage: "acquire into a fresh directory outside the checkout; emit acquisition-dir for assembly (runner cleans it at job end)"},
 			&cli.StringFlag{Name: flagArtifactTransferPlanJSON, Sources: cli.EnvVars("ARTIFACT_TRANSFER_PLAN_JSON"), Usage: "typed transfer plan JSON listing which CI artifacts to download"},
 			&cli.StringFlag{Name: "run-id", Sources: cienv.RunID(), Usage: "CI run ID artifacts are downloaded from"},
 			&cli.StringFlag{Name: flagRepository, Sources: cienv.Repository(), Usage: "\"owner/repo\" the run belongs to"},
@@ -452,11 +475,18 @@ EXAMPLE (as a workflow step):
 					return err
 				}
 
-				return apprelease.DownloadArtifacts(ctx, dl, os.Stderr, apprelease.DownloadArtifactsInput{
+				in := apprelease.DownloadArtifactsInput{
 					ArtifactTransferPlanJSON: cmd.String(flagArtifactTransferPlanJSON),
 					RunID:                    cmd.String("run-id"),
 					Repository:               cmd.String(flagRepository),
-				})
+				}
+				if cmd.Bool("isolated") {
+					_, err := apprelease.AcquireArtifacts(ctx, dl, d.OutputSink, os.Stderr, in)
+
+					return err
+				}
+
+				return apprelease.DownloadArtifacts(ctx, dl, os.Stderr, in)
 			})
 		},
 	}
@@ -536,16 +566,11 @@ func sbomZipCmd() *cli.Command {
 			var signer apprelease.Signer
 
 			if cmd.Bool("sign") {
-				built, method, err := buildSigner(cmd, os.Stderr)
+				// The GPG branch applies the swap policy before it
+				// reads the key (buildGPGSigner).
+				built, err := buildSigner(cmd, os.Stderr)
 				if err != nil {
 					return err
-				}
-
-				// GPG branch only; see signCmd.
-				if method == domainrelease.SignMethodGPG {
-					if err := requireNoSwapWithWarning(cmd); err != nil {
-						return err
-					}
 				}
 
 				signer = built

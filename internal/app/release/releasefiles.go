@@ -43,12 +43,13 @@ const (
 type releaseSignature struct{ suffix, source string }
 
 // releaseSignatures are the signature files the signing verbs write: a cosign
-// bundle, and the detached signature of a distro package. Finalization
-// publishes them for declared files, and nothing else decides what a signature
-// file is.
+// bundle, the armored OpenPGP signature `release sign --method gpg` writes,
+// and the detached signature of a distro package. Finalization publishes them
+// for declared files, and nothing else decides what a signature file is.
 func releaseSignatures() []releaseSignature {
 	return []releaseSignature{
 		{suffix: ".bundle", source: "signature_bundle"},
+		{suffix: ".asc", source: "openpgp_signature"},
 		{suffix: ".sig", source: "package_signature"},
 	}
 }
@@ -104,6 +105,11 @@ type WriteReleaseFileManifestInput struct {
 
 	OutputFile     string
 	AssetsJSONFile string
+	Unsigned       bool
+	EvidenceFiles  []string
+	// ReleaseImagesLedger opts into the native final-image evidence contract.
+	// Ordinary evidence extension, including legacy/base ledgers, is unchanged.
+	ReleaseImagesLedger string
 }
 
 // ImportGoReleaserFileManifestInput selects additional evidence to sign alongside
@@ -151,8 +157,63 @@ func WriteReleaseFileManifest(in WriteReleaseFileManifestInput) (*FileManifest, 
 		output = ctx.manifestFile
 	}
 
+	if in.Unsigned {
+		return extendUnsignedReleaseFileManifest(ctx, in, output)
+	}
+
+	if len(in.EvidenceFiles) != 0 || in.ReleaseImagesLedger != "" {
+		return nil, fmt.Errorf("adding evidence requires --unsigned before signing: %w", errs.ErrUsage)
+	}
+
 	manifest, err := prepareReleaseFileManifest(ctx, in.AssetsJSONFile)
 	if err != nil {
+		return nil, err
+	}
+
+	return writeReleaseFileManifest(ctx, manifest, output)
+}
+
+// Extend only an admitted unsigned manifest, before any signature is created.
+func extendUnsignedReleaseFileManifest(ctx releaseFilesCtx, in WriteReleaseFileManifestInput, output string) (*FileManifest, error) {
+	if in.AssetsJSONFile != "" {
+		return nil, fmt.Errorf("unsigned evidence extension requires an existing manifest, not assets-json: %w", errs.ErrUsage)
+	}
+
+	manifest, err := readReleaseFileManifest(ctx.manifestFile)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := validateReleaseFileManifest(ctx, manifest); err != nil {
+		return nil, err
+	}
+
+	if err := validateUnsignedReleaseFiles(ctx, manifest); err != nil {
+		return nil, err
+	}
+
+	if in.ReleaseImagesLedger != "" {
+		if err := validateReleaseImageEvidence(ctx, in.ReleaseImagesLedger, in.EvidenceFiles); err != nil {
+			return nil, err
+		}
+	}
+
+	collector := &releaseFileCollector{}
+	for _, entry := range manifest.Assets {
+		if err := collector.add(ctx, entry.Path, entry.Source); err != nil {
+			return nil, err
+		}
+	}
+
+	evidence, err := addEvidenceEntries(ctx, collector, in.EvidenceFiles)
+	if err != nil {
+		return nil, err
+	}
+
+	manifest.Assets = collector.entries
+
+	manifest.Evidence = append(manifest.Evidence, evidence...)
+	if err := validateUnsignedReleaseFiles(ctx, manifest); err != nil {
 		return nil, err
 	}
 
@@ -363,10 +424,13 @@ func PublishableReleaseFiles(in FilesInput) ([]string, error) {
 	return entryPaths(manifest.Assets), nil
 }
 
-// requireFinalizedManifest refuses a manifest finalization has not written.
-// Finalization declares the provenance statement with its bundle and the
-// bundle of every evidence file; those are the published files no checksum
-// line covers.
+// requireFinalizedManifest refuses a manifest finalization has not written,
+// and a release whose signing left a signed file unsigned. Finalization
+// declares the provenance statement with its bundle and the bundle of every
+// evidence file; those are the published files no checksum line covers. It
+// declares a signature of each checksums file and each SBOM too, a Cosign
+// bundle or an OpenPGP .asc: the checksums bind every other file, so a
+// release without that signature would be published unauthenticated.
 func requireFinalizedManifest(ctx releaseFilesCtx, manifest *FileManifest) error {
 	const hint = "run `release files manifest` after signing"
 
@@ -383,6 +447,15 @@ func requireFinalizedManifest(ctx releaseFilesCtx, manifest *FileManifest) error
 		bundle := filepath.Clean(signed) + ".bundle"
 		if _, ok := declared[bundle]; !ok {
 			return fmt.Errorf("release file manifest %s is not finalized: it declares %s without its signature bundle %s; %s: %w", ctx.manifestFile, signed, bundle, hint, errs.ErrValidation)
+		}
+	}
+
+	for _, signed := range append(entryPaths(manifest.Checksums), entryPaths(manifest.SBOMs)...) {
+		signed = filepath.Clean(signed)
+
+		_, bundle := declared[signed+".bundle"]
+		if _, openPGP := declared[signed+".asc"]; !bundle && !openPGP {
+			return fmt.Errorf("release file manifest %s is not finalized: it declares %s without its signature, %s.bundle or %s.asc; sign the checksums and SBOMs, then %s: %w", ctx.manifestFile, signed, signed, signed, hint, errs.ErrValidation)
 		}
 	}
 

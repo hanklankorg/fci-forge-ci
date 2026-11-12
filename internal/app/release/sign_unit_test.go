@@ -325,20 +325,26 @@ func TestSign_AssemblySignsDistroPackagesAsCanonicalAssets(t *testing.T) {
     {"path":"release-files/assets/app.rpm","name":"app.rpm"},
     {"path":"release-files/assets/app.apk","name":"app.apk"}
   ],
-  "checksum_file":""
+  "checksum_file":"release-files/checksums.sha256"
 }`))
 	fsys.Chdir()
+
+	if _, err := apprelease.Checksums(io.Discard, apprelease.ChecksumsInput{AssemblyFile: "assembly.json"}); err != nil {
+		t.Fatal(err)
+	}
+
+	want := slices.Concat(packages, []string{"release-files/checksums.sha256"})
 
 	signer := &fakeSigner{}
 	if err := apprelease.SignArtifacts(context.Background(), signer, io.Discard, apprelease.SignInput{AssemblyFile: "assembly.json"}); err != nil {
 		t.Fatal(err)
 	}
 
-	if !slices.Equal(signer.signed, packages) {
-		t.Errorf("signed = %v, want %v", signer.signed, packages)
+	if !slices.Equal(signer.signed, want) {
+		t.Errorf("signed = %v, want %v", signer.signed, want)
 	}
 
-	for _, path := range packages {
+	for _, path := range want {
 		if _, err := os.Stat(path + ".asc"); err != nil {
 			t.Errorf("missing canonical signature for %s: %v", path, err)
 		}
@@ -349,13 +355,16 @@ func TestSign_AssemblyFailsClosedWhenSignerProducesNoSidecar(t *testing.T) {
 	// No t.Parallel: testfs.Real.Chdir mutates the process working directory.
 	fsys := testfs.NewReal(t)
 	fsys.WriteFile(filepath.Join("release-files", "assets", "app.deb"), []byte("package"))
-	fsys.WriteFile(filepath.Join("release-files", "assets", "app.deb.asc"), []byte("stale signature"))
 	fsys.WriteFile("assembly.json", []byte(`{
   "version": 1,
   "assets": [{"path":"release-files/assets/app.deb","name":"app.deb"}],
-  "checksum_file":""
+  "checksum_file":"release-files/checksums.sha256"
 }`))
 	fsys.Chdir()
+
+	if _, err := apprelease.Checksums(io.Discard, apprelease.ChecksumsInput{AssemblyFile: "assembly.json"}); err != nil {
+		t.Fatal(err)
+	}
 
 	err := apprelease.SignArtifacts(context.Background(), silentSigner{}, io.Discard, apprelease.SignInput{AssemblyFile: "assembly.json"})
 	if !errors.Is(err, errs.ErrValidation) {
@@ -363,6 +372,6 @@ func TestSign_AssemblyFailsClosedWhenSignerProducesNoSidecar(t *testing.T) {
 	}
 
 	if _, statErr := os.Stat(filepath.Join("release-files", "assets", "app.deb.asc")); !errors.Is(statErr, os.ErrNotExist) {
-		t.Fatalf("stale sidecar survived failed signing: %v", statErr)
+		t.Fatalf("sidecar exists despite silent signer: %v", statErr)
 	}
 }

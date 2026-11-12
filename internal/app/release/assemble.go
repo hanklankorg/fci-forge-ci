@@ -4,6 +4,7 @@
 package release
 
 import (
+	"bytes"
 	"cmp"
 	"encoding/json"
 	"errors"
@@ -21,6 +22,7 @@ import (
 	domainartifact "github.com/diggsweden/forge-ci/internal/domain/artifact"
 	"github.com/diggsweden/forge-ci/internal/domain/errs"
 	"github.com/diggsweden/forge-ci/internal/domain/pipeline"
+	"github.com/diggsweden/forge-ci/internal/domain/provenance"
 	domainrelease "github.com/diggsweden/forge-ci/internal/domain/release"
 	domainsbom "github.com/diggsweden/forge-ci/internal/domain/sbom"
 	"github.com/diggsweden/forge-ci/internal/domain/version"
@@ -46,6 +48,9 @@ type AssembleInput struct {
 	ReleaseFilesDir          string
 	ReleaseArtifactsDir      string
 	SBOMDir                  string
+	// AcquisitionDir is the fresh producer tree emitted by download-artifacts
+	// --isolated. Source checkout contents remain attachment-only in this mode.
+	AcquisitionDir string
 }
 
 type assemblyCollector struct {
@@ -57,6 +62,7 @@ type assemblyCollector struct {
 	// than threaded through every collect* helper.
 	releaseFilesDir     string
 	releaseArtifactsDir string
+	acquisitionDir      string
 	assets              []domainrelease.AssemblyFile
 	sboms               []domainrelease.AssemblyFile
 	assetByName         map[string]domainrelease.AssemblyFile
@@ -111,16 +117,14 @@ func Assemble(out io.Writer, in AssembleInput) (*domainrelease.Assembly, error) 
 		return nil, err
 	}
 
-	for _, dir := range append([]string{releaseArtifactsDir, sbomDir}, plannedSBOMRoots(cfg)...) {
-		if !pathsafe.Relative(dir) {
-			return nil, fmt.Errorf("assembly source directory must be workspace-relative: %q: %w", dir, errs.ErrValidation)
-		}
+	if err := validateAssemblySources(cfg, in.AcquisitionDir, releaseArtifactsDir, sbomDir); err != nil {
+		return nil, err
+	}
 
-		root, rootErr := pathsafe.OpenRoot(dir)
-		if rootErr == nil {
-			_ = root.Close()
-		} else if !errors.Is(rootErr, fs.ErrNotExist) {
-			return nil, rootErr
+	if in.AcquisitionDir != "" {
+		releaseArtifactsDir = filepath.Join(in.AcquisitionDir, releaseArtifactsDir)
+		for index := range transfer.Items {
+			transfer.Items[index].Path = filepath.Join(in.AcquisitionDir, transfer.Items[index].Path)
 		}
 	}
 
@@ -132,6 +136,7 @@ func Assemble(out io.Writer, in AssembleInput) (*domainrelease.Assembly, error) 
 		sbomsDir:            sbomsDir,
 		releaseFilesDir:     releaseFilesDir,
 		releaseArtifactsDir: releaseArtifactsDir,
+		acquisitionDir:      in.AcquisitionDir,
 		assetByName:         make(map[string]domainrelease.AssemblyFile),
 		sbomByName:          make(map[string]domainrelease.AssemblyFile),
 		seenSBOMSrc:         make(map[string]struct{}),
@@ -173,6 +178,47 @@ func Assemble(out io.Writer, in AssembleInput) (*domainrelease.Assembly, error) 
 	}
 
 	return asm, nil
+}
+
+func validateAssemblySources(cfg pipeline.ConfigPlan, acquisitionDir, artifactsDir, sbomDir string) error {
+	sourceDirs := []string{artifactsDir, sbomDir}
+	if acquisitionDir == "" {
+		sourceDirs = append(sourceDirs, plannedSBOMRoots(cfg)...)
+	} else {
+		if !filepath.IsAbs(acquisitionDir) {
+			return fmt.Errorf("acquisition-dir must be absolute: %w", errs.ErrValidation)
+		}
+
+		if err := validateAcquisitionRoot(acquisitionDir); err != nil {
+			return err
+		}
+
+		root, err := pathsafe.OpenRoot(acquisitionDir)
+		if err != nil {
+			return err
+		}
+
+		_ = root.Close()
+	}
+
+	for _, dir := range sourceDirs {
+		if !pathsafe.Relative(dir) {
+			return fmt.Errorf("assembly source directory must be workspace-relative: %q: %w", dir, errs.ErrValidation)
+		}
+
+		if acquisitionDir != "" {
+			dir = filepath.Join(acquisitionDir, dir)
+		}
+
+		root, err := pathsafe.OpenRoot(dir)
+		if err == nil {
+			_ = root.Close()
+		} else if !errors.Is(err, fs.ErrNotExist) {
+			return err
+		}
+	}
+
+	return nil
 }
 
 // stage validates both destinations and source overlap before clearing either.
@@ -350,15 +396,25 @@ func collectAttachmentAssets(c *assemblyCollector, patterns string) error {
 	return nil
 }
 
-func collectAssemblySBOMs(c *assemblyCollector, cfg pipeline.ConfigPlan, sbomDir string) error {
+func collectAssemblySBOMs(collector *assemblyCollector, cfg pipeline.ConfigPlan, sbomDir string) error {
+	if collector.acquisitionDir != "" {
+		// Only acquired members and outputs generated from them, never source
+		// fixtures. Visit analyzed-container inputs first to preserve their role.
+		if err := walkSBOMRoot(collector, filepath.Join(collector.acquisitionDir, sbomDir), assemblySourceAnalyzedContainerSBOM); err != nil {
+			return err
+		}
+
+		return walkSBOMRoot(collector, collector.acquisitionDir, assemblySourceGeneratedSBOM)
+	}
+
 	roots := plannedSBOMRoots(cfg)
 	for _, root := range roots {
-		if err := walkSBOMRoot(c, root, assemblySourceGeneratedSBOM); err != nil {
+		if err := walkSBOMRoot(collector, root, assemblySourceGeneratedSBOM); err != nil {
 			return err
 		}
 	}
 
-	return walkSBOMRoot(c, sbomDir, assemblySourceAnalyzedContainerSBOM)
+	return walkSBOMRoot(collector, sbomDir, assemblySourceAnalyzedContainerSBOM)
 }
 
 //nolint:varnamelen // c is the assembly collector threaded through every collect* helper; a longer name only adds noise.
@@ -372,7 +428,11 @@ func walkSBOMRoot(c *assemblyCollector, root, kind string) error {
 	}
 
 	releaseFilesAbs := absOrSelf(c.releaseFilesDir)
+
 	releaseArtifactsAbs := absOrSelf(c.releaseArtifactsDir)
+	if c.acquisitionDir != "" {
+		releaseArtifactsAbs = "" // acquired producer SBOMs are legitimate inputs too
+	}
 
 	return filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
@@ -727,6 +787,145 @@ func readAssembly(path string) (domainrelease.Assembly, error) {
 	}
 
 	return asm, nil
+}
+
+// ValidateAssembly admits an unsigned assembly without loading signing material.
+// Assembly paths are not discovery hints: every declared input must exist, and
+// checksums must cover exactly the public assets and the generated SBOM ZIP.
+func ValidateAssembly(path string) error {
+	_, err := validatedSigningAssembly(path, nil)
+
+	return err
+}
+
+func validatedSigningAssembly(path string, extensions []string) ([]string, error) {
+	asm, err := readAssembly(path)
+	if err != nil {
+		return nil, err
+	}
+
+	subjectPaths, err := assemblyChecksumSubjects(asm)
+	if err != nil {
+		return nil, err
+	}
+
+	selected := make([]string, 0, len(subjectPaths)+1)
+	for _, asset := range asm.Assets {
+		selected = append(selected, asset.Path)
+	}
+
+	if asm.SBOMZipFile != "" && regularFileExists(asm.SBOMZipFile) {
+		selected = append(selected, asm.SBOMZipFile)
+	}
+
+	if asm.ChecksumFile == "" {
+		return nil, fmt.Errorf("assembly checksums file is required: %w", errs.ErrMissingInput)
+	}
+
+	if err := checkChecksumOutputInputs(asm.ChecksumFile, append(append([]string{path}, selected...), assemblySBOMPaths(asm)...)); err != nil {
+		return nil, err
+	}
+
+	selected = append(selected, asm.ChecksumFile)
+	if err := validateAssemblySignerOutputs(selected, extensions); err != nil {
+		return nil, err
+	}
+
+	body, err := readReleaseFile(asm.ChecksumFile)
+	if err != nil {
+		return nil, fmt.Errorf("assembly checksums file: %w", err)
+	}
+
+	// Container-only releases can have no public file subjects. The producer
+	// still writes an empty checksums file; there is nothing to sign in it.
+	if len(subjectPaths) == 0 && len(bytes.TrimSpace(body)) == 0 {
+		return selected[:len(selected)-1], nil
+	}
+
+	subjects, err := provenance.ParseChecksums(bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+
+	if err := checkChecksumSubjects(subjects, sortedChecksumSubjectNames(subjectPaths)); err != nil {
+		return nil, err
+	}
+
+	if err := verifyReleaseChecksumDigests(subjects, subjectPaths); err != nil {
+		return nil, err
+	}
+
+	return selected, nil
+}
+
+func assemblySBOMPaths(asm domainrelease.Assembly) []string {
+	paths := make([]string, 0, len(asm.SBOMs))
+	for _, file := range asm.SBOMs {
+		paths = append(paths, file.Path)
+	}
+
+	return paths
+}
+
+func assemblyChecksumSubjects(asm domainrelease.Assembly) (map[string]string, error) {
+	subjects := make(map[string]string, len(asm.Assets)+1)
+	paths := map[string]bool{}
+
+	add := func(path, name string) error {
+		if name != filepath.Base(path) || subjects[name] != "" || paths[filepath.Clean(path)] {
+			return fmt.Errorf("assembly public asset has inconsistent or duplicate name/path %q: %w", path, errs.ErrValidation)
+		}
+
+		if !regularFileExists(path) {
+			return fmt.Errorf("assembly public asset %q is missing or not regular: %w", path, errs.ErrMissingInput)
+		}
+
+		subjects[name] = path
+		paths[filepath.Clean(path)] = true
+
+		return nil
+	}
+	for _, asset := range asm.Assets {
+		if err := add(asset.Path, asset.Name); err != nil {
+			return nil, err
+		}
+	}
+
+	if len(asm.SBOMs) > 0 && (asm.SBOMZipFile == "" || !regularFileExists(asm.SBOMZipFile)) {
+		return nil, fmt.Errorf("assembly SBOM ZIP is missing; run release sbom-zip --assembly first: %w", errs.ErrMissingInput)
+	}
+
+	if asm.SBOMZipFile != "" && regularFileExists(asm.SBOMZipFile) {
+		if err := add(asm.SBOMZipFile, filepath.Base(asm.SBOMZipFile)); err != nil {
+			return nil, err
+		}
+	}
+
+	return subjects, nil
+}
+
+// Unsigned handoffs must not supply signer-owned outputs, either as subjects or
+// as pre-existing sidecars. Check both production backends, plus the selected
+// signer's extensions for defense in depth before its first invocation.
+func validateAssemblySignerOutputs(paths, extensions []string) error {
+	extensions = append([]string{".asc", ".bundle"}, extensions...)
+	for _, path := range paths {
+		for _, ext := range extensions {
+			if strings.HasSuffix(path, ext) {
+				return fmt.Errorf("assembly contains reserved signer output %q: %w", path, errs.ErrValidation)
+			}
+
+			if _, err := os.Lstat(path + ext); !errors.Is(err, fs.ErrNotExist) {
+				if err != nil {
+					return fmt.Errorf("inspect assembly signer output: %w", err)
+				}
+
+				return fmt.Errorf("assembly contains reserved signer output %q: %w", path+ext, errs.ErrValidation)
+			}
+		}
+	}
+
+	return nil
 }
 
 func validateAssemblyPaths(asm domainrelease.Assembly) error {

@@ -32,10 +32,11 @@ type UploadAttachmentsInput struct {
 }
 
 // UploadAttachments expands Pattern into a list of files and uploads each
-// to the release identified by Tag. Per-file failures are logged as
-// warnings (matching the bash's `|| printf warning` behavior) — the
-// function returns nil when at least one upload succeeded and the rest
-// were warnings. An empty pattern is a no-op.
+// to the release identified by Tag. A file that fails does not stop the
+// others: each failure is a warning, and after the last file the function
+// fails and names every file the release lacks. A release that holds its
+// archive without the signature or provenance beside it is not complete.
+// An empty pattern is a no-op.
 //
 // Path safety: each pattern is required to stay within WorkingDir. Patterns
 // that resolve to absolute paths outside WorkingDir or contain `..` segments
@@ -71,17 +72,25 @@ func UploadAttachments(ctx context.Context, up provider.ReleaseAssetUploader, ou
 
 	var failed []string
 
+	// Unavailable only when the network stopped every failed upload: one
+	// the forge refused is refused again.
+	class := errs.ErrDependencyUnavailable
+
 	for _, file := range files {
 		_, _ = fmt.Fprintf(out, "Uploading %s to release...\n", file)
 
 		if err := up.UploadReleaseAsset(ctx, in.Tag, file); err != nil {
 			annot.Warningf("Failed to upload %s: %v", file, err)
 			failed = append(failed, file)
+
+			if !errs.Retriable(err) && !errs.IsTransport(err) {
+				class = errs.ErrValidation
+			}
 		}
 	}
 
-	if len(failed) == len(files) {
-		return fmt.Errorf("all %d uploads failed: %w", len(files), errs.ErrDependencyUnavailable)
+	if len(failed) > 0 {
+		return fmt.Errorf("%d of %d uploads failed: %s: %w", len(failed), len(files), strings.Join(failed, ", "), class)
 	}
 
 	return nil

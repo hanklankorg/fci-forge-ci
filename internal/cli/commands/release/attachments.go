@@ -60,7 +60,10 @@ func attachmentsUploadCmd() *cli.Command {
 	return &cli.Command{
 		Name:  "upload",
 		Usage: "expand a glob pattern and attach matching files to the platform release (gh release upload --clobber)",
-		Description: `EXAMPLE:
+		Description: `A file that fails to upload does not stop the others. The command then
+fails and names each file the release lacks.
+
+EXAMPLE:
    forge-ci release attachments upload --tag v1.2.3 --pattern "dist/*.zip"`,
 		Flags: []cli.Flag{
 			&cli.StringFlag{Name: flagTag, Required: true, Sources: cienv.Tag(), Usage: "tag of the existing release to attach to (e.g. v1.2.3)"},

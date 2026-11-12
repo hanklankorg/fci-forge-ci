@@ -36,7 +36,7 @@ func publishCmd() *cli.Command {
 		&cli.BoolFlag{Name: "release-name-from-repository", Sources: cli.EnvVars("RELEASE_NAME_FROM_REPOSITORY"), Usage: "when --release-name is empty, default to '<repo-name> <tag>' instead of the tag (reconcile only)"},
 		&cli.BoolFlag{Name: "draft", Value: true, Sources: cli.EnvVars("RELEASE_DRAFT", "DRAFT"), Usage: "publish/update the release as a draft (default true)"},
 		&cli.StringFlag{Name: "release-notes-file", Value: "dist/release-notes.md", Sources: cli.EnvVars("RELEASE_NOTES_FILE"), Usage: "path to the release-notes markdown body"},
-		&cli.StringSliceFlag{Name: "asset", Usage: "release asset file to publish (repeatable); defaults to the assets of the finalized --manifest (reconcile only)"},
+		&cli.StringSliceFlag{Name: flagAsset, Usage: "release asset file to publish (repeatable); defaults to the assets of the finalized --manifest (reconcile only)"},
 		// recreate-strategy flags.
 		&cli.StringFlag{Name: "make-latest", Value: makeLatestDefault, Sources: cli.EnvVars("MAKE_LATEST"), Usage: "platform latest handling: true, false, or legacy (recreate only)"},
 		&cli.StringFlag{Name: flagAssembly, Sources: cli.EnvVars("RELEASE_ASSEMBLY"), Usage: "release assembly manifest to upload exactly (recreate only; required)"},
@@ -85,7 +85,7 @@ func runPublishReconcile(ctx context.Context, cmd *cli.Command) error {
 			return err
 		}
 
-		assets := cmd.StringSlice("asset")
+		assets := cmd.StringSlice(flagAsset)
 		if len(assets) == 0 {
 			assets, err = apprelease.PublishableReleaseFiles(releaseFilesInput(cmd))
 			if err != nil {

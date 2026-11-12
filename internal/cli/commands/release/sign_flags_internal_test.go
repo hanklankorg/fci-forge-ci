@@ -51,7 +51,7 @@ func TestValidateSignFlags_GPGKeyFilesPerMethod(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			err := validateSignFlags(tc.method, tc.keyRef, "", tc.keyFile, tc.passFile)
+			err := validateSignFlags(tc.method, tc.keyRef, "", tc.keyFile, tc.passFile, "")
 			if tc.wantErr == "" {
 				if err != nil {
 					t.Fatalf("unexpected error: %v", err)

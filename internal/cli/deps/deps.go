@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"github.com/urfave/cli/v3"
 
@@ -79,6 +80,11 @@ func (d *Deps) RequireTokenValidator() (provider.TokenValidator, error) {
 	return requireRole[provider.TokenValidator](d, "token validation")
 }
 
+// RequireBranchHeadResolver returns the authenticated source-freshness reader.
+func (d *Deps) RequireBranchHeadResolver() (provider.BranchHeadResolver, error) {
+	return requireRole[provider.BranchHeadResolver](d, "source branch resolution")
+}
+
 // RequireReleaseCreator returns the ReleaseCreator role when the
 // active provider implements it. GitHub, GitLab and Forgejo do; local does not.
 func (d *Deps) RequireReleaseCreator() (provider.ReleaseCreator, error) {
@@ -96,6 +102,12 @@ func (d *Deps) RequireReleasePublisher() (provider.ReleasePublisher, error) {
 // implement it; local does not.
 func (d *Deps) RequireReleaseAssetUploader() (provider.ReleaseAssetUploader, error) {
 	return requireRole[provider.ReleaseAssetUploader](d, "release asset upload")
+}
+
+// RequireReleaseReader returns the read-only ReleaseReader role when the
+// active provider implements it. GitHub, GitLab and Forgejo do; local does not.
+func (d *Deps) RequireReleaseReader() (provider.ReleaseReader, error) {
+	return requireRole[provider.ReleaseReader](d, "release readback")
 }
 
 // RequireReleaseAssetPruner returns the ReleaseAssetPruner role when the
@@ -121,6 +133,13 @@ func (d *Deps) RequireForgeMavenRegistryResolver() (provider.ForgeMavenRegistryR
 // the npm sibling of RequireForgeMavenRegistryResolver.
 func (d *Deps) RequireForgeNPMRegistryResolver() (provider.ForgeNPMRegistryResolver, error) {
 	return requireRole[provider.ForgeNPMRegistryResolver](d, "forge-packages npm publish")
+}
+
+// RequireForgeDistroRegistryResolver returns the ForgeDistroRegistryResolver
+// role when the active forge has native Debian, RPM and Alpine registries
+// (Forgejo); every other forge yields an unsupported error.
+func (d *Deps) RequireForgeDistroRegistryResolver() (provider.ForgeDistroRegistryResolver, error) {
+	return requireRole[provider.ForgeDistroRegistryResolver](d, "forge-packages distro package publish")
 }
 
 // RegistryAuthForDetected returns the RegistryAuthResolver for the
@@ -185,7 +204,32 @@ func (d *Deps) WebURLBuilder() provider.WebURLBuilder {
 }
 
 func unsupportedRoleError(p provider.ForgeAPI, capability string) error {
+	if p == provider.ForgeLocal {
+		return fmt.Errorf("%s is not supported on platform %q: %s: %w", capability, p, localForgeHint(), errs.ErrUnsupported)
+	}
+
 	return fmt.Errorf("%s is not supported on platform %q: %w", capability, p, errs.ErrUnsupported)
+}
+
+// localForgeHint says how to reach a forge from outside a CI job, where
+// detection finds no forge: name it, and set the variables its adapter reads,
+// taken from providerEnvKeysFor so the advice is what the adapters do.
+func localForgeHint() string {
+	forges := []provider.ForgeAPI{provider.ForgeGitHub, provider.ForgeForgejo, provider.ForgeGitLab}
+	parts := make([]string, 0, len(forges))
+
+	for _, forge := range forges {
+		keys := providerEnvKeysFor(forge)
+		part := fmt.Sprintf("--provider %s with %s", forge, strings.Join(keys.ownTokens, " or "))
+
+		if forge != provider.ForgeGitHub {
+			part += " and " + keys.serverURL.name
+		}
+
+		parts = append(parts, part)
+	}
+
+	return "outside a CI job no forge is detected; pass " + strings.Join(parts, "; ")
 }
 
 // Build produces a *Deps wired for the detected platform. Most CLI actions

@@ -168,7 +168,7 @@ func TestVerifyTagSSHAgainstAllowedSigners_ClassifiesEachFailure(t *testing.T) {
 			// without openssh-client; it read as a missing allowlist.
 			name:    "ssh-keygen is not installed",
 			stderr:  "error: cannot run ssh-keygen: No such file or directory\n",
-			want:    errs.ErrDependencyUnavailable,
+			want:    errs.ErrPrerequisite,
 			wantMsg: "install openssh-client",
 		},
 		{
@@ -307,5 +307,23 @@ func TestGitRun_CancellationIsReported(t *testing.T) {
 
 	if _, err := repo.Run(ctx, "rev-parse", "HEAD"); !errors.Is(err, context.Canceled) {
 		t.Errorf("err = %v, want it to carry context.Canceled", err)
+	}
+}
+
+// A remote command that ends on ssh's own statement that the host was not
+// reached is an unavailable dependency; a remote that refused is not. Not
+// parallel: see newFakeGitBinary.
+func TestFetch_ARemoteThatWasNotReachedIsAnUnavailableDependency(t *testing.T) {
+	for said, want := range map[string]error{
+		"ssh: connect to host forge.example port 22: Connection timed out\nfatal: Could not read from remote repository.\n": errs.ErrDependencyUnavailable,
+		"git@forge.example: Permission denied (publickey).\nfatal: Could not read from remote repository.\n":                errs.ErrValidation,
+	} {
+		fake := newFakeGitBinary(t, "", said, 128)
+		repo := &adaptergit.Repo{GitBin: fake.path}
+
+		err := repo.Fetch(context.Background(), "ssh://git@forge.example/org/repo.git", nil, runcontext.Credential{}, 1)
+		if err == nil || !errors.Is(err, want) || errs.ExitCodeFromError(err) != errs.ExitCodeFromError(want) {
+			t.Errorf("%q: err = %v, want %v", said, err, want)
+		}
 	}
 }

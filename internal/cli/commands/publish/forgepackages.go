@@ -19,6 +19,7 @@ import (
 	"github.com/diggsweden/forge-ci/internal/cli/commonflags"
 	"github.com/diggsweden/forge-ci/internal/cli/deps"
 	"github.com/diggsweden/forge-ci/internal/domain/errs"
+	"github.com/diggsweden/forge-ci/internal/domain/provider"
 )
 
 func forgePackagesCmd() *cli.Command {
@@ -27,11 +28,51 @@ func forgePackagesCmd() *cli.Command {
 		Usage: "publish to the forge-native package registry (GitHub Packages / GitLab Package Registry / Forgejo)",
 		Commands: []*cli.Command{
 			forgePackagesDeployCmd(),
+			forgePackagesDistroPackagesCmd(),
+			forgePackagesNPMTarballsCmd(),
 		},
 	}
 }
 
 const forgeMavenProject = "maven"
+
+const (
+	flagDistDir    = "dist-dir"
+	flagProjectDir = "project-dir"
+)
+
+func forgePackagesNPMTarballsCmd() *cli.Command {
+	return &cli.Command{
+		Name:  "npm-tarballs",
+		Usage: "name each npm project's packed tarball in a dist directory, refusing any other",
+		Description: `Prints, one a line and in the order of --project-dir, the name of the
+   *.tgz at the root of --dist-dir whose packed package.json carries the name
+   and version of that project's package.json in the current directory. It
+   fails when a project has no tarball, or the directory holds a *.tgz of no
+   project: a release publishes exactly the packages its plan names.
+
+EXAMPLE:
+   forge-ci publish forge-packages npm-tarballs --dist-dir dist --project-dir frontend`,
+		Flags: []cli.Flag{
+			&cli.StringFlag{Name: flagDistDir, Required: true, Usage: "directory holding the packed tarballs at its root"},
+			&cli.StringSliceFlag{Name: flagProjectDir, Required: true, Usage: "npm project directory, relative to the current directory; repeat for each"},
+		},
+		Action: func(_ context.Context, cmd *cli.Command) error {
+			names, err := apppublish.NPMTarballs(".", cmd.String(flagDistDir), cmd.StringSlice(flagProjectDir))
+			if err != nil {
+				return err
+			}
+
+			for _, name := range names {
+				if _, err := fmt.Fprintln(os.Stdout, name); err != nil {
+					return err
+				}
+			}
+
+			return nil
+		},
+	}
+}
 
 func forgePackagesDeployCmd() *cli.Command {
 	return &cli.Command{
@@ -92,7 +133,15 @@ func deployForgeNPM(ctx context.Context, cmd *cli.Command, dependencies *deps.De
 		return err
 	}
 
-	return apppublish.ForgePackagesNPMPublish(ctx, npm.New(), resolver, os.Stderr, os.Stderr, apppublish.ForgePackagesNPMPublishInput{
+	if verifier, ok := resolver.(provider.ForgeProjectVerifier); ok {
+		if err := verifier.VerifyForgeProject(ctx); err != nil {
+			return err
+		}
+	}
+
+	ops := &npm.Adapter{Env: apppublish.NPMPublishEnvironment(os.Environ())}
+
+	return apppublish.ForgePackagesNPMPublish(ctx, ops, resolver, os.Stderr, os.Stderr, apppublish.ForgePackagesNPMPublishInput{
 		WorkingDir: cmd.String("working-dir"),
 		Tag:        cmd.String("npm-tag"),
 	})

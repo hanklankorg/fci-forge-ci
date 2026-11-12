@@ -14,6 +14,7 @@ import (
 	apprelease "github.com/diggsweden/forge-ci/internal/app/release"
 	"github.com/diggsweden/forge-ci/internal/cli/cienv"
 	"github.com/diggsweden/forge-ci/internal/cli/deps"
+	"github.com/diggsweden/forge-ci/internal/cli/dryrun"
 	"github.com/diggsweden/forge-ci/internal/domain/errs"
 )
 
@@ -42,7 +43,7 @@ EXAMPLE:
 			&cli.IntFlag{Name: "keep", Required: true, Sources: cli.EnvVars("RELEASE_ASSET_RETENTION"), Usage: "how many of the newest published releases keep every file"},
 			&cli.StringFlag{Name: "keep-files", Value: apprelease.DefaultAssetRetentionKeepFiles, Sources: cli.EnvVars("RELEASE_ASSET_RETENTION_KEEP_FILES"), Usage: "regular expression of the file names older releases keep"},
 			&cli.IntFlag{Name: "max-delete", Value: 200, Sources: cli.EnvVars("RELEASE_ASSET_RETENTION_MAX_DELETE"), Usage: "refuse a pass that would delete more files than this (0 disables the bound)"},
-			&cli.BoolFlag{Name: "dry-run", Value: true, Sources: cli.EnvVars("RELEASE_ASSET_RETENTION_DRY_RUN"), Usage: "report what would be deleted without deleting it"},
+			dryrun.DeletionFlag("RELEASE_ASSET_RETENTION_DRY_RUN"),
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			keepFiles, err := regexp.Compile(cmd.String("keep-files"))
@@ -61,7 +62,7 @@ EXAMPLE:
 					Keep:       cmd.Int("keep"),
 					KeepFiles:  keepFiles,
 					MaxDelete:  cmd.Int("max-delete"),
-					DryRun:     cmd.Bool("dry-run"),
+					DryRun:     dryrun.Enabled(cmd),
 				})
 
 				return err

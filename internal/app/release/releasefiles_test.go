@@ -300,6 +300,76 @@ func TestWriteReleaseFileManifest_PreservesExplicitEvidence(t *testing.T) {
 	}
 }
 
+// A release whose checksums and SBOM `release sign --method gpg` signed
+// publishes their armored signatures, and a producer's hand-off that already
+// holds one is refused, as a Cosign bundle is.
+func TestWriteReleaseFileManifest_PublishesOpenPGPSignatures(t *testing.T) {
+	t.Chdir(t.TempDir())
+
+	writeReleaseFilesTestFile(t, "dist/app.jar", "application\n")
+	writeReleaseFilesTestFile(t, "dist/app.cdx.json", "{}\n")
+	writeReleaseFilesTestFile(t, "dist/checksums.sha256",
+		testFileSHA256(t, "dist/app.jar")+"  app.jar\n"+testFileSHA256(t, "dist/app.cdx.json")+"  app.cdx.json\n")
+
+	unsigned := apprelease.FileManifest{
+		Version: appreleaseVersionForTest,
+		Assets: []apprelease.FileEntry{
+			{Path: "dist/app.jar", Name: "app.jar", Source: "producer"},
+			{Path: "dist/app.cdx.json", Name: "app.cdx.json", Source: "producer"},
+			{Path: "dist/checksums.sha256", Name: "checksums.sha256", Source: "producer"},
+		},
+		Checksums:  []apprelease.FileEntry{{Path: "dist/checksums.sha256", Name: "checksums.sha256", Source: "checksum"}},
+		SBOMs:      []apprelease.FileEntry{{Path: "dist/app.cdx.json", Name: "app.cdx.json", Source: "sbom"}},
+		Evidence:   []apprelease.FileEntry{},
+		Provenance: []apprelease.FileEntry{},
+	}
+
+	body, err := json.Marshal(unsigned)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	writeReleaseFilesTestFile(t, "dist/release-files.json", string(body))
+
+	files := apprelease.FilesInput{DistDir: "dist", ManifestFile: "dist/release-files.json"}
+
+	writeReleaseFilesTestFile(t, "dist/checksums.sha256.asc", "preseeded signature\n")
+
+	if err := apprelease.ValidateReleaseFileManifest(apprelease.ValidateReleaseFileManifestInput{FilesInput: files, Unsigned: true}); err == nil {
+		t.Fatal("the unsigned hand-off check accepted a preseeded OpenPGP signature")
+	}
+
+	writeReleaseFilesTestFile(t, "dist/checksums.sha256.asc", "checksums signature\n")
+	writeReleaseFilesTestFile(t, "dist/slsa-provenance.intoto.json", "provenance\n")
+	writeReleaseFilesTestFile(t, "dist/slsa-provenance.intoto.json.bundle", "provenance bundle\n")
+
+	// Signing that left the SBOM unsigned is finalized, and not published.
+	if _, err := apprelease.WriteReleaseFileManifest(apprelease.WriteReleaseFileManifestInput{FilesInput: files}); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := apprelease.PublishableReleaseFiles(files); err == nil || !strings.Contains(err.Error(), "declares dist/app.cdx.json without its signature") {
+		t.Fatalf("publishing an unsigned SBOM: %v", err)
+	}
+
+	writeReleaseFilesTestFile(t, "dist/app.cdx.json.asc", "SBOM signature\n")
+
+	manifest, err := apprelease.WriteReleaseFileManifest(apprelease.WriteReleaseFileManifestInput{FilesInput: files})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := apprelease.PublishableReleaseFiles(files); err != nil {
+		t.Fatalf("publishing OpenPGP-signed checksums and SBOM: %v", err)
+	}
+
+	for _, name := range []string{"checksums.sha256.asc", "app.cdx.json.asc"} {
+		if source := releaseFileEntrySource(manifest.Assets, name); source != "openpgp_signature" {
+			t.Errorf("%s source = %q, want openpgp_signature", name, source)
+		}
+	}
+}
+
 func TestWriteReleaseFileManifest_RejectsParentSymlink(t *testing.T) {
 	t.Chdir(t.TempDir())
 

@@ -14,8 +14,8 @@ func TestSignFlagMatrix_AllMethodCells(t *testing.T) {
 	t.Parallel()
 
 	for _, method := range []domainrelease.SignMethod{domainrelease.SignMethodGPG, domainrelease.SignMethodSigstore, domainrelease.SignMethodKMS} {
-		for _, field := range []string{"none", "key", "issuer", "private", "passphrase"} {
-			key, issuer, private, pass := "", "", "", ""
+		for _, field := range []string{"none", "key", "issuer", "private", "passphrase", "fingerprint"} {
+			key, issuer, private, pass, fingerprint := "", "", "", "", ""
 			if method == domainrelease.SignMethodKMS {
 				key = "fixture"
 			}
@@ -29,11 +29,15 @@ func TestSignFlagMatrix_AllMethodCells(t *testing.T) {
 				private = "fixture"
 			case "passphrase":
 				pass = "fixture"
+			case "fingerprint":
+				fingerprint = "fixture"
 			}
 
-			err := validateSignFlags(method, key, issuer, private, pass)
+			err := validateSignFlags(method, key, issuer, private, pass, fingerprint)
 
-			forbidden := (method == domainrelease.SignMethodGPG && (field == "key" || field == "issuer")) || (method == domainrelease.SignMethodSigstore && (field == "key" || field == "private" || field == "passphrase")) || (method == domainrelease.SignMethodKMS && (field == "issuer" || field == "private" || field == "passphrase"))
+			gpgOnly := field == "private" || field == "passphrase" || field == "fingerprint"
+
+			forbidden := (method == domainrelease.SignMethodGPG && (field == "key" || field == "issuer")) || (method == domainrelease.SignMethodSigstore && (field == "key" || gpgOnly)) || (method == domainrelease.SignMethodKMS && (field == "issuer" || gpgOnly))
 			if forbidden {
 				require.ErrorIs(t, err, errs.ErrInvalidConfig)
 			} else {
@@ -42,7 +46,7 @@ func TestSignFlagMatrix_AllMethodCells(t *testing.T) {
 		}
 	}
 
-	err := validateSignFlags(domainrelease.SignMethodKMS, "", "", "", "")
+	err := validateSignFlags(domainrelease.SignMethodKMS, "", "", "", "", "")
 	require.ErrorIs(t, err, errs.ErrInvalidConfig)
 	require.Contains(t, err.Error(), "--key is required")
 }

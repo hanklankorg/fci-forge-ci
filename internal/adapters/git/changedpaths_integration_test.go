@@ -59,3 +59,34 @@ func TestPathsDiffIsTheBumpCheckInput(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "1.2.2", result.OldVersion)
 }
+
+// FileAt reads a committed file's exact bytes and mode, says when a commit
+// has none, and refuses a link, so a text version check compares real
+// content.
+func TestFileAtReadsExactCommittedBytes(t *testing.T) {
+	t.Parallel()
+	adapter, repo := newRepo(t)
+	require.NoError(t, os.WriteFile(filepath.Join(repo.Dir, "gradle.properties"), []byte("version=1.2.3\n\n"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(repo.Dir, "run.xcconfig"), []byte("MARKETING_VERSION = 1.2.3\n"), 0o700))
+	require.NoError(t, os.Symlink("gradle.properties", filepath.Join(repo.Dir, "linked.properties")))
+	repo.Git("add", "gradle.properties", "run.xcconfig", "linked.properties")
+	repo.Git("commit", "-m", "first")
+	head := repo.Git("rev-parse", "HEAD")
+
+	body, mode, exists, err := adapter.FileAt(t.Context(), head, "gradle.properties")
+	require.NoError(t, err)
+	require.True(t, exists)
+	require.Equal(t, "version=1.2.3\n\n", body)
+	require.Equal(t, "100644", mode)
+
+	_, mode, _, err = adapter.FileAt(t.Context(), head, "run.xcconfig")
+	require.NoError(t, err)
+	require.Equal(t, "100755", mode)
+
+	_, _, exists, err = adapter.FileAt(t.Context(), head, "versions.xcconfig")
+	require.NoError(t, err)
+	require.False(t, exists)
+
+	_, _, _, err = adapter.FileAt(t.Context(), head, "linked.properties")
+	require.Error(t, err)
+}

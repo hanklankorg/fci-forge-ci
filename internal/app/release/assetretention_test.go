@@ -112,6 +112,11 @@ func TestApplyAssetRetention_KeepsPublishedSBOMAndProvenanceNames(t *testing.T) 
 	for _, name := range []string{
 		"nanolinter-1.0.0-linux-x86_64.tar.gz.sbom.json",
 		"forge-ci_1.0.0_linux_amd64.tar.gz.cdx.sbom.json",
+		// The Build SBOM as `release files declare --sbom` names it, with
+		// its signature sidecars.
+		"my-cli.cdx.json",
+		"my-cli.cdx.json.bundle",
+		"my-cli.cdx.json.sig",
 		"slsa-provenance.intoto.json",
 		"forge-ci.intoto.jsonl",
 	} {
@@ -128,6 +133,58 @@ func TestApplyAssetRetention_KeepsPublishedSBOMAndProvenanceNames(t *testing.T) 
 	want := []string{"v1.0.0/app_v1.0.0_linux_amd64.tar.gz", "v1.0.0/app_v1.0.0_amd64.deb"}
 	if !slices.Equal(pruner.deleted, want) || result.Files != len(want) {
 		t.Fatalf("deleted %v, result %+v; published evidence must survive", pruner.deleted, result)
+	}
+}
+
+func TestApplyAssetRetention_KeepsPublicReleaseEvidenceDependencies(t *testing.T) {
+	t.Parallel()
+
+	old := goRelease("v1.0.0", 1)
+	// The index SBOM references the native inventories; the plan and each
+	// inventory are also subjects of the retained signing bundles.
+	for _, name := range []string{
+		"image-sbom-distroless.cyclonedx.json",
+		"image-sbom-distroless.cyclonedx.json.bundle",
+		"sbom-distroless-amd64.json",
+		"sbom-distroless-amd64.json.bundle",
+		"sbom-distroless-arm64.json",
+		"sbom-distroless-arm64.json.bundle",
+		"sbom-alpine-amd64.json",
+		"sbom-alpine-amd64.json.bundle",
+		"release-plan.json",
+		"release-plan.json.bundle",
+	} {
+		old.Assets = append(old.Assets, provider.ListedAsset{Name: name, Size: 1e3})
+	}
+
+	// Files no retained evidence references are deleted with the archives.
+	unreferenced := []string{
+		"release-images.json", // Internal image ledger, not public evidence.
+		"trivy-results-distroless-amd64.json",
+		"payload.json",
+		"other-release-plan.json",
+		"release-plan.json.backup",
+		"other-sbom-distroless-amd64.json",
+		"sbom-distroless-amd64.json.backup",
+	}
+
+	want := make([]string, 0, 2+len(unreferenced))
+	want = append(want, "v1.0.0/app_v1.0.0_linux_amd64.tar.gz", "v1.0.0/app_v1.0.0_amd64.deb")
+
+	for _, name := range unreferenced {
+		old.Assets = append(old.Assets, provider.ListedAsset{Name: name, Size: 1e3})
+		want = append(want, old.Tag+"/"+name)
+	}
+
+	pruner := &releasePruner{releases: []provider.ListedRelease{old, goRelease("v1.1.0", 2)}}
+
+	result, err := apprelease.ApplyAssetRetention(t.Context(), pruner, &bytes.Buffer{}, retention(1))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !slices.Equal(pruner.deleted, want) || result.Files != len(want) || result.Bytes != 15e6+7e3 {
+		t.Fatalf("deleted %v, result %+v; want only obsolete payloads and non-evidence %v", pruner.deleted, result, want)
 	}
 }
 
