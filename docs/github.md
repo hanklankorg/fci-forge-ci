@@ -4,26 +4,17 @@ How `forge-ci` is used on GitHub: the reusable workflows under
 `.github/workflows/` that check a pull request, build, publish, sign and release,
 and the runtime images and CLI they run.
 
-The three forge guides, [GitHub](github.md), [GitLab](gitlab.md) and
-[Forgejo](forgejo.md), use the same section order. What each layer has beside
-the others is in [Delivery layers side by side](providers.md#delivery-layers-side-by-side).
-
-> **Current source versus release pins:** `v0.90.0` examples identify a historical
-> baseline, not the current source revision. Confirm matching workflows, CLI
-> assets and runtime images before adoption. For unreleased changes, follow
-> [Branch Testing](runtime-images.md#branch-testing).
-
-To inspect the CLI today, use the reviewed
-[source checkout](DEVELOPMENT.md#source-checkout). The adoption steps below
-require available release artifacts: `init` reads examples from a release tag,
-and installing a local binary does not publish workflow images.
+Replace the pins in the snippets with the release you install, as
+[Which version to pin](README.md#documentation-index) describes. What each
+forge layer has beside the others is in
+[Delivery layers side by side](providers.md#delivery-layers-side-by-side).
 
 ## What ships
 
 | Path | Content |
 |---|---|
 | `.github/workflows/` | Three orchestrators a consumer calls, the stages they compose, and the build, publish, lint, security and release leaves. [Components Reference](components.md#workflow-inventory) is the complete inventory. |
-| `.github/actions/install-forge-ci` | The composite installer for plain-runner jobs: verifies a released binary against its Sigstore bundle. See [Installing `forge-ci`](providers.md#installing-forge-ci). |
+| `.github/actions/consume-canonical-cli`, `.github/actions/build-darwin-cli` | How a job that is not a runtime container gets the engine: Linux host jobs receive the canonical CLI built in the run from the pinned engine commit; macOS jobs build it from the engine checkout. See [Installing `forge-ci`](providers.md#installing-forge-ci). |
 | `containers/runtime/Containerfile` | The runtime images the workflow jobs run in, published on `ghcr.io`. See [Runtime Images](runtime-images.md). |
 | `examples/` | A pull-request, release and, where it applies, snapshot workflow per ecosystem under `<ecosystem>/github/`, and the signing backends. See [Examples](../examples/README.md). |
 
@@ -53,7 +44,7 @@ lint job alone does not establish that your project tests passed.
 | Requirement | Value |
 |---|---|
 | Forge | **github.com.** The release workflows pin `actions/upload-artifact@v7`, which GitHub Enterprise Server does not support, so `release-orchestrator.yml` stops with exit 78 in its first preflight there. The CLI's own release API commands work on GHES. |
-| Runners | GitHub-hosted `ubuntu-26.04`; `ubuntu-26.04-arm` for the arm64 leg of a container build; macOS runners (the `macos-version` input) for Xcode and Swift jobs. |
+| Runners | GitHub-hosted by default: `ubuntu-26.04`, `ubuntu-26.04-arm` for the arm64 leg of an image build, `macos-26` for Xcode and Swift jobs. The orchestrators take `runs-on`, `build-runs-on-linux-amd64`, `build-runs-on-linux-arm64` and `runs-on-darwin-arm64` to choose others; signing, promotion and publication jobs stay on GitHub-hosted runners. See [GitHub runners](runners.md#github-runners). |
 | Runtime images | Readable from `ghcr.io`, or mirrored and selected with the `runtime-image*` inputs. See [Images and the engine binary](#images-and-the-engine-binary). |
 | Caller permissions | The `permissions:` each orchestrator declares; see the [permission matrix](reference.md#permission-requirements-matrix). |
 | Release authorisation | Committed `.forge-ci/allowed_signers` (SSH) or `.forge-ci/allowed_gpg_keys.asc` (GPG) when allowlisting is on; see [Release Authorisation](verification.md#release-authorisation). |
@@ -69,21 +60,18 @@ see the [Artifacts Reference](artifacts-reference.md).
 `forge-ci init https://github.com/diggsweden/forge-ci` in the repository does
 the CI-file setup for the example its build files imply (`--example` picks
 another): it writes the workflows and `.forge-ci/artifacts.yml`, pinned to
-the newest release, and never overwrites a file. Linter configuration is
-consumer-owned: init neither creates nor changes Nanolinter or MegaLinter
-configuration. These files are optional customizations: `lint-engine` selects
-the engine, with Nanolinter as the workflow default. Without a config file,
-the selected engine uses its defaults; absence of a config does not disable
-linting or Nanolinter's required-check floor. Example configs remain available
-to copy when you want custom settings. Review generated project-specific values
-before running; `doctor` checks local configuration, not remote secrets or
-runner/publishing availability.
+the newest release, and never overwrites a file. It writes no Nanolinter or
+MegaLinter configuration: without one, the lint engine runs with its defaults
+and Nanolinter's required-check floor. Review the generated values before
+running; `doctor` checks local configuration, not remote secrets or runners.
+`--dry-run` previews the files without writing them and lists every conflict
+with an existing file.
 
-Add `--dry-run` to preview the same rendered proposal without writing project
-files. Preview still fetches release templates into temporary storage. It lists
-all existing-file conflicts and returns nonzero if generation would be blocked;
-remaining placeholders are reported for review, not a claim of runnable CI.
-Repeat without `--dry-run` using the previewed `--ref` and `--example` to generate.
+Then run `forge-ci setup status`. It lists the steps from here to a first
+release, marks the ones the repository shows are done, and names the command
+for each: `doctor` for the values left to fill in, `setup signer` for the
+allowlist, `setup secrets` for the secrets, and `setup release-request` for the
+signed request tag. It works the same on files copied by hand.
 
 By hand:
 
@@ -98,16 +86,25 @@ By hand:
    runs `nanolinter verify`, which discovers root `nanolinter.toml`, then
    `development/nanolinter.toml`, then uses defaults. It requires at least the `required-lints`
    floor, default `secrets,sast`.
-3. **Pin the references.** `uses: ...@v0.90.0`, `forge-ci-binary-ref` and any
-   `runtime-image*` override move together; see
+3. **Pin the references.** Replace the examples' `PIN_FORGE_CI_SHA` and
+   `v0.90.0` with the commit and tag of the release you install (the commit
+   is `git rev-parse vX.Y.Z^{commit}`, not the tag object):
+   `forge-ci init` does this for you. The `uses: ...@<commit>` ref,
+   `forge-ci-binary-ref` (the same full commit), the `runtime-image` and
+   `canonical-builder-image` digests and any other `runtime-image*` override
+   move together; see
    [Advanced Pinning Recipe](runtime-images.md#advanced-pinning-recipe).
-4. **Set the [secrets](#secrets-and-tokens)** your release plan selects, and
+4. **Set the [secrets](#secrets-and-tokens)** your release plan selects
+   (`forge-ci setup secrets` lists them), and
    [protect the release tags](#protect-the-release-tags).
-5. **Commit the release allowlist** your signing policy needs; see
+5. **Commit the release allowlist** your signing policy needs
+   (`forge-ci setup signer` writes its lines); see
    [Release Authorisation](verification.md#release-authorisation).
-6. **Release** by pushing a signed request tag:
+6. **Release** by pushing a signed request tag. First check your signing
+   setup; the command prints the two git commands below once it passes:
 
    ```bash
+   forge-ci setup release-request v1.0.0
    git tag -s release-request/v1.0.0 -m "Release v1.0.0"
    git push origin release-request/v1.0.0
    ```
@@ -121,18 +118,15 @@ By hand:
    SSH or `.forge-ci/allowed_gpg_keys.asc` for GPG, with the principal you
    sign as. It is distinct from the bot's `RELEASE_*` secrets, which sign the
    release commit, the final tag and the artifacts after the request is
-   admitted. [Local Git signature setup](DEVELOPMENT.md#local-git-signature-setup)
-   says how to install and inspect signing keys locally.
+   admitted. `forge-ci setup release-request` names the step that is
+   missing: the git signing settings, or the allowlist line, which
+   `forge-ci setup signer` adds.
 
-   If a release fails partway, identify the failed stage before retrying. Keep
-   final tags and published content immutable. A failed publisher reuses the
-   successful signer's checkpoint; preparation can reuse an existing final tag
-   only under the exact commit, parentage, branch-head and signature criteria in
-   [Failed Release Recovery](failed-release-recovery.md#final-git-tag-exists).
-   Retry from the original release request, not a new event on the final tag.
+   If a release fails partway, follow
+   [Failed Release Recovery](failed-release-recovery.md).
 
 The [examples](../examples/README.md) show the caller workflows in full; the
-snapshot caller is under [Snapshots](#snapshots). `forge-ci doctor` in a job reports what the detected forge supports.
+snapshot caller is under [Snapshots](#snapshots).
 
 ## Inputs and variables
 
@@ -144,18 +138,22 @@ carries a description. The orchestrator inputs most callers set:
 | `project-type` | PR | `maven`, `npm`, `gradle`, `gradle-android`, `xcode-ios`, `cargo` or `go`; selects the nanolinter flavour. |
 | `lint-engine` | PR | `nanolinter` (default), `megalinter` or `none`. |
 | `required-lints` | PR | The mandated nanolinter floor, default `secrets,sast`. |
+| `disable-checks` | PR | Nanolinter check ids to leave out of the run, comma-separated; empty by default. It cannot remove a check `required-lints` names. Name here each check the job cannot run, for example a scan another job owns; see [check enforcement](admin-policy.md). |
 | `nanolinter-image`, `megalinter-image` | PR | The lint engine's image, pinned by digest: `nanolinter-image` is required with `lint-engine: nanolinter` and `megalinter-image` with `megalinter`. Neither has a default; pin your flavour as the examples show. |
 | `branch` | release, snapshot | The branch to prepare and release from, or the snapshot branch. |
-| `release-policy` | release | `stable` (default) or `stable-prerelease`; the signed tag determines classification. Replaces `release-type`. |
+| `release-policy` | release | `stable` (default) or `stable-prerelease`; the signed tag determines classification. |
 | `artifacts-config` | release, snapshot | Path to `artifacts.yml`, default `.forge-ci/artifacts.yml`. |
 | `release-publisher` | release | `github-cli` creates the GitHub release; empty skips it. |
-| `changelog-creator`, `changelog.config` | release | The changelog renderer (default `git-cliff`) and its configuration. git-cliff renders offline: a configuration that uses remote metadata, such as pull-request numbers, gets none. It reads stable `vX.Y.Z` tags only, overriding any `tag_pattern` in the configuration, so pre-release tags never split the changelog. |
+| `changelog-creator`, `changelog.config` | release | `git-cliff` (the default) or empty, which skips the changelog and the version bump; any other value is refused. git-cliff runs offline, so remote metadata such as pull-request numbers is not available, and it reads only stable `vX.Y.Z` tags. |
 | `release.sboms`, `release.signartifacts`, `release.requireallowlistedsigner`, `release.draft` | release | SBOM selection, artifact signing, the signer allowlist and draft releases. |
 | `release-asset-retention` | release | How many of the newest releases keep every file; older ones keep their checksums and signatures. Empty, the default, deletes nothing. See [Old releases' files](#old-releases-files). |
 | `promote-staging-environment`, `promote-release-environment`, `promote-release-*` | release | The GitHub Environments that gate the promotion ladder, and an optional separate release registry. |
 | `enforce-lint`, `enforce-vulnerabilities`, `enforce-application-tests`, `enforce-reproducible-builds` | PR, release, snapshot | [Check enforcement](admin-policy.md), default `false`, forwarded to every gate. Checks run and report findings; explicit `true` makes recognized findings block. Organisation-mandated values belong in its ruleset-required workflow. No workflow reads them from `vars` or the environment. |
-| `forge-ci-binary-ref` | all | The CLI release plain-runner jobs install. |
-| `runtime-image*` | all | The runtime image of each toolchain family. |
+| `forge-ci-binary-ref` | all | Required: the full engine commit the canonical CLI is built from in the run, for every plain-runner job of the PR, snapshot and release routes. The macOS lanes build the engine from a checkout of the same commit. |
+| `runtime-image*` | all | The runtime image of each toolchain family. `runtime-image` is required on every orchestrator and admitted only as an `@sha256:` digest; it is the control-plane, release-notes, SARIF-upload and cosign signing container. |
+| `canonical-builder-image` | all | Required: the Go runtime image digest the canonical CLI is built in. |
+| `runs-on`, `runs-on-darwin-arm64` | PR, release, snapshot | JSON arrays of runner labels for the ordinary jobs, default `["ubuntu-26.04"]`, and the unsigned Xcode and the Swift jobs, default `["macos-26"]`; signed Android and Xcode builds stay on hosted runners. See [GitHub runners](runners.md#github-runners). |
+| `build-runs-on-linux-amd64`, `build-runs-on-linux-arm64` | release, snapshot | JSON arrays of runner labels for the image builds per platform, default `["ubuntu-26.04"]` and `["ubuntu-26.04-arm"]`. Signing, promotion and publication jobs stay on GitHub-hosted runners. |
 
 Configuration of what is built, published and signed lives in
 `.forge-ci/artifacts.yml`, not in inputs; see the
@@ -163,32 +161,16 @@ Configuration of what is built, published and signed lives in
 [Components Reference](components.md).
 
 **Repository variables.** The workflows read these from the calling
-repository; each falls back to the default below. A consumer sets none.
-[Forks](#forks) says when to set them.
+repository; each falls back to the default below.
 
 | Variable | Default | Used for |
 |---|---|---|
-| `FORGE_CI_REPOSITORY` | the repository serving the called workflow (`job.workflow_repository`). GitHub Enterprise Server has no such context: there the variable is required, and a job refuses to start without it | bootstrap checkouts and script downloads, binary installs, release URLs, trusted signing identities, and the repository allowed to publish the rolling pre-release CLI |
-| `FORGE_CI_PRERELEASE_BRANCH` | `main` | the branch whose pushes publish runtime images and the pre-release CLI, and the branch the installer trusts for pre-release signatures |
-| `RELEASE_PLATFORMS` | `linux/amd64,linux/arm64` | the runtime images' platforms in Self Runtime Container; unset selects both declared architectures, and an explicit value may narrow the selection. An undeclared, duplicated or malformed entry fails before anything is built. Consumers read the same variable for their images with the same meaning, unset building what their configuration declares |
-| `CI_IMAGE_BUILDER` | `buildah` | Linux container and snapshot image builder: `buildah` or `kaniko`. The image leaves' explicit `image-builder` input takes precedence. |
-| `CI_IMAGE_BUILDER_JOB_IMAGE` | unset | Approved digest-pinned Kaniko job image; required when Kaniko is selected. The image leaves' explicit `image-builder-job-image` input takes precedence. |
-| `RUNTIME_IMAGE_RETENTION` | unset: nothing is deleted | how many of the newest commit images (`sha-*`) of each runtime image Self Runtime Container keeps after it publishes; older versions are deleted through the GitHub Packages API with the job token, except release and pre-release tags and every platform manifest, signature and attestation a kept image needs. `forge-ci container package-retention --dry-run` shows what a value would delete |
-| `FORGE_CI_IMAGE_NAMESPACE` | `ghcr.io/<repository owner>`, lowercased | Trusted repository variable selecting the runtime publication namespace and the images used by Self Pull Request and Self Release. Use a lowercase, tag-free GHCR path under the owner, e.g. `ghcr.io/owner/scratch-repo`, to isolate a scratch engine's packages. Source labels still identify the source repository; the layer cache remains repository-scoped. |
-| `FORGE_CI_TESTSUITE_REPOSITORY` | `diggsweden/forge-ci-blackbox-tests` | the external black-box suite checked out by the PR and release gates |
-| `RELEASE_BRANCH` | the branch whose head the release-request tag names | the fork's own Self Release: an explicit release branch when several branches share that head. A consumer names its branch with the orchestrator's `branch` input instead |
+| `FORGE_CI_REPOSITORY` | the repository serving the called workflow (`job.workflow_repository`) | the engine checkouts and images every job trusts, release URLs and trusted signing identities. GitHub Enterprise Server has no such context, so there it is required |
+| `RELEASE_PLATFORMS` | what the configuration declares | narrows the platforms the release's images are built for; an undeclared, duplicated or malformed entry fails before anything is built |
+| `CI_IMAGE_BUILDER` | `buildah` | the Linux container and snapshot image builder, `buildah` or `kaniko`; the image leaves' `image-builder` input takes precedence |
+| `CI_IMAGE_BUILDER_JOB_IMAGE` | unset | the digest-pinned kaniko job image, required with kaniko; the `image-builder-job-image` input takes precedence |
 
-Scratch engine trials set the runtime namespace before pushing their source and
-retain the prepared engine for batch reuse. `GitHubEngine.RuntimePackageNames`
-reports the seven exact runtime package names plus the separate repository cache.
-Before launch, the operator checks each exact coordinate: absence is acceptable;
-an existing package must be explicitly acknowledged and linked to the current
-source repository ID. Missing or foreign ownership blocks reuse. After publication,
-capture the package IDs with `ReadContainerPackageIdentity`; batch finalization
-may pass only acknowledged identities to `DeleteContainerPackage`, which rechecks
-both IDs before deletion and confirms absence. Nested package names are passed
-raw to go-github, which URL-escapes them once. This does not authorize cleanup of
-old owner-global packages.
+A fork's own CI reads more; see [Forks](#forks).
 
 ## Secrets and tokens
 
@@ -210,7 +192,9 @@ says how to create each one.
 | `CODE_SCANNING_TOKEN` | Optional SARIF upload; see [Code scanning](#code-scanning-sarif). |
 | `MAVEN_CENTRAL_USERNAME`, `MAVEN_CENTRAL_PASSWORD` | Maven Central. |
 | `ANDROID_KEYSTORE`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD`, `GOOGLE_PLAY_SERVICE_ACCOUNT_JSON` | Android signing and Google Play. |
-| `IOS_SIGNING_CERTIFICATE_PASSPHRASE`, `KEYCHAIN_PASSWORD`, `APP_STORE_CONNECT_API_KEY_ID`, `APP_STORE_CONNECT_ISSUER_ID` | Xcode signing and App Store Connect. |
+| `SECRETS_PROPERTIES_BASE64` | An Android `secrets.properties`. |
+| `IOS_SIGNING_CERTIFICATE_BASE64`, `IOS_SIGNING_CERTIFICATE_PASSPHRASE`, `PROVISIONING_PROFILE_BASE64`, `XCCONFIG_BASE64` | Xcode signing. |
+| `APP_STORE_CONNECT_API_KEY_ID`, `APP_STORE_CONNECT_ISSUER_ID`, `APP_STORE_CONNECT_API_PRIVATE_KEY_BASE64` | App Store Connect. |
 | `FORGE_CI_BUILD_SECRETS_JSON` | Build secrets mounted into container builds; see [Build secrets](artifacts-reference.md#build-secrets). |
 | `PROMOTE_RELEASE_REGISTRY_PASSWORD` | A separate release registry for the last promotion rung. |
 
@@ -225,63 +209,40 @@ names.
 
 Containerized jobs run in the runtime images, which carry the `forge-ci`
 binary and the toolchain of one family (base, full, Java, Node, Rust, Go,
-Android). Each orchestrator has one `runtime-image*` override per family, and
-each build, publish and changelog workflow one `runtime-image`. An empty
-`forge-ci-binary-ref` resolves the current published stable release to its concrete
-tag once, such as `v0.93.0`. Empty runtime-image overrides select the same tag,
-under `FORGE_CI_IMAGE_NAMESPACE` or the serving repository's owner on `ghcr.io`.
-No workflow names a fixed image.
-Explicit binary refs and image overrides take precedence; source commits use
-the corresponding `sha-<short>` runtime references. No `latest` image tag is used.
-[Runtime Images](runtime-images.md) has the roster, which workflow uses
-which image, tag and pinning conventions, and mirroring. Android images are
-linux/amd64 only.
+Android; Android is linux/amd64 only). Every orchestrator requires
+`forge-ci-binary-ref` as the full engine commit and `runtime-image` and
+`canonical-builder-image` as `@sha256:` digests. `runtime-image-full` and the
+family images (`-java`, `-node`, `-go`, `-rust`, `-android`) are digests too:
+pass the ones your artifacts use, and a native release always needs
+`runtime-image-full`. A workflow refuses a tag or an empty image it needs
+before its job starts, and none picks an image for its caller. Keep the
+workflow ref, `forge-ci-binary-ref` and the image digests on one release; the
+[Advanced Pinning Recipe](runtime-images.md#advanced-pinning-recipe) shows how
+to read them. A leaf workflow called on its own takes the same
+`forge-ci-binary-ref` and one `runtime-image` digest.
 
-Plain-runner jobs, the container build and the macOS jobs, install the
-binary named by `forge-ci-binary-ref`. A release tag installs the archive
-verified against `checksums.txt` and its Sigstore bundle; a branch or commit
-ref builds from source. [CLI binary channels](runtime-images.md#cli-binary-channels)
-and [Installing `forge-ci`](providers.md#installing-forge-ci) describe both.
-Keep the workflow ref, `forge-ci-binary-ref` and the runtime images on one
-version.
-
-Self Release supplies the exact commit named by its release-request tag and
-that commit's runtime images, even while the new stable release does not exist.
-Standalone container-only leaf workflows retain their documented explicit
-runtime defaults; orchestrators pass their resolved image overrides to them.
+The first job builds the CLI from `forge-ci-binary-ref` in the builder image.
+Linux jobs on a plain runner, and the planning jobs, receive that exact
+build and check it before they run it; other container jobs, such as the
+product builds, use the CLI baked into their image, and macOS jobs build it
+from a checkout of the same commit. No workflow downloads a forge-ci binary
+onto a host. [Engine delivery](engine-delivery.md) describes the checks, and
+[Runtime Images](runtime-images.md) the roster and which workflow uses which
+image.
 
 ### Linux image builders
 
-`publish-container.yml` and `snapshot-images.yml` accept `image-builder` and
-`image-builder-job-image`. Empty inputs use the repository/organization variables
-above, with Buildah as the final default. Orchestrated builds use those same
-variables; no separate builder preset is needed. All four administrator
-enforcement controls keep their existing forwarding and defaults.
-
-Buildah runs on the native hosted runner. Kaniko runs in an isolated Docker
-container action, leaving setup, evidence handling and artifact uploads on that
-runner. This follows the [builder-neutral execution principle](flows.md#builder-neutral-execution).
-The selected image must be readable by the runner, built from
-`containers/kaniko-job`, pinned by SHA-256 digest, and carry these labels:
-
-- `org.opencontainers.image.source`: the trusted engine's GitHub repository URL.
-- `org.opencontainers.image.title`: `forge-ci kaniko job image`.
-
-The workflow checks the labels and native architecture before building. The
-trusted CLI generates the local Docker action; consumer source stays in
-`source/`, separate from the action payload. The temporary action image adds
-the already-installed native CLI and, for container builds, the verified Trivy
-binary. It contains no registry auth file or build-secret files. Registry
-authentication is job-local, and artifact uploads use GitHub's normal actions;
-runtime artifact credentials are not exported into ordinary shell steps.
-
-Both builders retain the same scan, layout verification, publication and signing
-boundaries. Kaniko has no load mode or build-secret support: validation builds
-retain and scan an OCI layout without publishing, and a nonempty `build-secrets`
-input is refused early. Both builders require image-workflow context and
-Containerfile paths to be relative to the checked-out source and resolve inside
-it; absolute workspace-root paths are refused rather than including control
-files. The architecture matrix stays native; neither path introduces QEMU.
+`publish-container.yml` and `snapshot-images.yml` take `image-builder` and
+`image-builder-job-image`; empty, they use the `CI_IMAGE_BUILDER` variables
+above, with Buildah as the default. Buildah runs on the hosted runner. Kaniko
+runs in a Docker container action on that runner, in an image built from
+`containers/kaniko-job`, pinned by digest, readable by the runner and
+labelled `org.opencontainers.image.source` (the engine's repository URL) and
+`org.opencontainers.image.title` (`forge-ci kaniko job image`); the workflow
+checks the labels and the architecture before building. Kaniko has no load
+mode and no build secrets, so a nonempty `build-secrets` is refused. Context
+and Containerfile paths must be relative to the checked-out source. Both
+builders scan, publish and sign the same way, natively per architecture.
 
 ## Pull-request gates and lint
 
@@ -302,8 +263,8 @@ runs one general lint engine, chosen with `lint-engine`:
 - **none**: no general engine.
 
 Swift checks (`linters.swiftlint`, `linters.swiftformat`) run separately on
-macOS, because nanolinter has no macOS binary. The orchestrator writes one aggregated step summary. Project tests are
-not run by it: wire them in your own workflow beside it. [Lint
+macOS, because nanolinter has no macOS binary. The orchestrator writes one
+aggregated step summary. Project tests are not run by it: wire them in your own workflow beside it. [Lint
 Workflows](components.md#lint-workflows) has the flavour table and direct-call
 snippets, and [Linting](verification.md#linting) the caller/project policy
 boundary.
@@ -312,8 +273,8 @@ The gate is your branch protection: require the orchestrator's jobs, and your
 test jobs, as status checks. The jobs are named by stage, as on the other
 forges: `Check: plan`, `Check: lint`, `Check: status` and so on. A required
 check is matched by that name, so a rename of a job changes the check to
-require. The GitHub layer has no release-isolation gate
-like Forgejo's `check-l3-isolation`.
+require. The GitHub layer has no release-isolation gate like Forgejo's
+`check-l3-isolation`.
 
 **Who sets the enforcement settings.** The `enforce-*` inputs are only the
 administrator's when they are written in a workflow the consumer cannot
@@ -337,8 +298,10 @@ Containers are declared under `containers[]` and built in the publish stage by
 `publish-container.yml`: native multi-arch on split runners, Trivy gate, SBOM
 and SLSA provenance attestations, and an entry in the release-image ledger.
 See [Container configuration](artifacts-reference.md#containers-section) and
-[Artifact and Image Flows](flows.md).
-Container builds run their `RUN` steps on the job's own network (`--network host`), so they resolve and reach what the job's steps do, the host's loopback services included; a build is trusted like the job.
+[Artifact and Image Flows](flows.md). Container builds run their `RUN` steps
+on the job's own network (`--network host`), so they reach what the job's
+steps reach, the host's loopback services included; trust a build as you
+trust the job.
 
 ## Releases and promotion
 
@@ -347,6 +310,8 @@ A signed `release-request/vX.Y.Z` tag starts `release-orchestrator.yml`:
 1. **Setup and validation**: parse the configuration, validate the request
    tag, its signature and allowlist, and every prerequisite the plan needs
    ([Prerequisites Check Matrix](reference.md#prerequisites-check-matrix)).
+   The prerequisite job verifies with public keys only: it checks that the
+   private GPG key and passphrase are set, and never imports them.
 2. **Prepare**: version bump in project files, changelog, the signed release
    commit, and the final `vX.Y.Z` tag, created once.
 3. **Build**: one job per artifact.
@@ -370,20 +335,30 @@ published tag.
 
 ### Version preparation and signing
 
-GitHub release preparation runs native Maven/npm/Cargo version tooling in a
-separate key-free job. The fresh signing job receives only a version patch and
-checks it with the existing version-only verifier before committing. The
-multi-artifact path applies each planned project's patch, then uses engine-owned
-text edits for Gradle/Xcode and copies the independently rendered changelog.
-No project build tool runs beside the signing keys. The standalone
-`version-bump.yml` also checks out the immutable request commit and lease-checks
-that commit before pushing to the selected branch.
+The version bump runs the project's own Maven, npm or Cargo tooling in a
+separate job without keys. The signing job receives only the resulting
+version patch, checks that it changes nothing but versions, and commits it
+with the changelog; Gradle and Xcode versions are edited by forge-ci itself.
+No project build tool runs beside the signing keys.
+
+### The published release is read back
+
+After `Publish: release` has published and the old releases are trimmed, its
+last step reads the release back with `forge-ci release validate-published`
+and compares it with the files the release assembly planned, signatures and
+provenance included. The run fails, naming each file, when a planned file is
+missing or has another size or SHA-256 digest, and when the tag has no
+release, or two. A file the plan does not name is only a warning.
+
+The step reads with the job's own `contents: read` token, or with
+`RELEASE_TOKEN` for a draft (`release.draft: true`), which that token cannot
+see otherwise.
 
 ### Old releases' files
 
 Each release adds its archives, binaries and packages, and a forge's storage
-quota fills. With `release-asset-retention: <N>` on `release-orchestrator.yml` the release keeps every file
-of the newest N published releases. After it publishes, each older release
+quota fills. With `release-asset-retention: <N>` on `release-orchestrator.yml`
+the release keeps every file of the newest N published releases. After it publishes, each older release
 keeps its checksum manifests, signatures, bundles and SBOMs, and loses the
 rest; the releases, their notes and their tags stay. Empty, the default,
 deletes nothing. With reproducible builds a deleted file can be rebuilt from
@@ -409,8 +384,7 @@ Rules → Rulesets → New ruleset → New tag ruleset* and create two rulesets:
 Set *Enforcement status* to **Active** on both. Do not restrict creations of
 `v*`: the flow creates the final tag itself with `RELEASE_TOKEN`. Exclude
 `v*-pre` (*Exclude by pattern*), because the rolling pre-release channel
-recreates its tag at each publish. Once a final
-tag exists it cannot move, which is what
+recreates its tag at each publish. Once a final tag exists it cannot move, which is what
 [Failed Release Recovery](failed-release-recovery.md) relies on.
 
 ## Snapshots
@@ -420,20 +394,24 @@ and publishes a content-addressed npm snapshot (`<version>-snapshot-<branch>-<sh
 dist-tag `snapshot`) to `npm-registry` (GitHub Packages by default), with SBOMs
 when `sboms` asks for them.
 Declared containers also publish by default from the same frozen source SHA;
-`publish-containers: false` explicitly opts out. Containers use branch-hashed tags
-ending in lower-case `-snapshot`; package naming is unchanged. Snapshot images are
-always scanned, and their SBOM policy is independent of the package `sboms` input. Snapshot images are unsigned
-and never advance release aliases or promotions. See the
+`publish-containers: false` opts out. Containers use branch-hashed tags ending
+in `-snapshot`. Snapshot images are always scanned, their SBOM policy is
+independent of the package `sboms` input, and they are unsigned and never
+advance release aliases or promotions; see
+[what a snapshot takes from the declaration](workflows.md#what-a-snapshot-takes-from-the-declaration) and the
 [snapshot container contract](workflows.md#snapshot-container-contract-all-three-forges)
 and [manual branch-selection example](../examples/container-snapshot/).
 
-The root orchestrator sets `use-build-artifacts: true` on its snapshot-image call:
-`prepare-inputs` reuses exact current-run uploads, avoiding duplicate builds.
-Standalone `snapshot-images.yml` defaults that input to `false` and automatically
-builds required Go, Cargo, Maven, Gradle JVM and npm producers. Both paths use
-shared Go `gather-context`/`restore-context` validation and confined restoration.
-See [automatic artifact-first inputs](workflows.md#automatic-artifact-first-inputs)
-for frozen plan settings, mode preservation and npm Containerfile COPY paths.
+`publish-files: true` also keeps the built files of the declared artifacts as
+unsigned workflow artifacts of the run, named
+`<artifact-name>-files-<artifact>-<snapshot version>` and kept for 7 days for
+readers of the repository; see [snapshot files](workflows.md#snapshot-files). The
+`build-files` job has read permissions only.
+
+The orchestrator's snapshot images reuse the files its own build jobs
+uploaded. `snapshot-images.yml` called on its own builds the Go, Cargo, Maven,
+Gradle JVM and npm artifacts its images take first; see
+[automatic artifact-first inputs](workflows.md#automatic-artifact-first-inputs).
 
 A snapshot caller for feature branches:
 
@@ -447,22 +425,31 @@ permissions:
   contents: read
 jobs:
   snapshot-release:
-    uses: diggsweden/forge-ci/.github/workflows/release-snapshot-orchestrator.yml@v0.90.0
+    uses: diggsweden/forge-ci/.github/workflows/release-snapshot-orchestrator.yml@PIN_FORGE_CI_SHA # v0.90.0
     permissions:
+      actions: read
       contents: read
       packages: write
     # An npm snapshot to GitHub Packages needs no secret. An Android or iOS
     # snapshot passes its signing secrets by name under `secrets:`.
     with:
       branch: ${{ github.ref_name }}
-      forge-ci-binary-ref: v0.90.0
+      # The full commit the workflow ref above names; the snapshot route runs
+      # the CLI built in this run from exactly this commit.
+      forge-ci-binary-ref: PIN_FORGE_CI_SHA # v0.90.0
+      # Pinned by digest and admitted before any job runs; replace FIXME with
+      # the digests of the release you call (docs/runtime-images.md).
+      runtime-image: ghcr.io/diggsweden/forge-ci-runtime-base@sha256:0000000000000000000000000000000000000000000000000000000000000000 # FIXME v0.90.0 digest
+      canonical-builder-image: ghcr.io/diggsweden/forge-ci-runtime-go-1.27@sha256:0000000000000000000000000000000000000000000000000000000000000000 # FIXME v0.90.0 digest
+      runtime-image-full: ghcr.io/diggsweden/forge-ci-runtime@sha256:0000000000000000000000000000000000000000000000000000000000000000 # FIXME v0.90.0 digest
+      runtime-image-node: ghcr.io/diggsweden/forge-ci-runtime-node-24@sha256:0000000000000000000000000000000000000000000000000000000000000000 # FIXME v0.90.0 digest
       artifacts-config: .forge-ci/artifacts.yml
 ```
 
 ## Signing
 
-Release artifacts are signed with one method, `sign.method` in
-`artifacts.yml`:
+Release files and images are signed with `sign.method` in `artifacts.yml`,
+unless `sign.files-method` gives the files their own (below):
 
 | Method | Key | On GitHub |
 |---|---|---|
@@ -471,13 +458,32 @@ Release artifacts are signed with one method, `sign.method` in
 | `kms` | A KMS key reference (AWS, GCP, Azure, Vault/OpenBao, PKCS#11) | `.bundle` sidecars; the token exchange with the KMS is the caller's. See the [OpenBao example](../examples/signing/openbao-kms/). |
 | `kms` with `key: env://COSIGN_KEY` | A Cosign key pair: the private key in `RELEASE_COSIGN_PRIVATE_KEY`, its passphrase in `RELEASE_COSIGN_PASSPHRASE` | `.bundle` sidecars, verified against the public key. The GitLab and Forgejo layers sign the same way. See the [example](../examples/signing/cosign-key/). |
 
-Signing and publishing run in separate plain-runner jobs with the same
-forge-ci binary pinned by the orchestrator. The runtime image only assembles
-the files. GitHub-hosted runners have swap on, and
-`release sign` refuses to load a long-lived key while it is
-([swap policy](verification.md#swap-policy)), so the signing job turns swap off
-first. A self-hosted runner needs swap off, or passwordless `sudo` for the
-job to do it.
+**GPG for files, Cosign for images.** `gpg` cannot sign an image or its SLSA
+provenance, so a release with both files and images that wants `.asc`
+signatures on its files adds `files-method: gpg` beside a Cosign method:
+
+```yaml
+sign:
+  method: sigstore
+  files-method: gpg
+```
+
+The release files are then signed in the `gpg` job below, with
+`RELEASE_GPG_PRIVATE_KEY`, and nothing about them is written to the
+transparency log. The images keep their Cosign signatures and provenance from
+`method`, with its key, issuer and transparency settings. Without the field,
+`method` signs both. See
+[`sign.files-method`](artifacts-reference.md#signfiles-method).
+
+Signing and publishing are separate jobs. `gpg` signs on a plain runner with
+the canonical CLI delivered for the run: GitHub-hosted runners have swap on,
+and `release sign` refuses to load a long-lived key while it is
+([swap policy](verification.md#swap-policy)), so that job turns swap off
+first; a self-hosted runner needs swap off, or passwordless `sudo` for the job
+to do it. `sigstore` and `kms` sign inside the admitted `runtime-image`
+digest, whose baked cosign does the work; no installer runs. The full runtime
+image only assembles the files, and publication runs on a plain runner with
+the same canonical CLI.
 
 The publisher verifies the signer's checkpoint digest and the prepared tag,
 then publishes those exact bytes without signing credentials or OIDC access.
@@ -524,16 +530,29 @@ A fork of this repository on GitHub serves the workflows to its own consumers.
 
 1. **Fork or copy** the repository. Consumers pin your fork's commits or tags
    in `uses:`.
-2. **Set the [repository variables](#inputs-and-variables)** in the
-   repository that runs the workflows where they differ from the defaults.
-   `FORGE_CI_REPOSITORY` already defaults to the repository the called
-   workflow comes from, so the fork's workflows install the fork's engine. Scheduling and provider-layer branch
-   restrictions still apply.
+2. **Set the repository variables** below in the repository that runs the
+   workflows, where they differ from the defaults. `FORGE_CI_REPOSITORY`
+   already defaults to the repository the called workflow comes from, so the
+   fork's workflows install the fork's engine.
 3. **Publish runtime images** from the fork with Self Runtime Container on
    the pre-release branch, and have consumers override the `runtime-image*`
    inputs: released defaults still name `ghcr.io/diggsweden`.
 4. **Provision the rolling pre-release** if the fork publishes the
    pre-release CLI (below).
+
+The fork's own CI, Self Runtime Container, Self Pull Request and Self
+Release, reads these variables as well:
+
+| Variable | Default | Used for |
+|---|---|---|
+| `FORGE_CI_PRERELEASE_BRANCH` | `main` | the branch whose pushes publish runtime images and the pre-release CLI |
+| `RELEASE_PLATFORMS` | `linux/amd64,linux/arm64` | the runtime images' platforms; an explicit value may narrow them |
+| `FORGE_CI_IMAGE_NAMESPACE` | `ghcr.io/<repository owner>`, lowercased | where the runtime images are published and read from; a lowercase, tag-free GHCR path under the owner, such as `ghcr.io/owner/scratch-repo`, keeps a scratch engine's packages apart |
+| `RUNTIME_IMAGE_RETENTION` | unset: nothing is deleted | how many of the newest `sha-*` images of each runtime image to keep after publishing; release and pre-release tags, and everything a kept image needs, stay. `forge-ci container package-retention --dry-run` shows what a value would delete |
+| `FORGE_CI_COSIGN_TRANSPARENCY` | unset: `public` | `none` publishes the runtime images, their attestations and the CLI unsigned, and skips the rolling pre-release CLI, so the fork never appears in the public transparency log; any other value fails the run |
+| `FORGE_CI_RUNTIME_VULNERABILITIES` | unset: report | `enforce` refuses a runtime image with a `CRITICAL` finding not approved in `.trivyignore.yaml`; unset, findings are reported. Consumer images take `enforce-vulnerabilities` from their caller instead |
+| `FORGE_CI_TESTSUITE_REPOSITORY` | `diggsweden/forge-ci-blackbox-tests` | the external black-box suite the pull-request and release gates check out |
+| `RELEASE_BRANCH` | the branch whose head the release-request tag names | an explicit release branch when several branches share that head |
 
 `vars` resolve in the calling repository. A consumer that calls a fork's
 workflows runs that fork's bootstrap scripts and binary, and trusts signatures
@@ -572,21 +591,23 @@ maintainer side.
 | Findings missing from Code Scanning | No `CODE_SCANNING_TOKEN` passed, or `upload-sarif: false`. The gate itself still ran. |
 | A build succeeds but nothing is published | See [Configuration troubleshooting](artifacts-reference.md#configuration-troubleshooting). |
 | A release failed after the final tag was pushed | Re-run forward; see [Failed Release Recovery](failed-release-recovery.md). |
-| Plain-runner job cannot install the CLI | `forge-ci-binary-ref` names a release that does not exist yet, or a source ref the module restriction blocks; see [Branch Testing](runtime-images.md#branch-testing). |
+| A run stops in `canonical-cli` or before it | `forge-ci-binary-ref` is not a full 40-hex commit, or `runtime-image` / `canonical-builder-image` is a tag rather than an `@sha256:` digest; see [Advanced Pinning Recipe](runtime-images.md#advanced-pinning-recipe). |
 
 `forge-ci doctor` in a job prints the detected forge, its capabilities and what
 to do where it degrades.
 
 ## Limits
 
-- **github.com only** for the release workflows; GitHub Enterprise Server is
-  refused.
 - **No container tag deletion.** `container release-images cleanup` and
   `rollback` need a forge registry API that deletes a tag and keeps the
   manifest; the GitHub adapter has none and refuses.
-- **No release-isolation gate** over the consumer's workflow.
 - **npm publishing targets GitHub Packages**; `NPM_TOKEN` is reserved and does
   not enable npmjs.org.
-- **Snapshot image features are limited.** Build secrets and binary extraction
-  are unsupported; explicit snapshot OCI signing/provenance is rejected.
+- **No distro package registry.** [GitHub Packages](https://docs.github.com/en/packages/learn-github-packages/introduction-to-github-packages)
+  has no Debian, RPM or Alpine registry, so a declaration with
+  `distro-packages` is refused when the release is planned; the packages
+  stay release files.
+- **Snapshot image features are limited.** Build secrets are unsupported; a
+  snapshot builds the runtime image unsigned, whatever the declaration signs
+  in a release, and runs no `extract.binary`.
 - **Android runtime image is linux/amd64 only.**

@@ -5,21 +5,9 @@ CI/CD components under `templates/` that lint, check and build a merge request,
 publish packages, and prepare, sign and publish a release. They call the same
 engine commands as the other delivery layers.
 
-The three forge guides, [GitHub](github.md), [GitLab](gitlab.md) and
-[Forgejo](forgejo.md), use the same section order. What each layer has beside
-the others is in [Delivery layers side by side](providers.md#delivery-layers-side-by-side).
-
-> **Release source and instance setup.** Pin an authenticated engine commit and
-> serve its components and checksum-bound package on your GitLab instance.
-> An upstream GitHub release does not publish your GitLab Catalog or packages.
-> Validate the selected instance and runner through
-> [GitLab live acceptance](testing.md#gitlab-live-acceptance).
-
-For local CLI evaluation, use the reviewed
-[source checkout](DEVELOPMENT.md#source-checkout). Consumer adoption below also
-requires your instance's published components, engine package and job images.
-`init` reads its examples and defaults from a release tag on that mirror; a
-local build alone does not supply them.
+Host the components, the engine package and the job images on your own
+instance: an upstream release does not publish them for you. See
+[Getting started](#getting-started), steps 1 and 2.
 
 ## What ships
 
@@ -31,6 +19,7 @@ families, which get the engine differently.
 |---|---|---|
 | `check` | checksum-bound | Downloads the recorded engine, checks the consumer out at the pipeline commit and runs the consumer's check commands. |
 | `release` (with `release-jobs`) | checksum-bound | The native release: request validation, changelog, signed release commit and final tag, key-free build, signing, image promotion, publication and cleanup, in separately scoped jobs. |
+| `snapshot-images` (with `snapshot-image-jobs`) | checksum-bound | Snapshot images, and optionally snapshot files, of one branch, run from a policy project. See [Snapshots](#snapshots). |
 | `nanolinter`, `megalinter` | Catalog | The merge-request lint gate, with findings published as a GitLab SAST report. |
 | `build-go`, `build-cargo`, `build-maven`, `build-npm`, `build-gradle`, `build-gradle-android` | Catalog | One release build per artifact: `forge-ci build <ecosystem> run` in a runtime image. |
 | `publish-forge-packages`, `publish-maven-central`, `publish-apple-appstore` | Catalog | Maven, npm and exported Gradle JVM packages to the GitLab Package Registry; Maven/Gradle to Central; App Store Connect. |
@@ -55,13 +44,13 @@ fan-out.
 
 | Requirement | Value |
 |---|---|
-| GitLab | 18.7 or later for `check`; `release` uses the same component context. CE/Free is enough: protected-environment approvals and paid pipeline-execution policies are not used. |
+| GitLab | 18.7 or later. CE/Free is enough: protected-environment approvals and paid pipeline execution policies are not required. |
 | Hosting | The components, and for checksum-bound components the engine project, on the **same instance** as the consumer. |
 | Engine project | **Readable without credentials**, and its generic package downloadable anonymously. Downloads send no credential. |
 | Runner architecture | **linux/amd64 or linux/arm64** for checksum-bound jobs: the engine is recorded for both, and each job runs the one of its runner's architecture. Catalog runtime images are linux/amd64 and linux/arm64, except Android (amd64 only). |
-| Executor | Docker or Kubernetes. The components clear the entrypoint of `job-image`, `build-image`, `nanolinter-image` and `megalinter-image`, so an image that starts a tool of its own still runs the job's shell. |
-| Job images | For `check`: Bash, Git, curl, `sha256sum` and the consumer's check tools, pinned by digest. For the lint components' SAST conversion: Bash, Git, curl and `sha256sum` in the lint image; Nanolinter's flavours and MegaLinter have them. For `release`: a `job-image` run as an ordinary user, a `build-image`, with `release-images` a `builder-job-image`, and the organization's `signer-image`; see [Images and the engine binary](#images-and-the-engine-binary). |
-| Artifact size | Enough native artifact capacity for the release handoff; the GitLab default of 100 MB can be too small. See [Releases and promotion](#releases-and-promotion). |
+| Executor | Docker or Kubernetes. The components clear the entrypoint of `job-image`, `build-image`, the `runtime-image-<family>` images, `nanolinter-image` and `megalinter-image`, so an image that starts a tool of its own still runs the job's shell. |
+| Job images | Digest-pinned; see [Images and the engine binary](#images-and-the-engine-binary). |
+| Artifact size | Enough artifact capacity for the release hand-off; the GitLab default of 100 MB can be too small. See [Artifact size](#artifact-size). |
 | Release branch | The project's default branch unless `release` is given another `release-branch`: the request must be its head. |
 | macOS runner | With Xcode and a reviewed `forge-ci` on it, for `publish-apple-appstore` only. |
 | SHA-256 repositories | Supported. Enable GitLab's `support_sha256_repositories` feature flag before creating the project; see [Troubleshooting](#troubleshooting). |
@@ -77,7 +66,7 @@ own package registry.
 First get a green merge-request gate; then configure release publishing.
 After pushing a request tag, follow its pipeline's prepare, build, sign and
 publish jobs and inspect the final release. If it fails, use
-[Failed Release Recovery](failed-release-recovery.md) rather than deleting final tags.
+[Failed Release Recovery](failed-release-recovery.md#gitlab) rather than deleting final tags.
 
 Two roles share the work. **The organization, once:** host the components
 (steps 1 and 2), build the job, build and signer images, hold the Cosign key
@@ -86,24 +75,14 @@ runs from. **Each consumer, per project:** the merge-request gate in its
 `.gitlab-ci.yml`, its `nanolinter.toml`, its project settings and the
 protected variables (steps 3 to 6).
 
-Init neither creates nor modifies Nanolinter or MegaLinter configuration files.
-These are optional customizations: the engine selected by your lint component
-uses its defaults without a config file, with the component's required lint
-floor still applying. Keep your existing config or copy an example if you want
-custom settings.
+`forge-ci init` writes no Nanolinter or MegaLinter configuration: without
+one, the lint engine uses its defaults and the component's required floor.
+Preview the files with `forge-ci init <mirror URL> --dry-run`.
 
-Use `forge-ci init <mirror URL> --dry-run` to preview the proposed files,
-remaining placeholders, and all existing-file conflicts before generation.
-It still fetches release templates into temporary storage, but writes no project
-files. Conflicts return nonzero. Repeat without `--dry-run` using the reported
-`--ref` and `--example` after reviewing the proposal.
-
-Automatic release selection accepts both Catalog tags such as `0.90.0` and
-prefixed tags such as `v0.90.0`, choosing the highest stable version.
-Prereleases and build-metadata tags are excluded from automatic selection.
-If both spellings exist at the highest version, the prefixed tag wins;
-use `--ref 0.90.0` to choose the unprefixed tag explicitly.
-Init resolves and reads the exact selected tag name.
+Then run `forge-ci setup status`: it lists the steps from here to a first
+release, marks the ones the repository shows are done, and names the command
+for each. GitLab takes the allowed signers as the `request-allowed-signers`
+input, so run `forge-ci setup signer --dry-run` and paste the line it prints.
 
 The organization's mirror can make `forge-ci init <mirror URL>` write a
 consumer's files with every pin filled in. The operator commits
@@ -153,9 +132,9 @@ the steps are these.
            - just test-unit
    ```
 
-   Copy the example's `nanolinter.toml` to the consumer's repository root.
-   The lint component runs `nanolinter verify` against it and requires at
-   least the `required-lints` floor, default `secrets,sast`.
+   Optionally copy the example's `nanolinter.toml` to the consumer's
+   repository root. The lint component runs `nanolinter verify`, with the
+   `required-lints` floor (default `secrets,sast`) applying either way.
 4. **Configure the project** to require successful pipelines and refuse
    merging on skipped pipelines, and protect the target branch.
 5. **For releases**, create an independently controlled policy project that
@@ -167,13 +146,9 @@ the steps are these.
 6. **Release** by pushing a protected, SSH-signed `release-request/vX.Y.Z` tag
    at the head of the release branch. The flow creates the final `vX.Y.Z` tag once.
 
-Replace every pin with a reviewed immutable value. The Nanolinter GHCR
-coordinates are the migration destination: confirm the image is published and
-readable, then use its served digest or an available mirror. See
-[lint images](components.md#lint-nanolinteryml-default).
-Component inputs are
-documented on each component's Catalog page, which GitLab renders from its
-`spec:`.
+Replace every pin with a reviewed digest; see
+[lint images](components.md#lint-nanolinteryml-default). Each component's
+Catalog page lists its inputs, from its `spec:`.
 
 ## Inputs and variables
 
@@ -189,9 +164,10 @@ images and pins, a validating regex. The inputs that are not obvious:
 | | `commands` | The consumer's check commands; a failure fails the job. `job-name` (default `check`) and `stage` (default `test`) name the job. |
 | | `enforce-lint`, `enforce-vulnerabilities`, `enforce-application-tests`, `enforce-reproducible-builds` | The administrator's [check enforcement](admin-policy.md) for the gates the commands run through `forge-ci`; default `false`. |
 | `release` | `forge-ci-repository`, `consumer-project` | The engine project, and the only project allowed to run this policy. |
-| | `server-url` | This instance's URL as `CI_SERVER_URL` reads, `https://host[:port]` without a path, for example `https://gitlab.example.com`; required. Each job refuses to start when `CI_SERVER_URL` differs, and derives `CI_API_V4_URL` from it. See [The instance as a literal](#the-instance-as-a-literal). |
+| | `server-url` | As for `check`. |
 | | `registry` | This instance's container registry as `CI_REGISTRY` reads, `host[:port]`, for example `registry.gitlab.example.com`, or empty when the project has none; required. GitLab configures it apart from the web host, so it is stated, not derived. Each job refuses to start when `CI_REGISTRY` differs; the project's image repository is derived from it. |
-| | `job-image`, `build-image`, `signer-image` | Digest-pinned images for key-free jobs, the build job, and the signing jobs. |
+| | `job-image`, `signer-image` | Digest-pinned images for the key-free jobs, `Build: release files` among them, and for the signing jobs. |
+| | `runtime-image-java`, `-node`, `-go`, `-rust`, `-android` | Digest-pinned runtime images of the toolchain families: the plan's version and build jobs of each family run in its image. Empty, the default, for a family the plan has none of; a planned family without one is refused at `Release: plan`. See [Plan-driven release jobs](#plan-driven-release-jobs). |
 | | `job-user` | UID or `UID:GID` the `job-image` jobs run as, for example `65532:65532` with a runtime image. Empty, the default, keeps the image's user. |
 | | `publication-project`, `publication-image-repository` | The separate project that owns final images, and the exact registry repository in it. |
 | | `cosign-public-key-sha256` | SHA-256 of your Cosign public key, written out. |
@@ -199,102 +175,100 @@ images and pins, a validating regex. The inputs that are not obvious:
 | | `request-allowed-signers` | OpenSSH allowed-signers text for the people who may sign a request tag. |
 | | `bot-name`, `bot-email` | The release bot identity; no default. |
 | | `checks`, `build` | Consumer commands: checks on the request commit, and the build that writes `dist/release-files.json` and `release-notes.md`. |
-| | `build-runner-tags` | Runner tags for the build job and, with Buildah, the amd64 image job, for example `[privileged]`. Empty, the default, leaves them untagged. |
+| | `build-runner-tags-linux-amd64` | Required, never empty: runner tags of the consumer checks, family builds, release files and amd64 image and export jobs, whichever the image builder. Name a runner's own tags, such as `[privileged]` for a self-managed runner that permits user namespaces, or a `saas-linux-*` tag on GitLab.com. An untagged job could land on a runner of any platform, so there is no default. |
 | | `release-images`, `artifacts-config`, `release-platforms`, `labels` | `true` builds the `containers:` of `artifacts-config` (default `.forge-ci/artifacts.yml`; without it the root `Containerfile`) in the release's image jobs, narrowed to `release-platforms`, with `labels` beside the standard ones. Default `false`: no image jobs. See [Release images](#release-images). |
 | | `image-builder`, `builder-job-image` | The image jobs' builder, `buildah` (default) or `kaniko`, and the digest-pinned job image they run in: the Buildah job image or the kaniko job image. |
-| | `build-runner-tags-arm64` | Tags of a native arm64 runner. The arm64 image and export jobs exist only when they are set. |
+| | `build-runner-tags-linux-arm64` | Required: tags of a native arm64 runner for the arm64 image and export jobs, such as `[saas-linux-medium-arm64]` on GitLab.com, or `[]` to state there is none; the arm64 jobs exist only when it is set. |
 | | `export-files`, `export` | `true` runs the `export` commands once per selected architecture, natively, in `builder-job-image` with `image-builder`, before the build job, and lays their `dist/` into its own. See [Files exported from a Containerfile](#files-exported-from-a-containerfile). |
-| | `checks-runner-tags` | Runner tags for consumer checks after restricted signed-request authorization. Empty, the default, leaves checks untagged. Authorization and signing stay untagged. |
+| | `runner-tags`, `signer-runner-tags` | Runner tags of ordinary jobs, including request authorization, preparation and generated version jobs, and of the signer jobs, the ones in `signer-image` that hold the release credentials. Consumer build commands use the build input above. Empty, the default, leaves ordinary and signer jobs untagged. Write both as literals in this policy, never as a `$VARIABLE`: GitLab expands a variable in a tag, so a project could then choose the runner that sees the credentials. See [Runner roles across the forges](runners.md#runner-roles-across-the-forges). |
 | | `changelog-creator`, `changelog-config`, `commit-body-config` | `git-cliff` (default) or `git-chglog`, and the consumer's configuration files, by default `.forge-ci/gitcliff/keepachangelog.toml` and `.forge-ci/gitcliff/minimal.toml`, copies of this repository's [`templates/gitcliff/`](../templates/gitcliff/) that `forge-ci init` writes. git-cliff renders offline, without remote metadata, and reads stable `vX.Y.Z` tags only, overriding any `tag_pattern` in the configuration. A SHA-256 repository needs `git-chglog`, since git-cliff cannot read one. |
 | | `release-policy` | `stable` (default) or `stable-prerelease`, selected in the trusted external policy. GitLab has no native prerelease flag; see [release policy](workflows.md#stable-and-prerelease-policy). |
 | | `release-branch` | The branch a release lands on; empty, the default, takes the project's default branch. The request must be its head. |
 | | `transparency-log` | `none` (default) or `public`: whether Cosign signatures are also written to the public Sigstore transparency log. See [Signing](#signing). |
 | | `sign-distro-packages` | Default `true`: GPG `.sig` sidecars for `.deb`, `.rpm` and `.apk`, which makes the GPG variables required. |
 | | `release-asset-retention` | How many of the newest releases keep every file; older ones keep their checksums and signatures, upload and link both deleted. Empty, the default, deletes nothing. See [Old releases' files](#old-releases-files). |
-| | `base-images` | Default `false`; see [Content-addressed base images](#content-addressed-base-images). |
-| | `enforce-lint`, `enforce-vulnerabilities`, `enforce-application-tests`, `enforce-reproducible-builds` | The administrator's [check enforcement](admin-policy.md) for the checks and build jobs and the image scans; default `false`. |
-| `nanolinter` | `forge-ci-repository`, `server-url`, `nanolinter-image`, `required-lints`, `enable-gitlab-sast` | The project serving the component and its engine package (required), the flavour image (required, pinned by digest, as the examples show), the mandated floor (default `secrets,sast`), and the SAST report. `enforce-lint` and `enforce-vulnerabilities`, default `false`, are the administrator's [check enforcement](admin-policy.md). |
+| | `base-stages`, `base-plan` | The project's graph of base images and its planner; empty, the default, builds none. See [Base images](#base-images). |
+| | `enforce-lint`, `enforce-vulnerabilities`, `enforce-application-tests`, `enforce-reproducible-builds` | The administrator's [check enforcement](admin-policy.md) for the checks and build jobs and the image scans, those of the base stages included; default `false`. |
+| `nanolinter` | `forge-ci-repository`, `server-url`, `nanolinter-image`, `required-lints`, `disable-checks`, `enable-gitlab-sast` | The project serving the component and its engine package (required), the flavour image (required, pinned by digest, as the examples show), the mandated floor (default `secrets,sast`), the checks to leave out of the run (empty by default; it cannot remove one the floor names), and the SAST report. `enforce-lint` and `enforce-vulnerabilities`, default `false`, are the administrator's [check enforcement](admin-policy.md). |
 | `megalinter` | `forge-ci-repository`, `server-url`, `megalinter-image`, `enable-gitlab-sast` | Required digest-pinned image; the rest as for `nanolinter`. |
-| `build-*` | `working-directory`, `version`, `skip-tests`, `enable-build-sbom`, `runtime-image` | Common to every build component; `runtime-image` is required and pinned by `@sha256:`; `build-go` and `build-cargo` add `platforms` and `artifact-name`, `build-go` also `main-package` (relative to `working-directory`), `build-maven` `build-type` and `profile`, `build-gradle-android` the module, flavour and signing inputs. `enforce-application-tests`, default `false`, is the administrator's [check enforcement](admin-policy.md); the job's `runtime-image` must carry an engine from this release or later. |
-| `publish-*` | `project-type`, `working-directory`, `runtime-image` | `runtime-image` as for `build-*`. `publish-maven-central` adds `profile` and `settings-path`; `publish-apple-appstore` takes none of these, only `platform`, `skip-validation`, `runner-tags` and `macos-image`. |
+| `check`, `nanolinter`, `megalinter`, `build-*`, `publish-*` | `runner-tags` | Runner tags of the component's job; empty, the default, leaves it untagged. `publish-apple-appstore` takes `runner-tags-darwin-arm64` instead, which defaults to a hosted macOS runner's. |
+| `build-*` | `working-directory`, `skip-tests`, `enable-build-sbom`, `runtime-image` | Common to every build component; `runtime-image` is required and pinned by `@sha256:`. `build-go`, `build-cargo`, `build-gradle` and `build-gradle-android` also take `version`; `build-go` and `build-cargo` add `platforms` and `artifact-name`, `build-go` also `main-package` (relative to `working-directory`), `build-maven` `build-type` and `profile`, `build-gradle-android` the module, flavour and signing inputs. `enforce-application-tests`, default `false`, is the administrator's [check enforcement](admin-policy.md). |
+| `publish-*` | `project-type`, `working-directory`, `runtime-image` | `runtime-image` as for `build-*`. `publish-maven-central` adds `profile` and `settings-path`; `publish-apple-appstore` takes none of these, only `platform`, `skip-validation`, `runner-tags-darwin-arm64` and `macos-image`. |
 
 The standalone `publish-maven-central` component also accepts `release-policy`.
 It binds the selected input before authorization; a project environment variable
 cannot widen the default stable-only policy. Snapshot publishing is independent.
 
-**Variables.** Project-level variables the components read:
-
-| Variable | Value |
-|---|---|
-| `COSIGN_PUBLIC_KEY` | The PEM text of your Cosign public key; it must hash to `cosign-public-key-sha256`. |
-
-Engine commands write scalar outputs to the dotenv file named by `CI_OUTPUT`,
-with upper-snake names (`VERSION`, not `version`); see
-[Scalar step outputs](providers.md#gitlab).
-
 ## Secrets and tokens
 
 Use **project-level** protected variables with these environment scopes:
 
-| Variables | Scope |
-|---|---|
-| `COSIGN_PUBLIC_KEY` | `*` (public value) |
-| `RELEASE_SSH_SIGNING_KEY` | `release/prepare` |
-| `RELEASE_COSIGN_PRIVATE_KEY`, `RELEASE_COSIGN_PASSPHRASE`, `RELEASE_GPG_PRIVATE_KEY`, `RELEASE_GPG_PASSPHRASE`, `RELEASE_GPG_FINGERPRINT` | `release/registry/signing` |
-| `RELEASE_REGISTRY_USER`, `RELEASE_REGISTRY_TOKEN` | `release/registry/*` |
-| `RELEASE_TOKEN` | `release/publish` |
+| Variable | Scope | Used for |
+|---|---|---|
+| `COSIGN_PUBLIC_KEY` | `*` (public value) | The PEM text of your Cosign public key; it must hash to `cosign-public-key-sha256`. |
+| `RELEASE_SSH_SIGNING_KEY` | `release/prepare` | The signed release commit and final tag; a deploy key that may push to the project. |
+| `RELEASE_COSIGN_PRIVATE_KEY`, `RELEASE_COSIGN_PASSPHRASE` | `release/registry/signing` | Provenance and image signatures and attestations, and checksum and SBOM signatures unless `artifacts.yml` says `sign.method: gpg` or `sign.files-method: gpg`. |
+| `RELEASE_GPG_PRIVATE_KEY`, `RELEASE_GPG_PASSPHRASE`, `RELEASE_GPG_FINGERPRINT` | `release/registry/signing` | Distro-package signatures, when `sign-distro-packages` is on, and checksum and SBOM signatures, when `artifacts.yml` says `sign.method: gpg` or `sign.files-method: gpg`. |
+| `RELEASE_REGISTRY_USER`, `RELEASE_REGISTRY_TOKEN` | `release/registry/*` | Importing, signing, promoting and cleaning up images in the publication project. |
+| `RELEASE_TOKEN` | `release/publish` | Creating the GitLab release and its assets. |
+| `RELEASE_PACKAGE_TOKEN` | `release/packages` | Publishing the release's npm packages: a project deploy token with `read_package_registry` and `write_package_registry` only. See [Package publication](#package-publication). |
 
-These are ordinary environment names and variable scopes; protected-environment
-approvals and paid pipeline-execution policies are not required. Each release
-job also refuses to start when a release secret it does not use is visible to
-it (`is available to the wrong release job`), so a wrongly scoped variable fails
-closed.
+Each release job refuses to start when a release secret it does not use is
+visible to it (`is available to the wrong release job`), so a wrongly scoped
+variable fails closed.
 
 Set the project's **Minimum role to use pipeline variables** to **No one
 allowed** (Settings > CI/CD > Variables, or the project API's
 `ci_pipeline_variables_minimum_override_role: no_one_allowed`). A pipeline
-variable, set when a pipeline is run by hand, triggered or created through the
-API, outranks the job's own variables and GitLab's predefined ones, and so do
-project and group variables. Whoever may set one could point `CI_SERVER_URL`,
-`CI_API_V4_URL` or `CI_REGISTRY` at another host, where the release jobs would
-send `RELEASE_TOKEN` and `RELEASE_REGISTRY_TOKEN`. The jobs no longer read
-those variables for a token's destination (see
+variable outranks the job's own variables and GitLab's predefined ones, and so
+do project and group variables. Whoever may set one could point
+`CI_SERVER_URL`, `CI_API_V4_URL` or `CI_REGISTRY` at another host. The jobs
+do not take a token's destination from those variables (see
 [The instance as a literal](#the-instance-as-a-literal)), so the setting is
-defence in depth: it keeps every other predefined variable the jobs read as
-GitLab set it.
+defence in depth: it keeps every other predefined variable as GitLab set it.
 
 ### The instance as a literal
 
 Every policy component (`check`, `nanolinter`, `megalinter`, `release` and
 `snapshot-images`) takes the instance's URL as `server-url`, and `release`
 and `snapshot-images` take its container registry as `registry`, from the
-administrator's include. Each job's start assigns them read only and refuses
-to run when `CI_SERVER_URL`, or `CI_REGISTRY`, is not the literal, before it
-fetches anything or reads a token; it then sets `CI_API_V4_URL` to
-`<server-url>/api/v4` and, for `release`, `CI_REGISTRY_IMAGE` to
+administrator's include. Each job refuses to run when `CI_SERVER_URL`, or
+`CI_REGISTRY`, is not the literal, before it fetches anything or reads a
+token; it then sets `CI_API_V4_URL` to `<server-url>/api/v4` and, for
+`release`, `CI_REGISTRY_IMAGE` to
 `<registry>/<consumer-project>` in lower case, as GitLab derives them. A
 variable that points the jobs elsewhere stops them instead of receiving the
 job token or a release token. The URL is an origin, `https://host[:port]`: an
 instance served under a relative URL path is not supported.
 
-This binds the destination, not the runner's network trust. Token-bearing jobs
-still use `CI_SERVER_TLS_CA_FILE` for instances with a private CA. GitLab can
-override that predefined variable with a project, group or pipeline variable,
-so the administrator must control it as well as `GIT_SSL_CAINFO`,
-`CURL_CA_BUNDLE`, `SSL_CERT_FILE`, `SSL_CERT_DIR` and proxy settings. An
-attacker-controlled CA combined with a redirected route can impersonate even
-the literal server name. The components do not pin a CA digest or establish
-the provenance of these environment values. Keep CA/proxy configuration in
-trusted runner/admin configuration and prevent lower-trust overrides; setting
-`server-url` alone does not enforce that boundary.
+This binds the destination, not the runner's network trust. The jobs still
+read the CA and proxy variables: `CI_SERVER_TLS_CA_FILE`, `GIT_SSL_CAINFO`,
+`CURL_CA_BUNDLE`, `SSL_CERT_FILE`, `SSL_CERT_DIR`, `NODE_EXTRA_CA_CERTS` (the
+release sets it from `CI_SERVER_TLS_CA_FILE` for npm) and the proxy settings.
+A project or group variable can override each of them, and a CA of an
+attacker's choice can impersonate even the literal server name. So whoever
+may set project or group variables is trusted with what these jobs hold. Keep
+CA and proxy settings in the runner's configuration, protect the
+release-request tags and the release branch, scope each secret as the table
+above lists, and keep the secrets out of reach of the consumer project's
+maintainers. Runner-level variables such as `CI_DEBUG_TRACE` take effect
+before any script runs, so restrict them at the instance or group.
 
-| Secret | Used for |
-|---|---|
-| `RELEASE_SSH_SIGNING_KEY` | The signed release commit and final tag; a deploy key that may push to the project. |
-| `RELEASE_COSIGN_PRIVATE_KEY`, `RELEASE_COSIGN_PASSPHRASE` | Checksum, SBOM, provenance and image signatures and attestations. |
-| `RELEASE_GPG_PRIVATE_KEY`, `RELEASE_GPG_PASSPHRASE`, `RELEASE_GPG_FINGERPRINT` | Distro-package signatures, when `sign-distro-packages` is on. |
-| `RELEASE_REGISTRY_USER`, `RELEASE_REGISTRY_TOKEN` | Importing, signing, promoting and cleaning up images in the publication project. |
-| `RELEASE_TOKEN` | Creating the GitLab release and its assets. |
+**Lock the variables where you have pipeline execution policies.** In GitLab
+18.1 or later, a pipeline execution policy can set `variables_override` with
+`allowed: false`, so a project cannot override the variables of the policy's
+jobs, the ones that hold the credentials. Name the variables a project may
+still set as exceptions:
+
+```yaml
+variables_override:
+  allowed: false
+  exceptions: [MY_PROJECT_SETTING]
+```
+
+This keeps a project from setting CA and TLS variables such as
+`SSL_CERT_FILE` and `CI_SERVER_TLS_CA_FILE` for those jobs. It is not on by
+default, and it narrows the risk above without removing it.
 
 The Catalog publish components read their own masked, protected variables:
 `MAVEN_CENTRAL_USERNAME`, `MAVEN_CENTRAL_PASSWORD`,
@@ -324,51 +298,37 @@ the runtime images the GitHub workflows use, or, for an installation that must
 not pull from `ghcr.io`, to your mirror of them. `forge-ci plan
 gitlab-build-pipeline` takes the same images as `--runtime-image-java`,
 `-node`, `-go`, `-rust` and `-android`, one per toolchain family the plan
-builds. [Runtime Images](runtime-images.md) has the roster and pinning
+builds, and the `release` component as its `runtime-image-<family>` inputs. [Runtime Images](runtime-images.md) has the roster and pinning
 conventions.
 
 ### The job's user
 
 The runtime images run as root and carry the ordinary user `nonroot`,
-65532:65532, whose caches live in its home. A check that needs ordinary-user
-filesystem semantics runs a runtime image with `job-user: "65532:65532"`.
-Give the group too: on Kubernetes a UID alone can run the job with GID 0. The
-component sets both `image:docker:user` and `image:kubernetes:user`, since
-the Kubernetes executor reads only the latter, and names a job variable there
-rather than the input: GitLab refuses an empty image user, and the runner
-reads an empty value after expansion as the image's own user on either
-executor. The Kubernetes executor admits any UID but 0 unless its
-`allowed_users` narrows that; the Docker executor admits any user unless the
-runner configures `user` or `allowed_users`, which must then list it. Runner
-settings that fix `runAsUser` take precedence. The Kubernetes executor sets
-`umask 0000` while it fetches into the build volume, so the workspace is
-writable for the job's UID; with `FF_DISABLE_UMASK_FOR_KUBERNETES_EXECUTOR` it
-changes the files' owner to that UID instead. The image user needs GitLab
-18.0 and GitLab Runner 17.11 or later on Kubernetes.
+65532:65532. A check that needs ordinary-user filesystem semantics runs a
+runtime image with `job-user: "65532:65532"`. Give the group too: on
+Kubernetes a UID alone can run the job with GID 0. The runner must admit the
+user: on Docker, through its `user` or `allowed_users` settings when it sets
+them; on Kubernetes, any UID but 0 unless `allowed_users` narrows it, and
+runner settings that fix `runAsUser` win. Kubernetes needs GitLab 18.0 and
+GitLab Runner 17.11 or later.
 
-A project, group or instance variable outranks the job's own, so the job
-does not trust the variable alone. At its start it refuses an `RC_JOB_USER`
-that is not `job-user` as written, then a process whose UID, or `UID:GID`
-when the input gives both, differs from it, before any checkout. Either way
-it prints one line, `job user: uid=65532 gid=65532`, the user it runs as;
-the job's log shows which user each executor gave it. In `release` only
-the `job-image` jobs take `job-user`: the build, image build and signer jobs
-hold the same variable to empty and run as their images' own users. Which
-of these a job is follows from its role, a literal of the template, never
-from its name, which a project variable can set too.
-The images need `id`, as coreutils and BusyBox provide.
+Each job refuses to run as any other user than `job-user` says, before any
+checkout, and prints the user it runs as, `job user: uid=65532 gid=65532`.
+In `release` only the `job-image` jobs take `job-user`; the family, image
+build and signer jobs run as their images' own users. The images need `id`,
+as coreutils and BusyBox provide.
 
 ### Images of the release policy
 
-The policy selects separate digest-pinned `job-image`, `build-image` and
-`signer-image` inputs. Run checks and rendering as an ordinary user;
-permission tests must run with ordinary-user filesystem semantics. A runtime
-image with `job-user: "65532:65532"` does that, as [The job's user](#the-jobs-user)
-describes; the jobs in the other images keep those images' users. Only the
-build job selects `build-image`, the consumer's build tools. Pass the same
-image for both inputs when the build needs no separate environment, and the
-Buildah job image when the build runs `forge-ci container build` and nothing
-else.
+The policy selects separate digest-pinned `job-image`, `signer-image` and
+`runtime-image-<family>` inputs. Run checks, rendering and the release files
+job as an ordinary user; permission tests must run with ordinary-user
+filesystem semantics. A runtime image with `job-user: "65532:65532"` does
+that, as [The job's user](#the-jobs-user) describes; the jobs in the other
+images keep those images' users. The plan's version and build jobs of a
+toolchain family run in that family's `runtime-image-<family>`, the
+consumer's build tools for it: `runtime-image-java` for Maven and Gradle,
+`-node` for npm, `-go`, `-rust` for Cargo and `-android`.
 
 With `release-images`, the image build jobs run in `builder-job-image`, as
 root, whichever the builder. For Buildah, the default, it is the image of
@@ -376,37 +336,19 @@ root, whichever the builder. For Buildah, the default, it is the image of
 built and pinned by digest like the signer image; it carries Buildah and its
 helpers, and the job installs nothing. Buildah needs user namespaces. Where
 only some runners allow them, tag those runners and name the tags in
-`build-runner-tags`: the build job and the amd64 image job move there, and the
-signing jobs stay on the untagged runners.
+`build-runner-tags-linux-amd64`: the consumer checks, family builds, release
+files and amd64 image and export jobs run there. Ordinary and version jobs
+stay on `runner-tags`, and signing jobs on `signer-runner-tags`, untagged by
+default.
 
 Where no runner allows them, set `image-builder: kaniko` and
 `builder-job-image` to the kaniko job image of
 [containers/kaniko-job/Containerfile](../containers/kaniko-job/Containerfile),
-pinned by digest. The image build jobs then run in it, as root, on untagged
-runners. Before a Containerfile is
-built, the job admits the image as the snapshot builds do: its title must be
-`forge-ci kaniko job image` and its `org.opencontainers.image.source` label
-the engine project, `${CI_SERVER_URL}/<forge-ci-repository>`, read with the
-job token. kaniko replaces the job's root filesystem with the image it
-builds and deletes it after each build, so the job keeps its work, the engine
-and the checkout in the workspace, and its temporary files in the job image's
-`/kaniko/tmp`. See
+pinned by digest. The image build jobs then run in it, as root, on the same
+build runner inputs. Before a Containerfile is built, the job checks that the
+image is the kaniko job image built from your engine project. See
 [Building on the pool with kaniko](runners.md#building-on-the-pool-with-kaniko)
 for what kaniko does not do.
-
-Integration checks that execute Buildah need user namespaces too. Set
-`checks-runner-tags` in the trusted release policy for those checks. The
-restricted `Check: release request` must succeed before the selected runner
-starts `Check: consumer checks`; that job freshly checks out the immutable
-request commit and repeats signature and branch-head validation before running
-`checks`. Both jobs refuse release credentials. Changelog and version
-preparation wait for successful consumer checks. This selector does not route
-merge-request checks or change the ordinary runner default.
-The components clear the entrypoint of `job-image` and `build-image`, here and
-in `check`, and of the lint images in `nanolinter` and `megalinter`, so an
-image that starts a tool of its own still runs the job's shell on a Docker
-executor as it does on a Kubernetes one. The signer image
-is the organization's and declares none.
 
 The signer image is built from the same definition as the Forgejo layer's,
 `containers/signer/Containerfile`, and every signing job runs the same strict
@@ -417,18 +359,10 @@ describes its contents and a manual `buildah build`.
 
 ### Checksum-bound engine bootstrap
 
-The delivery binary has one build definition and one checksum per
-architecture, shared with Forgejo. The established paths remain
-`scripts/ci/engine-binary.sh` and
-`.engine/bin/forge-ci-linux-<amd64|arm64>.sha256`; do not maintain a second
-GitLab build or checksum copy. The script and directory are named for the engine,
-shared by all delivery layers; its `build` and `refresh` know no forge, and `publish`
-uploads to GitLab when `FORGE_CI_PACKAGE_PROVIDER=gitlab`, as shown below.
-
-Checksum-bound check/release jobs use the **Linux** delivery binary of the
-runner's architecture, amd64 or arm64, and refuse any other runner. Select a
-compatible runner and job/signer image. There is no macOS engine; other components' runtime-image
-platforms are described in the [runtime image roster](runtime-images.md#image-roster).
+The engine binary has one build definition and one checksum per
+architecture, shared with Forgejo: `scripts/ci/engine-binary.sh` and
+`.engine/bin/forge-ci-linux-<amd64|arm64>.sha256`. `publish` uploads to
+GitLab when `FORGE_CI_PACKAGE_PROVIDER=gitlab`, as shown below.
 
 Set these coordinates for GitLab:
 
@@ -444,9 +378,8 @@ The resolver uses the full project path, including subgroups:
 https://gitlab.example.com/api/v4/projects/team%2Fci%2Fforge-ci/packages/generic/forge-ci/<sha256>/forge-ci-linux-<amd64|arm64>
 ```
 
-The engine repository must be on `CI_SERVER_URL`. The package must permit
-anonymous downloads. Downloads and publication read-back send no credential;
-the recorded SHA-256 is verified before the binary can run.
+The engine repository must be on `CI_SERVER_URL`. The binary is verified
+against the recorded SHA-256 before it runs.
 
 #### Publish the recorded build
 
@@ -501,7 +434,7 @@ same choice reads on GitHub and Forgejo:
 
 - **`nanolinter`** runs `nanolinter verify` against the project's
   `nanolinter.toml` in a flavour image (`core`, `go`, `java`, `kotlin`,
-  `javascript-typescript`, `rust` or `swift`; default `core`), with
+  `javascript-typescript`, `rust` or `swift`; required, no default), with
   `required-lints` as a floor the project cannot lower. Pin the image by digest.
   In a merge-request pipeline it checks out the whole history (`GIT_DEPTH: 0`)
   and fetches the target branch as `origin/<target>`, with the job token, so
@@ -512,6 +445,8 @@ same choice reads on GitHub and Forgejo:
   job token.
 
 Both publish findings as a SAST report; see [Code scanning](#code-scanning-sarif).
+The conversion needs Bash, Git, curl and `sha256sum` in the lint image;
+Nanolinter's flavours and MegaLinter have them.
 The ecosystem examples include `nanolinter` in their stack's flavour. To use
 MegaLinter instead, include it in its place:
 
@@ -549,103 +484,26 @@ include:
         - just lint
 ```
 
-Replace both pins with reviewed immutable values. `forge-ci-repository` is the
-project serving the component, including subgroups. The image must contain
-Bash, Git, curl, sha256sum and the consumer's check tools. Optional input
-`job-name` defaults to `check`; `stage` defaults to `test`; `job-user`, empty
-by default, runs the job as another user. Include the component once per
-toolchain to check a monorepo's parts in their own images, and give each
+Replace both pins with reviewed digests. The image must contain Bash, Git,
+curl, `sha256sum` and the consumer's check tools. To check a monorepo's parts
+in their own images, include the component once per toolchain and give each
 include its own `job-name`: GitLab merges two jobs of one name into one, so
 two includes left at `check` run only one of the checks, silently.
 
-The job starts with an empty workspace and no cache or artifact dependencies.
-It uses the runner's custom CA when provided, keeps the helpers outside the
-consumer checkout, and checksums the engine. It then writes a `forge-ci`
-that runs that engine with the component's four
-[enforcement inputs](admin-policy.md) as flags, puts it first on PATH and
-names it in `FORGE_CI_BIN`, and prints the effective policy with
-`forge-ci policy show` before the commands run; the release's checks and
-build jobs do the same. A command that gives a setting again is refused. Code
-the commands run can still reach the bare binary; the settings are the
-administrator's only where the include is, see
-[Who sets them](admin-policy.md#gitlab). `CI_OUTPUT` points to a temporary dotenv file for engine
-commands within the job; no cross-job output artifact is published.
+The job puts a `forge-ci` on `PATH` that runs the checksummed engine with the
+component's four [enforcement inputs](admin-policy.md) as flags, and prints
+the effective policy before the commands run. The settings are the
+administrator's only where the include is; see
+[Who sets them](admin-policy.md#gitlab).
 
-Signing and publication credentials must be environment-scoped away from check
-jobs. The component refuses known release secrets before checkout and refuses
-a component included through a mutable reference. GitLab merges components
-into the consumer's configuration: the caller still owns pipeline rules,
-required checks and protected settings. This source-check primitive does not
-yet establish a complete MR/release trust policy.
-
-Consumer checkout selects GitLab's short-lived `CI_JOB_TOKEN` when no explicit
-token overrides it. The credential stays bound to the issuing `CI_SERVER_URL`
-and uses GitLab's required `gitlab-ci-token` HTTPS username. Git receives an
-origin-scoped transient header; neither the token nor that header is written
-to the checkout's remote URL or configuration. The component derives the
-consumer's object format from the full pipeline SHA, avoiding a metadata API
-request that job tokens cannot make for private projects. The engine
-source/package must still be publicly readable. The checkout component supports
-public and private consumers with SHA-1 or SHA-256 repositories.
-`forge-ci platform checkout` also derives the format from the native pipeline
-SHA when its requested repository and server both match the current project,
-including snapshot checkouts of another branch. For another private project,
-provide `--object-format sha1|sha256` or a credential that can read its metadata.
-Source-check jobs refuse `GITLAB_TOKEN`; scope long-lived API credentials to
-their publication jobs rather than supplying them for checkout.
-
-### Required MR gate
-
-For a required MR gate, configure the GitLab project to require successful
-pipelines and disallow merging on skipped pipelines. Protect the target branch
-and scope protected release credentials to their signing environment. These
-are project settings, not guarantees supplied by an included YAML component.
-
-GitLab has no release-isolation gate like Forgejo's `check-l3-isolation`: the
-signing policy lives in a separate, pinned policy project instead, which the
-consumer's own YAML cannot change.
-
-A GitLab job cannot read a sibling job's status, so an aggregated summary is
-built from per-job records. Each job records its own outcome in
-`after_script`, where `$CI_JOB_STATUS` holds the final status, and keeps the
-record as an artifact even when it fails; a summary job that `needs:` them
-collects the records:
-
-```yaml
-.records-outcome:
-  image: ghcr.io/diggsweden/forge-ci-runtime-base:v0.90.0
-  after_script:
-    - forge-ci report job-result --name "$CI_JOB_NAME" --status "$CI_JOB_STATUS"
-  artifacts:
-    when: always
-    paths:
-      - .ci-results/jobs/
-
-quality-summary:
-  image: ghcr.io/diggsweden/forge-ci-runtime-base:v0.90.0
-  stage: summary
-  when: always
-  needs: [lint, scan]
-  variables:
-    STAGE_PLAN_JSON: '{"version":1,"stage":"quality","targets":{"lint":{"runs":true},"scan":{"runs":true}}}'
-    CI_OUTPUT: stage.env
-  script:
-    - forge-ci report stage-result
-  artifacts:
-    when: always
-    paths:
-      - .ci-results/
-    reports:
-      dotenv: stage.env
-```
-
-`lint` and `scan` are jobs that `extends: .records-outcome`; their names match
-the plan's targets. With no `--job-results`, `report stage-result` collects
-`$CI_RESULTS_DIR/jobs/*.json` (default `.ci-results`) and aggregates them
-against `STAGE_PLAN_JSON` with the same rule GitHub and Forgejo feed from
-`toJson(needs)`. A job cancelled before its `after_script` leaves no record,
-and its target then counts as failed. `report pr` renders the panel from the
-`<stage>-result.json` it writes.
+The component refuses known release secrets and `GITLAB_TOKEN` before
+checkout, and refuses an include by tag or branch. The caller still owns the
+pipeline rules, required checks and protected settings; for a required gate
+the administrator controls, see
+[The merge-request gate under a policy](#the-merge-request-gate-under-a-policy).
+Checkout uses the job token, which works for public and private consumers
+with SHA-1 or SHA-256 repositories; see
+[Git operation credentials](providers.md#git-operation-credentials).
 
 ## Builds
 
@@ -660,10 +518,8 @@ native artifacts. Container builds run their `RUN` steps on the job's own networ
 | `build-cargo` | Rust binaries per `platforms` | `dist/`, `bom.json` |
 | `build-maven` | `build-type: app` or `lib` | `target/`, `target/bom.json` |
 | `build-npm` | Packed tarball | `*.tgz`, `bom.json` |
-| `build-gradle` | `gradle-tasks` (default `assemble`) | `build/libs/`, SBOM under `build/reports/` |
+| `build-gradle` | `gradle-tasks` (default `assemble`) | `build/libs/` of the project and its subprojects, not of `buildSrc`; SBOM under `build/reports/` |
 | `build-gradle-android` | APK and AAB, optionally signed | `<module>/build/outputs/`, SBOM under `build/reports/` |
-
-There is no Xcode build component.
 
 GitLab has no run-artifact API, so a later job receives files through native
 `artifacts:` and `needs:`, never `forge-ci artifact download`. GitLab also
@@ -674,17 +530,13 @@ trigger job runs it. It refuses a plan that names a component that does not
 exist. See the [monorepo example](../examples/monorepo/gitlab/.gitlab-ci.yml).
 
 In the native release, the build is the consumer's own `build` commands,
-running in `build-image` without signing keys. They must write
-`dist/release-files.json` and `release-notes.md`, and, for images, leave
-their build context in `image-context/`; the image ledger is the
-[release image jobs'](#release-images). The flow checks that the hand-off is
-unsigned.
+run without signing keys; see [Plan-driven release jobs](#plan-driven-release-jobs).
 
 ## Releases and promotion
 
-### Native release policy (under acceptance)
+### Native release policy
 
-The `release` component is designed for GitLab CE/Free. A project selects
+The `release` component runs on GitLab CE/Free. A project selects
 a configuration from an independently controlled project using
 `policy.yml@namespace/policy-project:<full commit SHA>` as its CI configuration
 path. That policy includes `release` at the independently authenticated engine
@@ -702,7 +554,7 @@ include:
       consumer-project: team/app
       job-image: ghcr.io/diggsweden/forge-ci-runtime-go-1.27@sha256:PIN_DIGEST
       job-user: "65532:65532"
-      build-image: registry.example.com/team/build-tools@sha256:PIN_DIGEST
+      runtime-image-go: ghcr.io/diggsweden/forge-ci-runtime-go-1.27@sha256:PIN_DIGEST
       signer-image: registry.example.com/team/forge-ci-signer@sha256:PIN_DIGEST
       publication-project: team/app-releases
       publication-image-repository: registry.example.com/team/app-releases/app
@@ -715,6 +567,8 @@ include:
       bot-email: FIXME
       checks:
         - bash .gitlab/check-release.sh
+      build-runner-tags-linux-amd64: [saas-linux-small-amd64]
+      build-runner-tags-linux-arm64: []
       build:
         - bash .gitlab/build-release.sh
 ```
@@ -731,12 +585,12 @@ the build and signing, as the Forgejo
    `Check: release request` makes the same plan at the request commit first,
    so a stage that would stop later stops the release before `Prepare`
    pushes the release commit and tag: a container that builds linux/arm64
-   without `build-runner-tags-arm64` (narrow `release-platforms` or name the
+   without `build-runner-tags-linux-arm64` (narrow `release-platforms` or name the
    runner), an empty `builder-job-image`, whichever the builder, or a
    `publication-project` that is not a separate project. An empty
    `builder-job-image` GitLab already refuses as it creates the pipeline,
    since the image jobs then name no image.
-2. `Images: build amd64` and, with `build-runner-tags-arm64`, `Images: build
+2. `Images: build amd64` and, with `build-runner-tags-linux-arm64`, `Images: build
    arm64` build every planned image of their architecture natively to OCI
    layouts in `builder-job-image`, with no registry write. The engine passes
    the build no credential of the job, but this is the trust `Build: release files` gives
@@ -756,7 +610,14 @@ the build and signing, as the Forgejo
    results, and joins them to the build's `dist/` in a hand-off of its own,
    digested again. A finding in any image leaves the registry untouched.
 4. `Sign: files and images` reads that hand-off, and only it, and imports the
-   staging images into the publication project as before.
+   staging images into the publication project.
+
+`Publish: tidy up` removes the candidate tags in the publication project,
+not the `staging-<final tag>` tags in this project's registry. Set a bounded
+registry retention for those tags yourself, keeping the ones active releases
+and their recovery need. `Images: publish` needs Syft in `job-image`, which
+every forge-ci runtime image carries. Base images are built by the
+release's `base-stages` jobs instead; see [Base images](#base-images).
 
 The build itself pushes no image: a `dist/release-images.json` from the
 `build` commands stops its hand-off. The images carry the source, revision,
@@ -773,8 +634,7 @@ labels: |
 `Check: release request` refuses a label that names one of the standard
 eight, which describe where the image came from, a key that is not a
 lowercase dotted name, a key named twice, and `labels` without
-`release-images`. Their SBOMs are generated when they are signed. Build secrets, binary extraction
-and base images are not carried out by the image jobs; a binary extraction
+`release-images`. The image jobs take no build secrets; a binary extraction
 is the export jobs' work.
 
 #### Files exported from a Containerfile
@@ -786,16 +646,16 @@ architecture, never emulated. With `export-files: true`:
 
 1. `Check: release request` refuses an export the jobs would not carry out:
    an empty `builder-job-image`, or a `release-platforms` that names
-   linux/arm64 without `build-runner-tags-arm64`. Export commands without
+   linux/arm64 without `build-runner-tags-linux-arm64`. Export commands without
    `export-files` would have no effect and are refused too.
-2. `Build: export amd64` and, with `build-runner-tags-arm64`, `Build: export
+2. `Build: export amd64` and, with `build-runner-tags-linux-arm64`, `Build: export
    arm64` run the `export` commands on the release commit in
    `builder-job-image` with `image-builder`, as the image jobs do, for each
    architecture `release-platforms` selects; empty selects linux/amd64, the
    platform a container declares when it names none. A container that
    declares linux/arm64 then needs `release-platforms` named, or the request
    check refuses, so the images and the exports build the same
-   architectures; `build-runner-tags-arm64` serves arm64 and never selects
+   architectures; `build-runner-tags-linux-arm64` serves arm64 and never selects
    it. `EXPORT_PLATFORM` and `EXPORT_ARCH` name the
    job's architecture, and the job holds no credential of its own once the
    builder is admitted. The commands write `dist/`, regular files and
@@ -815,19 +675,77 @@ export:
     --arch "$EXPORT_ARCH" --expected-names app
 ```
 
+#### Plan-driven release jobs
+
+The release child is one pipeline, as GitHub's release is one run: checks,
+version, release commit, builds, images, signing and publication, its jobs
+handing their files on through native `needs:`. `Release: plan`, in the
+parent pipeline before the child starts, plans the request commit's
+`artifacts-config` (empty is `.forge-ci/artifacts.yml`) with
+`forge-ci plan gitlab-release-pipeline`, the planner GitHub's release uses,
+and writes the child's plan-driven jobs. The child is two files: the policy's
+`templates/release-jobs.yml`, included with the policy's inputs as written,
+and that generated file, which only names jobs, each extending its family's
+hidden job in `release-jobs.yml`. It holds no policy value and no consumer
+string, so what a job may do stays in the pinned template. `Release: plan`
+holds the job token alone and runs no consumer code.
+
+| Job | When | Image | Does |
+|---|---|---|---|
+| `Prepare: version java`, `node`, `rust` | the plan bumps Maven, npm or Cargo projects | `runtime-image-<family>` | Runs that family's native version tool (`mvn versions:set`, `npm version`, Cargo) on the request for each of its planned projects, and hands over only the patch of their native version files and its digest; holds no credential. |
+| `Build: java`, `node`, `go`, `rust`, `android` | the plan builds projects of the family | `runtime-image-<family>` | Runs `build` on the release commit with `FORGE_CI_BUILD_FAMILY` set to the family and `FORGE_CI_ARTIFACTS` to its planned artifacts, space-separated; hands on `dist/` and `image-context/` without a manifest. |
+| `Publish: npm packages` | an npm project lists `forge-packages` under `publish-to` | `runtime-image-node` | After `Publish: release`, publishes the signed release's packed packages to this project's package registry; see [Package publication](#package-publication). Runs no consumer command, on the signer's runner, and holds `RELEASE_PACKAGE_TOKEN` alone. |
+
+The families are java (Maven, Gradle), node (npm), go, rust (Cargo) and
+android (Gradle Android); a family the plan uses needs its
+`runtime-image-<family>`, and `Release: plan` refuses the release without it.
+A Cargo or Go artifact built `container-first` is built by its Containerfile
+(see [Files exported from a Containerfile](#files-exported-from-a-containerfile)),
+not by a family job, though it is still version-bumped.
+
+`Build: release files` then plans the release again, requires a hand-off
+from exactly the planned build jobs, lays every family's and export job's
+`dist/` and `image-context/` together, refusing a top-level path two of them
+hold, and
+runs `build` once more in `job-image` as `job-user`, with both variables
+empty: that run writes the release notes and declares the files with
+`forge-ci release files declare`. One script serves every run; a sketch for a
+Maven backend and an npm frontend:
+
+```bash
+case "${FORGE_CI_BUILD_FAMILY}" in
+java)
+  forge-ci build maven run --working-dir services/backend --expect-version "${RELEASE_VERSION}"
+  mkdir -p dist/backend && cp services/backend/target/backend-api-*.jar dist/backend/
+  ;;
+node)
+  npm --prefix packages/frontend ci && npm --prefix packages/frontend run build
+  mkdir -p dist/frontend && tar -C packages/frontend -czf dist/frontend/frontend-ui.tgz dist
+  ;;
+'')
+  forge-ci release notes --changelog-file CHANGELOG.md --release-version "${RELEASE_TAG}" --target-file dist/release-notes.md
+  forge-ci release files declare --asset 'dist/backend/*' --asset 'dist/frontend/*'
+  ;;
+esac
+```
+
+Without a declaration the release plans no family: `Build: release files`
+runs `build` alone, in `job-image`.
+
 #### Version bump
 
-With `version-bump: maven` in the policy's `release` inputs, the signed
-release commit carries the release version in the project's POMs, as it does
-on GitHub and on Forgejo. The `Prepare: version` job runs `mvn versions:set`
-in `job-image`, so that image needs the JDK and Maven, and holds no credential
-(`rc_release_context` refuses every release secret there). It hands over only
-the patch and its digest. `Prepare: release commit and tag`, which holds the
-SSH signing key, runs no build tool: `forge-ci version apply-bump` checks the patch as text,
-the files of `pom.xml` only, each changed line the version or the
-reproducible-build timestamp and nothing else, then commits it beside
-`CHANGELOG.md`. The build then finds the release version already declared.
-Empty, the default, leaves the release commit to the changelog.
+The signed release commit carries the release version in the version files
+of every project the declaration plans, and a copy of the full changelog in
+each project's directory. There is no `version-bump` input: a release without
+a declaration, or whose projects have no version file (Go), carries the
+changelog alone. Either changelog renderer bumps.
+
+The `Prepare: version <family>` jobs run the native version tool in their
+runtime image and hold no credential. `Prepare: release commit and tag`,
+which holds the SSH signing key, runs no build tool: it admits their patches
+only as version substitutions of the planned project files. Every later job
+that checks the release commit out checks again that it holds the changelog,
+its copies and the planned version changes, and nothing else.
 
 #### The merge-request gate under a policy
 
@@ -839,14 +757,11 @@ out, and takes from the consumer only the commands, as a script in its
 repository.
 
 Prefer a pipeline execution policy in inject mode (`inject_policy`) where the
-tier allows it: its jobs run beside the project's own pipeline, apart from
-its configuration, and a project maintainer cannot remove the policy. The
-project's CI configuration path naming the policy file is weaker: GitLab then
-runs only the policy file, merge requests included, but a project maintainer
-can change the path, and every file the policy includes is merged into one
-configuration. With that setting, the policy includes the consumer's file for
-merge-request pipelines only, read at the merge request's commit, **before**
-the gate components, and nothing of the consumer's for release tags:
+tier allows it; [Who sets them](admin-policy.md#gitlab) explains why. With the
+project's CI configuration path naming the policy file instead, the policy
+includes the consumer's file for merge-request pipelines only, read at the
+merge request's commit, **before** the gate components, and nothing of the
+consumer's for release tags:
 
 ```yaml
 include:
@@ -881,24 +796,27 @@ include:
       enforce-reproducible-builds: true
     rules:
       - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+  # The release, for tag pipelines only.
   - component: gitlab.example.com/team/ci/forge-ci/release@PIN_FORGE_CI_SHA
     inputs:
       # as above
+    rules:
+      - if: '$CI_COMMIT_TAG'
 ```
 
+Keep that rule on the release. GitLab checks every job's stage when it
+creates a pipeline, whatever the job's own rules: a consumer file that
+declares `stages`, as the example gates do with `test` and `build`, leaves
+out the release job's `deploy`, and without the rule every merge-request
+pipeline is refused as a configuration error.
+
 The include rules only decide when a file is read. The policy declares the
-pipelines it runs in with its own `workflow: rules`, as the consumer's gate
-file did before, admitting merge-request pipelines beside its release
+pipelines it runs in with its own `workflow: rules`, admitting merge-request pipelines beside its release
 pipelines. A consumer file merged before them can still add keys the gates do
 not state, such as `rules`, `needs` or `variables`: keep the consumer file to
 jobs of its own, with names of its own, and require the gate jobs by name.
 
-Release-request tag pipelines stay policy-only. The live consumer-release trial checks both sides when the
-consumer has `.gitlab/merge-request.yml`: it adds this include to the policy,
-releases, then opens a merge request on the released main and requires the
-gate's pipeline to pass. That trial still includes the gates from the
-consumer's file, the shape this section replaces; it proves the pipeline, not
-who set the settings.
+Release-request tag pipelines stay policy-only.
 
 A merge request from a fork gets its pipeline in the fork by default, where
 the gate compares with the fork's copy of the target branch and the fork's job
@@ -906,205 +824,227 @@ token cannot read a private project. Turn on the project's setting to run
 pipelines in the parent project for merge requests from forks: the gate then
 runs here, against the real target, once a maintainer starts it.
 
+#### The release jobs
+
 The parent trigger holds a resource group through a mirrored child pipeline,
 serializing the entire release. The child uses native `needs` and artifacts;
 artifact files are never sourced or declared as dotenv reports. Request tags
 must be protected and SSH-signed against the allowed-signers text in the
 trusted policy. Checks, changelog rendering and builds run without signing keys.
 
-The child runs these jobs, in five stages that read the same on every forge
-(check, prepare, build, sign, publish):
+The child runs these jobs, in six stages: check, prepare, build, images, sign
+and publish.
 
 | Job | Image | Does |
 |---|---|---|
-| `Check: signing access`, `Check: publishing access`, `Check: registry access` | signer | The toolchain check, the Cosign key against the trusted public key, and the release and registry tokens, before anything else. |
-| `Check: release request` | job | On the restricted runner, validates the signed request and that it is the head of the release branch; executes no consumer commands. |
-| `Check: consumer checks` | job | After authorization, freshly checks out and revalidates the immutable request, then runs `checks` on `checks-runner-tags` (untagged by default). |
-| `Prepare: changelog` | job | Renders the changelog and commit message. Consumer configuration runs only here and in `Prepare: version`. |
-| `Prepare: version` | job | With `version-bump`, sets the release version in the project files and hands over the patch; holds no credential. |
-| `Prepare: release commit and tag` | job | Verifies the version patch, commits it with the changelog and pushes the signed release commit and final tag with `RELEASE_SSH_SIGNING_KEY`. |
-| `Build: release files` | build | Checks out the final tag and runs `build`; hands `dist/` on with its digest. |
+| `Check: signing access`, `Check: publishing access`, `Check: registry access` | signer | The toolchain check, the Cosign key against the trusted public key, the GPG variables when `sign-distro-packages` or the declaration's `gpg` needs them, and the release and registry tokens, before anything else. Registry access is scheduled only when the protected `release-images` input is true or `base-stages` names a stage; archive/export-only releases need no publication-registry token. |
+| `Check: release request` | job | On `runner-tags`, validates the signed request and that it is the head of the release branch; executes no consumer commands. |
+| `Check: consumer checks` | job | After authorization, freshly checks out and revalidates the immutable request, then runs `checks` on `build-runner-tags-linux-amd64`. |
+| `Prepare: changelog` | job | Renders the changelog and commit message. Consumer configuration runs only here and in the version jobs. |
+| `Prepare: version <family>` | runtime | One per family the plan bumps with a native tool; sets the release version in the family's project files and hands over the patch; holds no credential. See [Plan-driven release jobs](#plan-driven-release-jobs). |
+| `Prepare: release commit and tag` | job | Verifies the version patches, applies the plan's bump, commits it with the changelog and pushes the signed release commit and final tag with `RELEASE_SSH_SIGNING_KEY`. |
+| `Build: <family>` | runtime | One per family the plan builds; checks out the final tag and runs `build` for the family's artifacts on `build-runner-tags-linux-amd64`; hands `dist/` and `image-context/` on. |
+| `Base: …` | see [Base images](#base-images) | One set per stage of `base-stages`: plans, builds, signs and promotes the project's base images before the release's files are built. |
+| `Build: export amd64`, `Build: export arm64` | builder | With `export-files: true`, run the `export` commands per architecture. See [Files exported from a Containerfile](#files-exported-from-a-containerfile). |
+| `Build: release files` | job | On `build-runner-tags-linux-amd64`, checks out the final tag, lays the family and export files together and runs `build` to declare them; hands `dist/` on with its digest. |
+| `Images: plan`, `Images: build amd64`, `Images: build arm64`, `Images: publish` | job; builder for the builds | With `release-images: true`, plan, build and push the release's candidate images. See [Release images](#release-images). |
 | `Sign: files and images` | signer | Imports images into the publication project, signs files, packages, provenance and images. |
 | `Publish: images` | signer | Moves final image tags, with a journal. |
 | `Publish: release` | signer | Creates the GitLab release with notes and assets. |
 | `Publish: tidy up` | signer | Removes candidate tags. |
 | `Summary: release` | job | After a successful release, prints the release overview as a "Summary" section of its log; holds no release secret. |
 
-Which job may hold which release secret is written in roles, in
-`.gitlab/bin/release.sh` (`rc_release_context`). Each job's `before_script`
-opens with its role, `readonly rc_job_role=…`, a literal of the template; the
-role also decides the job's user, home and work directory. Nothing the policy
-relies on reads `CI_JOB_NAME` or another variable, since a project, group or
-instance variable outranks every other, the predefined ones included.
+Each job's role is fixed in the template and decides which secret it may
+see, its user and its work directory; no job trusts `CI_JOB_NAME`.
 
-**The policy's values are literals of the job's script.** A project
-maintainer can set project variables, and a project, group or instance
-variable reaches every job and outranks the job's own `variables:`. So no
-value the policy relies on is a job variable. Each job's start assigns the
-policy's inputs as read-only shell variables from the inputs as written, the
-same way it takes its role, and `.gitlab/bin/release.sh` reads only those:
-the engine project and its fetch URL, `consumer-project`, the publication
-project and image repository, the Cosign key digest, the release Git URL and
-host key, the request's allowed signers, the bot identity, the changelog
-settings, `sign-distro-packages`, `base-images`, `release-branch`,
-`version-bump`, `release-asset-retention`, `transparency-log`, which the
-engine reads as `FORGE_CI_COSIGN_TRANSPARENCY` and the start exports, and the
-four [check enforcement](admin-policy.md) settings, which reach the engine as
-flags. A
-variable of the same name is replaced. The image builder and its job image
-reach the image jobs as script arguments. Three runner settings must stay
-job variables, because the runner reads them before the job's shell:
-`RC_JOB_USER`, `GIT_STRATEGY` and `GIT_SUBMODULE_STRATEGY`. The start refuses
-any of them that differs from its literal. Since the inputs are quoted in
-the script, none of the free-text inputs may contain a single quote, and
-their regexes refuse one before the pipeline starts.
-
-The snapshot component works the same way: the engine project and commit,
-the image builder and its job image, the branch, the image repository, the
-job images, the context job, the runner tags and the enforcement settings
-are literals of the job's script. The generated child jobs get their image, architecture and context
-job as script arguments. The check component's engine project and enforcement settings and the
-lint components' `required-lints`, `enable-gitlab-sast` and enforcement
-settings are literals too. The
-lint components' `forge-ci-repository` stays a variable so that it can name
-`$CI_PROJECT_PATH`: what runs is bound by the component's commit and the
-engine's recorded checksum, not by the project path.
-
-Only GitLab knows some facts, and a variable can still shadow them:
-`CI_PROJECT_PATH`, `CI_COMMIT_REF_PROTECTED`, `CI_PIPELINE_SOURCE`,
-`CI_COMMIT_TAG`, `CI_COMMIT_SHA`, `CI_SERVER_URL` and the registry
-coordinates. Where a literal exists, the jobs compare the fact with it
-(`consumer-project`). The engine and the consumer checkout are bound by
-commit, and the request by its signature and the literal allowed signers.
-The jobs still send their tokens to the GitLab API and registry those
-variables name. So the rest of the protection comes from GitLab: protect
-the release-request tags and the release branch, scope each
-secret to its environment as [Secrets and tokens](#secrets-and-tokens)
-lists, and keep the secrets out of reach of the people who maintain the
-consumer project. A secret a project maintainer can read or replace is
-not protected by any template. Runner-level variables such as
-`CI_DEBUG_TRACE` take effect before any script runs, so restrict them at
-the instance or group.
+**The policy's values are literals of the job's script.** A project, group
+or instance variable reaches every job and outranks the job's own
+`variables:`, so no value the policy relies on is a job variable: each job
+assigns the policy's inputs as read-only shell variables, and a variable of
+the same name cannot change them. The same holds in `snapshot-images`,
+`check` and the lint components, except the lint components'
+`forge-ci-repository`, which may name `$CI_PROJECT_PATH`. The runner
+settings `RC_JOB_USER`, `GIT_STRATEGY` and `GIT_SUBMODULE_STRATEGY` must
+stay job variables, and a job refuses any that differs from its literal.
+Free-text inputs may not contain a single quote.
 
 **The request is the head of the release branch.** As on Forgejo, the release
 commit is pushed on top of the request commit without force, so a request that
 is not the tip of the release branch is refused. The branch is the
-`release-branch` input, else the project's default branch, and every engine
-call that reads a branch is given it explicitly, never through `RELEASE_BRANCH`
-or `BRANCH`. The deploy key of `release-git-url` must be allowed to push to
-that protected branch. Push the request tag at the tip and freeze merges until
-`Prepare: release commit and tag` has pushed; a request whose branch moved first is spent.
+`release-branch` input, else the project's default branch. The deploy key of
+`release-git-url` must be allowed to push to that protected branch. Push the
+request tag at the tip and freeze merges until `Prepare: release commit and
+tag` has pushed; a request whose branch moved first is spent.
 [The request is the head of the release
 branch](forgejo.md#the-request-is-the-head-of-the-release-branch) gives the operator rules.
 
-Provision enough native artifact capacity for the full release handoff. GitLab's
-default archive limit is 100 MB; a multi-platform package release can exceed it
-even after raw build directories are pruned. The GitLab administrator owns this
-capacity setting. A project owner's API request can be silently filtered when
-it lacks `update_max_artifacts_size`; successful HTTP status alone is not proof
-that the limit changed. Measure the largest native handoff for the selected
-consumer and provision a bounded limit with appropriate headroom.
-Forge Lab provides `just k3s-gitlab-artifact-limit 512` for this explicit admin
-operation, with locality checks and verified read-back; the consumer account
-keeps its ordinary permissions.
+#### Artifact size
 
-Each producer uses its own top-level artifact directory (`_release-render`,
-`_release-build`, `_release-sign` or `_release-promote`). This avoids writing
-inside a directory restored under another container's UID. The job's native
-`after_script`, which names that directory as a literal, makes only its
-outgoing regular files and directories readable
-by the artifact helper, including a failed promotion's journal. It follows no
-symlinks and leaves private workspaces outside that operation. Dist handoffs
-use content digests rooted at `.` so different runner paths remain compatible.
+The release hands its files between jobs as artifacts, and GitLab's default
+archive limit, 100 MB, can be too small for a multi-platform release. Only the
+GitLab administrator can raise it: measure the largest hand-off and set a
+bounded limit with some headroom.
 
-The component owns input defaults and forwards explicit values to the child.
-Its default renderer is `git-cliff`, and its default configuration paths match
-the Forgejo layer: `.forge-ci/gitcliff/keepachangelog.toml` for `CHANGELOG.md`
-and `.forge-ci/gitcliff/minimal.toml` for the release commit body. `forge-ci
-init` writes them from this repository's
-[`templates/gitcliff/`](../templates/gitcliff/); by hand, copy the two files
-there to start. Set `changelog-config` and `commit-body-config` to the consumer's
-actual paths when using another layout or `git-chglog`; the renderer CLI
-requires filenames, and refuses one that does not exist. A SHA-256 repository
-needs `git-chglog`: git-cliff cannot read one, and the render refuses it.
+### The published release is read back
+
+After `Publish: release`, the job reads the release back with the job token
+and compares its files with the planned ones, signatures and provenance
+included. GitLab's release links carry no size, so only names are compared.
+A planned file that is missing fails the job; a file the plan does not name
+is a warning. The general check is in
+[verification](verification.md).
 
 ### Old releases' files
 
-Each release adds its archives, binaries and packages, and a forge's storage
-quota fills. With `release-asset-retention: <N>` on the `release` component the release keeps every file
-of the newest N published releases. After it publishes, each older release
-keeps its checksum manifests, signatures, bundles and SBOMs, and loses the
-rest; the releases, their notes and their tags stay. Empty, the default,
-deletes nothing. With reproducible builds a deleted file can be rebuilt from
-its tag and checked against the kept checksums and against its own
-signature. Drafts are neither counted nor touched.
-`forge-ci release asset-retention --repository <owner/repo> --keep <N>` is a
-dry run that lists what a value would delete; `--keep-files` changes which
-files old releases keep.
-A GitLab release file is a project upload behind a link, so the upload is
-deleted with its link: the link alone would keep the storage. A link to
-anything else, such as a package file, loses only the link. Deleting an
-upload needs GitLab 17.2 or later and `RELEASE_TOKEN` with the Maintainer
-role. Publishing no longer leaves replaced or removed files behind either.
+With `release-asset-retention: <N>`, the newest N releases keep every file;
+each older release keeps its checksum manifests, signatures, bundles and
+SBOMs, and loses the rest. The releases, their notes and their tags stay.
+Empty, the default, deletes nothing. `forge-ci release asset-retention
+--repository <owner/repo> --keep <N>` lists what a value would delete. A
+GitLab release file is a project upload behind a link, so the upload is
+deleted with its link; a link to anything else, such as a package file,
+loses only the link. Deleting an upload needs GitLab 17.2 or later and
+`RELEASE_TOKEN` with the Maintainer role.
 
 ### Serialization and promotion recovery
 
-The parent resource group covers the mirrored child through preparation, signing,
-promotion and publication. A second release must wait before creating its child.
-`TestGitLabRelease_ResourceGroupSpansTheChild` exercises that native scheduling
-contract with a blocking child job.
-
-Promotion journals belong to their job attempts. Keep the original failed
-attempt's artifact if rollback is needed; a clean retry writes a journal for
-the state it finds. Pipeline failure does not trigger automatic rollback.
-`TestGitLabRelease_PromotionRetryAfterRegistryWrite` exercises a failure after
-a registry write, blocked downstream jobs, retained evidence and a clean retry.
+The parent resource group covers the child pipeline from the checks to the
+last publish job, so a second release waits until the first has finished.
 
 Promotion moves final tags in the publication project; there is no
-`:dev`/`:staging` ladder on GitLab. GitLab keeps an untagged manifest reachable
-by digest, so a rollback can restore a moved tag; see
-[Implementation status](providers.md#implementation-status). For a failure
-after the final tag exists, re-run forward and follow
-[Failed Release Recovery](failed-release-recovery.md).
+`:dev`/`:staging` ladder on GitLab. Each `Publish: images` attempt keeps its
+promotion journal as an artifact, also when it fails; keep the first failed
+attempt's journal if you may need to roll back. A failed pipeline rolls
+nothing back by itself. See
+[Failed Release Recovery](failed-release-recovery.md#gitlab).
 
-### Content-addressed base images
+### Base images
 
-The independent policy can opt into base publication with `base-images: true`.
-The build image must expose the pinned Cosign executable on PATH, including
-for warm-only builds. Verification runs in an isolated environment; a Mise shim
-requiring its configuration variables is insufficient. Resolve the installed
-tool while preparing the reviewed image, for example
-`install -m 0755 "$(mise which cosign)" /usr/local/bin/cosign`, then verify
-`env -i HOME=/tmp PATH=/usr/local/bin:/usr/bin:/bin cosign version` works.
+A project whose product is a graph of base images, a root and the flavors
+built on it, names the graph in the release policy. The policy then builds,
+signs and promotes each stage of it before the release's files are built.
+See the [base-images example](../examples/base-images/README.md).
 
-The consumer's key-free build owns its base graph, input IDs and cache decision:
+| Input | Value |
+|---|---|
+| `base-stages` | The stages, separated by spaces and in build order: a flavor for a root, `flavor:parent` for a child of a parent that an earlier stage builds, and `flavor+flavor:parent` for siblings on one parent. `base tools+debug:base` is a root and two flavors on it. Empty, the default: no base stage. |
+| `base-plan` | The project's planner, for example `bash base-plan.sh`. Its words are split at spaces and run without a shell. |
 
-- Verify warm bases with `container base-images validate`, the policy's pinned
-  public key, exact source/workflow and expected flavor/input IDs. Publication
-  bases must be anonymously readable. An existing tag with invalid evidence is
-  an error, not a cache miss that may be silently rebuilt.
-- Push newly built base digests only below `${CI_REGISTRY_IMAGE}/bases` using
-  the native job token. Emit `dist/base-images.json` as a base-only ledger with
-  `image_kind: base`, flavor, input ID, digest, content-addressed final tag
-  `<base-input-id>-<flavor>` and its `staging-` candidate. Include any pinned
-  SBOM files in the handoff. Warm-only builds omit this ledger.
-- The trusted signer imports those digests into
-  `${RC_PUBLICATION_IMAGE_REPOSITORY}/bases`, preserving identities, SBOM pins
-  and build lineage. It refuses producer-supplied publication ledgers, mixed
-  image kinds, moving tags, conflicting candidates and out-of-scope refs.
-  It then signs the imported bases and their CycloneDX/SLSA attestations.
-- The separate promotion job verifies that evidence before publishing immutable
-  base tags, then promotes release images. Release-image base references use
-  the publication base repository. Base candidates are retained; retention is
-  a separate base-image cleanup/prune operation.
+A release with `base-stages` needs `base-plan` and `builder-job-image`, and a
+child stage needs `image-builder: buildah`: its build job holds no registry
+credential, and kaniko has no local store to load the verified parent into.
+`Release: plan` refuses the release otherwise, before anything runs.
 
-`container base-images import` is distinct from `container release-images
-import`: release-only import continues to reject base entries. Neither import
-copies producer signatures or publishes final tags. A failure after base
-promotion can leave a valid immutable cache entry for the next request; bases
-are not rolled back with release tags.
+Each stage is these jobs, named after it, in the `build` stage:
+
+| Job | Image, runner | Holds | Does |
+|---|---|---|---|
+| `Base: plan <stage>` | job image, `runner-tags` | no release secret | Runs `base-plan` at the release commit and admits what it prints as one stage. A child's plan takes its parent from the hand-off of the parent's promotion. |
+| `Base: parent <stage>` (child only) | signer | `RELEASE_REGISTRY_TOKEN` | Verifies the promoted parent digest again against the pinned Cosign key, then fetches it for the build. Runs nothing of the project's. |
+| `Base: build <stage>` | `builder-job-image`, `build-runner-tags-linux-amd64` | no release secret | Builds every image of the stage to an OCI layout, a child from the bytes the parent job fetched. |
+| `Base: publish <stage>` | job image, `signer-runner-tags` | `RELEASE_REGISTRY_TOKEN` | Scans the layouts and pushes unsigned `staging-` candidates. Runs nothing of the project's. The job image must carry Syft. |
+| `Base: sign and promote <stage>` | signer | the Cosign key, `RELEASE_REGISTRY_TOKEN` | Signs the candidates and their SBOM and provenance, verifies each against the pinned key and the declared inputs, then moves the final tags. Hands each flavor's `{"ref":...,"input_id":...}` on. |
+
+`Base: all promoted` gathers those hand-offs, and `Build: release files`
+waits for it.
+
+**The planner.** The plan job calls
+
+```text
+<base-plan> <flavor>[,<flavor>...] <repository> [<parent-ref> <parent-input-id>]
+```
+
+and reads the stage's plan from its output, in the shape
+[`base-images.yml`](../.forgejo/workflows/base-images.yml) describes. The
+graph, the input IDs and the content-addressed tags are the project's. The
+policy holds a plan to one complete stage in the bases repository: exactly
+the flavors `base-stages` names for the stage, each under the final tag
+`<base-input-id>-<flavor>`, and, for a child, on the one parent it names.
+Every job of the stage checks this again before it builds, pushes or signs
+anything.
+
+**Where the images live.** In `<publication image repository>/bases`. The
+jobs that reach it log in with `RELEASE_REGISTRY_USER` and
+`RELEASE_REGISTRY_TOKEN` of the `release/registry/promote` and
+`release/registry/signing` environments. The job token is never used for the
+registry: every job that runs the project's code holds one.
+
+**What the project's code can reach.** `Base: plan` and `Base: build` run
+the planner and the Containerfiles, the project's own code. They hold no
+release secret, but code in their container can read the job's own job
+token. The bases repository takes the release's registry credential alone,
+and what the two jobs hand on is checked again by the jobs that hold it. Do
+not add the release project to the publication project's job-token
+allowlist.
+
+**What a child builds on.** A child's plan job needs its parent's
+`Base: sign and promote`, and its build needs its own `Base: parent`. A child
+is therefore planned and built only on a digest that a signer job verified
+against the pinned key, after the parent's promotion.
+
+**What the build receives.** `Build: release files` runs `build` with
+`FORGE_CI_BASE_IMAGES_DIR` set to a directory of `<flavor>.json`, one per
+flavor of the policy, each the promoted `{"ref":...,"input_id":...}` with the
+ref pinned by digest. A `dist/base-images.json` from the build is refused:
+the base stage is the only source of base images.
+
+**A release that reuses a stage.** Final base tags are immutable. When every final tag of a
+stage already exists and verifies against the pinned key and the stage's
+declared inputs, `Base: sign and promote` signs nothing and hands the
+existing images on. The build and publish jobs of a reused stage still run.
+Bases are not rolled back with a failed release.
+
+**A promotion that stopped halfway.** Promotion moves a stage's final tags
+one by one. When `Base: sign and promote` fails between two of them, retry
+the job: it finds some final tags, signs nothing, and promotes again.
+Promotion verifies every candidate's signature and lineage and requires each
+existing final tag to be the digest this stage staged before it moves a tag,
+so the retry completes exactly what the first attempt signed. A stage whose
+existing tags are another digest, or whose candidates carry no signature
+that verifies, is refused with nothing moved: its flavors changed apart, so
+give a flavor that changes on its own a stage of its own.
+
+**Limits.** A stage builds for `linux/amd64` alone.
 
 ### Package publication
+
+The native release publishes npm packages itself. An npm project that lists
+`forge-packages` under `publish-to` in the release's `artifacts.yml` adds the
+plan-driven job `Publish: npm packages` to the release child. It runs after
+`Publish: release`, in `runtime-image-node`, and publishes the packed
+tarballs of the signed hand-off, the bytes the release offers as files, to
+this project's package registry with `forge-ci publish forge-packages deploy`
+under the tag `release-<version>`, which the engine holds to the packed
+version. So one release publishes files, a package and images together.
+
+- The `*.tgz` files at the root of `dist/` must be exactly the planned
+  projects' packages, one each: every tarball packs the `name` and `version`
+  of its project's `package.json` at the release commit, and no other
+  `*.tgz` lies there. `forge-ci publish forge-packages npm-tarballs` checks
+  it in `Build: release files`, before anything is signed, and in the
+  package job again, on the signed hand-off and a fresh checkout of the
+  release commit. Keep other archives in a subdirectory or under another
+  suffix.
+- The credential is `RELEASE_PACKAGE_TOKEN`: create a project deploy token
+  with the scopes `read_package_registry` and `write_package_registry`, and
+  store it as a masked, protected project variable with the environment
+  scope `release/packages`. Do not give the job token package write: the
+  jobs that run the project's code hold one too. Keep its self entry
+  read-only; see
+  [Signing and publication are separate authorities](#signing-and-publication-are-separate-authorities).
+- The job runs on the signer's runner (`signer-runner-tags`) and runs no
+  consumer command. Every other release job refuses to start when it sees
+  `RELEASE_PACKAGE_TOKEN`, and the package job when it sees any other
+  release secret. `npm publish` runs with `--ignore-scripts`, and a project
+  variable cannot send the package elsewhere or load code into npm.
+- A registry takes a package version once. A retry of the job finds a
+  package an earlier run published, by the release's tag, and leaves it when
+  the registry's digest of that version is the tarball's; it then publishes
+  the rest. The same version with other content fails the job.
+- Maven and Gradle packages are not published by the release: a release
+  whose `artifacts.yml` sends a Maven library or a Gradle project to
+  `forge-packages` is refused when it is planned. They, and a project
+  without the release policy, use the Catalog components below.
 
 The Catalog publish components are separate from the native release and run
 in the consumer's own pipeline. Each expects its input files from an earlier
@@ -1116,7 +1056,6 @@ job through native artifacts.
 | `publish-maven-central` | A Maven library through its profile, or exported Gradle JVM publications through the Central API | Signed release request and prepared SHA; publisher secrets including the GPG public key; sources and javadoc JARs |
 | `publish-apple-appstore` | An IPA to App Store Connect with `xcrun altool` | A macOS runner with Xcode and `forge-ci`; the IPA under `artifacts/` |
 
-Google Play and standalone release-container publishing have no GitLab component.
 Development containers use the [snapshot component](#snapshots). See
 [Publishing](publishing.md) for target setup, which is forge-neutral for
 Maven Central and App Store Connect.
@@ -1124,14 +1063,18 @@ Maven Central and App Store Connect.
 ## Snapshots
 
 `templates/snapshot-images.yml` is the native snapshot image component. Include
-it from a trusted pinned policy with explicit `branch`, `image-repository`,
-`forge-ci-repository`, digest-pinned `job-image` and `build-image`. The selected
+it from a trusted pinned policy, by full commit SHA. Required inputs, with no
+default: `branch`, `forge-ci-repository`, `server-url`, `registry`, the
+digest-pinned `job-image` and `build-image`, and
+`build-runner-tags-linux-amd64` and `build-runner-tags-linux-arm64` (`[]` when
+there is no arm64 runner). `image-repository` is needed when the declaration
+has a container. The selected
 branch is resolved once; the policy pipeline's ref is not the source identity.
 `publish-containers` defaults to `true`; explicit `false` opts out.
 
 The component generates a child pipeline with native amd64/arm64 builds,
 publication after all builds and exact receipt collection. Set
-`build-runner-tags` and `build-runner-tags-arm64` for the corresponding native
+`build-runner-tags-linux-amd64` and `build-runner-tags-linux-arm64` for the corresponding native
 runners; arm64 builds require arm64 tags. `runner-tags` selects control-plane
 runners. Buildah is the default; kaniko requires the admitted digest-pinned
 `builder-job-image`, also used as `build-image`. Build execution receives no
@@ -1139,41 +1082,75 @@ registry publication credentials. Publishers use `SNAPSHOT_REGISTRY_USER` and
 `SNAPSHOT_REGISTRY_PASSWORD`, falling back to GitLab registry credentials.
 The collect job retains `container-images.json` as a child-pipeline artifact.
 
-The default `context-job: 'Snapshot: plan'` enables automatic required
-artifact-first producers in the child pipeline. They invoke the existing Go,
-Cargo, Maven, Gradle JVM and npm builders using the frozen plan's `artifacts[]`,
-source SHA and `source_date_epoch`, then gather and restore the bound inputs.
-Optional `artifact-job-image-go`, `artifact-job-image-java`,
-`artifact-job-image-node` and `artifact-job-image-rust` inputs must be
-digest-pinned when provided; otherwise producers use the trusted `job-image`,
-which must supply their toolchains.
+`publish-files: true` adds one job per declared file artifact to the child
+pipeline, `Snapshot: files <artifact>`. It builds the artifact in its
+toolchain image (`artifact-job-image-*`, else `job-image`) and keeps
+`snapshot-files/<artifact>/` as an unsigned job artifact, named
+`<artifact>-<snapshot version>`, for 7 days; see
+[snapshot files](workflows.md#snapshot-files). The job reads no protected
+variable and no registry credential.
+`examples/go-cli/gitlab/snapshot-files-policy.yml` is such an include, for the
+policy project.
 
-To override automatic production, set `context-job` to a parent producer that
-needs `Snapshot: plan` and builds from its frozen SHA. Use `gather-context` to
-export `_snapshot-context/` containing `source-sha`, `snapshot-plan.json`,
-`manifest.sha256` and `files/`, including `files/snapshot-dependencies.json` and
-planned artifact destinations. The execute job waits for that producer before
-creating the child pipeline; build jobs fetch the bundle with `needs:pipeline:job`.
-This is an optional advanced prepared-context override. There is no package
-snapshot orchestrator.
+With the default `context-job: 'Snapshot: plan'`, the child pipeline builds
+the Go, Cargo, Maven, Gradle JVM and npm artifacts the images need from the
+planned commit. They run in the digest-pinned `artifact-job-image-go`,
+`-java`, `-node` or `-rust` image when given, else in `job-image`, which must
+then carry the toolchains. To build them yourself instead, set `context-job`
+to a job of the parent pipeline that needs `Snapshot: plan` and exports
+`_snapshot-context/` with `forge-ci` `gather-context`, as
+[workflows](workflows.md#snapshot-container-contract-all-three-forges)
+describes.
 
-The shared Go `restore-context` command verifies the source SHA, exact plan,
-manifest, dependency names, platforms, file sizes, digests and canonical string
-modes `0644`/`0755`, then restores only confined planned inputs. Shell adapters
-provide native transport, not context-validation business rules. Do not recreate
-the producer inventory after transport. Npm inputs require one valid packaged
-tarball at `<context>/.forge-ci/snapshot-inputs/<name>`. See the
+An npm package is laid over the build context, where the release's image
+jobs lay `image-context/`. See the
 [shared contract](workflows.md#snapshot-container-contract-all-three-forges) for
-branch-hashed, final `-snapshot` tags, an always-on scan, independent SBOM policy and unsupported
-build secrets, extraction and explicit snapshot OCI signing/provenance requests.
+branch-hashed, final `-snapshot` tags, an always-on scan, independent SBOM policy, unsupported
+build secrets, and no `extract.binary`. The snapshot reads the release's
+declaration and leaves its signing and provenance out, see
+[what a snapshot takes from the declaration](workflows.md#what-a-snapshot-takes-from-the-declaration).
 Snapshots do not advance release aliases or promotions.
 
 ## Signing
 
-The runner that runs the signing jobs needs swap off: `release sign` refuses
-to load a long-lived key while swap is active, and a job image cannot turn
-it off ([swap policy](verification.md#swap-policy)). Turn it off in the
-runner host's setup, or sign with `sigstore` or `kms`.
+GitLab signs release files and images with the Cosign key
+(`env://COSIGN_KEY`), set from `RELEASE_COSIGN_PRIVATE_KEY` and
+`RELEASE_COSIGN_PASSPHRASE`, unless `artifacts.yml` asks for GPG for the
+files, as below. A method other than `kms` or `gpg`, or a KMS key other than
+`env://COSIGN_KEY`, in `artifacts.yml` is not used, and `forge-ci doctor` and
+the release plan warn about it.
+
+A declaration that says `sign.method: gpg`, or `sign.files-method: gpg`
+beside a Cosign method, signs the checksums and SBOMs with the OpenPGP key:
+each gets an armored `.asc` beside it on the release page, and no Cosign
+bundle. `Check: signing access` reads the declaration before the release
+commit exists and requires `RELEASE_GPG_PRIVATE_KEY`,
+`RELEASE_GPG_PASSPHRASE` and `RELEASE_GPG_FINGERPRINT` for it, also with
+`sign-distro-packages: false`. `Sign: files and images` signs them with that
+key, dated at the release commit, in a subshell whose environment holds the
+GPG key, its passphrase and its fingerprint and none of the job's other
+signing and publishing secrets or its job token, and refuses a key whose
+fingerprint is not `RELEASE_GPG_FINGERPRINT`. The provenance statement, the
+evidence and the images are signed with the Cosign key all the same, so the
+Cosign variables stay required. Any other method, and a declaration without a
+`sign` section, signs the checksums and SBOMs with the Cosign key. With the
+release's public OpenPGP key imported, the checksums verify and then the
+files they list:
+
+```bash
+gpg --verify checksums.txt.asc checksums.txt
+sha256sum --check --ignore-missing checksums.txt
+```
+
+With `sign.files-method: gpg`, GPG for the files beside Cosign for the
+images, the files are signed with GPG as above and the images with the
+Cosign key, whatever `sign.method` names
+([`sign.files-method`](artifacts-reference.md#signfiles-method)).
+
+Swap matters for OpenPGP keys: the [swap policy](verification.md#swap-policy)
+keeps a GPG key off disk. Cosign reads its key in its own process. If you sign
+distro packages with `sign-distro-packages`, or the checksums and SBOMs with
+GPG, keep swap off on the signer runner.
 
 ### Signing and publication are separate authorities
 
@@ -1188,16 +1165,15 @@ Fine-grained REST permissions do not constrain every registry operation.
 Final container images therefore belong to a separate publication project,
 while the source project's registry holds untrusted staging images. Only
 trusted registry jobs receive credentials for the publication project.
-`container release-images import` copies the admitted source digests into that
-project and writes a publication ledger; source provenance and base-image
-dependencies remain unchanged. The producer ledger is preserved.
+`Sign: files and images` copies the admitted images into it by digest.
 
 ### What is signed, and with what
 
 | Object | Key | Variable |
 |---|---|---|
 | Release commit and final tag | SSH | `RELEASE_SSH_SIGNING_KEY` |
-| Checksums, SBOMs, SLSA provenance, images and their attestations | Cosign key pair | `RELEASE_COSIGN_PRIVATE_KEY`, `RELEASE_COSIGN_PASSPHRASE`, checked against `COSIGN_PUBLIC_KEY` and `cosign-public-key-sha256` |
+| Checksums and SBOMs | Cosign key pair, or OpenPGP when `artifacts.yml` says `sign.method: gpg` or `sign.files-method: gpg` | `RELEASE_COSIGN_PRIVATE_KEY`, `RELEASE_COSIGN_PASSPHRASE`; with `gpg`, `RELEASE_GPG_PRIVATE_KEY`, `RELEASE_GPG_PASSPHRASE`, `RELEASE_GPG_FINGERPRINT` |
+| SLSA provenance, images and their attestations | Cosign key pair | `RELEASE_COSIGN_PRIVATE_KEY`, `RELEASE_COSIGN_PASSPHRASE`, checked against `COSIGN_PUBLIC_KEY` and `cosign-public-key-sha256` |
 | `.deb`, `.rpm`, `.apk` packages | OpenPGP | `RELEASE_GPG_PRIVATE_KEY`, `RELEASE_GPG_PASSPHRASE`, `RELEASE_GPG_FINGERPRINT` |
 | Request tag (verified, not made) | The signer's SSH key | `request-allowed-signers` |
 
@@ -1220,14 +1196,17 @@ cosign verify --key cosign.pub --insecure-ignore-tlog \
 `public` writes every signature to the public log, Rekor, permanently, and the
 signer jobs then need `rekor.sigstore.dev` and `tuf-repo-cdn.sigstore.dev`;
 verify without the flag. Every release of one organization takes the same
-value, because a signature is verified the way it was made.
+value, because a signature is verified the way it was made. The input
+decides, not `artifacts.yml`: a declaration that writes `sign.transparency`
+is not read, and `forge-ci doctor` and `Release: plan` warn about it.
 [The transparency log](forgejo.md#the-transparency-log) explains what each
 value gives up.
 
-**Keyless and KMS.** The CLI supports keyless Sigstore signing on GitLab: the
-OIDC issuer is `https://gitlab.com` or your `CI_SERVER_URL`, and public Fulcio
-trusts only gitlab.com. No shipped component uses it; a caller-owned job can run
-`forge-ci release sign --method=sigstore` or `--method=kms`. See
+**Keyless and KMS.** The `release` component does not use them. The CLI
+supports keyless Sigstore signing on GitLab, with `https://gitlab.com` or
+your `CI_SERVER_URL` as the OIDC issuer; public Fulcio trusts only gitlab.com.
+A job of your own can run `forge-ci release sign --method=sigstore` or
+`--method=kms`. See
 [Signing Methods](verification.md#signing-methods-for-release-artifacts).
 
 ## Code scanning (SARIF)
@@ -1239,16 +1218,13 @@ Security tab. Producing the report works on every tier; displaying it needs
 GitLab Ultimate. `enable-gitlab-sast: false` keeps the SARIF as a plain
 artifact only.
 
-The conversion runs the engine the way `check` does: it checks out
-`forge-ci-repository` at the component's commit and downloads the binary that
-commit records from the project's generic packages, refusing any other
-bytes. A component included by version therefore needs the engine of that
-version's commit published; see
-[Publish the recorded build](#publish-the-recorded-build). It is
-best-effort: when the checkout, download or conversion fails, for example
-because the binary is not published, the job logs `GitLab-SAST conversion skipped` and keeps the SARIF; the lint
-gate itself is unaffected. `forge-ci security report upload-sarif` on GitLab
-prints a notice and exits 0.
+The conversion runs the engine the way `check` does, from the
+component's commit, so a component included by version needs the engine of
+that version's commit published; see
+[Publish the recorded build](#publish-the-recorded-build). A failed
+conversion fails the job after the gate has printed its verdict, and the
+SARIF is kept. `forge-ci security report upload-sarif` on GitLab prints a
+notice and exits 0.
 
 ## Forks
 
@@ -1275,14 +1251,32 @@ package, images, keys and bot.
 7. **Publish the Catalog components** by pushing a semver tag, if consumers
    use them by version.
 
-What does not follow the fork, and must be overridden:
-
-- The lint components select `ghcr.io/itiquette/nanolinter`; pass a verified,
-  available digest through `nanolinter-image`, including for a mirror.
-
 `forge-ci-repository` and `consumer-project` are the fork's and the consumer's
-paths; nothing else in the checksum-bound components or the lint components'
-SAST conversion names an owner.
+paths; nothing else in the components names an owner. The lint images have no
+default: each consumer passes its own digest-pinned `nanolinter-image` or
+`megalinter-image`.
+
+## A job that found a dependency unavailable
+
+GitLab runs a job once more when the engine ended it with exit code 69: a
+download, registry or resolver that did not answer
+([what 69 means](providers.md#capability-matrix)). No other failure is
+retried, and no job more than once: `retry: {max: 1, exit_codes: 69}`, a
+literal of the components, with no input or variable to widen it. It is on
+the jobs that only read, build and hand on files: the `check`, lint and
+`build-*` components, the release's plan, check, version, build, export,
+base plan, parent and build, image plan and build and summary jobs, and every
+snapshot job but the publishing one.
+
+Every job that pushes an image, signs, tags, moves a tag, publishes,
+deletes, or starts the pipeline of such jobs says `retry: 0`, so a
+`default: retry` of the including configuration does not reach it. That
+also switches off GitLab's retry of a runner failure. These jobs fail once,
+and a person decides whether to run them again: `Prepare: release commit
+and tag`, `Base: publish`, `Base: sign and promote`, `Images: publish`,
+`Sign: files and images`, `Publish: images`, `Publish: release`,
+`Publish: tidy up`, `Publish: npm packages`, the snapshot's publishing job,
+the two triggers and the `publish-*` components.
 
 ## Troubleshooting
 
@@ -1291,40 +1285,20 @@ SAST conversion names an owner.
 | A check or release job refuses before checkout: mutable reference | The component was included by tag or branch. Include checksum-bound components by full commit SHA. |
 | A check job refuses: release secret present | A signing or publication variable reaches the check job. Scope it to its release environment. |
 | `is available to the wrong release job` | A release variable is scoped too broadly. Use the scopes in [Secrets and tokens](#secrets-and-tokens). |
-| A release job fails in its first lines | The component is not included at its `engine-sha`, the project is not `consumer-project`, the tag is not protected, or the pipeline is not the policy's child. |
+| A release job fails in its first lines | The component is not included by full commit SHA, the project is not `consumer-project`, the tag is not protected, or the pipeline is not the policy's child. |
 | The engine download fails | The binary for that commit is not published, or the engine project or its packages need credentials. |
 | `Check: release request` refuses the request | The tag is not SSH-signed by an allowed signer, or it is not the head of the release branch. |
-| A release job fails uploading artifacts | The handoff is over the instance's artifact limit (100 MB by default); have the administrator raise it. |
+| A release job fails uploading artifacts | The hand-off is over the instance's artifact limit; see [Artifact size](#artifact-size). |
 | An image build step ends with `exec format error` | A `RUN` step for another architecture on an unprivileged runner; emulation on the host does not reach a nested build. Build on a runner of that architecture. |
 | A project requested as SHA-256 is SHA-1 | The `support_sha256_repositories` feature flag was not enabled for the account when the project was created. |
-| Warm base verification fails with a Cosign shim error | The build image exposes Cosign through a Mise shim; install the binary on `PATH` as in [Content-addressed base images](#content-addressed-base-images). |
+| `Base: sign and promote` refuses a stage as half promoted | Some final tags of the stage exist, and they are not what this stage signed. A stage is promoted or reused whole; see [Base images](#base-images). |
 | Findings do not appear on the Security tab | Display needs GitLab Ultimate, or the conversion was skipped; the job log says so. |
 
 `forge-ci doctor` in a job prints what the detected forge supports.
 
-For `sign.method: sigstore`, doctor checks `.gitlab-ci.yml` for a local job
-declaring `id_tokens.SIGSTORE_ID_TOKEN` with a non-empty audience (a string or
-list of strings). This declares a token GitLab creates at job runtime; never
-put the token's actual value in a template or committed configuration.
-Use the audience required by your signing service, commonly `sigstore`.
-
-A separate `spec: inputs` header followed by `---` is supported: doctor
-inspects the jobs in the following document. Input expressions (`$[[ ... ]]`)
-in that pipeline produce a warning because doctor does not evaluate them.
-
-The check reports a missing declaration as a failure for a directly readable
-local pipeline. Includes, defaults, inheritance, child pipelines, custom token
-variable names, or an unavailable default configuration file produce a warning
-to inspect the effective signing job in GitLab instead. Doctor does not fetch
-includes, evaluate the merged pipeline, inspect token values, or verify job
-execution or audience suitability. Malformed local YAML, a header without its
-pipeline, or unexpected extra documents are failures.
-
-Doctor also fails when two forge-ci component includes in `.gitlab-ci.yml`
-define the same job: GitLab merges jobs of one name without a warning, so the
-second include rewrites the first. A component's job is its `job-name` input,
-or the component's name by default; give each include of the same component
-its own `job-name`. A `job-name` given as an expression is not checked.
+Doctor fails when two forge-ci component includes in `.gitlab-ci.yml`
+define the same job: GitLab merges jobs of one name without a warning. Give
+each include of the same component its own `job-name`.
 
 Outside CI, doctor recognizes an unambiguous GitLab-only layout. For a repository
 with multiple forge layouts, select GitLab explicitly with
@@ -1332,14 +1306,17 @@ with multiple forge layouts, select GitLab explicitly with
 
 ## Limits
 
-- **No package snapshot orchestrator.** Snapshot image artifact-first producers
-  run automatically for supported Go, Cargo, Maven, Gradle JVM and npm inputs.
-- **No Google Play, container-publishing or Xcode-build components**; Gradle
-  publishing is not wired in `publish-forge-packages`.
+- **No Google Play or Xcode-build components**, and `publish-forge-packages`
+  does not run Gradle: with `project-type: gradle` or `gradle-android` it
+  uploads a Maven publication the build has already exported. Container
+  images are built and published by `release` and `snapshot-images`.
 - **No `:dev`/`:staging` promotion ladder.**
+- **No distro package registry.** GitLab has no RPM or Alpine registry, and
+  its [Debian registry](https://docs.gitlab.com/user/packages/debian_repository/)
+  is an experiment behind a feature flag that is off by default. A
+  declaration with `distro-packages` is refused when the release is planned;
+  the packages stay release files.
 - **Checksum-bound jobs run on linux/amd64 or linux/arm64 only.**
 - **No run-artifact API**: files move between jobs through native artifacts.
 - **SAST display needs GitLab Ultimate.**
 - **The engine project and its packages must be readable anonymously.**
-- **The native release is under acceptance**; validate it on your instance as
-  in [GitLab live acceptance](testing.md#gitlab-live-acceptance).

@@ -27,21 +27,88 @@ does not replace them. Helpers under `/usr/lib/podman` or `/usr/libexec/podman`
 are recognized outside `PATH`. With `--install-packages=false`, provision these
 runtime packages in the job image.
 
+## Runner roles across the forges
+
+Every forge layer chooses runners for the same roles. Each maps a role to its
+native field: `tags:` on GitLab, an array input interpolated whole; `runs-on`
+on Forgejo and GitHub, a JSON array of labels passed as text and decoded with
+`fromJSON`. A cell without an input says what decides instead.
+
+| Role | GitLab | Forgejo | GitHub |
+|---|---|---|---|
+| ordinary | `runner-tags` of `check`, `nanolinter`, `megalinter`, `build-*`, `publish-*`, `release` and `snapshot-images`; default `[]`, untagged | `runs-on` of every reusable workflow; required, no default; callers pass `vars.CI_RUNNER_LABEL` | `runs-on` of ordinary jobs; default `["ubuntu-26.04"]` |
+| ordinary-arm64 | none: no component has an ordinary job bound to arm64 | `runs-on-linux-arm64` of `runtime-images.yml`, for the native arm64 smoke test of the image it built; required when arm64 is planned | none: the smoke test runs on the arm64 build runner |
+| image-build | `build-runner-tags-linux-amd64` of `release` and `snapshot-images`, which the release's consumer checks take too; required, never empty | `build-runs-on-linux-amd64` of `release-images.yml`, `base-images.yml`, `snapshot-images.yml` and `runtime-images.yml`; required when amd64 is planned; callers pass `CI_RUNNER_LABEL_CONTAINER` or the pool | `build-runs-on-linux-amd64`, default `["ubuntu-26.04"]` |
+| image-build-arm64 | `build-runner-tags-linux-arm64` of `release` and `snapshot-images`; required when arm64 is planned, never `[]` then | `build-runs-on-linux-arm64` of `release-images.yml`, `base-images.yml`, `snapshot-images.yml` and `runtime-images.yml`; required when arm64 is planned | `build-runs-on-linux-arm64`, default `["ubuntu-26.04-arm"]` |
+| signer | `signer-runner-tags` of `release`; default `[]`; a literal of the separately pinned policy project | `signer-runs-on` of `sign-and-publish-release.yml`, `sign-container-images.yml` and `runtime-images.yml`; required, set by the caller workflow | none: the hosted `ubuntu-26.04` literal of the layer, which no caller input or variable changes; `slsa-attestor.yml` is the exception |
+| macos | `runner-tags-darwin-arm64` of `publish-apple-appstore`; default `[saas-macos-medium-m1]` | none: the Forgejo layer has no Apple workflows | `runs-on-darwin-arm64` for unsigned Xcode and Swift lint, default `["macos-26"]`; signed Xcode and App Store publication stay on literal `macos-26` |
+
+Each job takes its own role's input, and none falls back to another's. On
+GitLab the kaniko image jobs take the build inputs as Buildah's do, and the
+release's consumer checks, family builds and release files, which may run
+Buildah, take `build-runner-tags-linux-amd64`; generated version jobs keep
+the ordinary `runner-tags`. How the inputs are named is under
+[How a workflow names its runners](#how-a-workflow-names-its-runners).
+
+Where the names differ, each has a reason:
+
+- GitLab names each role's input, `build-runner-tags-linux-amd64` beside `runner-tags`,
+  because one component holds jobs of several roles. A Forgejo reusable
+  workflow declares the inputs of the roles its jobs have, `runs-on` always,
+  and the caller picks the pool or the container runners for each.
+- GitLab takes arrays and Forgejo and GitHub JSON-array strings, because a
+  GitLab input can be an array and a `workflow_call` input cannot.
+- GitLab says tags and Forgejo labels: each forge's own word for the field.
+- `runs-on-linux-arm64` exists on Forgejo's `runtime-images.yml` alone,
+  because only that workflow runs the image it built as a job container, on
+  the image's own architecture.
+
+Who chooses the signer runner differs by forge. GitLab runs the signer jobs
+from a component the policy project includes, so their tags are that
+project's literals; a tag written as a `$VARIABLE` would let a project
+variable choose the runner that sees the credentials, and the components take
+tags only from inputs. GitHub fixes the hosted runner in the layer. Forgejo
+has no policy project: the caller's release workflow passes
+`signer-runs-on`, which only the job that reads the signing key runs on. The
+examples pass the repository variable `CI_RUNNER_LABEL` there, so whoever may
+set repository variables chooses that runner; an installation with a runner
+kept for signing writes its labels in the workflow instead, where a change is
+a reviewed commit.
+
+GitHub threads its role-specific inputs through the orchestrators. Its
+signing, trust-root and publication jobs retain hosted literals; see
+[GitHub runners](#github-runners).
+
 ## How a workflow names its runners
 
-Runner selection is a repository or organization variable, never a literal in
-a workflow. Every value is a JSON array of labels that must all match one
-runner; see [Variables](forgejo.md#variables).
+Every runner input is named `[role-]<keyword>[-<os>-<arch>]`:
+
+- the role: none for ordinary jobs, `build-` for privileged image builds,
+  `signer-` for the jobs that hold the signing credentials;
+- the keyword: `runner-tags` on GitLab, `runs-on` on Forgejo and GitHub;
+- the platform, only on an input whose jobs run on that one platform: its
+  `RELEASE_PLATFORMS` name with `/` turned into `-`, such as `linux-arm64` or
+  `darwin-arm64`.
+
+So `build-runner-tags-linux-arm64` chooses GitLab's arm64 image build runner
+and `runs-on-darwin-arm64` the GitHub macOS runner. GitHub has no `signer-`
+input: its signer jobs run on a hosted literal, with one exception named
+under [GitHub runners](#github-runners).
+
+On Forgejo, runner selection is a repository or organization variable that
+the caller's workflow maps to the inputs. Every value is a JSON array of
+labels that must all match one runner; see [Variables](forgejo.md#variables).
 
 | Variable | Selects |
 |---|---|
 | `CI_RUNNER_LABEL`, `CI_RUNNER_LABEL_ARM64` | the pool, per architecture: every job, image builds included |
 | `CI_RUNNER_LABEL_CONTAINER`, `CI_RUNNER_LABEL_CONTAINER_ARM64` | optional overrides: where image builds run instead of the pool |
 
-Architecture is always selected by variable name, never by a truthy fallback,
-so a missing arm64 variable fails at scheduling instead of routing an arm64
-build to amd64. The container-or-pool dimension does fall back, to the pool:
-`fromJSON(vars[... 'CI_RUNNER_LABEL_CONTAINER_ARM64' || 'CI_RUNNER_LABEL_CONTAINER'] || vars[... 'CI_RUNNER_LABEL_ARM64' || 'CI_RUNNER_LABEL'])`.
+The layer's workflows take one input per role and platform and never one in
+place of another: an arm64 build runs on `build-runs-on-linux-arm64` or the
+plan is refused. The caller's workflow maps the variables to the inputs, and
+there the container-or-pool dimension does fall back, to the pool:
+`build-runs-on-linux-amd64: ${{ vars.CI_RUNNER_LABEL_CONTAINER || vars.CI_RUNNER_LABEL }}`.
 That fallback is never silent: on a pool that denies user namespaces the build
 fails at `setup-buildah` or `setup-image-builder` with the hint naming the
 override; where the pool permits them, or with kaniko, the pool is simply
@@ -55,6 +122,70 @@ Where image builds run is the installation's choice:
 | the pool denies them; build with kaniko | unset | unset |
 | your own runners with rootless Podman | their labels | unset |
 | a hosted pool that denies them; borrow a runner | the labels the lender registers, e.g. `["gh-vm","arch=amd64"]` | `github` |
+
+## A planned platform needs its runner
+
+The planning commands take each runner input of the calling layer with
+`--runner-input name=value`, as the layer passed it after its own defaults:
+`forge-ci plan release`, `plan snapshot-release`,
+`container release-images plan`, `container snapshot-images plan`,
+`container platform-plan` and the base stage plans
+(`container base-images root-base plan` and `child-base plan`). The layers
+pass them for you; a consumer that calls `forge-ci plan release` itself
+passes its runner inputs too, as the GitLab monorepo example does. The plan
+is refused when one of its jobs has no runner:
+
+- an image build for a platform the plan includes after `RELEASE_PLATFORMS`
+  narrowed it, whose `build-` input of that platform has no value;
+- an Xcode or App Store job, whose `darwin-arm64` input has no value.
+
+The refusal names the input, the platform and the forge, and asks for a JSON
+list that selects a runner of that platform. There is no fallback across
+platforms or roles: an arm64 build never runs on the amd64 runner, and an
+image build never on the ordinary one. A default counts as a value. An empty
+value or `[]` counts as missing, except for GitLab's `runner-tags` and
+`signer-runner-tags`, where `[]` means untagged. `release-platforms`, not
+runner availability, selects the platforms; build inputs of platforms that
+are not planned may stay empty.
+
+`plan release`, `container snapshot-images plan` and the base stage plans
+refuse a call with no `--runner-input` at all, except in a local run
+(`--provider local`), which has no runners. The GitLab release builds a base
+stage in one amd64 job, so an arm64 base is refused there.
+
+This is a check of the inputs, not proof that a registered runner has the
+promised capabilities.
+
+## GitHub runners
+
+The GitHub layer takes its runners as `workflow_call` inputs, not variables.
+Each is a JSON array of labels passed as text and read with `fromJSON`, and
+is named as [above](#how-a-workflow-names-its-runners). Each input defaults to
+a GitHub-hosted label and never falls back to another input.
+
+| Input | Default | Selects |
+|---|---|---|
+| `runs-on` | `["ubuntu-26.04"]` | ordinary jobs: builds, lint, plans, SBOMs, changelogs, summaries |
+| `build-runs-on-linux-amd64` | `["ubuntu-26.04"]` | the linux/amd64 legs of `publish-container.yml` and `snapshot-images.yml`; each leg reads the input of its own arch, so a missing or empty one fails the leg instead of falling back |
+| `build-runs-on-linux-arm64` | `["ubuntu-26.04-arm"]` | the linux/arm64 legs of the same image builds |
+| `runs-on-darwin-arm64` | `["macos-26"]` | the unsigned Xcode build and the Swift lint jobs |
+
+A reusable workflow declares only the inputs its own jobs or callees use, and
+the orchestrators pass theirs on. An image build runner must permit the user
+namespaces Buildah needs, as [above](#what-a-job-needs).
+
+Jobs that sign, promote, publish or hold release credentials or an OIDC
+token run on the GitHub-hosted `ubuntu-26.04` or `macos-26`, written as a
+literal in the layer, and no input or variable moves them. The same holds for
+the bootstrap jobs every release starts with, which admit the engine commit
+and the runtime images and build the engine every later job runs. The one
+exception is `slsa-attestor.yml`, a public `workflow_call` workflow that signs
+with the operator's KMS key on the runner its caller names in `runs-on`. Hosted
+runners are VMs that GitHub starts fresh for one job and destroys after it,
+so no earlier job on the machine could have touched the signer; a runner the
+caller chooses could be persistent or shared. Signed Android and Xcode builds
+run as a separate `build-variants-signed` job on those hosted runners, while
+unsigned and library builds take `runs-on` and `runs-on-darwin-arm64`.
 
 ## Runner lending
 
@@ -122,8 +253,6 @@ Every lender runs the same script on the machine,
 install the pinned `forgejo-runner` by checksum, create an unprivileged user
 with subordinate ids, register `--ephemeral` with the labels, run `one-job
 --wait` under a clean environment until the job is done or the wait is over.
-A lender for GitLab CI or for a cloud VM API is the same script with another
-way of starting the machine; the port has room for them.
 
 ### Setting up the GitHub lender
 
@@ -156,14 +285,12 @@ offers.
 
 It is selected per repository by the image builder type, for the verbs that
 build to an OCI layout: `container build` (push-by-digest, oci and local
-modes) and `multiarch-image build-arch`. In local mode kaniko builds the
-target to a private layout and the engine extracts the image's flattened
-filesystem into `--output-dir`, refusing absolute or escaping symlinks,
-hardlinks, devices and other special files, so a `FROM scratch` export stage
-gives the same files under either builder. The image, the digest push, the scan, the ledger
-and the signer are the same as with Buildah. `release-images.yml` reads the
-same variables from the calling organization, so a consumer that builds its
-release images there changes nothing to move between the two.
+modes) and `multiarch-image build-arch`. A `FROM scratch` export stage in
+local mode gives the same files under either builder. The image, the digest
+push, the scan, the ledger and the signer are the same as with Buildah.
+`release-images.yml` reads the same variables from the calling organization,
+so a consumer that builds its release images there changes nothing to move
+between the two.
 
 | Variable | Value |
 |---|---|
@@ -193,19 +320,12 @@ ignore file Buildah builds with: the Containerfile's own
 
 ### The kaniko job image
 
-kaniko replaces the job container's root filesystem with the image's, and
-forge-ci has it delete that filesystem after each build (`--cleanup`), so the
-next build of the same job starts from its own base image. A kaniko job
-therefore runs in a job image made for that:
-[containers/kaniko-job/Containerfile](../containers/kaniko-job/Containerfile).
-It keeps a static bash, a BusyBox toolset and kaniko's CA bundle under
-`/kaniko`, which kaniko never touches, last on `PATH` so that they take over
-only once Debian's tools are gone, and points `TMPDIR` at `/kaniko/tmp`, since
-`/tmp` goes with the filesystem; the runner's workspace is a mount and
-survives too, forge-ci with it. The steps after the build
-(metadata upload, cleanup) use those and nothing else from the original image.
-The adapter also names the layout, the context and the staged registry
-credentials with `--ignore-path`.
+kaniko replaces the job container's root filesystem with the image's and
+deletes it after each build, so a kaniko job runs in a job image made for
+that: [containers/kaniko-job/Containerfile](../containers/kaniko-job/Containerfile).
+It keeps the tools the steps after the build need under `/kaniko`, which
+kaniko never touches; the runner's workspace is a mount and survives too,
+forge-ci with it.
 
 The job image is the one image no kaniko job can build. Its bootstrap,
 [examples/forgejo/kaniko-job-image.yml](../examples/forgejo/kaniko-job-image.yml),
@@ -229,14 +349,12 @@ the runner's own environment), its environment passes `CI_IMAGE_BUILDER` and
 whichever is selected before `multiarch-image build-arch`. The signer example
 is that job.
 
-On GitLab the trusted policy selects the builder, not a project variable: the
+On GitLab the policy project selects the builder, not a project variable: the
 `release` and `snapshot-images` components take `image-builder: kaniko` and
-`builder-job-image`, the kaniko job image. The release's image jobs run in it
-on untagged runners; the snapshot components take it as their `build-image`.
-With Buildah the release's image jobs run in `builder-job-image` too: the
-Buildah job image of
-[containers/buildah-job/Containerfile](../containers/buildah-job/Containerfile).
-See [Release images](gitlab.md#release-images).
+`builder-job-image`, the kaniko job image, which the snapshot components also
+take as their `build-image`. The image jobs still need their per-platform
+build inputs, which may name a pool without user namespaces. See
+[Release images](gitlab.md#release-images).
 
 #### Pinning the job image
 
@@ -253,17 +371,9 @@ tag and never written by a workflow.
    value exactly, `@sha256:` included, so every repository reads the one
    value and a rebuild is one paste.
 
-Rebuild when the kaniko release in the Containerfile or the Containerfile
-itself moves, not when the engine pin does. A rebuild may produce a new digest even from
-the same sources, because the Debian packages it installs move on; the
-previous digest stays published and valid, so a variable not yet updated
-keeps working. Delete superseded tags from the package when nothing pins
-them.
-
-Automating step 3 would need a token that may write the organization's
-variables, kept as a secret of a workflow; whoever can change that workflow
-could then rewrite any variable, the runner labels and this image included.
-A paste per rebuild is the cheaper risk.
+A rebuild may give a new digest from the same sources, because the Debian
+packages it installs move on. Delete superseded tags from the package when
+nothing pins them.
 
 Before any build, the signer example's build job checks the variable: it
 must be a `…@sha256:` reference, and the image must carry the title label of
@@ -272,19 +382,10 @@ for the job's architecture. A missing, tag-pinned or foreign image stops the
 job there, naming `CI_IMAGE_BUILDER_JOB_IMAGE`; a private package fails
 already when the job pulls its container.
 
-Kaniko, like Buildah here, builds only for the architecture it runs on. A
-job's `--custom-platform` must be its runner's, which `build-arch` enforces,
-and every image, the job image included, is one native build per architecture
-assembled into an index. No emulation, anywhere.
-
-Kaniko uses full content snapshots and retains `--reproducible` for pinned
-builds. When remote layer caching is selected, the engine disables compressed
-caching to reduce compression memory pressure. It does not use `redo` or
-`time` snapshots: they can miss content changes whose metadata is unchanged.
-Large base filesystems still need sufficient job memory for extraction and
-full snapshots; disabling cache compression does not remove that requirement,
-and has no effect on builds without a layer-cache repository. Increase the
-runner's bounded memory allocation rather than weakening snapshot correctness.
+Kaniko, like Buildah here, builds only for the architecture it runs on, with
+no emulation. Kaniko takes full snapshots of the filesystem, so a large base
+image needs enough job memory; raise the runner's memory limit if a build
+runs out.
 
 ### Choosing between lending and kaniko
 
@@ -321,32 +422,10 @@ lender's run for the reason.
 
 ### Unused-runner retirement limitation
 
-With the pinned Forgejo runner **13.2.0**, `--ephemeral` means deletion after
-completion of one job. SIGINT stops an idle `one-job --wait` process but does
-not delete its registration. The runner has no unregister command, and its
-runner RPC protocol has no delete-self operation. The lending script therefore
-fails idle expiry with **retirement unconfirmed**, rather than reporting that
-the registration was released. Cancelling the hosted VM likewise does not prove
-registration removal. A forge operator must verify and remove the exact unused
-registration; do not delete registrations by name prefix.
-
-This was reproduced in Forge CI's local live scenario (see
-[Local runner-lending lifecycle](testing.md#local-runner-lending-lifecycle)).
-The checked upstream sources are tag `v13.2.0`, commit
-`df6b843fb929bb04b933b09c6bf208774d42480b`: `internal/app/cmd/cmd.go:42`
-defines ephemeral as deletion after a job, and
-`internal/app/poll/single.go:133–147` shuts down polling/tasks without revocation.
-Its `actions-proto v0.8.0` dependency's `proto/runner/v1/services.proto` has no
-retirement RPC.
-
-Neither the registration token nor the per-runner credential is a Forgejo user
-management token. In the local live test, the supported repository runner DELETE
-endpoint rejected the per-runner credential with HTTP 401; its scoped owner
-credential could perform exact-ID cleanup. Do not add an administrator PAT to the worker to work around
-this. For automatic unused-runner retirement, the smallest compatible design
-choice is an explicitly authorized **forge-side provisioner** retaining the
-exact created runner ID and owning its deletion when the lend ends. That
-changes the current registration-token provisioning contract and is not
-implemented here. An upstream narrowly scoped self-retirement RPC would avoid
-that extra management authority. Until one exists, idle/cancel retirement is
-not supported by the current lender contract.
+The pinned Forgejo runner 13.2.0 deletes an `--ephemeral` registration only
+after it has run a job; it has no way to unregister itself. A lend that
+expires idle, or whose VM is cancelled, leaves its registration behind, and
+the lending script fails, saying that registration retirement is
+unconfirmed. A forge operator removes that registration by its exact ID,
+never by name prefix. Do not give the lent machine an administrator token to
+work around this.
