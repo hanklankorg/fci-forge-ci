@@ -1,41 +1,29 @@
 # CLI black-box testing requirements
 
-This document primarily catalogues behaviour-only requirements for the
-*built* `forge-ci` binary. Built-binary scenarios are ID'd and stated as
-**observable results**: exit code, stdout, stderr, files written
-(`$GITHUB_OUTPUT`, `$GITHUB_STEP_SUMMARY`, artifact dirs, auth config), forge
-API calls against a loopback mock, and child-tool argv.
+This page catalogues behaviour-only requirements for the *built* `forge-ci`
+binary. Each scenario has an ID and is stated as an **observable result**:
+exit code, stdout, stderr, files written (`$GITHUB_OUTPUT`,
+`$GITHUB_STEP_SUMMARY`, artifact dirs, auth config), forge API calls against a
+loopback mock, and child-tool argv. It keeps the public CLI contract that the
+reusable workflows depend on stable across releases and forges.
+[Testing conventions](testing.md) describes the other test layers.
 
-One section is deliberately different: `ART-06`–`ART-09` retain IDs for
-artifact-contract traceability but list supporting domain, adapter, and live
-evidence rather than built-binary scenarios. That section explicitly states
-what its direct tests do not prove.
-
-This complements, and does not replace, [`docs/testing.md`](testing.md) (the
-unit/adapter/smoke layering) and the domain unit tests that own internal
-algorithms. The black-box layer preserves the **public CLI contract** that the
-reusable workflows in `.github/workflows/` depend on, across releases and
-across forges.
-
-There are two binary harnesses, and the built-binary sections of this document
-are the catalogue and acceptance criteria for both:
+Two harnesses run these scenarios:
 
 - `cmd/forge-ci/smoke_test.go` (build tag `smoke`, `just test-smoke`): the
-  in-repo smoke harness. It builds with the pinned Go toolchain and needs no
-  auxiliary application/signing toolchain for the root scenarios. It covers the root
-  contract: command discovery, help, version, flag parsing, the exit-code
+  in-repo smoke harness. It builds with the pinned Go toolchain and covers the
+  root contract: command discovery, help, version, flag parsing, the exit-code
   ladder, stream discipline.
-- The external black-box testsuite, where most of the scenarios below actually
-  live. It drives the built binary against committed fixture projects with
-  the real toolchains (`syft`, `gpg`, `cosign`, `mvn`, `gradle`, `cargo`,
-  `npm`). Forge/service endpoints are faked, while package tools may download
-  public dependencies, plugins, distributions, and base images into isolated
-  caches. Real credentials and user settings remain excluded.
+- The external black-box testsuite, where most scenarios live. It drives the
+  built binary against committed fixture projects with the real toolchains
+  (`syft`, `gpg`, `cosign`, `mvn`, `gradle`, `cargo`, `npm`). Forge and service
+  endpoints are faked; package tools may download public dependencies into
+  isolated caches. Real credentials and user settings stay out.
 
 A new scenario goes in the testsuite if it needs a real toolchain or a
-fixture project, and here if it is about the CLI's own surface. Note that
-both harnesses are the *black-box* tier, and "e2e" is reserved for a real
-runner against a real forge, which neither of them is.
+fixture project, and here if it is about the CLI's own surface. Both harnesses
+are the *black-box* tier; "e2e" is reserved for a real runner against a real
+forge, which neither of them is.
 
 ## Scope
 
@@ -62,8 +50,6 @@ In scope:
 Out of scope as built-binary scenarios:
 
 - Internal algorithms and helpers already covered by direct tests.
-  `ART-06`–`ART-09` cross-reference that supporting evidence without
-  reclassifying it as black-box coverage.
 - TUI behaviour: workflow commands are non-interactive. `init` may ask for an
   example on a terminal when it cannot detect the ecosystem; `--example`
   avoids that prompt, and non-terminal calls without a detectable ecosystem fail.
@@ -85,10 +71,10 @@ conventional meaning. Source of truth: `internal/domain/errs`
 | `2` | Usage | CLI misuse: bad flags, wrong args, unknown command, a bare `forge-ci` or command group, context-cancel |
 | `65` | DataErr | malformed input (bad JSON/YAML payload, unparsable value) |
 | `66` | NoInput | a required input file/ref/artifact is missing |
-| `69` | Unavailable | external dependency missing/unreachable, rate-limited, timed out |
+| `69` | Unavailable | a registry, forge or download host unreachable, rate-limited, timed out |
 | `70` | Software | unclassified internal error or panic boundary |
 | `77` | NoPerm | auth / permission failure (missing secret, 401/403) |
-| `78` | Configuration | bad config file (schema violation, invalid `artifacts.yml`) |
+| `78` | Configuration | bad config file (schema violation, invalid `artifacts.yml`), a required tool missing, a capability unsupported here |
 
 HTTP status mapping (`errs.FromHTTPStatus`): `401`/`403`→`77`, `404`→`66`,
 `429`→`69`, `5xx`→`69`.
@@ -115,40 +101,6 @@ requirements need; the table maps each to the helper that satisfies it.
 | HAR-07 | Capture stdout, stderr, exit code separately for every command; assert on stable machine output, not human prose, where a JSON/sink field exists. | `runBinary` returns `(stdout, stderr, exit)`. |
 | HAR-08 | Exercise both `--flag value` and `--flag=value` for string/int flags; assert equivalent results. | Scenario matrix (see `CLI-05`). |
 | HAR-09 | Force the CI runtime explicitly rather than depending on the host. | `--provider {github,gitlab,forgejo,local}` / `FORGE_CI_PROVIDER`, `--runner …`; CI env fixtures `ghaenv` / `glabenv`. |
-| HAR-10 | "No writes / no deletes" scenarios snapshot the temp tree (and the mock's recorded calls) before and after, and diff. | `testfs` + mock-server call recorder. |
-| HAR-11 | Performance scenarios record input size, wall-clock, and machine class so a regression is explainable. | n/a (scheduled hardening only). |
-
-Go tests should use the existing isolation helpers above. For a non-Go Linux
-harness, this is an environment/work-directory skeleton, not an OS sandbox.
-Run it within HAR-05's network boundary, use a reviewed tool path, and configure
-tool-specific settings/caches explicitly. The harness must terminate and reap
-its children before cleanup, including on interruption.
-
-```sh
-(
-  set -eu
-  umask 077
-  root="$(mktemp -d)"
-  trap 'rm -rf -- "$root"' EXIT
-  mkdir -p "$root/home" "$root/work" "$root/config" "$root/state" \
-    "$root/data" "$root/cache" "$root/gnupg" "$root/tmp" "$root/git-template"
-  timeout --kill-after=5s 60s env -i \
-    PATH=/absolute/reviewed/tool-bin:/usr/bin:/bin \
-    HOME="$root/home" USERPROFILE="$root/home" \
-    XDG_CONFIG_HOME="$root/config" XDG_STATE_HOME="$root/state" \
-    XDG_DATA_HOME="$root/data" XDG_CACHE_HOME="$root/cache" \
-    GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 \
-    GIT_TEMPLATE_DIR="$root/git-template" GIT_TERMINAL_PROMPT=0 \
-    GIT_SSH_COMMAND=false GNUPGHOME="$root/gnupg" TMPDIR="$root/tmp" \
-    LANG=C.UTF-8 LC_ALL=C.UTF-8 NO_COLOR=1 \
-    bash --noprofile --norc -c '
-      set -eu
-      cd -- "$1"
-      # Set only the synthetic CI inputs needed by this scenario.
-      # Run scenarios with output paths and fixtures under this owned work dir.
-    ' _ "$root/work"
-)
-```
 
 ## Fixture catalogue
 
@@ -190,7 +142,7 @@ are exact.
 | ID | Scenario | Expected observable result |
 |---|---|---|
 | OUT-01 | A command that emits machine data with `--json` / `--format json`. | stdout is valid JSON; logs/diagnostics go to stderr; stdout parses without filtering. |
-| OUT-02 | A gate that emits CI annotations (e.g. `validate workflow input-defaults`, `validate event-context`) on failure, on a GitHub vs non-GitHub runner. | These now route through the format-aware `output.Annotator`: on a GitHub runner they emit `::error file=…,line=…::…` workflow commands with **every interpolated value escaped** (`EscapeWorkflowCommandData`/`Property`) so hostile scanned content cannot forge a command; on a non-GitHub runner they emit a plain `Error: <file>:<line>: …`/`Warning: …` with no workflow-command noise. This now covers **every** annotation site (including `tags.go`'s allowlist `::warning::` notices); no raw workflow-command `Fprintf` remains. |
+| OUT-02 | A gate that emits CI annotations (e.g. `validate workflow input-defaults`, `validate event-context`) on failure, on a GitHub vs non-GitHub runner. | On a GitHub runner, `::error file=…,line=…::…` workflow commands with **every interpolated value escaped** (`EscapeWorkflowCommandData`/`Property`), so hostile scanned content cannot forge a command; on a non-GitHub runner, a plain `Error: <file>:<line>: …`/`Warning: …` with no workflow-command noise. Every annotation site goes through the format-aware `output.Annotator`. |
 | OUT-03 | A command that sets step outputs (e.g. `release resolve metadata`) with `GITHUB_OUTPUT` pointed at a temp file. | The `key=value` lines are appended to `$GITHUB_OUTPUT`; values are correctly escaped; no duplicate copy on stdout. |
 | OUT-04 | `report status quality-check` with an owned summary destination. | Markdown appends at configured relative or absolute paths; write/open errors propagate. An unset destination follows the runner's documented no-op/log-fallback policy. The harness owns path isolation. |
 | OUT-05 | Colour: default piped output, `--no-color`, `NO_COLOR=1`. | Piped/`--no-color`/`NO_COLOR` output has no ANSI; the `✓/✗` markers degrade to plain text. |
@@ -234,7 +186,7 @@ CLI flag/env wiring, provider selection, or process exit-code wiring.
 | ART-06 | Glob collection supports `**`, include/exclude patterns, a least-common-ancestor root computed from pattern bases, and opt-in hidden files. | `internal/domain/artifact/glob_test.go`; adapter upload implementations call the shared collector. | No built-binary assertion that `--path`/`--include-hidden` reaches this collector, and no transport proof. |
 | ART-07 | GitHub and Forgejo adapter methods support pattern layout, merge-multiple, and a write-free zero-match result. | `internal/adapters/github/artifacts_test.go` and `internal/adapters/forgejo/runartifact_test.go`. The live tier proves only a named Forgejo upload/download round trip. | No built-binary pattern/zero-match assertion; the live round trip does not exercise those branches. |
 | ART-08 | GitHub zip and Forgejo container entries such as `../escape` are confined and return an error wrapping `ErrValidation`. | `internal/domain/artifact/safe_test.go` plus both provider adapter test files. | `ExitCodeFromError` maps `ErrValidation` to `1`, but this evidence does not run the binary and therefore does not prove that process-level mapping. |
-| ART-09 | The provider methods intentionally differ: GitHub download uses REST and can read an authorized foreign run; GitHub upload uses the v4 results service; Forgejo uses a current-run-scoped v3 runtime service and rejects a foreign `RunID`. | Provider adapter protocol/scope tests; live named round-trip evidence currently covers Forgejo. | Does not prove CLI provider selection or flags, and there is no live GitHub artifact transport target in the lab. |
+| ART-09 | The provider methods intentionally differ: GitHub download uses REST and can read an authorized foreign run; GitHub upload uses the v4 results service; Forgejo uses a current-run-scoped v3 runtime service and rejects a foreign `RunID`. | Provider adapter protocol/scope tests; live named round-trip evidence covers Forgejo only. | Does not prove CLI provider selection or flags, and there is no live GitHub artifact transport target in the lab. |
 
 ## VAL-*: Validation & policy gates
 
@@ -304,28 +256,13 @@ Linux architecture (isolated fixtures/caches, loopback mocks, fake secrets):
 - `DIST-01`, `DIST-02`
 
 The remainder (100× stability, concurrency, large-input performance,
-resource-limit handling, full arch/package matrix) runs in scheduled or
-pre-release hardening jobs.
-
-`ART-06`–`ART-09` remain release-relevant supporting evidence, but are
-deliberately not represented as binary smoke. Their direct package tests prove
-the contracts stated in their table, not CLI/provider/exit wiring. Live
-artifact transport is opt-in and currently has Forgejo, not GitHub, lab
-coverage.
+resource-limit handling, full arch/package matrix) is not run by any CI job.
 
 ## Traceability
 
 | Source | Contract used by this plan |
 |---|---|
-| `docs/cli-reference.md` | Command syntax, flags, env vars, defaults. |
 | `internal/domain/errs` (`ExitCodeFromError`, `FromHTTPStatus`) | The exit-code ladder and HTTP-status mapping. |
-| `docs/workflow-design-policy.md` | Node-less/forge-portable goal, event-context guard invariant, artifact verb contract. |
-| `docs/testing.md` | Layer boundaries, build tags, and the `smoke` harness location. |
-| `docs/providers.md` | Forge detection and the per-provider capability matrix. |
-| `docs/artifacts-reference.md` | `artifacts.yml` schema that `doctor`/`config` validate. |
 | `cmd/forge-ci/smoke_test.go` and `smoke_cli_contract_test.go` | The in-repo smoke harness, including binary `ART-01`–`ART-05`. |
 | `cmd/forge-ci/smoke_git_credentials_test.go` | Built-binary rejection of literal Git-token flags, file-input discovery and read-failure boundaries for `SEC-02`. |
-| `internal/domain/artifact/*_test.go` | Supporting collection and path-safety evidence for `ART-06` and `ART-08`; not binary wiring. |
-| `internal/adapters/{github,forgejo}/*artifact*_test.go` | Supporting provider-method evidence for `ART-07`–`ART-09`; not CLI provider selection. |
-| `internal/livetest/conformance/artifact_test.go` | Opt-in named run-artifact round trip; currently Forgejo only, not pattern/zero-match coverage. |
-| External black-box testsuite | The bulk of these scenarios: real toolchains, fixtures, signing round-trips, reproducibility. |
+| `test/live/conformance/artifact_test.go` | Opt-in named run-artifact round trip on Forgejo; not pattern or zero-match coverage. |

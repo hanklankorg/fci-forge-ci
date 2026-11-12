@@ -11,7 +11,7 @@
 #
 # Prerequisite for publication: mark the project as a CI/CD Catalog project
 # (Settings > CI/CD > Catalog) and give it a description. Provider acceptance
-# requirements are documented in docs/providers.md and docs/testing.md.
+# requirements are documented in docs/providers.md and docs/live-runs.md.
 stages:
   - release
 
