@@ -13,7 +13,7 @@ name: Promote base container images (reusable)
 on:
   workflow_call:
     inputs:
-      runner-label:
+      runs-on:
         description: JSON array of trusted runner labels; all labels must match (for example '["ci-builder"]').
         type: string
         required: true
@@ -52,7 +52,14 @@ on:
         description: >-
           JSON array of base image metadata. Each item must include `flavor`, `tag`, `ref`, and `base_input_id`; newly built images also include `candidate_ref` and `candidate_tag`.
         type: string
-        required: true
+        required: false
+        default: ''
+      ledger-json:
+        description: >-
+          The base-image ledger of the stage that built the images, base-images.yml's ledger-json output, instead of all-images-json. Pass exactly one of the two.
+        type: string
+        required: false
+        default: ''
       repository-suffix:
         description: >-
           Optional suffix appended to the caller repository package name, for example -base for forge.example/owner/repo-base. Must be empty or match -[A-Za-z0-9][A-Za-z0-9._-]*.
@@ -71,6 +78,11 @@ on:
         type: string
         required: false
         default: ''
+      base-inputs-json:
+        description: >-
+          JSON array mapping every promoted flavor to its expected `base_input_id` and, for a child, the expected `parent_base` `{ref, input_id}`, as passed to verify-base-container-images.yml. Every promoted flavor must appear exactly once; the engine requires each image's own signed statement to carry it.
+        type: string
+        required: true
       base-input-id:
         description: Optional single base input ID expected for every image.
         type: string
@@ -102,7 +114,7 @@ env:
 jobs:
   coordinates:
     name: Validate helper trust coordinates
-    runs-on: ${{ fromJSON(inputs['runner-label']) }}
+    runs-on: ${{ fromJSON(inputs['runs-on']) }}
     timeout-minutes: 5
     outputs:
       helpers_repository: ${{ steps.validate.outputs.helpers_repository }}
@@ -183,7 +195,7 @@ jobs:
   promote-base-container-images:
     name: Promote base container images
     needs: coordinates
-    runs-on: ${{ fromJSON(inputs['runner-label']) }}
+    runs-on: ${{ fromJSON(inputs['runs-on']) }}
     container:
       image: ${{ needs.coordinates.outputs.signer_image }}
     env:
@@ -280,9 +292,11 @@ jobs:
         id: promote
         env:
           ALL_IMAGES_JSON: ${{ inputs.all-images-json }}
+          LEDGER_JSON: ${{ inputs.ledger-json }}
           REPOSITORY_SUFFIX: ${{ inputs.repository-suffix }}
           BASE_IMAGE_REPOSITORY: ${{ inputs.base-repository }}
           BASE_INPUT_ID: ${{ inputs.base-input-id }}
+          BASE_INPUTS_JSON: ${{ inputs.base-inputs-json }}
           EXPECTED_WORKFLOW: ${{ inputs.caller-workflow }}
           TRUSTED_KEY_INPUT: ${{ inputs['cosign-public-key'] }}
           TRUSTED_KEY_SHA256_INPUT: ${{ inputs['cosign-public-key-sha256'] }}
@@ -312,7 +326,16 @@ jobs:
           unset REGISTRY_TOKEN REGISTRY_USER
           # shellcheck source=.engine/bin/lib-forge-ci.sh
           source "${HELPERS_DIR:?}/.engine/bin/lib-forge-ci.sh"
+          # A stage's ledger names its images itself; the engine refuses
+          # both sources together and neither.
+          ledger=()
+          if [ -n "${LEDGER_JSON:-}" ]; then
+            printf '%s' "${LEDGER_JSON}" >"${SIGNER_WORKSPACE}/base-images.ledger.json"
+            ledger=(--ledger "${SIGNER_WORKSPACE}/base-images.ledger.json")
+          fi
+          unset LEDGER_JSON
           printf '%s' "${registry_token}" | FORGE_CI_PROVIDER=forgejo run_forge_ci container base-images promote \
+            "${ledger[@]}" \
             --expected-repository "${BASE_IMAGE_REPOSITORY}" \
             --registry-username "${registry_user}" \
             --registry-password-file -

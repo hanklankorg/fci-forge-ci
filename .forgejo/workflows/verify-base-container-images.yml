@@ -9,7 +9,7 @@ name: Verify base container images (reusable)
 on:
   workflow_call:
     inputs:
-      runner-label:
+      runs-on:
         description: JSON array of trusted runner labels; all labels must match (for example '["ci-builder"]').
         type: string
         required: true
@@ -71,6 +71,12 @@ on:
         type: string
         required: false
         default: '[]'
+      expected-ref:
+        description: >-
+          Empty discovers which bases of flavors-file exist. A digest-pinned reference instead authenticates exactly that one published base, the one flavor base-inputs-json names: its final tag must resolve to this digest and its signature, SBOM and lineage must verify, with the registry token. A missing base is then a failure, and parent-base-json is the only output.
+        type: string
+        required: false
+        default: ''
       flavors-file:
         description: Path to the newline-delimited flavor list in the consumer checkout.
         type: string
@@ -94,6 +100,13 @@ on:
       missing-flavors-json:
         description: JSON array of flavor names whose final base image was missing.
         value: ${{ jobs.verify-base-container-images.outputs.missing_flavors_json }}
+      parent-base-json:
+        description: With expected-ref, the authenticated base as {"ref","input_id"}, for the parent-base-json input of base-images.yml and the parent_base of a child's base-inputs-json.
+        value: ${{ jobs.verify-base-container-images.outputs.parent_base_json }}
+      parent-bases-json:
+        description: >-
+          Without expected-ref and with the registry token, a JSON object that maps every found flavor to its authenticated {"ref","input_id"}: the digest its final tag resolved to, on which its signature, SBOM and lineage verified. A base found this way is a parent on the same terms as one authenticated with expected-ref; pass toJSON(fromJSON(<this output>).<flavor>) as the parent-base-json input of base-images.yml. A missing flavor has no entry, and without the token the object is empty, so a child planned from either is refused.
+        value: ${{ jobs.verify-base-container-images.outputs.parent_bases_json }}
 
 env:
   FORGEJO_SERVER: ${{ forgejo.server_url }}
@@ -102,7 +115,7 @@ env:
 jobs:
   coordinates:
     name: Validate helper trust coordinates
-    runs-on: ${{ fromJSON(inputs['runner-label']) }}
+    runs-on: ${{ fromJSON(inputs['runs-on']) }}
     timeout-minutes: 5
     outputs:
       helpers_repository: ${{ steps.validate.outputs.helpers_repository }}
@@ -183,7 +196,7 @@ jobs:
   verify-base-container-images:
     name: Verify base container images
     needs: coordinates
-    runs-on: ${{ fromJSON(inputs['runner-label']) }}
+    runs-on: ${{ fromJSON(inputs['runs-on']) }}
     container:
       image: ${{ needs.coordinates.outputs.signer_image }}
     env:
@@ -195,6 +208,8 @@ jobs:
       all_found: ${{ steps.verify.outputs.all_found }}
       all_images_json: ${{ steps.verify.outputs.all_images_json }}
       missing_flavors_json: ${{ steps.verify.outputs.missing_flavors_json }}
+      parent_base_json: ${{ steps.verify.outputs.parent_base_json }}
+      parent_bases_json: ${{ steps.verify.outputs.parent_bases_json }}
     steps:
       - name: Checkout layer helpers
         env:
@@ -287,6 +302,7 @@ jobs:
           BASE_INPUT_ID: ${{ inputs.base-input-id }}
           BASE_INPUTS_JSON: ${{ inputs.base-inputs-json }}
           FLAVORS_FILE: ${{ inputs.flavors-file }}
+          EXPECTED_REF: ${{ inputs['expected-ref'] }}
           EXPECTED_WORKFLOW: ${{ inputs.caller-workflow }}
           TRUSTED_KEY_INPUT: ${{ inputs['cosign-public-key'] }}
           TRUSTED_KEY_SHA256_INPUT: ${{ inputs['cosign-public-key-sha256'] }}
@@ -328,6 +344,18 @@ jobs:
             exit 1
           fi
           unset registry_token REGISTRY_USER
+          if [ -n "${EXPECTED_REF:-}" ]; then
+            # Authentication of one exact base, never discovery: the engine
+            # refuses it without explicit registry credentials.
+            if [ "${#auth[@]}" -eq 0 ]; then
+              echo 'ERROR: expected-ref requires RELEASE_REGISTRY_TOKEN' >&2
+              exit 1
+            fi
+            parent=$(FORGE_CI_PROVIDER=forgejo run_forge_ci container base-images authenticate-parent "${auth[@]}" \
+              --expected-ref "${EXPECTED_REF}" --base-inputs-json "${BASE_INPUTS_JSON}")
+            printf 'parent_base_json=%s\n' "${parent}" >>"${FORGEJO_OUTPUT:?}"
+            exit 0
+          fi
           FORGE_CI_PROVIDER=forgejo run_forge_ci container base-images validate "${auth[@]}"
 
       - name: Cleanup signer workspace
