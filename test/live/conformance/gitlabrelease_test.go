@@ -43,12 +43,7 @@ import (
 
 func TestGitLabRelease_MinimalSignedArtifacts(t *testing.T) {
 	registerLaneScenario(t)
-
-	for _, visibility := range livetest.ConsumerVisibilities(t) {
-		t.Run(visibility.Name, func(t *testing.T) {
-			runGitLabRelease(t, "", visibility.Private)
-		})
-	}
+	runGitLabRelease(t, "")
 }
 
 func TestGitLabRelease_ConsumerTrial(t *testing.T) {
@@ -61,12 +56,7 @@ func TestGitLabRelease_ConsumerTrial(t *testing.T) {
 
 	forEachConsumerCheckout(t, provider.ForgeGitLab, "just test-live-consumer gitlab <checkout> release job-archive=<path> build-archive=<path> signer-archive=<path>", func(t *testing.T, root string) {
 		t.Helper()
-
-		for _, visibility := range livetest.ConsumerVisibilities(t) {
-			t.Run(visibility.Name, func(t *testing.T) {
-				runGitLabRelease(t, root, visibility.Private)
-			})
-		}
+		runGitLabRelease(t, root)
 	}, livetest.TrialRelease)
 }
 
@@ -201,9 +191,9 @@ buildah build --isolation chroot --network host --pull=never \
   --tag localhost/fci-build-image-probe "${work}/context"
 `
 
-func runGitLabRelease(t *testing.T, consumerRoot string, private bool) {
+func runGitLabRelease(t *testing.T, consumerRoot string) {
 	t.Helper()
-	runGitLabReleaseScenario(t, consumerRoot, gitlabStandardRelease, private)
+	runGitLabReleaseScenario(t, consumerRoot, gitlabStandardRelease)
 }
 
 type gitlabReleaseCase uint8
@@ -421,8 +411,28 @@ func useGitLabAdminPolicy(ctx context.Context, t *testing.T, client *gitlabapi.C
 	}
 }
 
-func runGitLabReleaseScenario(t *testing.T, consumerRoot string, scenario gitlabReleaseCase, private bool) {
+// gitlabReleaseRow is what the visibilities of one release row share: what
+// the checkout and the settings say before anything is created, and the job
+// images pushed for the row.
+type gitlabReleaseRow struct {
+	consumerRoot string
+	scenario     gitlabReleaseCase
+	settings     livetest.GitLabReleaseSettings
+	profile      gitlabConsumerProfile
+	archives     gitlabReleaseArchives
+	images       gitlabReleaseImages
+	pushed       livetest.JobImages
+}
+
+// runGitLabReleaseScenario runs the release once for each visibility. The
+// job images are pushed once, before them: no run changes them, and every
+// visibility reads them from public projects. Each visibility serves a layer
+// of its own, and pushes beside it the kaniko job image, which is labelled
+// with that layer.
+func runGitLabReleaseScenario(t *testing.T, consumerRoot string, scenario gitlabReleaseCase) {
 	t.Helper()
+
+	visibilities := livetest.ConsumerVisibilities(t)
 
 	settings, profile := gitlabConsumerProfileOf(t, consumerRoot, gitlabConsumerSettings(t, consumerRoot))
 	bases := profile.baseStages != ""
@@ -442,8 +452,6 @@ func runGitLabReleaseScenario(t *testing.T, consumerRoot string, scenario gitlab
 		t.Fatal("consumer recovery requires policy-owned release-images")
 	}
 
-	requestTag, finalTag := profile.requestTag, profile.finalTag
-
 	// The export jobs, like the image jobs, run in the builder's job image.
 	archives := gitlabReleaseArchiveInputs(t, consumerRoot != "", profile.releaseImages || len(profile.export) != 0 || bases, profile.kaniko)
 	if !livetest.Requires(t, provider.ForgeGitLab, livetest.NeedsInRunner) {
@@ -451,6 +459,29 @@ func runGitLabReleaseScenario(t *testing.T, consumerRoot string, scenario gitlab
 	}
 
 	requireGitLabDemoScenario(t, consumerRoot)
+
+	target := livetest.Accept(t, provider.ForgeGitLab)
+	pushed := livetest.JobImages{}
+	row := gitlabReleaseRow{
+		consumerRoot: consumerRoot, scenario: scenario, settings: settings, profile: profile,
+		archives: archives, images: pushGitLabReleaseImages(t, target, archives, pushed), pushed: pushed,
+	}
+
+	for _, visibility := range visibilities {
+		t.Run(visibility.Name, func(t *testing.T) {
+			runGitLabReleaseVisibility(t, row, visibility.Private)
+		})
+	}
+}
+
+func runGitLabReleaseVisibility(t *testing.T, row gitlabReleaseRow, private bool) {
+	t.Helper()
+
+	consumerRoot, settings, profile := row.consumerRoot, row.settings, row.profile
+	bases := profile.baseStages != ""
+	recovery := row.scenario == gitlabInterruptedConsumerRelease
+	preseeded := row.scenario == gitlabPreseededProvenanceRelease
+	requestTag, finalTag := profile.requestTag, profile.finalTag
 
 	target := livetest.Accept(t, provider.ForgeGitLab)
 
@@ -478,7 +509,8 @@ func runGitLabReleaseScenario(t *testing.T, consumerRoot string, scenario gitlab
 		*consumer = consumer.WithDraftLayer(t, layer)
 	}
 
-	images := pushGitLabReleaseImages(t, target, archives, layer)
+	images := row.images
+	images.kaniko = pushGitLabKanikoJobImage(t, target, row.archives, layer)
 	jobImage := images.job
 	publication := gitlabReleaseRepo(t, target, "release-publication", "")
 	policyRepo := gitlabReleaseRepo(t, target, "release-owned-policy", "")
@@ -577,7 +609,7 @@ func runGitLabReleaseScenario(t *testing.T, consumerRoot string, scenario gitlab
 
 	gateImages := livetest.GitLabGateImages{Job: jobImage, Lint: images.lint}
 	if gate {
-		gateImages.ExtraJobs = livetest.PushGitLabGateExtraJobImages(t, target, *consumer, func(name string) string {
+		gateImages.ExtraJobs = livetest.PushGitLabGateExtraJobImages(t, target, *consumer, maps.Clone(row.pushed), func(name string) string {
 			return gitlabReleaseRepo(t, target, "release-job-image-"+strings.ToLower(name), livetest.ReadJobImageAnonymously)
 		})
 	}
@@ -965,35 +997,48 @@ func gitlabReleaseArchiveInputs(t *testing.T, needBuild, builderJobs, kaniko boo
 // gitlabReleaseImages are the image references of a release's jobs.
 type gitlabReleaseImages struct{ job, build, buildah, kaniko, signer, lint string }
 
-// pushGitLabReleaseImages pushes each archive to a project of its own and
-// returns the image references.
-// The kaniko job image is labelled with the layer it runs from, which admits
-// it.
-func pushGitLabReleaseImages(t *testing.T, target livetest.Target, archives gitlabReleaseArchives, layer livetest.Layer) gitlabReleaseImages {
+// pushGitLabReleaseImages pushes each archive once, to a project named after
+// the first role that takes it, and returns the image references. The kaniko
+// job image is pushed beside the layer it runs from
+// (pushGitLabKanikoJobImage).
+func pushGitLabReleaseImages(t *testing.T, target livetest.Target, archives gitlabReleaseArchives, pushed livetest.JobImages) gitlabReleaseImages {
 	t.Helper()
 
-	images := gitlabReleaseImages{job: livetest.PushJobImage(t, target, gitlabReleaseRepo(t, target, "release-job-image", livetest.ReadJobImageAnonymously), archives.job)}
+	push := func(scenario, archive string) string {
+		if archive == "" {
+			return ""
+		}
+
+		return pushed.Push(t, target, archive, func() string {
+			return gitlabReleaseRepo(t, target, scenario, livetest.ReadJobImageAnonymously)
+		})
+	}
+
+	images := gitlabReleaseImages{job: push("release-job-image", archives.job)}
 
 	images.build = images.job
 
 	if archives.build != "" {
-		images.build = livetest.PushJobImage(t, target, gitlabReleaseRepo(t, target, "release-build-image", livetest.ReadJobImageAnonymously), archives.build)
+		images.build = push("release-build-image", archives.build)
 	}
 
-	if archives.buildah != "" {
-		images.buildah = livetest.PushJobImage(t, target, gitlabReleaseRepo(t, target, "release-buildah-job-image", livetest.ReadJobImageAnonymously), archives.buildah)
-	}
-
-	if archives.kaniko != "" {
-		images.kaniko = livetest.PushKanikoJobImage(t, target, gitlabReleaseRepo(t, target, "release-kaniko-job-image", livetest.ReadJobImageAnonymously), archives.kaniko, layer)
-	}
-
-	images.signer = livetest.PushJobImage(t, target, gitlabReleaseRepo(t, target, "release-signer-image", livetest.ReadJobImageAnonymously), archives.signer)
-	if archives.lint != "" {
-		images.lint = livetest.PushJobImage(t, target, gitlabReleaseRepo(t, target, "release-lint-image", livetest.ReadJobImageAnonymously), archives.lint)
-	}
+	images.buildah = push("release-buildah-job-image", archives.buildah)
+	images.signer = push("release-signer-image", archives.signer)
+	images.lint = push("release-lint-image", archives.lint)
 
 	return images
+}
+
+// pushGitLabKanikoJobImage pushes the kaniko job image, when the release has
+// one, labelled with the layer it runs from, which admits it.
+func pushGitLabKanikoJobImage(t *testing.T, target livetest.Target, archives gitlabReleaseArchives, layer livetest.Layer) string {
+	t.Helper()
+
+	if archives.kaniko == "" {
+		return ""
+	}
+
+	return livetest.PushKanikoJobImage(t, target, gitlabReleaseRepo(t, target, "release-kaniko-job-image", livetest.ReadJobImageAnonymously), archives.kaniko, layer)
 }
 
 // requireGitLabDemoScenario refuses demo mode for anything but a consumer's

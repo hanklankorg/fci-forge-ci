@@ -182,3 +182,18 @@ func TestForgejoConsumerImageBuilder(t *testing.T) {
 		}
 	}
 }
+
+// A role whose archive is pushed already takes that image, and makes no
+// project of its own: the target is never accepted, so a push would fail.
+func TestJobImagesPushTakesTheImageOfAnArchivePushedAlready(t *testing.T) {
+	images := JobImages{"/prepared/java.tar": "registry.example/fci-job@sha256:1"}
+
+	got := images.Push(t, Target{}, "/prepared/java.tar", func() string {
+		t.Fatal("a pushed archive made a project of its own")
+
+		return ""
+	})
+	if got != "registry.example/fci-job@sha256:1" {
+		t.Fatalf("Push = %q, want the image pushed already", got)
+	}
+}

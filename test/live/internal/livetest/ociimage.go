@@ -80,6 +80,28 @@ func PushJobImage(tb TB, target Target, repo, archive string) string {
 	return pushJobImage(tb, target, repo, readJobImage(tb, archive))
 }
 
+// JobImages are the job images a test has pushed, by the archive each was
+// pushed from. A test that runs one archive in several roles, or for several
+// visibilities, pushes it once: a multi-gigabyte archive costs minutes to
+// compress and upload, and its image is the same whichever role reads it.
+// Each project belongs to the test that pushed into it, so a subtest that
+// pushes further images does so into a clone of its parent's.
+type JobImages map[string]string
+
+// Push returns the image pushed from the archive, pushing it first, as
+// PushJobImage does, to the project repo makes when none was.
+func (images JobImages) Push(tb TB, target Target, archive string, repo func() string) string {
+	tb.Helper()
+
+	if image, pushed := images[archive]; pushed {
+		return image
+	}
+
+	images[archive] = PushJobImage(tb, target, repo(), archive)
+
+	return images[archive]
+}
+
 // GitLabJobImageArchiveEnv prefixes the variable that names the archive of a
 // gate's further job image: FORGE_CI_LIVE_JOB_IMAGE_ARCHIVE_NODE for the
 // $CI_JOB_IMAGE_NODE of a check component.
@@ -92,11 +114,12 @@ func GitLabSnapshotProducerArchiveEnv(family string) string {
 	return GitLabJobImageArchiveEnv + strings.ToUpper(family)
 }
 
-// PushGitLabGateExtraJobImages publishes, as PushJobImage does, every further
-// job image the consumer's gate names, each to a project repoFor names, and
-// returns them for GitLabGateImages.ExtraJobs. A run that was not given one
-// does not cover the gate.
-func PushGitLabGateExtraJobImages(tb TB, target Target, consumer Consumer, repoFor func(name string) string) map[string]string {
+// PushGitLabGateExtraJobImages publishes, as JobImages.Push does, every
+// further job image the consumer's gate names, each to a project repoFor
+// names unless its archive was pushed already, and returns them for
+// GitLabGateImages.ExtraJobs. A run that was not given one does not cover the
+// gate.
+func PushGitLabGateExtraJobImages(tb TB, target Target, consumer Consumer, pushed JobImages, repoFor func(name string) string) map[string]string {
 	tb.Helper()
 
 	images := map[string]string{}
@@ -108,7 +131,7 @@ func PushGitLabGateExtraJobImages(tb TB, target Target, consumer Consumer, repoF
 				name, GitLabJobImageArchiveEnv, name, strings.ToLower(name))
 		}
 
-		images[name] = PushJobImage(tb, target, repoFor(name), archive)
+		images[name] = pushed.Push(tb, target, archive, func() string { return repoFor(name) })
 	}
 
 	return images

@@ -33,12 +33,7 @@ func TestGitLabRelease_ConsumerInterruptedRecovery(t *testing.T) {
 
 	forScenarioConsumer(t, provider.ForgeGitLab, "consumer recovery requires a reviewed single-image policy-owned release consumer or a prepared directory", func(t *testing.T, root string) {
 		t.Helper()
-
-		for _, visibility := range livetest.ConsumerVisibilities(t) {
-			t.Run(visibility.Name, func(t *testing.T) {
-				runGitLabReleaseScenario(t, root, gitlabInterruptedConsumerRelease, visibility.Private)
-			})
-		}
+		runGitLabReleaseScenario(t, root, gitlabInterruptedConsumerRelease)
 	})
 }
 

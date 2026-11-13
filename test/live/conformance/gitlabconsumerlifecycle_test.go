@@ -8,6 +8,7 @@ package conformance_test
 import (
 	"context"
 	"fmt"
+	"maps"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -92,16 +93,27 @@ func TestGitLabLayer_ConsumerLifecycle(t *testing.T) {
 			t.Fatal("a lifecycle runs in disposable scratch projects, not in a kept demo")
 		}
 
-		for _, visibility := range livetest.ConsumerVisibilities(t) {
-			t.Run(visibility.Name, func(t *testing.T) {
-				runGitLabConsumerLifecycle(t, root, visibility.Private)
-			})
-		}
+		runGitLabConsumerLifecycle(t, root)
 	}, livetest.TrialLifecycle)
 }
 
-func runGitLabConsumerLifecycle(t *testing.T, root string, private bool) {
+// gitlabLifecycleRow is what the visibilities of one lifecycle row share:
+// what a release row shares, the declaration the snapshot builds from and
+// the selected image builder.
+type gitlabLifecycleRow struct {
+	gitlabReleaseRow
+
+	snapshotSource string
+	builder        livetest.ImageBuilderChoice
+}
+
+// runGitLabConsumerLifecycle runs the lifecycle once for each visibility,
+// pushing the job images once before them, as a release does
+// (runGitLabReleaseScenario).
+func runGitLabConsumerLifecycle(t *testing.T, root string) {
 	t.Helper()
+
+	visibilities := livetest.ConsumerVisibilities(t)
 
 	if event := os.Getenv(consumerEventEnv); event != livetest.TrialLifecycle {
 		t.Fatalf("the event is %s; a lifecycle starts with %s", event, livetest.TrialLifecycle)
@@ -134,11 +146,31 @@ func runGitLabConsumerLifecycle(t *testing.T, root string, private bool) {
 	target := livetest.Accept(t, provider.ForgeGitLab)
 	builder := livetest.ChooseImageBuilder(t, target)
 
-	buildTags := builder.RunnerLabels
-
 	if platforms := settings.Variables["RELEASE_PLATFORMS"]; platforms != "linux/amd64" {
 		livetest.NotCoveredf(t, "the snapshot and the release build images for %s only on tagged arm64 runners, which the lab has none of", platforms)
 	}
+
+	pushed := livetest.JobImages{}
+	row := gitlabLifecycleRow{
+		consumerRoot: root, settings: settings, profile: profile,
+		archives: archives, images: pushGitLabReleaseImages(t, target, archives, pushed), pushed: pushed,
+		snapshotSource: snapshotSource, builder: builder,
+	}
+
+	for _, visibility := range visibilities {
+		t.Run(visibility.Name, func(t *testing.T) {
+			runGitLabConsumerLifecycleVisibility(t, row, visibility.Private)
+		})
+	}
+}
+
+func runGitLabConsumerLifecycleVisibility(t *testing.T, row gitlabLifecycleRow, private bool) {
+	t.Helper()
+
+	root, settings, profile, snapshotSource := row.consumerRoot, row.settings, row.profile, row.snapshotSource
+	buildTags := row.builder.RunnerLabels
+
+	target := livetest.Accept(t, provider.ForgeGitLab)
 
 	opened := livetest.OpenConsumer(t, target, root)
 	if !opened.HasGitLabGate(t) {
@@ -155,7 +187,8 @@ func runGitLabConsumerLifecycle(t *testing.T, root string, private bool) {
 	layer := livetest.PushLayer(t, target, gitlabReleaseRepo(t, target, "lifecycle-engine", livetest.ReadLayerAnonymously))
 	consumer := opened.WithDraftLayer(t, layer).WithServiceSnapshotDeclaration(t, snapshotSource)
 	families := livetest.ServiceSnapshotFamilies(livetest.Context(t), t, consumer)
-	images := pushGitLabReleaseImages(t, target, archives, layer)
+	images := row.images
+	images.kaniko = pushGitLabKanikoJobImage(t, target, row.archives, layer)
 	publication := gitlabReleaseRepo(t, target, "lifecycle-publication", "")
 	policyRepo := gitlabReleaseRepo(t, target, "lifecycle-policy", "")
 	policyProject := livetest.RepoSlug(target, policyRepo)
@@ -238,7 +271,7 @@ func runGitLabConsumerLifecycle(t *testing.T, root string, private bool) {
 		"rules":     []any{map[string]string{"if": gitlabMainPushRule}},
 	}
 
-	gateImages := livetest.GitLabGateImages{Job: images.job, Lint: images.lint, ExtraJobs: livetest.PushGitLabGateExtraJobImages(t, target, consumer, func(name string) string {
+	gateImages := livetest.GitLabGateImages{Job: images.job, Lint: images.lint, ExtraJobs: livetest.PushGitLabGateExtraJobImages(t, target, consumer, maps.Clone(row.pushed), func(name string) string {
 		return gitlabReleaseRepo(t, target, "lifecycle-job-image-"+strings.ToLower(name), livetest.ReadJobImageAnonymously)
 	})}
 	gateCommit := gitlabPolicyCommit(t, ctx, client, policyProject, livetest.GitLabAdminGateFile, consumer.GitLabAdminPolicy(t, layer, gateImages), gitlabapi.FileCreate)

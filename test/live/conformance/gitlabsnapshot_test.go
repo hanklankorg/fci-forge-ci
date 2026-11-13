@@ -60,16 +60,30 @@ func TestGitLabLayer_Snapshot(t *testing.T) {
 			t.Fatal("a snapshot runs in disposable scratch projects, not in a kept demo")
 		}
 
-		for _, visibility := range livetest.ConsumerVisibilities(t) {
-			t.Run(visibility.Name, func(t *testing.T) {
-				runGitLabSnapshot(t, root, visibility.Private)
-			})
-		}
+		runGitLabSnapshot(t, root)
 	}, livetest.TrialSnapshot)
 }
 
-func runGitLabSnapshot(t *testing.T, root string, private bool) {
+// gitlabSnapshotRow is what the visibilities of one snapshot row share: the
+// declaration, the selected builder, its archive, and the job images pushed
+// for the row.
+type gitlabSnapshotRow struct {
+	root, source, builderArchive string
+	builder                      livetest.ImageBuilderChoice
+	jobImage, builderJobImage    string
+	pushed                       livetest.JobImages
+}
+
+// runGitLabSnapshot runs the snapshot once for each visibility. The job
+// image and the Buildah job image are pushed once, before them, as a
+// release's are (runGitLabReleaseScenario). Each visibility serves a layer of
+// its own, and pushes beside it a kaniko job image, labelled with that layer,
+// and the producer images of the families its plan names that are not pushed
+// already.
+func runGitLabSnapshot(t *testing.T, root string) {
 	t.Helper()
+
+	visibilities := livetest.ConsumerVisibilities(t)
 
 	if event := os.Getenv(consumerEventEnv); event != livetest.TrialSnapshot {
 		t.Fatalf("the event is %s; this trial runs %s", event, livetest.TrialSnapshot)
@@ -107,6 +121,36 @@ func runGitLabSnapshot(t *testing.T, root string, private bool) {
 	target := livetest.Accept(t, provider.ForgeGitLab)
 	builder := livetest.ChooseImageBuilder(t, target)
 
+	pushed := livetest.JobImages{}
+	push := func(scenario, archive string) string {
+		return pushed.Push(t, target, archive, func() string {
+			return gitlabReleaseRepo(t, target, scenario, livetest.ReadJobImageAnonymously)
+		})
+	}
+
+	row := gitlabSnapshotRow{
+		root: root, source: source, builderArchive: builderArchive, builder: builder,
+		jobImage: push("snapshot-job-image", jobArchive), pushed: pushed,
+	}
+	if builder.Builder != livetest.ImageBuilderKaniko {
+		row.builderJobImage = push("snapshot-builder-job-image", builderArchive)
+	}
+
+	for _, visibility := range visibilities {
+		t.Run(visibility.Name, func(t *testing.T) {
+			runGitLabSnapshotVisibility(t, row, visibility.Private)
+		})
+	}
+}
+
+func runGitLabSnapshotVisibility(t *testing.T, row gitlabSnapshotRow, private bool) {
+	t.Helper()
+
+	root, source, builder := row.root, row.source, row.builder
+	jobImage, builderJobImage := row.jobImage, row.builderJobImage
+
+	target := livetest.Accept(t, provider.ForgeGitLab)
+
 	layer := livetest.PushLayer(t, target, gitlabReleaseRepo(t, target, "snapshot-engine", livetest.ReadLayerAnonymously))
 	consumer := livetest.OpenConsumer(t, target, root).WithDraftLayer(t, layer).WithSnapshotImagesDeclaration(t, source)
 	families := livetest.ServiceSnapshotFamilies(livetest.Context(t), t, consumer)
@@ -115,21 +159,16 @@ func runGitLabSnapshot(t *testing.T, root string, private bool) {
 	// snapshot is given no registry credential and no image repository.
 	files := len(livetest.SnapshotFileOutputs(livetest.Context(t), t, consumer)) != 0
 
-	jobImage := livetest.PushJobImage(t, target, gitlabReleaseRepo(t, target, "snapshot-job-image", livetest.ReadJobImageAnonymously), jobArchive)
-
-	builderRepo := gitlabReleaseRepo(t, target, "snapshot-builder-job-image", livetest.ReadJobImageAnonymously)
-
 	// A kaniko job image is labelled with the layer it runs from, which
 	// admits it.
-	var builderJobImage string
 	if builder.Builder == livetest.ImageBuilderKaniko {
-		builderJobImage = livetest.PushKanikoJobImage(t, target, builderRepo, builderArchive, layer)
-	} else {
-		builderJobImage = livetest.PushJobImage(t, target, builderRepo, builderArchive)
+		builderJobImage = livetest.PushKanikoJobImage(t, target, gitlabReleaseRepo(t, target, "snapshot-builder-job-image", livetest.ReadJobImageAnonymously), row.builderArchive, layer)
 	}
 
-	// Each producer builds in the runtime image of its toolchain family.
+	// Each producer builds in the runtime image of its toolchain family,
+	// often the archive of the job image too.
 	producerImages := map[string]string{}
+	pushed := maps.Clone(row.pushed)
 
 	for _, family := range families {
 		archive := os.Getenv(livetest.GitLabSnapshotProducerArchiveEnv(family))
@@ -137,7 +176,9 @@ func runGitLabSnapshot(t *testing.T, root string, private bool) {
 			livetest.NotCoveredf(t, "the snapshot builds a %s producer; set %s to the %s runtime image archive", family, livetest.GitLabSnapshotProducerArchiveEnv(family), family)
 		}
 
-		producerImages[family] = livetest.PushJobImage(t, target, gitlabReleaseRepo(t, target, "snapshot-producer-image-"+family, livetest.ReadJobImageAnonymously), archive)
+		producerImages[family] = pushed.Push(t, target, archive, func() string {
+			return gitlabReleaseRepo(t, target, "snapshot-producer-image-"+family, livetest.ReadJobImageAnonymously)
+		})
 	}
 
 	policyRepo := gitlabReleaseRepo(t, target, "snapshot-policy", "")

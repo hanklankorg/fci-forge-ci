@@ -23,12 +23,7 @@ func TestGitLabRelease_RejectsPreseededProvenance(t *testing.T) {
 
 	forScenarioConsumer(t, provider.ForgeGitLab, "requires a reviewed native consumer or a prepared directory; the harness inserts preseeded provenance in its private build wrapper", func(t *testing.T, root string) {
 		t.Helper()
-
-		for _, visibility := range livetest.ConsumerVisibilities(t) {
-			t.Run(visibility.Name, func(t *testing.T) {
-				runGitLabReleaseScenario(t, root, gitlabPreseededProvenanceRelease, visibility.Private)
-			})
-		}
+		runGitLabReleaseScenario(t, root, gitlabPreseededProvenanceRelease)
 	})
 }
 

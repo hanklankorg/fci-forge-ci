@@ -34,14 +34,36 @@ type developmentAcceptance struct {
 }
 
 // runGitLabDevelopment pushes the consumer's development branch under the
-// rendered gate and judges its one push pipeline by the acceptance. It never
-// selects the MR config or opens an MR.
-func runGitLabDevelopment(t *testing.T, root string, private bool, acceptance developmentAcceptance) {
+// rendered gate, once for each visibility, and judges its one push pipeline
+// by the acceptance. It never selects the MR config or opens an MR. The lint
+// image is pushed once, before the visibilities; the job image is served
+// from each visibility's layer project and, for kaniko, is labelled with
+// that layer.
+func runGitLabDevelopment(t *testing.T, root string, acceptance developmentAcceptance) {
 	t.Helper()
+
+	visibilities := livetest.ConsumerVisibilities(t)
 
 	if !livetest.Requires(t, provider.ForgeGitLab, livetest.NeedsInRunner) {
 		livetest.NotCoveredf(t, "the development consumer needs a GitLab runner")
 	}
+
+	target := livetest.Accept(t, provider.ForgeGitLab)
+
+	var lintImage string
+	if lint := os.Getenv("FORGE_CI_LIVE_LINT_IMAGE_ARCHIVE"); lint != "" {
+		lintImage = livetest.PushJobImage(t, target, livetest.NewPublicScratchRepo(t, target, "gitlab-development-lint", livetest.ReadJobImageAnonymously), lint)
+	}
+
+	for _, visibility := range visibilities {
+		t.Run(visibility.Name, func(t *testing.T) {
+			runGitLabDevelopmentVisibility(t, root, visibility.Private, acceptance, lintImage)
+		})
+	}
+}
+
+func runGitLabDevelopmentVisibility(t *testing.T, root string, private bool, acceptance developmentAcceptance, lintImage string) {
+	t.Helper()
 
 	target := livetest.Accept(t, provider.ForgeGitLab)
 
@@ -55,7 +77,7 @@ func runGitLabDevelopment(t *testing.T, root string, private bool, acceptance de
 
 	archive := os.Getenv("FORGE_CI_LIVE_CONSUMER_IMAGE_ARCHIVE")
 
-	var images livetest.GitLabGateImages
+	images := livetest.GitLabGateImages{Lint: lintImage}
 
 	switch {
 	case acceptance.buildsImages && livetest.GitLabKaniko(t):
@@ -76,10 +98,6 @@ func runGitLabDevelopment(t *testing.T, root string, private bool, acceptance de
 		images.JobTags = map[string][]string{acceptance.jobName: {label}}
 	default:
 		images.Job = livetest.PushJobImage(t, target, engine, archive)
-	}
-
-	if lint := os.Getenv("FORGE_CI_LIVE_LINT_IMAGE_ARCHIVE"); lint != "" {
-		images.Lint = livetest.PushJobImage(t, target, livetest.NewPublicScratchRepo(t, target, "gitlab-development-lint", livetest.ReadJobImageAnonymously), lint)
 	}
 
 	repo := livetest.NewBareScratchRepo(t, target, "gitlab-consumer-development", consumer.ObjectFormat, private)

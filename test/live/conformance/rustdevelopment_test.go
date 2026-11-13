@@ -40,15 +40,11 @@ func TestGitLabLayer_RustDevelopment(t *testing.T) {
 		t.Fatal("Rust development requires disposable scratch repositories")
 	}
 
-	for _, visibility := range livetest.ConsumerVisibilities(t) {
-		t.Run(visibility.Name, func(t *testing.T) {
-			runGitLabDevelopment(t, root, visibility.Private, developmentAcceptance{
-				jobName: "Check: Rust development", smokeMarker: "Rust development smoke passed at ",
-				artifactPrefix: "fc-rust-dev-", maxArchive: 256 << 20, buildsImages: true,
-				checkArchive: rustFixtureRoles().requireArchive, checkPublication: rustFixtureRoles().requireRegistryPublication,
-			})
-		})
-	}
+	runGitLabDevelopment(t, root, developmentAcceptance{
+		jobName: "Check: Rust development", smokeMarker: "Rust development smoke passed at ",
+		artifactPrefix: "fc-rust-dev-", maxArchive: 256 << 20, buildsImages: true,
+		checkArchive: rustFixtureRoles().requireArchive, checkPublication: rustFixtureRoles().requireRegistryPublication,
+	})
 }
 
 func TestForgejoLayer_RustDevelopment(t *testing.T) {
