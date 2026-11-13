@@ -884,15 +884,15 @@ Start it inside the hosted session, as a single trial; it starts none. It
 prepares the engine once, then runs each cell with the engine reused, one
 after another: the cells of one demo share package coordinates. Each demo's
 pull-request fixture pins its Nanolinter flavor by a placeholder digest
-(`nanolinter:kotlin@sha256:0...`), so the run names one public image a
+(`nanolinter:kotlin@sha256:0...`), so the run names one public image per
 flavor, `nanolinter-image=<flavor>:<digest reference>` as the prepare's
-`job-image=` does, and each cell lints with the image of its flavor. A
-flavor of the set's cells with no image is refused before anything runs.
-The other settings after the set go to every cell but a variant, whose
-fixture root has workflows of its own that take none. Each cell runs with its own visibility,
-whatever `FORGE_CI_LIVE_CONSUMER_VISIBILITY` the caller has set; the fork pull
-request runs public in every set. Before anything runs it refuses a setting a
-cell does not take, and a set with a release or lifecycle when
+`job-image=` does, and each cell lints with the image of its flavor. If a
+cell's flavor has no image, nothing runs. The other settings after the set
+go to every cell but a variant, whose fixture root has workflows of its own
+that take none. Each cell runs with its own visibility, whatever
+`FORGE_CI_LIVE_CONSUMER_VISIBILITY` the caller has set; the fork pull
+request runs public in every set. Before anything runs it refuses a setting
+a cell does not take, and a set with a release or lifecycle when
 `FORGE_CI_LIVE_GITHUB_RELEASE_TOKEN_FILE` is unset. It reads no credential
 itself and runs no cell twice.
 

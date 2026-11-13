@@ -255,9 +255,10 @@ func githubTestLintImage(flavor string) string {
 
 // githubTestLintImages names an image for every flavor the fixtures pin.
 func githubTestLintImages() []string {
-	var words []string
+	flavors := []string{"core", "go", "java", "javascript-typescript", "kotlin", "rust", "swift"}
+	words := make([]string, 0, len(flavors))
 
-	for _, flavor := range []string{"core", "go", "java", "javascript-typescript", "kotlin", "rust", "swift"} {
+	for _, flavor := range flavors {
 		words = append(words, "nanolinter-image="+flavor+":"+githubTestLintImage(flavor))
 	}
 

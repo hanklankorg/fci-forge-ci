@@ -1467,20 +1467,22 @@ test-live-affected base forge set="set=full":
 # another, on the demos of a prepared directory: the engine is prepared once
 # (FORGE_CI_LIVE_ENGINE_MODE=prepare), then each cell is one `just
 # test-live-consumer github` call that reuses it, with the cell's settings,
-# the settings given here (the lint image, as nanolinter-image=) and, in a
+# the settings given here (one lint image a flavor the cells pin, as
+# nanolinter-image=<flavor>:<digest reference>) and, in a
 # set below the full one, the cell's one visibility. after=small or
 # after=medium right after the set runs the cells and visibilities of the
 # set that the set after did not. Run it inside Forge
 # Lab's hosted session, as a single trial: it starts no session. Before
-# anything runs it refuses a setting a cell does not take, and a set with a
+# anything runs it refuses a setting a cell does not take, a lint flavor
+# with no image, and a set with a
 # release or a lifecycle when FORGE_CI_LIVE_GITHUB_RELEASE_TOKEN_FILE is
 # unset. The run directory, under the live runs' root, gets a log of the
 # engine and of each cell, and cells.txt: the run set and, of a delta run,
 # the set after, then a line a cell: passed, failed or not-covered. No cell
 # is run again, and any that did not pass fails the recipe. docs/live-runs.md, Hosted GitHub cells.
 #
-#   just test-live-github-cells ~/prepared/k3s <org-id> set=medium nanolinter-image=<digest reference>
-#   just test-live-github-cells ~/prepared/k3s <org-id> set=full after=medium nanolinter-image=<digest reference>
+#   just test-live-github-cells ~/prepared/k3s <org-id> set=medium nanolinter-image=java:<digest reference> nanolinter-image=go:<digest reference> ...
+#   just test-live-github-cells ~/prepared/k3s <org-id> set=full after=medium nanolinter-image=java:<digest reference> ...
 [arg('dir', help='Absolute prepared directory from just test-live-prepare')]
 [arg('org', help='Numeric ID of the organization the hosted session authorizes')]
 [arg('set', help='set=small, set=medium or set=full: the run set whose cells run')]

@@ -205,7 +205,8 @@ func GitHubCellRuns(root, set string, extra []string, getenv func(string) string
 
 // githubFixtureLintFlavor is the Nanolinter flavor a demo's pull-request
 // fixture pins its placeholder lint image of, nanolinter:<flavor>@sha256:0...,
-// until a run names a real image.
+// until a run names a real image. It reads the pin githubPlaceholderLintImage
+// refuses in a trial; keep the two in step.
 var githubFixtureLintFlavor = regexp.MustCompile(`(?m)^[ \t]*nanolinter-image:[ \t]*\S+/nanolinter:([a-z][a-z0-9-]*)@sha256:0{64}\b`)
 
 // githubCellLintImages takes the run's nanolinter-image=<flavor>:<reference>
@@ -241,14 +242,13 @@ func githubCellLintImages(extra []string) (map[string]string, []string, error) {
 
 // githubCellLintImage is the nanolinter-image= setting of a demo's cell: the
 // run's image of the flavor its pull-request fixture pins, or none when the
-// fixture lints with no Nanolinter image.
+// fixture lints with no Nanolinter image. Every demo with a cell ships that
+// fixture, so a missing one is an error.
 func githubCellLintImage(root, demo string, images map[string]string) ([]string, error) {
 	fixture := filepath.Join(demoConsumerDir(root, demo), "test", "live", "github", "workflows", "pullrequest.yml")
 
 	body, err := os.ReadFile(fixture) //nolint:gosec // G304: a shipped demo's fixture, under the repository root.
-	if os.IsNotExist(err) {
-		return nil, nil
-	} else if err != nil {
+	if err != nil {
 		return nil, err
 	}
 
