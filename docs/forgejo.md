@@ -51,9 +51,10 @@ action.
 
 ## Requirements
 
-**Organization prerequisites:** host the reviewed layer and its published
-binary, provide fresh job containers on a trusted runner, and publish the
-reviewed job and signer images with their trusted signing-key information.
+**Owner prerequisites (an organization or a user):** host the reviewed layer
+and its published binary, provide fresh job containers on a trusted runner,
+and publish the reviewed job and signer images with their trusted
+signing-key information; see [Under a user account](#under-a-user-account).
 
 **Per repository:** fill the example's pins and project values, select the
 runner and job image, configure release secrets, and protect branches and
@@ -72,6 +73,41 @@ release; follow its workflow run to the final release, or use
 | The layer's binary | **Published on the instance for the pinned commit**, by the serving repository's owner, before a job runs; see [The binary in the layer](#the-binary-in-the-layer). |
 | Transport | HTTPS between the runner and the instance; the helper checkout refuses anything else. A private certificate authority must be trusted by the runner's job images and by the signer image; the layer has no input for a CA bundle. |
 | Release branch | `main` unless `prepare-release.yml` is given another `release-branch`; see [The request is the head of the release branch](#the-request-is-the-head-of-the-release-branch). |
+
+### Under a user account
+
+The owner of the layer and of its consumers can be a Forgejo user account
+as well as an organization. The setup maps directly:
+
+- The layer is called as
+  `uses: <user>/<repository>/.forgejo/workflows/<workflow>@<sha>`.
+- Variables and secrets go on each consumer repository, or on the user's own
+  Actions variables and secrets.
+- Runners register at user or instance level.
+- The layer's binary, the signer image and the release packages live under
+  the user.
+
+The rule that the serving repository and its owner's packages are readable
+without credentials still applies. Forgejo lets an anonymous client read a
+user's packages only when the user's visibility is public; a limited or
+private user's packages need a sign-in, so such a user cannot serve the
+layer. A layer under a user therefore needs a public user, on an instance
+that does not require a sign-in to view. A public user's packages are
+readable by anyone, those linked to its private repositories too, so a
+consumer that wants private packages belongs under another owner, one that
+is private.
+
+A user account leaves residual risk that an organization can reduce:
+
+- One person controls the layer, the pins and the signing keys, so there is
+  no separation of duties.
+- With no teams, required approvals must name collaborators.
+- Only the user can write the user's packages, so the package and registry
+  tokens are that person's personal tokens.
+
+Use an organization for production, and a user account for personal or
+small projects. The Forgejo live rows run with a user account as owner; see
+[Live runs](live-runs.md).
 
 ### Authorization and job tokens
 
@@ -325,9 +361,10 @@ architecture natively and hands its checked ledger to the signer.
 
 ### Variables
 
-Set these on the consumer repository or its organization. An operator supplies
-each value through a trusted channel; a release job derives none of them,
-except the default push URL when `RELEASE_GIT_URL` is unset.
+Set these on the consumer repository or its owner, an organization or a
+user. An operator supplies each value through a trusted channel; a release
+job derives none of them, except the default push URL when `RELEASE_GIT_URL`
+is unset.
 
 | Variable | Value |
 |---|---|
@@ -1551,10 +1588,10 @@ replaces `--packages-json`.
 
 ### Using the layer from a fork
 
-The layer names no organization. An organization serves it from its own copy
-of this repository, under any owner and any repository name, and brings its
-own signer image, Cosign key and bot identity. From nothing to a first
-release:
+The layer names no organization. An owner, an organization or a user, serves
+it from its own copy of this repository, under any repository name, and
+brings its own signer image, Cosign key and bot identity. From nothing to a
+first release:
 
 1. **Put the repository on your instance.** Forgejo does not fork across
    instances, so create an empty repository and push this history to it.
@@ -1588,10 +1625,11 @@ release:
 4. **Publish the binary and build your signer image.** One workflow does
    both, in that order. Copy
    [`examples/forgejo/signer-image.yml`](../examples/forgejo/signer-image.yml)
-   into one repository of your organization, set its two placeholders to your
-   copy and the commit of step 2, and run it. It needs the `CI_RUNNER_LABEL`
-   variable (a native AMD64 runner), `CI_RUNNER_LABEL_ARM64` (a native ARM64
-   runner for the arm64 image build, which never runs under emulation) and two
+   into one repository of your copy's owner, set its two placeholders to
+   your copy and the commit of step 2, and run it. It needs the
+   `CI_RUNNER_LABEL` variable (a native AMD64 runner),
+   `CI_RUNNER_LABEL_ARM64` (a native ARM64 runner for the arm64 image
+   build, which never runs under emulation) and two
    credentials: `ENGINE_PACKAGE_TOKEN` writes the engine owner's generic
    package on this forge; `SIGNER_REGISTRY_TOKEN`, with `SIGNER_REGISTRY_USER`,
    authenticates to the signer image registry.
