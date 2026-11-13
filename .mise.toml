@@ -68,7 +68,7 @@ go = "1.27.3"
 jq = "1.8.2"                                      # workflow/live-tier JSON utilities
 
 # Runtime dependency: SBOM generation and container-ledger signing invoke syft.
-"aqua:anchore/syft" = "1.55.0"
+"aqua:anchore/syft" = "1.57.0"
 
 # Runtime dependency: signing and verification invoke cosign. The adapter uses
 # the cosign 3 signing-config interface and is tested against this version.

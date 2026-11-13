@@ -179,7 +179,7 @@ func TestPinnedInstallers_VerifyExactDownloadBeforeInstalling(t *testing.T) {
 
 	for _, tc := range []pinnedInstallerCase{
 		{"trivy", "https://github.com/aquasecurity/trivy/releases/download/v0.76.1/trivy_0.76.1_Linux-64bit.tar.gz", "c7cbe3137fb8a48a17574bede3dd6beb16742d1e9772929940fc90082c39d9c0", "trivy", "", ""},
-		{"syft", "https://github.com/anchore/syft/releases/download/v1.55.0/syft_1.55.0_linux_amd64.tar.gz", "bb65249542db5fedeeb4d3f9b018b75e7264dbfbbb10486f044581a92f90490d", "syft", "", ""},
+		{"syft", "https://github.com/anchore/syft/releases/download/v1.57.0/syft_1.57.0_linux_amd64.tar.gz", "9c077a7d43029b3b13e98a8db720661e700c4d58db6352153a06395ae4a2a704", "syft", "", ""},
 		{"cargo-cyclonedx", "https://github.com/CycloneDX/cyclonedx-rust-cargo/releases/download/cargo-cyclonedx-0.5.9/cargo-cyclonedx-x86_64-unknown-linux-gnu.tar.xz", "fb8dbee9f182173e062a64a387b21a0badc6fab8b2abf9294973f012972bf6d8", "cargo-cyclonedx-x86_64-unknown-linux-gnu/cargo-cyclonedx", "", ""},
 		{"cargo-cyclonedx", "https://github.com/CycloneDX/cyclonedx-rust-cargo/releases/download/cargo-cyclonedx-0.5.9/cargo-cyclonedx-aarch64-unknown-linux-gnu.tar.xz", "7bf131ca5389b07a4f10c182bcf8a5ad339d64408b6f0d8f6834a0bd6120a06a", "cargo-cyclonedx-aarch64-unknown-linux-gnu/cargo-cyclonedx", "Linux", "aarch64"},
 		{"cargo-cyclonedx", "https://github.com/CycloneDX/cyclonedx-rust-cargo/releases/download/cargo-cyclonedx-0.5.9/cargo-cyclonedx-x86_64-apple-darwin.tar.xz", "59d2a583fa632f8759456c1b531340331255b277386d23c598a3dbbc916fde63", "cargo-cyclonedx-x86_64-apple-darwin/cargo-cyclonedx", "Darwin", "x86_64"},
@@ -199,9 +199,9 @@ func TestPinnedInstallers_VerifyExactDownloadBeforeInstalling(t *testing.T) {
 		{"forgejo-runner", "https://code.forgejo.org/forgejo/runner/releases/download/v13.2.1/forgejo-runner-13.2.1-linux-arm64", "eeddb7902f79abe488972f4189fbe3ea02762ee827d1b406b469420bf0d62dd9", "", "Linux", "aarch64"},
 		{"trivy", "https://github.com/aquasecurity/trivy/releases/download/v0.76.1/trivy_0.76.1_Linux-ARM64.tar.gz", "e174dff2a6dba5e3ae41f8d0537a6324405bd08132497340304c6b20e0f16a1f", "trivy", "Linux", "aarch64"},
 		{"trivy", "https://github.com/aquasecurity/trivy/releases/download/v0.76.1/trivy_0.76.1_macOS-ARM64.tar.gz", "11a9b6cd2752011b54f01ea4bd0dbfa9f0c41dc6538d5a3f9d23955f471bf4e5", "trivy", "Darwin", "arm64"},
-		{"syft", "https://github.com/anchore/syft/releases/download/v1.55.0/syft_1.55.0_linux_arm64.tar.gz", "929bd163db2d7cd2255d3bcb8967208079813d7b46b0c952f7b794d8e2c7d304", "syft", "Linux", "aarch64"},
-		{"syft", "https://github.com/anchore/syft/releases/download/v1.55.0/syft_1.55.0_darwin_amd64.tar.gz", "e2e5831cbabaec9a36fe65c34755c1113982c842a685edce3ce0b54a0ded8003", "syft", "Darwin", "x86_64"},
-		{"syft", "https://github.com/anchore/syft/releases/download/v1.55.0/syft_1.55.0_darwin_arm64.tar.gz", "1217c258bd5eb91ef3189cf22a82e02f9cac07e4ce934350f428e93aff674625", "syft", "Darwin", "arm64"},
+		{"syft", "https://github.com/anchore/syft/releases/download/v1.57.0/syft_1.57.0_linux_arm64.tar.gz", "410cbfa0ae0f63246bc0057843760b1de2833cd23919e025e368fd7681308cdb", "syft", "Linux", "aarch64"},
+		{"syft", "https://github.com/anchore/syft/releases/download/v1.57.0/syft_1.57.0_darwin_amd64.tar.gz", "f0e8568a9429ac1c8e4ae9e9c399fede5fcd09e4a7348b47b0532baf1c6500c1", "syft", "Darwin", "x86_64"},
+		{"syft", "https://github.com/anchore/syft/releases/download/v1.57.0/syft_1.57.0_darwin_arm64.tar.gz", "17012a5a110323bb1069e513a8665f1ae445905c56b4e3f9a9df4f95c5bb6161", "syft", "Darwin", "arm64"},
 		{"cosign", "https://github.com/sigstore/cosign/releases/download/v3.1.4/cosign-linux-arm64", "ade83b7aac62e131cacfe96d958948b2150cc9efec46a570a2649b8e27dedad2", "", "Linux", "aarch64"},
 		{"cosign", "https://github.com/sigstore/cosign/releases/download/v3.1.4/cosign-darwin-arm64", "9f9b8cd557cf2e5b3df3373a00baa005a86b02391e3e06dd0ce37b3a1533d3a4", "", "Darwin", "arm64"},
 		{"gh", "https://github.com/cli/cli/releases/download/v2.103.2/gh_2.103.2_linux_arm64.tar.gz", "4c3e99a50bd8b181a3fe9d69b25dd978bac768148d88f01507c6b4d1ef61a443", "gh_2.103.2_linux_arm64/bin/gh", "Linux", "arm64"},
