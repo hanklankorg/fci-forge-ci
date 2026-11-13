@@ -5,7 +5,8 @@
 // semantics for safe reads: GET and HEAD requests may retry 502/503/504, 429
 // Too Many Requests (honouring Retry-After), and DNS/connection errors.
 // Mutations are sent once because these failures do not prove the server did
-// not commit the request.
+// not commit the request. The one exception is a mutation the caller marks
+// with ReplayRefusedMutation, which may be replayed after an HTTP 500.
 //
 // The transport is safe for use as a drop-in replacement for
 // http.DefaultTransport. Use it via:
@@ -57,7 +58,8 @@ type Config struct {
 	Clock Clock
 	// RetryInternalServerErrors opts safe reads into HTTP 500 retries for
 	// services which use that status for temporary failures. Mutations still
-	// run once. The default policy deliberately leaves HTTP 500 terminal.
+	// run once unless marked with ReplayRefusedMutation. The default policy
+	// deliberately leaves HTTP 500 terminal.
 	RetryInternalServerErrors bool
 }
 
@@ -145,16 +147,30 @@ func WithInternalServerErrorRetries(inner http.RoundTripper) http.RoundTripper {
 	return NewTransport(cfg)
 }
 
+// replayRefusedKey is the context key ReplayRefusedMutation stores under.
+type replayRefusedKey struct{}
+
+// ReplayRefusedMutation returns a context whose mutation a transport with
+// RetryInternalServerErrors replays after an HTTP 500 answer, within the same
+// attempt and delay bounds as a safe read. Every other status, and a transport
+// failure, which leaves the server's outcome unknown, still ends the request at
+// once. Mark only a mutation the server is known to apply idempotently and to
+// refuse with HTTP 500 before changing anything.
+func ReplayRefusedMutation(ctx context.Context) context.Context {
+	return context.WithValue(ctx, replayRefusedKey{}, true)
+}
+
 // RoundTrip implements http.RoundTripper.
 //
-// Only GET and HEAD are retried. A request with a body is retryable only when
-// net/http can recreate that body through GetBody. Mutations require
-// operation-specific idempotency or reconciliation and therefore pass through
-// to the inner transport exactly once.
+// Only GET and HEAD are retried, and a mutation marked with
+// ReplayRefusedMutation on HTTP 500 alone. A request with a body is retryable
+// only when net/http can recreate that body through GetBody. Other mutations
+// require operation-specific idempotency or reconciliation and therefore pass
+// through to the inner transport exactly once.
 //
 //nolint:cyclop // retry loop with one branch per backoff/abort/replay/result class.
 func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
-	if !retryableRequest(req) {
+	if !t.retryableRequest(req) {
 		resp, err := t.cfg.Inner.RoundTrip(req)
 
 		return resp, SafeError(err)
@@ -181,7 +197,7 @@ func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 
 		resp, err = t.cfg.Inner.RoundTrip(req)
 
-		retryReason = t.retryDecision(resp, err)
+		retryReason = t.retryDecision(req, resp, err)
 		if retryReason == "" {
 			return resp, SafeError(err)
 		}
@@ -296,8 +312,8 @@ func SafeError(err error) error {
 	return transportError{cause: err}
 }
 
-func retryableRequest(req *http.Request) bool {
-	if req.Method != http.MethodGet && req.Method != http.MethodHead {
+func (t *Transport) retryableRequest(req *http.Request) bool {
+	if !safeMethod(req) && (!t.cfg.RetryInternalServerErrors || req.Context().Value(replayRefusedKey{}) == nil) {
 		return false
 	}
 
@@ -319,12 +335,25 @@ func drainAndClose(resp *http.Response) {
 // maxDrainBytes caps the drain; a larger body costs a new connection instead.
 const maxDrainBytes = 64 << 10
 
+func safeMethod(req *http.Request) bool {
+	return req.Method == http.MethodGet || req.Method == http.MethodHead
+}
+
 // retryDecision returns a short non-empty reason when the response/error
 // pair indicates a retryable failure, or "" when the result is final.
-func (t *Transport) retryDecision(resp *http.Response, err error) string {
+func (t *Transport) retryDecision(req *http.Request, resp *http.Response, err error) string {
+	if !safeMethod(req) {
+		// A mutation reaches this decision only when marked with
+		// ReplayRefusedMutation, and only an answered HTTP 500 is a refusal
+		// the caller vouched for; anything else may have been applied.
+		if err == nil && resp != nil && resp.StatusCode == http.StatusInternalServerError {
+			return "500 Internal Server Error"
+		}
+
+		return ""
+	}
+
 	if err != nil {
-		// RoundTrip reaches this decision only for replayable GET/HEAD
-		// requests; mutations bypass the retry loop entirely.
 		return "transport failure"
 	}
 

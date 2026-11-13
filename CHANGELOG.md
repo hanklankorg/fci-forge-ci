@@ -550,6 +550,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- On Forgejo, an artifact upload whose finalisation is refused with HTTP
+  500 is finalised again, within the runtime client's retry bounds.
+  Forgejo 17 confirms an artifact by opening every chunk of the run, so a
+  parallel job of the same run that removes its merged chunks at that
+  moment fails the confirmation with `HTTP 500: dependency unavailable`,
+  although nothing of the artifact was changed. A transport failure, whose
+  outcome is unknown, and every other status still end the upload at once.
 - `release sign --method gpg` and `release sbom-zip --sign --method gpg`
   apply the swap policy before they read the private key, so the key is
   never decrypted on a runner with swap on. Before, the key was loaded

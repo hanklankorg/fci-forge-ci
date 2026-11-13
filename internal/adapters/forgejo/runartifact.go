@@ -614,8 +614,9 @@ func isLoopbackHost(host string) bool {
 func (p *Provider) doRuntimeRequest(req *http.Request, token string) (*http.Response, error) {
 	client := *p.httpClient()
 	// Forgejo's artifact service can transiently return 500 on reads even
-	// after acknowledging an upload. Reuse bounded safe-read retries; never
-	// replay upload or finalization mutations automatically.
+	// after acknowledging an upload. Reuse bounded safe-read retries. Of the
+	// mutations, only finalization opts in to a replay after HTTP 500 (see
+	// finalizeArtifact); container creation and file uploads are sent once.
 	client.Transport = httpretry.WithInternalServerErrorRetries(client.Transport)
 
 	if token == "" {
@@ -893,6 +894,23 @@ func (p *Provider) putFile(ctx context.Context, creds runtimeUploadCreds, contai
 }
 
 // finalizeArtifact PATCHes the total size, sealing the artifact.
+//
+// The PATCH is replayed within the runtime client's retry bounds when Forgejo
+// answers HTTP 500, and only then. Forgejo's confirmUploadArtifact
+// (routers/api/actions/artifacts.go) runs mergeChunksForRun, whose
+// listChunksByRunID walks the run-wide chunk directory through
+// LocalStorage.IterateObjects, opening every chunk of every artifact in the
+// run. A parallel job confirming another artifact deletes its chunks after
+// merging them; one deleted between the walk's directory read and its open
+// fails this confirmation with HTTP 500 before anything of this artifact is
+// touched. The confirmation is idempotent: an artifact already merged has no
+// chunks left and is skipped, so a repeat merges only what is still pending.
+// A refusal after Forgejo's database update failed is the exception: its
+// chunks are already gone, so a replay is accepted with the artifact left
+// unconfirmed, and the failure surfaces at download.
+// The reference client, @actions/artifact v1, likewise retries its
+// patchArtifactSize on HTTP 500. A transport failure leaves the outcome
+// unknown and is not replayed.
 func (p *Provider) finalizeArtifact(ctx context.Context, creds runtimeUploadCreds, name string, total int64) error {
 	body, _ := json.Marshal(map[string]int64{"Size": total}) //nolint:errchkjson // single int field is always encodable.
 	patchURL := fmt.Sprintf("%s/_apis/pipelines/workflows/%s/artifacts?artifactName=%s&api-version=%s",
@@ -902,9 +920,17 @@ func (p *Provider) finalizeArtifact(ctx context.Context, creds runtimeUploadCred
 	// Never log the runtime URL, token, headers or response body. The byte count
 	// describes the uploaded artifact, not the small finalization request.
 	slog.DebugContext(ctx, "Finalizing Forgejo artifact", "method", http.MethodPatch, "artifact_bytes", total)
-	resp, err := p.runtimeSend(ctx, http.MethodPatch, patchURL, creds.token, "application/json", bytes.NewReader(body), int64(len(body)), nil)
+	resp, err := p.runtimeSend(httpretry.ReplayRefusedMutation(ctx), http.MethodPatch, patchURL, creds.token, "application/json", bytes.NewReader(body), int64(len(body)), nil)
 
 	elapsed := time.Since(started).Round(time.Millisecond)
+	if errors.Is(err, errs.ErrDependencyUnavailable) {
+		// The retry transport ends a replayed PATCH with this class only once
+		// HTTP 500 has answered every attempt: the server refused it. Its
+		// error names the runtime host, so it is not wrapped.
+		return fmt.Errorf("finalize artifact %q (PATCH, %d bytes, elapsed %s): HTTP %d, retries exhausted: %w",
+			name, total, elapsed, http.StatusInternalServerError, errs.ErrDependencyUnavailable)
+	}
+
 	if err != nil {
 		return fmt.Errorf("finalize artifact %q (PATCH, %d bytes, elapsed %s; server outcome unknown, not retried): %w", name, total, elapsed, err)
 	}

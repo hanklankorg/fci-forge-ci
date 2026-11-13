@@ -14,11 +14,13 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+	"time"
 
+	"github.com/diggsweden/forge-ci/internal/adapters/httpretry"
 	"github.com/diggsweden/forge-ci/internal/domain/errs"
 )
 
-func TestFinalizeArtifact_TransportDiagnosticsAndNoReplay(t *testing.T) {
+func TestFinalizeArtifact_DiagnosticsAndReplay(t *testing.T) {
 	// Capture debug logs too: credentials must not become visible with -v.
 	var logs bytes.Buffer
 
@@ -73,24 +75,62 @@ func TestFinalizeArtifact_TransportDiagnosticsAndNoReplay(t *testing.T) {
 		})
 	}
 
-	for _, status := range []int{http.StatusOK, http.StatusInternalServerError} {
-		t.Run(fmt.Sprintf("response-%d", status), func(t *testing.T) {
+	// Only an answered HTTP 500 is replayed, up to the retry bound: Forgejo
+	// refuses the whole confirmation when another artifact's chunk vanishes
+	// while it lists the run's chunks, and repeating it is idempotent.
+	for _, test := range []struct {
+		name       string
+		statuses   []int
+		want       error
+		calls      int
+		diagnostic string // in the error, when there is one
+		logged     string // the logged final status, when a response ends it
+	}{
+		{"accepted", []int{http.StatusOK}, nil, 1, "", "status=200"},
+		{"refused-then-accepted", []int{http.StatusInternalServerError, http.StatusOK}, nil, 2, "", "status=200"},
+		{"refused-throughout", []int{http.StatusInternalServerError}, errs.ErrDependencyUnavailable, httpretry.DefaultMaxAttempts, "HTTP 500, retries exhausted", ""},
+		{"conflict", []int{http.StatusConflict}, errs.ErrValidation, 1, "HTTP 409", "status=409"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
 			logs.Reset()
 
 			calls := 0
-			client := &Provider{HTTPClient: &http.Client{Transport: responseBoundaryTransport(func(request *http.Request) (*http.Response, error) {
+			fake := responseBoundaryTransport(func(request *http.Request) (*http.Response, error) {
 				calls++
 
+				if body, err := io.ReadAll(request.Body); err != nil || string(body) != `{"Size":1234}` {
+					t.Fatalf("attempt %d sent body %q, %v", calls, body, err)
+				}
+
+				status := test.statuses[min(calls, len(test.statuses))-1]
+
 				return &http.Response{StatusCode: status, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(private)), Request: request}, nil
+			})
+			client := &Provider{HTTPClient: &http.Client{Transport: httpretry.NewTransport(httpretry.Config{
+				Inner: fake, BaseDelay: time.Nanosecond, MaxDelay: time.Nanosecond,
 			})}}
 
-			err := client.finalizeArtifact(t.Context(), runtimeUploadCreds{url: "https://" + private + ".invalid", token: private, runID: "7"}, "runtime-cli", 1234)
-			if status == http.StatusOK && err != nil || status == http.StatusInternalServerError && !errors.Is(err, errs.ErrDependencyUnavailable) {
-				t.Fatalf("unexpected finalization status: %v", err)
+			// The retry transport's debug log names the host of a replayed
+			// request, as it does for every retried runtime read.
+			err := client.finalizeArtifact(t.Context(), runtimeUploadCreds{url: "https://runtime.invalid", token: private, runID: "7"}, "runtime-cli", 1234)
+			if test.want == nil && err != nil || test.want != nil && !errors.Is(err, test.want) {
+				t.Fatalf("finalization error = %v, want %v", err, test.want)
 			}
 
-			if calls != 1 || !strings.Contains(logs.String(), fmt.Sprintf("status=%d", status)) || !strings.Contains(logs.String(), "elapsed=") {
-				t.Fatalf("missing response diagnostics or replayed PATCH: calls=%d", calls)
+			if calls != test.calls {
+				t.Fatalf("PATCH sent %d times, want %d", calls, test.calls)
+			}
+
+			if err != nil && (!strings.Contains(err.Error(), test.diagnostic) || strings.Contains(err.Error(), "outcome unknown")) {
+				t.Errorf("diagnostic = %v, want %q and an answered outcome", err, test.diagnostic)
+			}
+
+			if test.logged != "" && (!strings.Contains(logs.String(), test.logged) || !strings.Contains(logs.String(), "elapsed=")) {
+				t.Fatalf("missing response diagnostics %q", test.logged)
+			}
+
+			if !strings.Contains(fmt.Sprint(err)+logs.String(), "elapsed") {
+				t.Fatal("missing elapsed diagnostics")
 			}
 
 			if strings.Contains(fmt.Sprint(err)+logs.String(), private) {

@@ -4,6 +4,7 @@
 package httpretry_test
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"net/http"
@@ -20,18 +21,24 @@ func TestInternalServerErrorRetryPolicy(t *testing.T) {
 	for _, tc := range []struct {
 		name, method string
 		optIn        bool
+		replay       bool
 		failures     int
 		attempts     int
 		exhausted    bool
+		status       int // the failure status; 0 means HTTP 500
 	}{
-		{"default_is_terminal", http.MethodGet, false, 10, 1, false},
-		{"read_recovers", http.MethodGet, true, 2, 3, false},
-		{"head_recovers", http.MethodHead, true, 2, 3, false},
-		{"read_exhausts", http.MethodGet, true, 10, 3, true},
-		{"post_once", http.MethodPost, true, 10, 1, false},
-		{"put_once", http.MethodPut, true, 10, 1, false},
-		{"patch_once", http.MethodPatch, true, 10, 1, false},
-		{"delete_once", http.MethodDelete, true, 10, 1, false},
+		{"default_is_terminal", http.MethodGet, false, false, 10, 1, false, 0},
+		{"read_recovers", http.MethodGet, true, false, 2, 3, false, 0},
+		{"head_recovers", http.MethodHead, true, false, 2, 3, false, 0},
+		{"read_exhausts", http.MethodGet, true, false, 10, 3, true, 0},
+		{"post_once", http.MethodPost, true, false, 10, 1, false, 0},
+		{"put_once", http.MethodPut, true, false, 10, 1, false, 0},
+		{"patch_once", http.MethodPatch, true, false, 10, 1, false, 0},
+		{"delete_once", http.MethodDelete, true, false, 10, 1, false, 0},
+		{"marked_patch_recovers", http.MethodPatch, true, true, 2, 3, false, 0},
+		{"marked_patch_exhausts", http.MethodPatch, true, true, 10, 3, true, 0},
+		{"marked_patch_default_is_terminal", http.MethodPatch, false, true, 10, 1, false, 0},
+		{"marked_patch_unavailable_once", http.MethodPatch, true, true, 10, 1, false, http.StatusServiceUnavailable},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -41,7 +48,7 @@ func TestInternalServerErrorRetryPolicy(t *testing.T) {
 				calls++
 				if calls <= tc.failures {
 					w.Header().Set("Retry-After", "1")
-					w.WriteHeader(http.StatusInternalServerError)
+					w.WriteHeader(cmp.Or(tc.status, http.StatusInternalServerError))
 				}
 			})
 			clock := newFakeClock()
@@ -52,7 +59,12 @@ func TestInternalServerErrorRetryPolicy(t *testing.T) {
 				transport = httpretry.WithInternalServerErrorRetries(base)
 			}
 
-			req, err := http.NewRequestWithContext(t.Context(), tc.method, testURL, nil)
+			ctx := t.Context()
+			if tc.replay {
+				ctx = httpretry.ReplayRefusedMutation(ctx)
+			}
+
+			req, err := http.NewRequestWithContext(ctx, tc.method, testURL, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -84,7 +96,7 @@ func TestInternalServerErrorRetryPolicy(t *testing.T) {
 			}
 			defer func() { _ = originalResponse.Body.Close() }()
 
-			if calls != 1 || originalResponse.StatusCode != http.StatusInternalServerError {
+			if calls != 1 || originalResponse.StatusCode != cmp.Or(tc.status, http.StatusInternalServerError) {
 				t.Fatalf("original transport's policy changed: calls=%d status=%d", calls, originalResponse.StatusCode)
 			}
 		})
