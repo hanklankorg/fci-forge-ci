@@ -273,7 +273,7 @@ func recoverForgejoReleaseAfterHandoff(t *testing.T, scenario layerScenario, req
 	t.Logf("run %d was interrupted at %q and left %s without a release; run %d released v%s of %s", interrupted.ID, livetest.ForgejoRecoveryCheckpointReached, finalTag, recovered.ID, next, released)
 }
 
-func rerunForgejoReleaseAfterHandoff(t *testing.T, scenario layerScenario, requester livetest.RequestSigner, keys releaseKeys, settings livetest.TrialSettings, external *livetest.ExternalRegistry, request string, secrets ...map[string]string) {
+func rerunForgejoReleaseAfterHandoff(t *testing.T, scenario layerScenario, requester livetest.RequestSigner, keys releaseKeys, settings livetest.TrialSettings, external *livetest.ExternalRegistry, request, workflow string, secrets ...map[string]string) {
 	t.Helper()
 
 	target, repo := scenario.target, scenario.repo
@@ -291,11 +291,17 @@ func rerunForgejoReleaseAfterHandoff(t *testing.T, scenario layerScenario, reque
 
 	hold := before[at]
 
+	dependants, err := livetest.ForgejoRecoveryHoldDependants(workflow)
+	if err != nil {
+		t.Fatalf("read the jobs that need the hold from %s: %v", settings.Workflow, err)
+	}
+
 	// The rerun of the hold runs again what the interruption stopped, and
 	// nothing else: every job that did not succeed is the hold or one that
-	// needs it, signing and publication or the job that calls them.
+	// needs it, directly or through another job, or signing and publication
+	// or the job that calls them.
 	for _, job := range before {
-		if job.Status != jobSuccess && job.ID != hold.ID && job.Name != forgejoSignJob &&
+		if job.Status != jobSuccess && job.ID != hold.ID && !slices.Contains(dependants, job.Name) && job.Name != forgejoSignJob &&
 			!slices.Contains(forgejoPublishJobs, job.Name) && len(job.RunsOn) != 0 {
 			t.Fatalf("job %q ended %s in the interrupted run, and it is neither the hold nor a job that needs it, so a rerun of the hold would leave it as it is", job.Name, job.Status)
 		}

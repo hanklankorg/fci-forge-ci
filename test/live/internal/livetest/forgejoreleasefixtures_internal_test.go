@@ -232,3 +232,48 @@ func TestNextPatchVersion(t *testing.T) {
 		}
 	}
 }
+
+// A rerun of the hold runs every job that needs it, directly or through
+// another job, and no other.
+func TestDependantJobs(t *testing.T) {
+	for _, tt := range []struct {
+		name  string
+		needs map[string][]string
+		want  []string
+	}{
+		{"direct", map[string][]string{"hold": {"reached"}, "sign": {"build", "hold"}, "build": nil}, []string{"sign"}},
+		{"transitive", map[string][]string{"sign": {"hold"}, "summary": {"build", "sign"}}, []string{"sign", "summary"}},
+		{"unrelated", map[string][]string{"hold": {"build"}, "lint": {"build"}}, []string{}},
+		{"diamond", map[string][]string{"left": {"hold"}, "right": {"hold"}, "join": {"left", "right"}, "after": {"join"}}, []string{"after", "join", "left", "right"}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := dependantJobs(tt.needs, "hold"); !slices.Equal(got, tt.want) {
+				t.Errorf("dependantJobs() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// The dependants are named as the run lists them: by name:, or by key.
+func TestForgejoRecoveryHoldDependants(t *testing.T) {
+	body := `jobs:
+  ` + forgejoRecoveryHoldJob + `:
+    name: hold
+  sign:
+    name: Sign
+    needs: ` + forgejoRecoveryHoldJob + `
+  summary:
+    needs: [build, sign]
+  build:
+    name: Build
+`
+
+	got, err := ForgejoRecoveryHoldDependants(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if want := []string{"Sign", "summary"}; !slices.Equal(got, want) {
+		t.Errorf("ForgejoRecoveryHoldDependants() = %v, want %v", got, want)
+	}
+}

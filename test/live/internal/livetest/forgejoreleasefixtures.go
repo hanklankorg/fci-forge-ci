@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -394,6 +395,76 @@ func forgejoNeeds(value any) ([]any, error) {
 	}
 
 	return nil, fmt.Errorf("the signing job needs no job, so nothing hands over to it: %w", errForgejoReleaseFixture)
+}
+
+// ForgejoRecoveryHoldDependants names every job of the release workflow
+// body that needs the recovery hold, directly or through another job, by
+// the name the run lists it under: its name:, or its key when it has none.
+// A rerun of the hold runs these again with it. The forge lists each job's
+// needs by key and the job itself by name, so the graph is read from the
+// workflow the run was started with.
+func ForgejoRecoveryHoldDependants(body string) ([]string, error) {
+	_, jobs, err := forgejoReleaseJobs(body)
+	if err != nil {
+		return nil, err
+	}
+
+	if _, held := jobs[forgejoRecoveryHoldJob]; !held {
+		return nil, fmt.Errorf("the release workflow has no job %s", forgejoRecoveryHoldJob)
+	}
+
+	needs := make(map[string][]string, len(jobs))
+
+	for key, value := range jobs {
+		job, _ := value.(map[string]any)
+
+		switch listed := job[fieldNeeds].(type) {
+		case string:
+			needs[key] = []string{listed}
+		case []any:
+			for _, need := range listed {
+				text, _ := need.(string)
+				needs[key] = append(needs[key], text)
+			}
+		}
+	}
+
+	keys := dependantJobs(needs, forgejoRecoveryHoldJob)
+	names := make([]string, 0, len(keys))
+
+	for _, key := range keys {
+		job, _ := jobs[key].(map[string]any)
+
+		name, _ := job[fieldName].(string)
+		if name == "" {
+			name = key
+		}
+
+		names = append(names, name)
+	}
+
+	return names, nil
+}
+
+// dependantJobs is every job, by key and sorted, that needs root directly
+// or through another job.
+func dependantJobs(needs map[string][]string, root string) []string {
+	found := map[string]bool{}
+	pending := []string{root}
+
+	for len(pending) != 0 {
+		needed := pending[0]
+		pending = pending[1:]
+
+		for job, listed := range needs {
+			if !found[job] && slices.Contains(listed, needed) {
+				found[job] = true
+				pending = append(pending, job)
+			}
+		}
+	}
+
+	return slices.Sorted(maps.Keys(found))
 }
 
 // forgejoHeldCondition adds the hold to a signing job's own condition. A

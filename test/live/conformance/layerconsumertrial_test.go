@@ -299,7 +299,7 @@ func runForgejoConsumerTrial(t *testing.T, root string, releaseCase forgejoRelea
 
 		return
 	} else if releaseCase == forgejoRerunAfterInterruptionRelease {
-		rerunForgejoReleaseAfterHandoff(t, scenario, requester, keys, settings, external, main, facts.Secrets, plan.Secrets)
+		rerunForgejoReleaseAfterHandoff(t, scenario, requester, keys, settings, external, main, workflows[settings.Workflow], facts.Secrets, plan.Secrets)
 
 		return
 	} else if run, released := requestRelease(t, scenario, requester, keys, settings, external, main, 0, facts.Secrets, plan.Secrets); released == "" {
