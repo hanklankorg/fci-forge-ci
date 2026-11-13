@@ -14,17 +14,12 @@ import (
 	"github.com/diggsweden/forge-ci/internal/testutil/reporoot"
 )
 
-// buildsImage reports whether a demo's release builds a container image.
-func buildsImage(demo string) bool {
-	return strings.HasSuffix(demo, "-service") || strings.HasSuffix(demo, "-container") || strings.HasSuffix(demo, "-workspace")
-}
-
 // checkRunSets holds what each run set of forge's table must keep. The full
 // set is the table, and every case names its set. The medium one has every
 // lane, and every demo's event with each release option, where a demo's
-// lifecycle stands for its pull request and its plain release. The
-// small one has a release of every ecosystem, every event but the lifecycle,
-// an image built with each builder and the snapshot that keeps files alone.
+// lifecycle stands for its pull request and its plain release. What the
+// small set covers is the same on every forge
+// (TestRunSetsCoverTheSamePairsOnEveryForge).
 func checkRunSets(t *testing.T, forge string) {
 	t.Helper()
 
@@ -48,30 +43,6 @@ func checkRunSets(t *testing.T, forge string) {
 		}) {
 			t.Errorf("%s: the medium set has no %s of %s with the release option %q", forge, c.Event, c.Demo, c.Option)
 		}
-	}
-
-	for _, ecosystem := range []string{"hello-maven", "hello-gradle", "hello-npm", "hello-cargo", "hello-go", "hello-meta"} {
-		if !in(SetSmall, func(c PreparedCase) bool { return c.Event == TrialRelease && strings.HasPrefix(c.Demo, ecosystem) }) {
-			t.Errorf("%s: the small set has no release of %s", forge, ecosystem)
-		}
-	}
-
-	for _, event := range []string{TrialPullRequest, TrialRelease, TrialSnapshot} {
-		if !in(SetSmall, func(c PreparedCase) bool { return c.Event == event }) {
-			t.Errorf("%s: the small set has no %s", forge, event)
-		}
-	}
-
-	for _, builder := range []string{ImageBuilderBuildah, ImageBuilderKaniko} {
-		if !in(SetSmall, func(c PreparedCase) bool {
-			return c.Event == TrialRelease && c.Builder == builder && buildsImage(c.Demo)
-		}) {
-			t.Errorf("%s: the small set builds no release image with %s", forge, builder)
-		}
-	}
-
-	if !in(SetSmall, func(c PreparedCase) bool { return c.Event == TrialSnapshot && c.Demo == "hello-go-cli" }) {
-		t.Errorf("%s: the small set has no snapshot that keeps files alone", forge)
 	}
 }
 

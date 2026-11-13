@@ -69,7 +69,16 @@ type PreparedCase struct {
 // change, the medium one for a forge's round and before a merge to main, and
 // the full one, every case with both visibilities, before a release and
 // before a plan closes. A case names the smallest set it is in (Set) by
-// hand; nothing computes or rotates a set.
+// hand; nothing computes or rotates a set. Each set covers the same demos'
+// events on Forgejo, GitLab and hosted GitHub (GitHubCells), but for the
+// named exceptions a test keeps: the small set a pull request of each
+// ecosystem, one release that bumps the version and one development build;
+// the medium set every demo's events; the full set adds the second
+// visibility, the second builder and a service demo's events alone. On the
+// lab the small set builds and releases an image with kaniko, the private
+// lane's hello-maven-service release, and builds one with Buildah, the
+// development build. The builder, the visibility, the release options and
+// the variants are each forge's own.
 const (
 	SetSmall  = "small"
 	SetMedium = "medium"
@@ -160,8 +169,9 @@ const (
 	// merge, service snapshot and signed release, with either builder.
 	LaneLifecycle = "lifecycle"
 	// LaneSnapshot: the snapshot of each multi-image demo, of the demos
-	// without a container, whose snapshots keep their files, and of one
-	// service from a variant of its declaration (SnapshotDeclaration).
+	// without a container, whose snapshots keep their files, of the Go
+	// service, the small set's development build, and of one service from
+	// a variant of its declaration (SnapshotDeclaration).
 	LaneSnapshot = "snapshot"
 	// LaneReleaseVariants: two releases in a row (NextVersion), release
 	// images read back (ReleaseImagesConfig), for hello-npm-service the
@@ -228,9 +238,13 @@ var ForgejoPreparedCases = []PreparedCase{
 	// Two producers of two families, each built in its own image: the
 	// backend in the Java job image, the frontend in the Node one.
 	{Lane: LaneSnapshot, Demo: "hello-monorepo", Event: TrialSnapshot, JobImage: flavorJava, Builder: ImageBuilderBuildah, NodeJobImage: flavorJS, Set: SetMedium},
+	// A service's snapshot alone, as on GitLab: the small set's development
+	// build, which hosted GitHub runs as the demo's own. Public below the
+	// full set, beside the private Buildah lifecycle of the demo.
+	{Lane: LaneSnapshot, Demo: "hello-go-service", Event: TrialSnapshot, JobImage: flavorGo, Builder: ImageBuilderBuildah, Set: SetSmall, Half: visibilityPublic},
 	// A declaration without a container: the snapshot keeps its files,
 	// through the demo's own snapshot-files caller (ForgejoSnapshotRoute).
-	{Lane: LaneSnapshot, Demo: "hello-go-cli", Event: TrialSnapshot, JobImage: flavorGo, Builder: ImageBuilderBuildah, Set: SetSmall},
+	{Lane: LaneSnapshot, Demo: "hello-go-cli", Event: TrialSnapshot, JobImage: flavorGo, Builder: ImageBuilderBuildah, Set: SetMedium},
 	// The same for an npm package, whose bundle is its one packed tarball.
 	{Lane: LaneSnapshot, Demo: "hello-npm-package", Event: TrialSnapshot, JobImage: flavorJS, Builder: ImageBuilderBuildah, Set: SetMedium},
 	// The Build SBOM alone: the demo's variant declaration keeps the
@@ -244,7 +258,7 @@ var ForgejoPreparedCases = []PreparedCase{
 	{Lane: LaneReleaseVariants, Demo: "hello-cargo-container", Event: TrialRelease, JobImage: flavorRust, Builder: ImageBuilderBuildah, Version: "0.2.0", NextVersion: "0.2.1", Platforms: nativePlatform, Option: OptionRetention, Set: SetMedium, Half: visibilityPrivate},
 	{Lane: LaneReleaseVariants, Demo: "hello-npm-package", Event: TrialRelease, JobImage: flavorJS, Builder: ImageBuilderBuildah, Version: "0.2.0", NextVersion: "0.2.1", Platforms: nativePlatform, Set: SetMedium, Half: visibilityPublic},
 	{Lane: LaneReleaseVariants, Demo: "hello-maven", Event: TrialRelease, JobImage: flavorJava, Builder: ImageBuilderBuildah, NextVersion: "0.0.2", Platforms: nativePlatform, Set: SetMedium, Half: visibilityPrivate},
-	{Lane: LaneReleaseVariants, Demo: "hello-go-service", Event: TrialRelease, JobImage: flavorGo, Builder: ImageBuilderBuildah, ReleaseImagesConfig: ".forge-ci/images.yml", Platforms: nativePlatform, Set: SetSmall, Half: visibilityPublic},
+	{Lane: LaneReleaseVariants, Demo: "hello-go-service", Event: TrialRelease, JobImage: flavorGo, Builder: ImageBuilderBuildah, ReleaseImagesConfig: ".forge-ci/images.yml", Platforms: nativePlatform, Set: SetMedium, Half: visibilityPublic},
 	{Lane: LaneReleaseVariants, Demo: "hello-cargo-workspace", Event: TrialRelease, JobImage: flavorRust, Builder: ImageBuilderBuildah, Version: "0.2.0", ReleaseImagesConfig: ".forge-ci/release-images.yml", Platforms: nativePlatform, Set: SetMedium, Half: visibilityPublic},
 	// One release of files, a package and an image: the version is this
 	// case's alone, because the owner's registry takes a package version once
@@ -265,15 +279,15 @@ var ForgejoPreparedCases = []PreparedCase{
 	{Lane: LanePrivate, Demo: "hello-go-service", Event: TrialPullRequest, JobImage: flavorGo, Builder: ImageBuilderKaniko, Set: SetFull},
 	{Lane: LanePrivate, Demo: "hello-go-service", Event: TrialRelease, JobImage: flavorGo, Builder: ImageBuilderKaniko, Platforms: nativePlatform, Set: SetMedium},
 	{Lane: LanePrivate, Demo: "hello-maven-service", Event: TrialPullRequest, JobImage: flavorJava, Builder: ImageBuilderKaniko, Set: SetFull},
-	{Lane: LanePrivate, Demo: "hello-maven-service", Event: TrialRelease, JobImage: flavorJava, Builder: ImageBuilderKaniko, Platforms: nativePlatform, Set: SetFull},
+	{Lane: LanePrivate, Demo: "hello-maven-service", Event: TrialRelease, JobImage: flavorJava, Builder: ImageBuilderKaniko, Platforms: nativePlatform, Set: SetSmall},
 	{Lane: LanePrivate, Demo: "hello-npm-service", Event: TrialPullRequest, JobImage: flavorJS, Builder: ImageBuilderKaniko, Set: SetFull},
-	{Lane: LanePrivate, Demo: "hello-npm-service", Event: TrialRelease, JobImage: flavorJS, Builder: ImageBuilderKaniko, Version: "0.2.0", Platforms: nativePlatform, Set: SetSmall},
+	{Lane: LanePrivate, Demo: "hello-npm-service", Event: TrialRelease, JobImage: flavorJS, Builder: ImageBuilderKaniko, Version: "0.2.0", Platforms: nativePlatform, Set: SetMedium},
 	{Lane: LanePrivate, Demo: "hello-maven", Event: TrialPullRequest, JobImage: flavorJava, Builder: ImageBuilderKaniko, Set: SetSmall},
-	{Lane: LanePrivate, Demo: "hello-maven", Event: TrialRelease, JobImage: flavorJava, Builder: ImageBuilderKaniko, Platforms: nativePlatform, Set: SetSmall},
+	{Lane: LanePrivate, Demo: "hello-maven", Event: TrialRelease, JobImage: flavorJava, Builder: ImageBuilderKaniko, Platforms: nativePlatform, Set: SetMedium},
 	{Lane: LanePrivate, Demo: "hello-cargo-container", Event: TrialPullRequest, JobImage: flavorRust, Builder: ImageBuilderKaniko, Set: SetFull},
 	{Lane: LanePrivate, Demo: "hello-cargo-container", Event: TrialRelease, JobImage: flavorRust, Builder: ImageBuilderKaniko, Version: "0.2.0", Platforms: nativePlatform, Set: SetFull},
-	{Lane: LanePrivate, Demo: "hello-cargo-workspace", Event: TrialPullRequest, JobImage: flavorRust, Builder: ImageBuilderKaniko, Set: SetSmall},
-	{Lane: LanePrivate, Demo: "hello-cargo-workspace", Event: TrialRelease, JobImage: flavorRust, Builder: ImageBuilderKaniko, Version: "0.2.0", Platforms: nativePlatform, Set: SetSmall},
+	{Lane: LanePrivate, Demo: "hello-cargo-workspace", Event: TrialPullRequest, JobImage: flavorRust, Builder: ImageBuilderKaniko, Set: SetMedium},
+	{Lane: LanePrivate, Demo: "hello-cargo-workspace", Event: TrialRelease, JobImage: flavorRust, Builder: ImageBuilderKaniko, Version: "0.2.0", Platforms: nativePlatform, Set: SetMedium},
 	{Lane: LanePrivate, Demo: "hello-npm-package", Event: TrialPullRequest, JobImage: flavorJS, Builder: ImageBuilderKaniko, Set: SetSmall},
 	{Lane: LanePrivate, Demo: "hello-npm-package", Event: TrialRelease, JobImage: flavorJS, Builder: ImageBuilderKaniko, Version: "0.2.0", Platforms: nativePlatform, Set: SetMedium},
 	{Lane: LanePrivate, Demo: "hello-gradle", Event: TrialPullRequest, JobImage: flavorJava, Builder: ImageBuilderKaniko, Set: SetSmall},
@@ -283,15 +297,15 @@ var ForgejoPreparedCases = []PreparedCase{
 	// workflow pins. The release is one version of both: the jar and the
 	// package as files, an image of each, and the package in the owner's
 	// registry, which takes a version once.
-	{Lane: LanePrivate, Demo: "hello-monorepo", Event: TrialPullRequest, JobImage: flavorJava, Builder: ImageBuilderKaniko, NodeJobImage: flavorJS, Set: SetSmall},
+	{Lane: LanePrivate, Demo: "hello-monorepo", Event: TrialPullRequest, JobImage: flavorJava, Builder: ImageBuilderKaniko, NodeJobImage: flavorJS, Set: SetMedium},
 	{Lane: LanePrivate, Demo: "hello-monorepo", Event: TrialRelease, JobImage: flavorJava, Builder: ImageBuilderKaniko, Version: "0.2.0", Platforms: nativePlatform, Set: SetMedium},
 	// hello-meta builds nothing and needs no toolchain: any prepared flavor
 	// carries its checks, and the Rust one has run this set of them.
 	{Lane: LanePrivate, Demo: "hello-meta", Event: TrialPullRequest, JobImage: flavorRust, Builder: ImageBuilderKaniko, Set: SetSmall},
-	{Lane: LanePrivate, Demo: "hello-meta", Event: TrialRelease, JobImage: flavorRust, Builder: ImageBuilderKaniko, Platforms: nativePlatform, Set: SetSmall},
+	{Lane: LanePrivate, Demo: "hello-meta", Event: TrialRelease, JobImage: flavorRust, Builder: ImageBuilderKaniko, Platforms: nativePlatform, Set: SetMedium},
 	// A multi-module build declared once at its root: a Maven reactor. The npm
 	// workspace is hello-npm-package, whose root bundles its member.
-	{Lane: LanePrivate, Demo: "hello-maven-reactor", Event: TrialPullRequest, JobImage: flavorJava, Builder: ImageBuilderKaniko, Set: SetSmall},
+	{Lane: LanePrivate, Demo: "hello-maven-reactor", Event: TrialPullRequest, JobImage: flavorJava, Builder: ImageBuilderKaniko, Set: SetMedium},
 	{Lane: LanePrivate, Demo: "hello-maven-reactor", Event: TrialRelease, JobImage: flavorJava, Builder: ImageBuilderKaniko, Platforms: nativePlatform, Set: SetMedium},
 	// Cargo without a container: a command and the library crate it links,
 	// compiled by cargo in the build job.
@@ -301,8 +315,8 @@ var ForgejoPreparedCases = []PreparedCase{
 	// development route of an artifact-first snapshot.
 	{Lane: LaneLifecycle, Demo: "hello-gradle-service", Event: TrialLifecycle, JobImage: flavorJava, Builder: ImageBuilderBuildah, Platforms: nativePlatform, Set: SetMedium, Half: visibilityPublic},
 	{Lane: LaneLifecycle, Demo: "hello-gradle-service", Event: TrialLifecycle, JobImage: flavorJava, Builder: ImageBuilderKaniko, Platforms: nativePlatform, Set: SetFull},
-	{Lane: LanePrivate, Demo: "hello-gradle-service", Event: TrialPullRequest, JobImage: flavorJava, Builder: ImageBuilderKaniko, Set: SetSmall},
-	{Lane: LanePrivate, Demo: "hello-gradle-service", Event: TrialRelease, JobImage: flavorJava, Builder: ImageBuilderKaniko, Platforms: nativePlatform, Set: SetSmall},
+	{Lane: LanePrivate, Demo: "hello-gradle-service", Event: TrialPullRequest, JobImage: flavorJava, Builder: ImageBuilderKaniko, Set: SetMedium},
+	{Lane: LanePrivate, Demo: "hello-gradle-service", Event: TrialRelease, JobImage: flavorJava, Builder: ImageBuilderKaniko, Platforms: nativePlatform, Set: SetMedium},
 
 	// The base-image graph is a release alone: a root, then a flavor on the
 	// parent the release authenticated. Its own jobs take no job image; the
@@ -346,10 +360,10 @@ var GitLabPreparedCases = []PreparedCase{
 	{Lane: LaneSnapshot, Demo: "hello-cargo-workspace", Event: TrialSnapshot, JobImage: flavorRust, Builder: ImageBuilderKaniko, Set: SetMedium},
 	{Lane: LaneSnapshot, Demo: "hello-monorepo", Event: TrialSnapshot, JobImage: flavorJava, Builder: ImageBuilderBuildah, Set: SetMedium},
 	{Lane: LaneSnapshot, Demo: "hello-monorepo", Event: TrialSnapshot, JobImage: flavorJava, Builder: ImageBuilderKaniko, Set: SetMedium},
-	{Lane: LaneSnapshot, Demo: "hello-go-service", Event: TrialSnapshot, JobImage: flavorGo, Builder: ImageBuilderBuildah, Set: SetMedium},
+	{Lane: LaneSnapshot, Demo: "hello-go-service", Event: TrialSnapshot, JobImage: flavorGo, Builder: ImageBuilderBuildah, Set: SetSmall},
 	{Lane: LaneSnapshot, Demo: "hello-go-service", Event: TrialSnapshot, JobImage: flavorGo, Builder: ImageBuilderKaniko, Set: SetMedium},
 	// A declaration without a container: the snapshot keeps its files.
-	{Lane: LaneSnapshot, Demo: "hello-go-cli", Event: TrialSnapshot, JobImage: flavorGo, Builder: ImageBuilderBuildah, Set: SetSmall},
+	{Lane: LaneSnapshot, Demo: "hello-go-cli", Event: TrialSnapshot, JobImage: flavorGo, Builder: ImageBuilderBuildah, Set: SetMedium},
 	// The same for an npm package, whose bundle is its one packed tarball.
 	{Lane: LaneSnapshot, Demo: "hello-npm-package", Event: TrialSnapshot, JobImage: flavorJS, Builder: ImageBuilderBuildah, Set: SetMedium},
 	// The Build SBOM alone, as on Forgejo.
@@ -357,13 +371,13 @@ var GitLabPreparedCases = []PreparedCase{
 
 	{Lane: LanePrivate, Demo: "hello-go-cli", Event: TrialPullRequest, JobImage: flavorGo, Builder: ImageBuilderKaniko, Set: SetSmall},
 	{Lane: LanePrivate, Demo: "hello-maven", Event: TrialPullRequest, JobImage: flavorJava, Builder: ImageBuilderKaniko, Set: SetSmall},
-	{Lane: LanePrivate, Demo: "hello-npm-service", Event: TrialPullRequest, JobImage: flavorJS, Builder: ImageBuilderKaniko, Set: SetSmall},
-	{Lane: LanePrivate, Demo: "hello-cargo-container", Event: TrialPullRequest, JobImage: flavorRust, Builder: ImageBuilderKaniko, Set: SetSmall},
-	{Lane: LanePrivate, Demo: "hello-go-service", Event: TrialPullRequest, JobImage: flavorGo, Builder: ImageBuilderKaniko, Set: SetSmall},
-	{Lane: LanePrivate, Demo: "hello-maven-service", Event: TrialPullRequest, JobImage: flavorJava, Builder: ImageBuilderKaniko, Set: SetSmall},
+	{Lane: LanePrivate, Demo: "hello-npm-service", Event: TrialPullRequest, JobImage: flavorJS, Builder: ImageBuilderKaniko, Set: SetMedium},
+	{Lane: LanePrivate, Demo: "hello-cargo-container", Event: TrialPullRequest, JobImage: flavorRust, Builder: ImageBuilderKaniko, Set: SetMedium},
+	{Lane: LanePrivate, Demo: "hello-go-service", Event: TrialPullRequest, JobImage: flavorGo, Builder: ImageBuilderKaniko, Set: SetMedium},
+	{Lane: LanePrivate, Demo: "hello-maven-service", Event: TrialPullRequest, JobImage: flavorJava, Builder: ImageBuilderKaniko, Set: SetMedium},
 	{Lane: LanePrivate, Demo: "hello-gradle", Event: TrialPullRequest, JobImage: flavorJava, Builder: ImageBuilderKaniko, Set: SetSmall},
-	{Lane: LanePrivate, Demo: "hello-monorepo", Event: TrialPullRequest, JobImage: flavorJava, Builder: ImageBuilderKaniko, Set: SetSmall},
-	{Lane: LanePrivate, Demo: "hello-cargo-workspace", Event: TrialPullRequest, JobImage: flavorRust, Builder: ImageBuilderKaniko, Set: SetSmall},
+	{Lane: LanePrivate, Demo: "hello-monorepo", Event: TrialPullRequest, JobImage: flavorJava, Builder: ImageBuilderKaniko, Set: SetMedium},
+	{Lane: LanePrivate, Demo: "hello-cargo-workspace", Event: TrialPullRequest, JobImage: flavorRust, Builder: ImageBuilderKaniko, Set: SetMedium},
 	{Lane: LanePrivate, Demo: "hello-npm-package", Event: TrialPullRequest, JobImage: flavorJS, Builder: ImageBuilderKaniko, Set: SetSmall},
 	// As on Forgejo, the Rust flavor stands in: hello-meta needs no toolchain.
 	{Lane: LanePrivate, Demo: "hello-meta", Event: TrialPullRequest, JobImage: flavorRust, Builder: ImageBuilderKaniko, Set: SetSmall},
@@ -372,17 +386,17 @@ var GitLabPreparedCases = []PreparedCase{
 	{Lane: LanePrivate, Demo: "hello-npm-service", Event: TrialRelease, JobImage: flavorJS, Builder: ImageBuilderKaniko, Version: "0.2.0", Set: SetMedium},
 	{Lane: LanePrivate, Demo: "hello-maven-service", Event: TrialRelease, JobImage: flavorJava, Builder: ImageBuilderKaniko, Version: "0.2.0", Set: SetSmall},
 	{Lane: LanePrivate, Demo: "hello-cargo-container", Event: TrialRelease, JobImage: flavorRust, Builder: ImageBuilderKaniko, Version: "0.2.0", Set: SetMedium},
-	{Lane: LanePrivate, Demo: "hello-cargo-workspace", Event: TrialRelease, JobImage: flavorRust, Builder: ImageBuilderKaniko, Version: "0.2.0", Set: SetSmall},
+	{Lane: LanePrivate, Demo: "hello-cargo-workspace", Event: TrialRelease, JobImage: flavorRust, Builder: ImageBuilderKaniko, Version: "0.2.0", Set: SetMedium},
 	{Lane: LanePrivate, Demo: "hello-npm-package", Event: TrialRelease, JobImage: flavorJS, Builder: ImageBuilderKaniko, Version: "0.2.0", Set: SetMedium},
 	{Lane: LanePrivate, Demo: "hello-gradle", Event: TrialRelease, JobImage: flavorJava, Builder: ImageBuilderKaniko, Version: "0.2.0", Set: SetMedium},
-	{Lane: LanePrivate, Demo: "hello-go-cli", Event: TrialRelease, JobImage: flavorGo, Builder: ImageBuilderKaniko, Version: "0.2.0", Set: SetSmall},
-	{Lane: LanePrivate, Demo: "hello-meta", Event: TrialRelease, JobImage: flavorRust, Builder: ImageBuilderKaniko, Version: "0.2.0", Set: SetSmall},
+	{Lane: LanePrivate, Demo: "hello-go-cli", Event: TrialRelease, JobImage: flavorGo, Builder: ImageBuilderKaniko, Version: "0.2.0", Set: SetMedium},
+	{Lane: LanePrivate, Demo: "hello-meta", Event: TrialRelease, JobImage: flavorRust, Builder: ImageBuilderKaniko, Version: "0.2.0", Set: SetMedium},
 	// The monorepo, as on Forgejo: the plan's java and node families, each
 	// bumped and built in its own runtime image, the Node one the further
 	// archive the gate's $CI_JOB_IMAGE_NODE already takes.
 	{Lane: LanePrivate, Demo: "hello-monorepo", Event: TrialRelease, JobImage: flavorJava, Builder: ImageBuilderKaniko, Version: "0.2.0", Set: SetMedium},
 	// The Maven reactor, as on Forgejo.
-	{Lane: LanePrivate, Demo: "hello-maven-reactor", Event: TrialPullRequest, JobImage: flavorJava, Builder: ImageBuilderKaniko, Set: SetSmall},
+	{Lane: LanePrivate, Demo: "hello-maven-reactor", Event: TrialPullRequest, JobImage: flavorJava, Builder: ImageBuilderKaniko, Set: SetMedium},
 	{Lane: LanePrivate, Demo: "hello-maven-reactor", Event: TrialRelease, JobImage: flavorJava, Builder: ImageBuilderKaniko, Version: "0.2.0", Set: SetMedium},
 	// Cargo without a container, as on Forgejo: the build job of the Rust
 	// family compiles the command.
@@ -391,8 +405,8 @@ var GitLabPreparedCases = []PreparedCase{
 	// A Gradle service, as on Forgejo: either builder for the lifecycle.
 	{Lane: LaneLifecycle, Demo: "hello-gradle-service", Event: TrialLifecycle, JobImage: flavorJava, Builder: ImageBuilderBuildah, Version: "0.2.0", Set: SetMedium, Half: visibilityPublic},
 	{Lane: LaneLifecycle, Demo: "hello-gradle-service", Event: TrialLifecycle, JobImage: flavorJava, Builder: ImageBuilderKaniko, Version: "0.2.0", Set: SetFull},
-	{Lane: LanePrivate, Demo: "hello-gradle-service", Event: TrialPullRequest, JobImage: flavorJava, Builder: ImageBuilderKaniko, Set: SetSmall},
-	{Lane: LanePrivate, Demo: "hello-gradle-service", Event: TrialRelease, JobImage: flavorJava, Builder: ImageBuilderKaniko, Version: "0.2.0", Set: SetSmall},
+	{Lane: LanePrivate, Demo: "hello-gradle-service", Event: TrialPullRequest, JobImage: flavorJava, Builder: ImageBuilderKaniko, Set: SetMedium},
+	{Lane: LanePrivate, Demo: "hello-gradle-service", Event: TrialRelease, JobImage: flavorJava, Builder: ImageBuilderKaniko, Version: "0.2.0", Set: SetMedium},
 
 	// The Android gates build in the Android runtime image and lint in the
 	// Java flavor: both demos are Java, and their plans run no Kotlin check.
@@ -410,7 +424,7 @@ var GitLabPreparedCases = []PreparedCase{
 	// release's package job publishes the packed package to the project's own
 	// registry, which every release trial reads. Buildah, where the private
 	// lane's release of the demo builds with kaniko.
-	{Lane: LaneReleaseVariants, Demo: "hello-npm-service", Event: TrialRelease, JobImage: flavorJS, Builder: ImageBuilderBuildah, Version: "0.3.0", Set: SetSmall, Half: visibilityPublic},
+	{Lane: LaneReleaseVariants, Demo: "hello-npm-service", Event: TrialRelease, JobImage: flavorJS, Builder: ImageBuilderBuildah, Version: "0.3.0", Set: SetMedium, Half: visibilityPublic},
 
 	// The base-image graph, as on Forgejo: the policy's base stages build,
 	// sign and promote the root, then its two flavors on the parent a signer

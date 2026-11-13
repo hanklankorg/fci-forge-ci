@@ -148,9 +148,10 @@ func TestAffectedRowsAreNarrowedByTheTable(t *testing.T) {
 		t.Errorf("github cells %q, %v; want %q", cells, err, want)
 	}
 
-	// A run set has its own rows alone, and the small one no scenario.
+	// A run set has its own rows alone, and the small one no scenario: the
+	// demo's snapshot is the medium set's.
 	rows, _, err = AffectedRows(forgeForgejo, SetSmall, []string{demosDir + "/hello-go-cli/consumer/go.mod"})
-	if want := []string{"^TestForgejoLayer_Snapshot$/^snapshot$", "^TestForgejoLayer_ConsumerTrial$/^private$/^hello-go-cli$/^pull-request$/^kaniko$"}; err != nil || !slices.Equal(rows, want) {
+	if want := []string{"^TestForgejoLayer_ConsumerTrial$/^private$/^hello-go-cli$/^pull-request$/^kaniko$"}; err != nil || !slices.Equal(rows, want) {
 		t.Errorf("small rows %q, %v; want %q", rows, err, want)
 	}
 

@@ -116,8 +116,8 @@ func TestGitHubCellsAreTheDemosHostedFixtures(t *testing.T) {
 
 // The sets as they were approved: the medium one has each service demo as
 // one lifecycle with one visibility, every other demo's pull request and
-// release, the variants and one development build; the small one a pull
-// request of each ecosystem and one release that bumps.
+// release, the variants and the small set; the small one a pull request of
+// each ecosystem, one release that bumps and one development build.
 func TestGitHubCellSetsAreAsApproved(t *testing.T) {
 	t.Parallel()
 
@@ -135,7 +135,7 @@ func TestGitHubCellSetsAreAsApproved(t *testing.T) {
 
 	if small, want := in(SetSmall), []string{
 		"hello-maven pull-request", "hello-gradle pull-request", "hello-npm-package pull-request", "hello-cargo-cli pull-request",
-		"hello-go-cli pull-request", "hello-meta pull-request", "hello-maven release",
+		"hello-go-cli pull-request", "hello-meta pull-request", "hello-go-service dev-release", "hello-maven-service release",
 	}; !slices.Equal(small, want) {
 		t.Errorf("small cells %q, want %q", small, want)
 	}
@@ -155,8 +155,9 @@ func TestGitHubCellSetsAreAsApproved(t *testing.T) {
 	for _, cell := range GitHubCells {
 		service, alone := slices.Contains(services, cell.Demo), cell.Event != TrialLifecycle && len(cell.Settings) <= 1
 		// A service demo's events alone are the full set's, but for the
-		// one development build; every other cell is in the medium set.
-		if want := !service || !alone || (cell.Demo == "hello-go-service" && cell.Event == TrialDevRelease); cell.InSet(SetMedium) != want {
+		// small set's development build and release; every other cell is
+		// in the medium set.
+		if want := !service || !alone || cell.Set == SetSmall; cell.InSet(SetMedium) != want {
 			t.Errorf("%s %s %q: in the medium set %t, want %t", cell.Demo, cell.Event, cell.Settings, !want, want)
 		}
 

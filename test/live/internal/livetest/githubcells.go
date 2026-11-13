@@ -42,11 +42,13 @@ const githubBump = "version=0.2.0"
 // demo that ships all three, and the variants, each a fixture root of its
 // own. A test holds the list to the fixtures the demos ship.
 //
-// The medium set has each service demo as one lifecycle, which runs its
-// pull request, development build and release, with one visibility; every
-// other demo's pull request and release; the variants; and one development
-// build alone. The small set is one pull request of each ecosystem and one
-// release that bumps.
+// The small set is one pull request of each ecosystem, one release that
+// bumps, the Maven service's, and one development build alone. The medium set has each service
+// demo as one lifecycle, which runs its pull request, development build and
+// release, with one visibility; every other demo's pull request and
+// release; and the variants. Each set covers the demos' events the lab
+// forges' sets do (PreparedCase.Set), but for the named exceptions a test
+// keeps.
 var GitHubCells = []GitHubCell{
 	{Demo: "hello-maven-service", Event: TrialLifecycle, Settings: []string{githubBump}, Set: SetMedium, Half: visibilityPrivate},
 	{Demo: "hello-cargo-container", Event: TrialLifecycle, Settings: []string{githubBump}, Set: SetMedium, Half: visibilityPrivate},
@@ -68,7 +70,7 @@ var GitHubCells = []GitHubCell{
 	{Demo: "hello-android-library", Event: TrialPullRequest, Set: SetMedium},
 	{Demo: "hello-ios", Event: TrialPullRequest, Set: SetMedium},
 
-	{Demo: "hello-maven", Event: TrialRelease, Settings: []string{githubBump}, Set: SetSmall},
+	{Demo: "hello-maven", Event: TrialRelease, Settings: []string{githubBump}, Set: SetMedium},
 	{Demo: "hello-gradle", Event: TrialRelease, Settings: []string{githubBump}, Set: SetMedium},
 	{Demo: "hello-npm-package", Event: TrialRelease, Settings: []string{githubBump}, Set: SetMedium},
 	{Demo: "hello-cargo-cli", Event: TrialRelease, Settings: []string{githubBump}, Set: SetMedium},
@@ -88,14 +90,14 @@ var GitHubCells = []GitHubCell{
 	{Demo: "hello-go-service", Event: TrialRelease, Settings: []string{"fixtures=test/live/github-gpg-files", "workflow=release-gpg-files.yml", "image=my-service"}, Set: SetMedium},
 	{Demo: "hello-npm-package", Event: TrialPullRequest, Settings: []string{"fixtures=test/live/github-fork", "head=fork"}, Set: SetMedium, Only: visibilityPublic},
 
-	// The one development build alone of the medium set.
-	{Demo: "hello-go-service", Event: TrialDevRelease, Set: SetMedium},
+	// The small set's development build, the one below the full set.
+	{Demo: "hello-go-service", Event: TrialDevRelease, Set: SetSmall},
 
 	// The service demos' events alone: their lifecycles run each in the
-	// medium set.
+	// medium set. The Maven service's release is the small set's release.
 	{Demo: "hello-maven-service", Event: TrialPullRequest, Set: SetFull},
 	{Demo: "hello-maven-service", Event: TrialDevRelease, Set: SetFull},
-	{Demo: "hello-maven-service", Event: TrialRelease, Settings: []string{githubBump}, Set: SetFull},
+	{Demo: "hello-maven-service", Event: TrialRelease, Settings: []string{githubBump}, Set: SetSmall},
 	{Demo: "hello-cargo-container", Event: TrialPullRequest, Set: SetFull},
 	{Demo: "hello-cargo-container", Event: TrialDevRelease, Set: SetFull},
 	{Demo: "hello-cargo-container", Event: TrialRelease, Settings: []string{githubBump}, Set: SetFull},

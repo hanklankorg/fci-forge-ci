@@ -738,9 +738,35 @@ and the full set is the whole table with both visibilities.
 
 | Set | What it has | When to run it |
 |---|---|---|
-| `small` | A pull request of most demos of the private lane (on GitLab of each; on Forgejo the four service demos with a lifecycle have theirs in the full set alone), one release of each ecosystem, an image built with each builder, and the snapshot that keeps files alone | After a change |
+| `small` | One pull request of each ecosystem (`hello-maven`, `hello-gradle`, `hello-npm-package`, `hello-cargo-cli`, `hello-go-cli`, `hello-meta`), one release that bumps the version and releases an image (`hello-maven-service`) and one development build (`hello-go-service`) | After a change |
 | `medium` | Every lane and every demo's flows once: one lifecycle of each service demo, the private lane, the snapshots and the release variants, mostly with one visibility | For a forge's round, and before a merge to `main` |
-| `full` | Every case with both visibilities | Before a release, and before closing a plan |
+| `full` | Every case with both visibilities: the medium set's demos and events, with the second visibility, the second builder and a service demo's events alone | Before a release, and before closing a plan |
+
+Each set covers the same demos and events on Forgejo, GitLab and hosted
+GitHub ([Hosted GitHub cells](#hosted-github-cells)). A lifecycle counts as
+the demo's pull request, development build and release, and a snapshot as
+its development build. Each forge keeps its own builder, visibility,
+lane, release options and fixture variants. On the lab the small set's
+pull requests and release are the private lane's, with kaniko, so the
+small set builds and releases an image with kaniko (the
+`hello-maven-service` release), and builds one with Buildah (the
+`hello-go-service` development build, a snapshot). The medium and full
+sets differ between forges only where a forge cannot run a demo's event:
+
+| Demo and event | Not on | Why |
+|---|---|---|
+| `hello-ios` pull request | Forgejo, GitLab | The build needs a macOS runner, which only hosted GitHub has |
+| `hello-go-service` release | GitLab | The demo has no GitLab release build |
+| `hello-android`, `hello-android-library` pull request | Forgejo | Missing: the demos' Forgejo workflows and an Android job image on Forgejo |
+| `hello-android-library` release | Forgejo, GitLab | Missing: a Forgejo release workflow and a GitLab release build |
+| `hello-base-images` release | GitHub | Missing: a hosted release fixture |
+| `hello-cargo-workspace`, `hello-go-cli`, `hello-monorepo`, `hello-npm-package` development build | GitHub | Missing: the demos' hosted `release-dev.yml` fixtures |
+
+`TestRunSetsCoverTheSamePairsOnEveryForge`
+(`test/live/internal/livetest/runsetparity_internal_test.go`) holds this:
+it fails on a demo's event that one forge's set has and another's lacks
+without an exception, and on an exception that no longer holds. Move a row
+between sets on every forge at once, or name the exception and its reason.
 
 `just test-live-prepared` takes the set as its last argument, `set=full`
 when left out. With `set=small` or `set=medium` it runs only the set's cases
@@ -760,8 +786,9 @@ the run not covered. The full set runs every scenario the pattern matches.
 A pattern that selects neither a row nor a scenario of the set is refused.
 
 On Forgejo the pull requests of the four service demos with a lifecycle,
-and the releases of `hello-maven-service` and `hello-cargo-container`, are
-in the full set alone: the lifecycle of each runs them in the medium set.
+and the release of `hello-cargo-container`, are in the full set alone: the
+lifecycle of each runs them in the medium set. The private lane's
+`hello-maven-service` release is the small set's release.
 
 A delta run takes `after=small` or `after=medium` after the set, a set
 below it, and runs what the set runs and the set after did not: the cases
@@ -898,8 +925,8 @@ itself and runs no cell twice.
 
 | Set | Cells |
 |---|---|
-| `small` | One pull request of each ecosystem and one release that bumps |
-| `medium` | One lifecycle of each service demo with one visibility, every other demo's pull request and release, the four release variants, the fork pull request and one development build |
+| `small` | One pull request of each ecosystem, one release that bumps and one development build, as on the lab forges |
+| `medium` | One lifecycle of each service demo with one visibility, every other demo's pull request and release, the four release variants, the fork pull request and the small set's development build |
 | `full` | Every cell with both visibilities, the service demos' events alone included |
 
 As with the tables, `after=small` or `after=medium` right after the set
