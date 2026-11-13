@@ -27,8 +27,9 @@
 #
 # The run directory is one of the live launcher's (FORGE_CI_LIVE_EVIDENCE_ROOT,
 # default $XDG_STATE_HOME/forge-ci/live-runs): a log for the engine and for
-# each cell, numbered in the run set's order, and cells.txt with the run set,
-# the set after of a delta run, and each cell's line as it ends.
+# each cell, numbered in the run set's order, the exit status of each cell's
+# trial beside its log, and cells.txt with the run set, the set after of a
+# delta run, and each cell's line as it ends.
 set -euo pipefail
 umask 077
 
@@ -116,10 +117,12 @@ readonly max_cells=3
 
 # A cell passed when its trial exited clean and its test passed. A trial
 # that exits clean with its test skipped, as every visibility not covered,
-# ran nothing to judge. Only this shell writes a cell's line, once its
-# trial has ended, so lines of cells that end together cannot interleave.
+# ran nothing to judge; one that wrote no exit status failed. Only this
+# shell writes a cell's line, once its trial has ended, so lines of cells
+# that end together cannot interleave.
 report() {
-  local cell=$1 exit_status=$2 verdict=failed
+  local cell=$1 exit_status=1 verdict=failed
+  [[ ! -s "${logs[cell]%.log}.status" ]] || read -r exit_status <"${logs[cell]%.log}.status"
   if [[ "$exit_status" -eq 0 ]]; then
     verdict=not-covered
     if grep -q '^--- PASS: TestGitHubLayer_Consumer' -- "${logs[cell]}"; then verdict=passed; fi
@@ -137,7 +140,9 @@ done <<<"$cells"
 
 # Each round starts, in the run set's order, every waiting cell there is room
 # for whose demo has no cell running, then waits for one to end. A signal
-# ends the wait early, with no cell named.
+# ends the wait early, with no cell named. Each cell writes its trial's exit
+# status itself: a trapped signal that ends the wait as it reaps a cell
+# loses that status in bash, which later names the cell with status 0.
 status=0 ran=0
 declare -A running=() busy=()
 while :; do
@@ -145,7 +150,11 @@ while :; do
   for cell in "${pending[@]}"; do
     if [[ "$interrupted" -eq 0 && ${#running[@]} -lt $max_cells && -z "${busy[${demos[cell]}]:-}" ]]; then
       read -ra settings <<<"${words[cell]}"
-      trial reuse "${visibilities[cell]}" "${logs[cell]}" "${demos[cell]}" "${events[cell]}" "${settings[@]}" &
+      {
+        trial_status=0
+        trial reuse "${visibilities[cell]}" "${logs[cell]}" "${demos[cell]}" "${events[cell]}" "${settings[@]}" || trial_status=$?
+        printf '%d\n' "$trial_status" >"${logs[cell]%.log}.status"
+      } &
       running[$!]=$cell busy[${demos[cell]}]=1
     else
       waiting+=("$cell")
@@ -164,7 +173,7 @@ while :; do
   cell=${running[$ended]}
   unset "running[$ended]" "busy[${demos[cell]}]"
   ran=$((ran + 1))
-  report "$cell" "$exit_status"
+  report "$cell"
 done
 
 if [[ "$interrupted" -ne 0 ]]; then
