@@ -99,7 +99,10 @@ func TestPreparedCasesHaveSettingsTheirTrialTakes(t *testing.T) {
 
 		switch settings := strings.Join(gitLabCase.GitLabSettings(), "\n"); gitLabCase.Event {
 		case TrialRelease:
-			_, err = ParseGitLabReleaseSettings(settings)
+			var parsed GitLabReleaseSettings
+			if parsed, err = ParseGitLabReleaseSettings(settings); parsed.Fixtures != gitLabCase.Fixtures {
+				t.Errorf("gitlab/%s: the trial stages the fixtures %q, the case names %q", gitLabCase.Name(), parsed.Fixtures, gitLabCase.Fixtures)
+			}
 		case TrialLifecycle:
 			_, err = ParseGitLabLifecycleSettings(settings)
 		case TrialSnapshot:

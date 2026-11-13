@@ -602,7 +602,8 @@ var gitLabRuntimeTarget = map[string]string{flavorGo: "go", flavorJava: "java", 
 // snapshot's declaration where the case names one, and none for a merge
 // request, which takes its images alone. A release names no scenario, so it
 // is the consumer release trial (GitLabConsumerReleaseScenario); it adds its
-// second version and its release option, each left out when empty.
+// second version, its release option and its fixtures, each left out when
+// empty.
 func (c PreparedCase) GitLabSettings() []string {
 	if c.Event == TrialSnapshot && c.SnapshotDeclaration != "" {
 		return []string{settingSnapshotDeclaration + "=" + c.SnapshotDeclaration}
@@ -620,6 +621,10 @@ func (c PreparedCase) GitLabSettings() []string {
 
 	if c.Option != "" {
 		settings = append(settings, settingReleaseOption+"="+c.Option)
+	}
+
+	if c.Fixtures != "" {
+		settings = append(settings, settingFixtures+"="+c.Fixtures)
 	}
 
 	return settings
