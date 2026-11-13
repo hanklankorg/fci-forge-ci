@@ -5,6 +5,8 @@ package ci
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"os"
 	"os/exec"
@@ -188,6 +190,22 @@ func newLiveRun(t *testing.T, extraEnv ...string) liveRun {
 	}, extraEnv...)
 
 	return run
+}
+
+// preparedEnv is the prepared.env of preparedDir.
+const preparedEnv = "PREPARED_COMMIT=0123456789abcdef0123456789abcdef01234567\n"
+
+// preparedDir is a prepared directory holding only its prepared.env, which a
+// run hashes into its header.
+func preparedDir(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+
+	if err := os.WriteFile(filepath.Join(dir, "prepared.env"), []byte(preparedEnv), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	return dir
 }
 
 func writeExecutable(t *testing.T, path, body string) {
@@ -631,7 +649,7 @@ func TestRunLiveTests_RunsEachSelectedRowAsItsOwnProcess(t *testing.T) {
 	}
 
 	rowRun := func(rows ...string) (liveRun, string, int) {
-		run := newLiveRun(t, "FAKE_REAL_CLASSIFIER="+classifier, "FORGE_CI_LIVE_PREPARED=/prepared/dir", "FAKE_GO_PACKAGE="+first+"\n"+second,
+		run := newLiveRun(t, "FAKE_REAL_CLASSIFIER="+classifier, "FORGE_CI_LIVE_PREPARED="+preparedDir(t), "FAKE_GO_PACKAGE="+first+"\n"+second,
 			"FAKE_GO_SECOND_PACKAGE="+second, "FAKE_FOCUSED_ROWS="+strings.Join(rows, "\n"), "FAKE_GO_SUITE="+fakeRowSuite)
 
 		stdout, stderr, status := run.exec(t, "focused", "TestTrial")
@@ -689,7 +707,7 @@ func TestRunLiveTests_ARunSetLeavesTheTestsOfItsOtherRowsOut(t *testing.T) {
 			"suite second" + flags + "^TestScenario$ -test.skip ^TestTrial$|^TestElsewhere$"},
 		"": {"suite first" + flags + row},
 	} {
-		run := newLiveRun(t, "FORGE_CI_LIVE_PREPARED=/prepared/dir", "FORGE_CI_LIVE_SET=small", "FAKE_GO_PACKAGE="+first+"\n"+second,
+		run := newLiveRun(t, "FORGE_CI_LIVE_PREPARED="+preparedDir(t), "FORGE_CI_LIVE_SET=small", "FAKE_GO_PACKAGE="+first+"\n"+second,
 			"FAKE_GO_SECOND_PACKAGE="+second, "FAKE_FOCUSED_ROWS="+row, "FAKE_FOCUSED_ROWS_FULL="+row+"\n^TestElsewhere$/^two$",
 			"FAKE_FOCUSED_SCENARIOS="+others, "FAKE_GO_SUITE="+fakeRowSuite)
 
@@ -722,7 +740,7 @@ func TestRunLiveTests_ADeltaRunSkipsWhatItsSetAfterRan(t *testing.T) {
 		flags = " -test.paniconexit0 -test.count=1 -test.timeout=3h -test.v -test.run "
 	)
 
-	run := newLiveRun(t, "FORGE_CI_LIVE_PREPARED=/prepared/dir", "FORGE_CI_LIVE_SET=full", "FORGE_CI_LIVE_AFTER=medium",
+	run := newLiveRun(t, "FORGE_CI_LIVE_PREPARED="+preparedDir(t), "FORGE_CI_LIVE_SET=full", "FORGE_CI_LIVE_AFTER=medium",
 		"FAKE_GO_PACKAGE="+first, "FAKE_GO_SECOND_PACKAGE=", "FAKE_FOCUSED_ROWS="+row,
 		"FAKE_FOCUSED_SCENARIOS=Test", "FAKE_FOCUSED_SKIP=^TestLane$", "FAKE_GO_SUITE="+fakeRowSuite)
 
@@ -736,8 +754,14 @@ func TestRunLiveTests_ADeltaRunSkipsWhatItsSetAfterRan(t *testing.T) {
 		t.Errorf("the suite ran as\n%s\nwant\n%s", strings.Join(suites, "\n"), strings.Join(want, "\n"))
 	}
 
-	if _, log := run.logFile(t); !strings.Contains(log, "forge_ci_live_set=full\nforge_ci_live_after=medium\n") {
+	_, log := run.logFile(t)
+	if !strings.Contains(log, "forge_ci_live_set=full\nforge_ci_live_after=medium\n") {
 		t.Errorf("the log's header does not record the delta:\n%s", log)
+	}
+
+	sum := sha256.Sum256([]byte(preparedEnv))
+	if want := "forge_ci_live_prepared_env_sha256=" + hex.EncodeToString(sum[:]) + "\n"; !strings.Contains(log, want) {
+		t.Errorf("the log's header does not record %q:\n%s", want, log)
 	}
 }
 
@@ -823,7 +847,7 @@ func TestRunLiveTests_RerunsARowThatFailedOnAnUnavailableDependencyOnce(t *testi
 				want = append(want, flags+row(name))
 			}
 
-			run := newLiveRun(t, "FAKE_REAL_CLASSIFIER="+classifier, "FORGE_CI_LIVE_PREPARED=/prepared/dir",
+			run := newLiveRun(t, "FAKE_REAL_CLASSIFIER="+classifier, "FORGE_CI_LIVE_PREPARED="+preparedDir(t),
 				"FAKE_FOCUSED_ROWS="+strings.Join(rows, "\n"), "FAKE_GO_SUITE="+fakeRerunSuite)
 
 			stdout, stderr, status := run.exec(t, "focused", "TestTrial")
@@ -884,7 +908,7 @@ func TestRunLiveTests_RerunsARowThatFailedOnAnUnavailableDependencyOnce(t *testi
 func TestRunLiveTests_ARefusedPatternIsAUsageError(t *testing.T) {
 	t.Parallel()
 
-	run := newLiveRun(t, "FORGE_CI_LIVE_PREPARED=/prepared/dir", "FAKE_FOCUSED_ROWS_REFUSED=1")
+	run := newLiveRun(t, "FORGE_CI_LIVE_PREPARED="+preparedDir(t), "FAKE_FOCUSED_ROWS_REFUSED=1")
 
 	stdout, stderr, status := run.exec(t, "focused", "^TestTrial$/^no-such-lane$")
 	if status != 2 || !strings.Contains(stderr, "selects no row") {
@@ -1115,7 +1139,8 @@ func awaitHeldLane(ctx context.Context, exited <-chan struct{}, ready string) er
 // nothing when that refuses: the images are of one commit.
 func TestRunLiveTests_RunsNothingOnAPreparedDirectoryOfAnotherCommit(t *testing.T) {
 	t.Parallel()
-	run := newLiveRun(t, "FORGE_CI_LIVE_PREPARED=/prepared/dir", "FAKE_PREPARED_REFUSES=1", "FAKE_GO_TEST_OUTPUT="+fakeSuiteOutput)
+	dir := preparedDir(t)
+	run := newLiveRun(t, "FORGE_CI_LIVE_PREPARED="+dir, "FAKE_PREPARED_REFUSES=1", "FAKE_GO_TEST_OUTPUT="+fakeSuiteOutput)
 
 	stdout, stderr, status := run.exec(t, "focused", "TestFake")
 	if status != 2 {
@@ -1123,7 +1148,7 @@ func TestRunLiveTests_RunsNothingOnAPreparedDirectoryOfAnotherCommit(t *testing.
 	}
 
 	calls := run.goCalls(t)
-	prepared := regexp.MustCompile(`^run ./test/live/internal/livetest/preflight prepared-source /prepared/dir [0-9a-f]{40}( |$)`)
+	prepared := regexp.MustCompile(`^run ./test/live/internal/livetest/preflight prepared-source ` + regexp.QuoteMeta(dir) + ` [0-9a-f]{40}( |$)`)
 
 	if !slices.ContainsFunc(calls, prepared.MatchString) {
 		t.Errorf("the preflight was not given the directory and the commit:\n%s", strings.Join(calls, "\n"))
