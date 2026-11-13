@@ -10,8 +10,8 @@
 #   prepare-live.sh <forge-lab checkout> <dir> <forgejo|gitlab|lane> ... [job-image=<flavor>:<local image> ...]
 #
 # Builds and publishes the images of this checkout's HEAD with the
-# live recipes: the signer and kaniko job images, the Buildah job image
-# archive and the archive of each runtime image the named lanes' cases need
+# live recipes: the signer image, the Buildah and kaniko job image
+# archives and the archive of each runtime image the named lanes' cases need
 # (preflight prepared-runtime-targets). A forge names every lane of it, a
 # lane of livetest.PreparedLanes that one. It publishes each job-image=
 # nanolinter image too, and saves it as an archive. It exports every demo as
@@ -111,9 +111,11 @@ prepare() {
   done
 
   local -a entries=("PREPARED_COMMIT=$commit")
-  local value signer_archive=$dir/images/forge-ci-live-signer.tar kaniko_archive=$dir/images/forge-ci-kaniko-job.tar
-  value=$(bash "$repo_root/scripts/ci/publish-live-image.sh" kaniko-job "$forge_lab" "$kaniko_archive")
-  entries+=("KANIKO_JOB_IMAGE=$value" "FORGE_CI_LIVE_KANIKO_JOB_IMAGE_ARCHIVE=$kaniko_archive")
+  local value signer_archive=$dir/images/forge-ci-live-signer.tar
+  # A run pushes the kaniko job image from its archive, labelled for the
+  # layer of its own account.
+  value=$(just --justfile "$repo_root/justfile" kaniko-job-image-archive "$dir/images")
+  entries+=("FORGE_CI_LIVE_KANIKO_JOB_IMAGE_ARCHIVE=$value")
   value=$(bash "$repo_root/scripts/ci/publish-live-image.sh" signer "$forge_lab" "$signer_archive")
   entries+=("FORGE_CI_LIVE_SIGNER_IMAGE=$value" "FORGE_CI_LIVE_SIGNER_IMAGE_ARCHIVE=$signer_archive")
   value=$(just --justfile "$repo_root/justfile" buildah-job-image-archive "$dir/images")

@@ -123,9 +123,9 @@ func runForgejoConsumerLifecycle(t *testing.T, root string, private bool) {
 		}
 	}
 
-	// The layer is the consumer trial's, as for its other events: the
-	// prepared kaniko job image is labelled for that repository, and a run
-	// admits it for no other (livetest.ConsumerTrialLayerURL).
+	// The layer is the consumer trial's, as for its other events: a kaniko
+	// job image is labelled for that repository, and a run admits it for no
+	// other (livetest.ConsumerTrialLayer).
 	scenario := layerScenario{target: target, label: livetest.RunnerLabel(t, target)}
 	scenario.layer = newConsumerLayer(t, target, livetest.ConsumerTrial)
 	scenario.repo = newConsumerRepo(t, target, consumer, name, private)

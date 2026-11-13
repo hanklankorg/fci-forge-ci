@@ -182,7 +182,7 @@ func TestImageArchiveRequiredResourcesRefuseBeforeEffects(t *testing.T) {
 	}
 
 	root := reporoot.Path(t)
-	for _, recipe := range []string{"buildah-job-image-archive", "runtime-image-archive"} {
+	for _, recipe := range []string{"buildah-job-image-archive", "kaniko-job-image-archive", "runtime-image-archive"} {
 		t.Run(recipe, func(t *testing.T) {
 			lane := newPrepareLane(t)
 
@@ -228,7 +228,7 @@ func TestImagePreparationInheritedRequiredOnly(t *testing.T) {
 		t.Skip("requires Just")
 	}
 
-	for _, route := range []string{"prepare-live", "test-live-image", "buildah-job-image-archive", "runtime-image-archive"} {
+	for _, route := range []string{"prepare-live", "test-live-image", "buildah-job-image-archive", "kaniko-job-image-archive", "runtime-image-archive"} {
 		t.Run(route, func(t *testing.T) {
 			lane := newPrepareLane(t)
 			fake := filepath.Join(t.TempDir(), "go")

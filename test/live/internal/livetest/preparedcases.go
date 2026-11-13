@@ -9,11 +9,8 @@ import (
 	"slices"
 	"strings"
 
-	"codefloe.com/itiquette/forge-lab-contract/labcontract"
-
 	"github.com/diggsweden/forge-ci/internal/domain/enforcement"
 	"github.com/diggsweden/forge-ci/internal/domain/errs"
-	"github.com/diggsweden/forge-ci/internal/domain/provider"
 )
 
 // PreparedCase is one consumer trial of a shipped demo that a run takes from
@@ -211,8 +208,6 @@ const (
 	flavorRust = "rust"
 
 	nativePlatform = "linux/amd64"
-
-	preparedKanikoJobImage = "KANIKO_JOB_IMAGE"
 
 	// mavenServiceBuildSBOMDeclaration is the Maven service demo's variant
 	// declaration: artifact-first, with the producer's Build SBOM and no SBOM
@@ -507,6 +502,8 @@ func (c PreparedCase) LaneEnvironment(forge string) map[string]string {
 // Settings are the trial's settings of the case, one key=value each, with the
 // images taken from prepared, the prepared directory's prepared.env. A case
 // whose image was not prepared is refused, naming the key that is missing.
+// A case that builds with kaniko (BuildsWithKaniko) needs the saved kaniko
+// job image archive; the run gives CI_IMAGE_BUILDER_JOB_IMAGE itself.
 func (c PreparedCase) Settings(prepared map[string]string) ([]string, error) {
 	jobImage := preparedJobImagePrefix + flavorEnvKey(c.JobImage)
 	if prepared[jobImage] == "" {
@@ -524,12 +521,8 @@ func (c PreparedCase) Settings(prepared map[string]string) ([]string, error) {
 		settings = append(settings, "CI_JOB_IMAGE_NODE="+prepared[nodeImage])
 	}
 
-	if c.Builder == ImageBuilderKaniko {
-		if prepared[preparedKanikoJobImage] == "" {
-			return nil, c.notPrepared(preparedKanikoJobImage)
-		}
-
-		settings = append(settings, "CI_IMAGE_BUILDER_JOB_IMAGE="+prepared[preparedKanikoJobImage])
+	if c.BuildsWithKaniko() && prepared[KanikoJobImageArchiveEnv] == "" {
+		return nil, c.notPrepared(KanikoJobImageArchiveEnv)
 	}
 
 	if c.Version != "" {
@@ -712,41 +705,13 @@ func (c PreparedCase) RequireGitLabFurtherArchives(checkout string, prepared map
 	return nil
 }
 
-// RequireForgejoKanikoAccount refuses a Forgejo release, lifecycle or
-// snapshot that builds with kaniko as a lab account other than the one the
-// directory was prepared as. The prepared kaniko job image is labelled for
-// that account's layer repository (ConsumerTrialLayerURL), and the product
-// refuses it for a layer anywhere else, late and in a build job. Every other
-// case runs as any account.
-func (c PreparedCase) RequireForgejoKanikoAccount(prepared map[string]string) error {
-	if c.Builder != ImageBuilderKaniko || c.Event == TrialPullRequest {
-		return nil
-	}
-
-	lab, err := currentLabContract()
-	if err != nil {
-		return err
-	}
-
-	endpoint, err := lab.Endpoint(labcontract.Kind(provider.ForgeForgejo))
-	if err != nil {
-		return err
-	}
-
-	return c.kanikoAccountGap(prepared[preparedKanikoJobImage], endpoint.Owner())
+// BuildsWithKaniko is whether the case's trial builds images with kaniko: a
+// release, lifecycle or snapshot whose builder is kaniko. A pull request
+// builds none.
+func (c PreparedCase) BuildsWithKaniko() bool {
+	return c.Builder == ImageBuilderKaniko && c.Event != TrialPullRequest
 }
 
 func (c PreparedCase) notPrepared(key string) error {
 	return fmt.Errorf("%s: %s has no %s; prepare its image: %w", c.Name(), PreparedEnvFile, key, errs.ErrValidation)
-}
-
-// kanikoAccountGap compares the account in a published kaniko job image's
-// reference, <registry>/<account>/<package>@<digest>, with the run's.
-func (c PreparedCase) kanikoAccountGap(image, account string) error {
-	if parts := strings.Split(image, "/"); len(parts) != 3 || parts[1] != account {
-		return fmt.Errorf("%s: the prepared kaniko job image %s is labelled for its own lab account's layer repository, and this run acts as %s; run this case as that account: %w",
-			c.Name(), image, account, errs.ErrValidation)
-	}
-
-	return nil
 }

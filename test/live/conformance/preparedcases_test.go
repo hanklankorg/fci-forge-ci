@@ -138,12 +138,12 @@ func usePreparedCase(t *testing.T, forge provider.ForgeAPI, trialCase livetest.P
 		err = trialCase.RequireGitLabFurtherArchives(root, env)
 	}
 
-	if err == nil && forge == provider.ForgeForgejo {
-		err = trialCase.RequireForgejoKanikoAccount(env)
-	}
-
 	if err != nil {
 		t.Fatal(err)
+	}
+
+	if forge == provider.ForgeForgejo && trialCase.BuildsWithKaniko() {
+		settings = append(settings, "CI_IMAGE_BUILDER_JOB_IMAGE="+pushForgejoKanikoJobImage(t, env[livetest.KanikoJobImageArchiveEnv]))
 	}
 
 	t.Setenv(consumerCheckoutEnv, root)
@@ -164,6 +164,28 @@ func usePreparedCase(t *testing.T, forge provider.ForgeAPI, trialCase livetest.P
 	}
 
 	return root
+}
+
+// pushForgejoKanikoJobImage pushes the prepared kaniko job image archive
+// for a Forgejo case, labelled for the consumer trial's layer under the
+// run's own account, as a scenario does. Every event and visibility serves
+// the layer from that one address, so one push serves the case. The image
+// goes to a package of its own, which the trial's repositories do not share
+// and so do not remove between visibilities.
+func pushForgejoKanikoJobImage(t *testing.T, archive string) string {
+	t.Helper()
+
+	target := livetest.Accept(t, provider.ForgeForgejo)
+
+	layer, err := livetest.ConsumerTrialLayer()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	repo := livetest.ScratchRepo("kaniko-job-image")
+	livetest.SweepPackagesAfter(t, target, repo)
+
+	return livetest.PushKanikoJobImage(t, target, repo, archive, layer)
 }
 
 // preparedCaseInputs are the settings and the environment of a case on forge.

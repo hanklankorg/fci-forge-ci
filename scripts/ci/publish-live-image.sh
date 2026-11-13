@@ -9,10 +9,12 @@
 #
 #   signer       containers/signer/Containerfile, for the release scenarios'
 #                signer jobs.
-#   kaniko-job   containers/kaniko-job/Containerfile, for consumer trials with
-#                CI_IMAGE_BUILDER=kaniko. A run admits it only when its source
-#                label names the repository the layer runs from, so it is
-#                labelled with the Forgejo consumer trial's scratch layer.
+#   kaniko-job   containers/kaniko-job/Containerfile, for a consumer trial
+#                with CI_IMAGE_BUILDER=kaniko run on a named checkout. A run
+#                admits it only when its source label names the repository
+#                the layer runs from, so it is labelled with the contract
+#                account's Forgejo consumer trial scratch layer. A prepared
+#                case pushes its own from the saved archive instead.
 #   buildah-job  containers/buildah-job/Containerfile, the GitLab release
 #                policy's builder-job-image with image-builder: buildah.
 #

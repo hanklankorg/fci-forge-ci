@@ -223,14 +223,28 @@ A prepared run runs each case as a process of its own, one after another, and
 each has three hours: a case that ends there fails and costs that case alone.
 Runs side by side share the lab's runners and slow each other down.
 One prepared directory serves every account, its images being public in the
-lab registry or pushed by each run from the saved archives, with one
-exception: a Forgejo release, lifecycle or snapshot that builds with kaniko
-runs as the account the directory was prepared as, because the product admits
-the kaniko job image only for that account's layer repository. Such a case is
-refused before it starts under any other account. Unscoped/all-provider
-launchers take `live.lock` exclusively. Locks remain held through
-test cleanup and are not inherited by suites or loggers. Never unlink a lock
-file or split HOME/XDG to create concurrency.
+lab registry or pushed by each run from the saved archives. The product
+admits a kaniko job image only for the layer repository its source label
+names, so a Forgejo release, lifecycle or snapshot that builds with kaniko
+pushes the saved kaniko job image (`FORGE_CI_LIVE_KANIKO_JOB_IMAGE_ARCHIVE`)
+once per case, labelled for its own account's layer repository, as the
+scenarios do. Any account with a Forgejo endpoint runs any Forgejo lane.
+
+The Forgejo layer lane is the longest. To shorten its wall time, split it
+between two accounts, the lifecycles in one run and everything else in the
+other; together the two patterns select each row and scenario of
+`^TestForgejoLayer_` once, in every run set and delta run:
+
+```sh
+just test-live-prepared <dir> forgejo '^TestForgejoLayer_ConsumerLifecycle$' set=medium &
+LAB_TARGETS_FILE=/absolute/forgeci2.json \
+  just test-live-prepared <dir> forgejo '^TestForgejoLayer_([^C]|Ca|Consumer[^L])' set=medium &
+wait
+```
+
+Unscoped/all-provider launchers take `live.lock` exclusively. Locks remain
+held through test cleanup and are not inherited by suites or loggers. Never
+unlink a lock file or split HOME/XDG to create concurrency.
 
 For GitHub, use the guarded Forge Lab hosted session recipe and its own
 organization lock; shared SDK preparation precedes parallel read-only reuse by
@@ -532,7 +546,7 @@ consumer from its `demos` with `just test-live-consumer`.
 
 Every image a prepare builds on the host is tagged with the full commit:
 `localhost/forge-ci-live-signer:<commit>`,
-`localhost/forge-ci-live-kaniko-job:<commit>`,
+`localhost/forge-ci-kaniko-job:<commit>`,
 `localhost/forge-ci-buildah-job:<commit>` and
 `localhost/forge-ci-runtime-<target>:<commit>`. A prepare of another commit
 on the same host therefore builds beside a running lane's images rather than
@@ -560,9 +574,10 @@ Prepare once per commit, from a clean checkout whose engine checksum is
 fresh, naming what will run: `forgejo` or `gitlab`, every lane of the forge, or
 a lane of `livetest.PreparedLanes` by name
 (`test/live/internal/livetest/preparedlanes.go`). It publishes the
-kaniko job, signer and named nanolinter job images with Forge Lab, saves the
+signer and named nanolinter job images with Forge Lab, saves the
 signer image, the Buildah and kaniko job images
-(`FORGE_CI_LIVE_BUILDAH_JOB_IMAGE_ARCHIVE`, `FORGE_CI_LIVE_KANIKO_JOB_IMAGE_ARCHIVE`)
+(`FORGE_CI_LIVE_BUILDAH_JOB_IMAGE_ARCHIVE`, `FORGE_CI_LIVE_KANIKO_JOB_IMAGE_ARCHIVE`;
+a run pushes the kaniko one labelled for its own account's layer)
 and the runtime images as archives, exports every demo as a one-commit
 checkout and writes `<dir>/prepared.env` (references and paths, no secrets,
 and `PREPARED_COMMIT`). The runtime images are those the GitLab cases of the
@@ -1075,10 +1090,11 @@ PATH". It selects its builder as the other events do, with the consumer's
 `CI_IMAGE_BUILDER`, and runs in the consumer trial's layer repository
 (`fci-consumer-trial-layer`, beside its own `fci-consumer-lifecycle`): a run
 admits a kaniko job image only for the repository its source label names, and
-the prepared one is labelled for that one, so one prepared image serves every
-event; under kaniko, `CI_IMAGE_BUILDER_JOB_IMAGE` pinned by digest is required
-before anything is created, as the run admits it by digest and label in the
-development phase. It needs what the published snapshot and a Forgejo release
+a prepared case pushes the saved one labelled for that repository, so one
+image serves every event and visibility of the case; under kaniko,
+`CI_IMAGE_BUILDER_JOB_IMAGE` pinned by digest is required before anything is
+created, as the run admits it by digest and label in the development phase.
+It needs what the published snapshot and a Forgejo release
 need: the contract's container/readiness runner, whichever builder builds the
 image, `FORGE_CI_LIVE_SIGNER_IMAGE`, ssh-keygen and gpg.
 

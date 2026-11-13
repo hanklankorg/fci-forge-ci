@@ -1309,6 +1309,41 @@ buildah-job-image-archive directory budget="" cpus="" memory_mib="" compiler_job
     podman save --quiet --format docker-archive --output "$archive" "$image"
     printf '%s\n' "$archive"
 
+# Build the kaniko job image of this tree, containers/kaniko-job, for this
+# machine's architecture and save it as <directory>/forge-ci-kaniko-job.tar:
+# the archive a trial pushes and labels for the layer it runs from
+# (FORGE_CI_LIVE_KANIKO_JOB_IMAGE_ARCHIVE). Prints the archive's path.
+[arg('directory', help='Absolute directory to write the archive to')]
+[doc('Build the kaniko job image archive; network')]
+[group('build')]
+kaniko-job-image-archive directory budget="" cpus="" memory_mib="" compiler_jobs="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    directory=$1
+    source scripts/ci/image-build-settings.sh
+    declare -a image_build_args
+    image_build_settings image_build_args image-build-settings "$2" "$3" "$4" "$5" || exit 2
+    if [[ "$directory" != /* ]]; then
+        printf 'the archive directory must be an absolute path, got %q\n' "$directory" >&2
+        exit 2
+    fi
+    # Keyed by the commit, as the runtime image archive is.
+    if [[ -n "$(git status --porcelain --untracked-files=all -- containers/kaniko-job)" ]]; then
+        printf 'the kaniko job image inputs have uncommitted changes; commit or stash them first:\n' >&2
+        git status --short --untracked-files=all -- containers/kaniko-job >&2
+        exit 2
+    fi
+    commit=$(git rev-parse --verify HEAD)
+    image="localhost/forge-ci-kaniko-job:$commit"
+    podman build "${image_build_args[@]}" --file containers/kaniko-job/Containerfile \
+        --label "org.opencontainers.image.revision=$commit" \
+        --tag "$image" containers/kaniko-job >&2
+    mkdir -p -- "$directory"
+    archive="$directory/forge-ci-kaniko-job.tar"
+    rm -f -- "$archive"
+    podman save --quiet --format docker-archive --output "$archive" "$image"
+    printf '%s\n' "$archive"
+
 # List the demos `just demo` made: each demo with its repositories, IDs and
 # links. On the lab it reads lab account demo's contract; on GitHub it runs
 # inside Forge Lab's `just github run` and takes org=<id>.
@@ -1406,9 +1441,9 @@ test-live-gitlab-interrupted-job:
 # Prepare a directory for live runs: everything the named lanes take, built
 # from HEAD once.
 #
-# Publishes the kaniko job and signer images and each named nanolinter job
-# image (package nanolinter-<flavor>) with Forge Lab, saves those images, the
-# Buildah job image and each runtime image the named lanes' cases and the
+# Publishes the signer image and each named nanolinter job image (package
+# nanolinter-<flavor>) with Forge Lab, saves those images, the Buildah and
+# kaniko job images and each runtime image the named lanes' cases and the
 # GitLab gates of their demos take as archives, exports every demo of
 # test/live/fixtures/consumers as a one-commit checkout under <dir>/demos, and writes
 # <dir>/prepared.env: image references, archive paths and PREPARED_COMMIT, no

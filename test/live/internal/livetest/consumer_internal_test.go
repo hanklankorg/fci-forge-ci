@@ -127,7 +127,7 @@ func TestParseTrialSettings_ReadsTheCallersWords(t *testing.T) {
 	}
 }
 
-func TestConsumerTrialLayerURL_IsTheForgejoScratchLayer(t *testing.T) {
+func TestConsumerTrialLayer_IsTheForgejoScratchLayer(t *testing.T) {
 	t.Parallel()
 
 	lab := &labcontract.Contract{Endpoints: []labcontract.Endpoint{
@@ -135,12 +135,12 @@ func TestConsumerTrialLayerURL_IsTheForgejoScratchLayer(t *testing.T) {
 		{Name: "forgejo", Kind: "forgejo", WebBaseURL: "https://forgejo.lab.test/", Credential: labcontract.Credential{Username: "forgeci"}},
 	}}
 
-	got, err := consumerTrialLayerURL(lab)
-	if want := "https://forgejo.lab.test/forgeci/fci-consumer-trial-layer"; err != nil || got != want {
-		t.Errorf("consumerTrialLayerURL() = %q, %v; want %q", got, err, want)
+	got, err := consumerTrialLayer(lab)
+	if want := (Layer{ServerURL: "https://forgejo.lab.test", Repository: "forgeci/fci-consumer-trial-layer"}); err != nil || got != want {
+		t.Errorf("consumerTrialLayer() = %+v, %v; want %+v", got, err, want)
 	}
 
-	if _, err := consumerTrialLayerURL(&labcontract.Contract{}); err == nil {
+	if _, err := consumerTrialLayer(&labcontract.Contract{}); err == nil {
 		t.Error("a contract without a Forgejo endpoint was accepted")
 	}
 }

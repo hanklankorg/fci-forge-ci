@@ -22,12 +22,13 @@ var preparedImages = map[string]string{
 	"JOB_IMAGE_JAVA":                  "registry.invalid/java@sha256:" + strings.Repeat("2", 64),
 	"JOB_IMAGE_JAVASCRIPT_TYPESCRIPT": "registry.invalid/js@sha256:" + strings.Repeat("3", 64),
 	"JOB_IMAGE_RUST":                  "registry.invalid/rust@sha256:" + strings.Repeat("4", 64),
-	"KANIKO_JOB_IMAGE":                "registry.invalid/kaniko@sha256:" + strings.Repeat("5", 64),
+	KanikoJobImageArchiveEnv:          "/c/kaniko.tar",
 }
 
 // A Forgejo case's settings are its flavor's prepared nanolinter image, its
-// builder, with kaniko the prepared kaniko job image, and what the case
-// names, each left out when empty. An image that was not prepared is refused
+// builder and what the case names, each left out when empty. A build with
+// kaniko takes no kaniko job image here, the run pushing it for its own
+// account, but needs its archive. An image that was not prepared is refused
 // by its key.
 func TestForgejoSettingsOfACase(t *testing.T) {
 	t.Parallel()
@@ -43,8 +44,7 @@ func TestForgejoSettingsOfACase(t *testing.T) {
 			"CI_JOB_IMAGE=" + preparedImages["JOB_IMAGE_JAVA"], "CI_IMAGE_BUILDER=buildah", "snapshot-declaration=" + mavenServiceBuildSBOMDeclaration,
 		}},
 		"kaniko lifecycle": {PreparedCase{Event: TrialLifecycle, JobImage: flavorJava, Builder: ImageBuilderKaniko, Platforms: nativePlatform}, []string{
-			"CI_JOB_IMAGE=" + preparedImages["JOB_IMAGE_JAVA"], "CI_IMAGE_BUILDER=kaniko",
-			"CI_IMAGE_BUILDER_JOB_IMAGE=" + preparedImages["KANIKO_JOB_IMAGE"], "RELEASE_PLATFORMS=linux/amd64",
+			"CI_JOB_IMAGE=" + preparedImages["JOB_IMAGE_JAVA"], "CI_IMAGE_BUILDER=kaniko", "RELEASE_PLATFORMS=linux/amd64",
 		}},
 		"gate with a front end": {PreparedCase{Event: TrialPullRequest, JobImage: flavorJava, Builder: ImageBuilderBuildah, NodeJobImage: flavorJS}, []string{
 			"CI_JOB_IMAGE=" + preparedImages["JOB_IMAGE_JAVA"], "CI_IMAGE_BUILDER=buildah",
@@ -65,15 +65,23 @@ func TestForgejoSettingsOfACase(t *testing.T) {
 		}
 	}
 
-	kaniko := PreparedCase{Event: TrialPullRequest, JobImage: flavorGo, Builder: ImageBuilderKaniko}
+	kaniko := PreparedCase{Event: TrialRelease, JobImage: flavorGo, Builder: ImageBuilderKaniko}
 
-	for _, missing := range []string{"JOB_IMAGE_GO", "KANIKO_JOB_IMAGE"} {
+	for _, missing := range []string{"JOB_IMAGE_GO", KanikoJobImageArchiveEnv} {
 		prepared := maps.Clone(preparedImages)
 		delete(prepared, missing)
 
 		if _, err := kaniko.Settings(prepared); !errors.Is(err, errs.ErrValidation) || !strings.Contains(err.Error(), "has no "+missing+";") {
 			t.Errorf("without %s: %v", missing, err)
 		}
+	}
+
+	// A pull request builds no image, so it needs no kaniko job image.
+	prepared := maps.Clone(preparedImages)
+	delete(prepared, KanikoJobImageArchiveEnv)
+
+	if _, err := (PreparedCase{Event: TrialPullRequest, JobImage: flavorGo, Builder: ImageBuilderKaniko}).Settings(prepared); err != nil {
+		t.Errorf("a kaniko pull request without the archive: %v", err)
 	}
 }
 
@@ -85,6 +93,11 @@ func TestPreparedCasesHaveSettingsTheirTrialTakes(t *testing.T) {
 
 	for _, c := range ForgejoPreparedCases {
 		settings, err := c.Settings(preparedImages)
+		if c.BuildsWithKaniko() {
+			// What the run pushes from the archive.
+			settings = append(settings, "CI_IMAGE_BUILDER_JOB_IMAGE=registry.invalid/kaniko@sha256:"+strings.Repeat("5", 64))
+		}
+
 		if err == nil {
 			_, err = ParseTrialSettings(c.Event, settings)
 		}
@@ -352,35 +365,6 @@ func TestPreparedCaseNamesAreUnique(t *testing.T) {
 			}
 
 			seen[c.Name()] = true
-		}
-	}
-}
-
-// A Forgejo case that builds with kaniko runs only as the account the
-// kaniko job image was published under; a pull request and a Buildah case
-// run as any.
-func TestForgejoKanikoCaseRunsAsThePreparedAccount(t *testing.T) {
-	t.Parallel()
-
-	const image = "forgejo.invalid:8443/forgeci/forge-ci-live-kaniko-job@sha256:1"
-
-	release := PreparedCase{Lane: LanePrivate, Demo: "hello-go-service", Event: TrialRelease, Builder: ImageBuilderKaniko}
-
-	if err := release.kanikoAccountGap(image, "forgeci"); err != nil {
-		t.Errorf("as the prepared account: %v", err)
-	}
-
-	if err := release.kanikoAccountGap(image, "forgeci2"); !errors.Is(err, errs.ErrValidation) || !strings.Contains(err.Error(), "acts as forgeci2") {
-		t.Errorf("as another account: %v", err)
-	}
-
-	// Neither reads the contract: there is nothing to compare.
-	for _, c := range []PreparedCase{
-		{Event: TrialPullRequest, Builder: ImageBuilderKaniko},
-		{Event: TrialRelease, Builder: ImageBuilderBuildah},
-	} {
-		if err := c.RequireForgejoKanikoAccount(nil); err != nil {
-			t.Errorf("%s with %s: %v", c.Event, c.Builder, err)
 		}
 	}
 }

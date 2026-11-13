@@ -78,9 +78,9 @@ const (
 // under test that its workflows call. ConsumerLifecycle names a lifecycle's
 // consumer copy, on either forge. On Forgejo a lifecycle serves the layer
 // from the trial's layer repository: a run admits a kaniko job image only
-// for the repository its source label names, and the prepare publishes one,
-// labelled for that repository (ConsumerTrialLayerURL), so every event of a
-// consumer trial runs its workflows from it, a snapshot's too.
+// for the repository its source label names, and one image labelled for
+// that repository (ConsumerTrialLayer) serves every event of a consumer
+// trial, a snapshot's too.
 // SnapshotScenario names a snapshot's consumer copy, on either forge.
 const (
 	ConsumerTrial     = "consumer-trial"
@@ -92,28 +92,39 @@ const (
 // pushes the layer under test to, beside its own.
 func LayerScenario(scenario string) string { return scenario + "-layer" }
 
-// ConsumerTrialLayerURL is the web URL of the repository a Forgejo consumer
-// trial pushes the layer under test to, whichever its event, for the
-// publisher of the lab's kaniko job image: a run admits that image only when
-// its source label names the repository the layer's workflows run from.
-func ConsumerTrialLayerURL() (string, error) {
+// ConsumerTrialLayer is the address, ServerURL and Repository alone, of the
+// repository a Forgejo consumer trial pushes the layer under test to,
+// whichever its event: a run admits a kaniko job image only when its source
+// label names the repository the layer's workflows run from.
+func ConsumerTrialLayer() (Layer, error) {
 	lab, err := currentLabContract()
 	if err != nil {
-		return "", err
+		return Layer{}, err
 	}
 
-	return consumerTrialLayerURL(lab)
+	return consumerTrialLayer(lab)
 }
 
-// consumerTrialLayerURL is the layer's address as PushLayer serves it: the
-// endpoint's web root, the credential's owner and the scratch repository.
-func consumerTrialLayerURL(lab *labcontract.Contract) (string, error) {
-	endpoint, err := lab.Endpoint(labcontract.Kind(provider.ForgeForgejo))
+// ConsumerTrialLayerURL is ConsumerTrialLayer's web URL, for the publisher of
+// the lab's kaniko job image.
+func ConsumerTrialLayerURL() (string, error) {
+	layer, err := ConsumerTrialLayer()
 	if err != nil {
 		return "", err
 	}
 
-	return strings.TrimSuffix(endpoint.WebBaseURL, "/") + "/" + endpoint.Owner() + "/" + ScratchRepo(LayerScenario(ConsumerTrial)), nil
+	return layer.ServerURL + "/" + layer.Repository, nil
+}
+
+// consumerTrialLayer is the layer's address as PushLayer serves it: the
+// endpoint's web root, the credential's owner and the scratch repository.
+func consumerTrialLayer(lab *labcontract.Contract) (Layer, error) {
+	endpoint, err := lab.Endpoint(labcontract.Kind(provider.ForgeForgejo))
+	if err != nil {
+		return Layer{}, err
+	}
+
+	return Layer{ServerURL: strings.TrimSuffix(endpoint.WebBaseURL, "/"), Repository: endpoint.Owner() + "/" + ScratchRepo(LayerScenario(ConsumerTrial))}, nil
 }
 
 // The values a repository variable of a trial may refer to, because the
