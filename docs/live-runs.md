@@ -921,11 +921,20 @@ just test-live-github-cells <dir> <org-id> set=medium \
 ```
 
 Start it inside the hosted session, as a single trial; it starts none. It
-prepares the engine once, then runs each cell with the engine reused, one
-after another: the cells of one demo share package coordinates. Within a
-cell the two visibilities run side by side, each in a repository of its own
-named after it, and finish in the time of the slower one. A cell whose release
-publishes a package the organization names apart from the repository, an npm
+prepares the engine once, then runs the cells with the engine reused, up to
+three at once, in the set's order, never two of one demo: the cells of one
+demo share package coordinates and, as a fork pull request and the demo's
+own, can share a repository name. Cells of different demos share nothing
+they change: each repository is named after its demo, visibility, event
+and workflow, and the packages the organization names apart from a
+repository are each one demo's. Three cells stay roughly within the free
+organization's limit of 20 concurrent jobs on standard hosted runners, 5 on
+macOS; a job over it waits in the queue, within the run's 90-minute bound,
+rather than failing. Their six visibilities, each reading its run's status
+once every 20 seconds, take some 1,100 of the 5,000 requests an hour of the
+session's token. Within a cell the two visibilities run side by side, each
+in a repository of its own named after it, and finish in the time of the
+slower one. A cell whose release publishes a package the organization names apart from the repository, an npm
 or Maven package in GitHub Packages or an image under a declared
 `image-name`, runs them one after the other instead
 (`livetest.GitHubReleaseSharesPackages`): both would publish the same package
@@ -934,10 +943,7 @@ at the same version. Of the cells that is the release of `hello-npm-package`,
 `hello-npm-service`; `TestGitHubReleaseSharesPackagesOfTheCells` holds the
 list. The cell's log holds both visibilities; `go test -v`
 names the subtest before each line it switches to (`=== CONT`, `=== NAME`),
-and the cell passes on the top-level `--- PASS` line alone. The two runs
-share the free organization's limit of 20 concurrent jobs on standard hosted
-runners, 5 on macOS; a job over it waits in the queue, within the run's
-90-minute bound, rather than failing. Each demo's
+and the cell passes on the top-level `--- PASS` line alone. Each demo's
 pull-request fixture pins its Nanolinter flavor by a placeholder digest
 (`nanolinter:kotlin@sha256:0...`), so the run names one public image per
 flavor, `nanolinter-image=<flavor>:<digest reference>` as the prepare's
@@ -970,7 +976,10 @@ just test-live-github-cells <dir> <org-id> set=medium after=small nanolinter-ima
 The run directory is one of the live runs' root
 (`FORGE_CI_LIVE_EVIDENCE_ROOT`), with `engine-prepare.log`, a log for each
 cell and `cells.txt`: the run set, `forge_ci_live_set`, and of a delta run
-the set after, `forge_ci_live_after`, then a line a cell as it is printed:
+the set after, `forge_ci_live_after`, then a line a cell as it ends, in
+the order the cells end. Only the recipe writes the lines, one cell after
+another, so they never interleave; a cell's log is numbered in the set's
+order:
 
 ```text
 forge_ci_live_set=medium
@@ -980,9 +989,12 @@ FORGE_CI_LIVE_CELL passed hello-maven release both version=0.2.0 nanolinter-imag
 A cell is `passed` when its trial exited clean and its test passed,
 `not-covered` when it exited clean and judged nothing, and `failed`
 otherwise. Any cell that did not pass fails the recipe once the others have
-run. Hosted cells do not run the lab launcher or classifier, so they write
-no `verdict.json`: keep the run directory, and with it each cell's interval,
-engine and consumer revisions, native run IDs and cleanup output.
+run. An interrupt, Ctrl-C, reaches the running cells, which clean up after
+themselves; no other cell starts, and once those running have ended, each
+with its line, the recipe exits 130. Hosted cells do not run the lab
+launcher or classifier, so they write no `verdict.json`: keep the run
+directory, and with it each cell's interval, engine and consumer revisions,
+native run IDs and cleanup output.
 
 `just test-live-consumer github` still runs one cell, with the words its
 line in `cells.txt` or `just test-live-affected <base> github` gives.

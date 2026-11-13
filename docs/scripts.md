@@ -64,7 +64,7 @@ contract.
 | `scripts/ci/image-build-settings.sh` | Sourced by the image-building recipes (`just test-live-image`, `just runtime-image-archive`, `just buildah-job-image-archive`): turns their optional resource settings into build arguments; Go does the validation. |
 | `scripts/ci/engine-binary.sh` | The shared delivery-binary build, checksum and publisher: behind `just refresh-engine-binary`, the recorded-build guard, and Forgejo/GitLab generic package publication. See [GitLab bootstrap](gitlab.md#checksum-bound-engine-bootstrap) for GitLab coordinates and token types. |
 | `scripts/ci/publish-live-image.sh` | Builds and publishes the signer or kaniko job image to the configured Forge Lab registry for authorized live-tier runs; see [live runs](live-runs.md). |
-| `scripts/ci/run-github-cells.sh` | Runs the hosted GitHub cells of a run set one after another, the engine prepared once and reused. Behind `just test-live-github-cells`; see [live runs](live-runs.md#hosted-github-cells). |
+| `scripts/ci/run-github-cells.sh` | Runs the hosted GitHub cells of a run set, up to three at once and never two of one demo, the engine prepared once and reused. Behind `just test-live-github-cells`; see [live runs](live-runs.md#hosted-github-cells). |
 | `scripts/ci/run-live-tests.sh` | The live conformance tier's entry, behind `just test-live` and `just test-live-consumer forgejo`. |
 | `scripts/ci/runtime-evidence.sh` | Uploads a runtime image's evidence directory under its artifact name and retention; called by `runtime-images.sh`. |
 | `scripts/ci/runtime-images.sh` | Runtime image publication orchestration for `.forgejo/workflows/runtime-images.yml`: binds the runtime roster to the source commit, registry namespace, run and artifact names. |
