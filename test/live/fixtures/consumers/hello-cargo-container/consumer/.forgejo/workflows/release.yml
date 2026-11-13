@@ -217,7 +217,7 @@ jobs:
           artifact-name: release-files
           path: dist/
   release-images:
-    needs: [prepare, build]
+    needs: [prepare, export-plan, test]
     uses: itiquette/forge-ci/.forgejo/workflows/release-images.yml@c08b59fe61f4b926d80875ce850f6bdc695b1d9a
     with:
       runs-on: ${{ vars.CI_RUNNER_LABEL }}
