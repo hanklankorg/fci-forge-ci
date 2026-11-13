@@ -876,14 +876,20 @@ One recipe runs a set of them:
 
 ```bash
 export FORGE_CI_LIVE_GITHUB_RELEASE_TOKEN_FILE=<file>
-just test-live-github-cells <dir> <org-id> set=medium nanolinter-image=<digest reference>
+just test-live-github-cells <dir> <org-id> set=medium \
+  nanolinter-image=java:<digest reference> nanolinter-image=go:<digest reference> ...
 ```
 
 Start it inside the hosted session, as a single trial; it starts none. It
 prepares the engine once, then runs each cell with the engine reused, one
-after another: the cells of one demo share package coordinates. The settings
-after the set go to every cell but a variant, whose fixture root has
-workflows of its own that take none. Each cell runs with its own visibility,
+after another: the cells of one demo share package coordinates. Each demo's
+pull-request fixture pins its Nanolinter flavor by a placeholder digest
+(`nanolinter:kotlin@sha256:0...`), so the run names one public image a
+flavor, `nanolinter-image=<flavor>:<digest reference>` as the prepare's
+`job-image=` does, and each cell lints with the image of its flavor. A
+flavor of the set's cells with no image is refused before anything runs.
+The other settings after the set go to every cell but a variant, whose
+fixture root has workflows of its own that take none. Each cell runs with its own visibility,
 whatever `FORGE_CI_LIVE_CONSUMER_VISIBILITY` the caller has set; the fork pull
 request runs public in every set. Before anything runs it refuses a setting a
 cell does not take, and a set with a release or lifecycle when
@@ -903,7 +909,7 @@ same commit are together the full set's cells. A delta run alone accepts
 nothing.
 
 ```bash
-just test-live-github-cells <dir> <org-id> set=medium after=small nanolinter-image=<digest reference>
+just test-live-github-cells <dir> <org-id> set=medium after=small nanolinter-image=java:<digest reference> ...
 ```
 
 The run directory is one of the live runs' root

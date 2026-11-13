@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/diggsweden/forge-ci/internal/domain/errs"
+	"github.com/diggsweden/forge-ci/internal/testutil/reporoot"
 )
 
 // buildsImage reports whether a demo's release builds a container image.
@@ -242,7 +243,7 @@ func TestDeltaRunsAreTheFullRun(t *testing.T) {
 	}
 
 	checkDeltaRuns(t, matrixGitHub, func(set, after string) []string {
-		cells, err := GitHubCellRuns(set, nil, func(name string) string {
+		cells, err := GitHubCellRuns(reporoot.Path(t), set, githubTestLintImages(), func(name string) string {
 			if name == liveAfterEnv {
 				return after
 			}
@@ -341,7 +342,7 @@ func TestDeltaRunRefusesASetAfterNotBelowItsSet(t *testing.T) {
 		t.Setenv(liveAfterEnv, test.after)
 
 		_, err := FocusedRowRuns("^TestForgejoLayer_")
-		_, cellsErr := GitHubCellRuns(test.set, nil, func(name string) string {
+		_, cellsErr := GitHubCellRuns(reporoot.Path(t), test.set, githubTestLintImages(), func(name string) string {
 			if name == liveAfterEnv {
 				return test.after
 			}

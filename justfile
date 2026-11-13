@@ -1484,7 +1484,7 @@ test-live-affected base forge set="set=full":
 [arg('dir', help='Absolute prepared directory from just test-live-prepare')]
 [arg('org', help='Numeric ID of the organization the hosted session authorizes')]
 [arg('set', help='set=small, set=medium or set=full: the run set whose cells run')]
-[arg('settings', help='after=small or after=medium first for a delta run, then key=value settings for every cell: nanolinter-image=, megalinter-image=, RELEASE_PLATFORMS=')]
+[arg('settings', help='after=small or after=medium first for a delta run, then nanolinter-image=<flavor>:<digest reference> for each lint flavor the cells pin, and key=value settings for every cell: megalinter-image=, RELEASE_PLATFORMS=')]
 [doc('Live; run the hosted GitHub cells of a run set in the hosted session')]
 [group('live')]
 test-live-github-cells dir org set="set=full" *settings:

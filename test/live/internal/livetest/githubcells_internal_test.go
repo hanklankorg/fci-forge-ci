@@ -185,26 +185,81 @@ func TestGitHubCellRunsRefuseWhatACellWouldFailOn(t *testing.T) {
 		return ""
 	}
 
-	const lint = "nanolinter-image=ghcr.io/o/n@sha256:" + unrunDigest
+	root := reporoot.Path(t)
+	lint := githubTestLintImages()
 
-	if _, err := GitHubCellRuns(SetSmall, nil, unset); !errors.Is(err, errs.ErrUsage) || !strings.Contains(err.Error(), GitHubReleaseTokenFileEnv) {
+	if _, err := GitHubCellRuns(root, SetSmall, lint, unset); !errors.Is(err, errs.ErrUsage) || !strings.Contains(err.Error(), GitHubReleaseTokenFileEnv) {
 		t.Errorf("a set with a release and no credential named gave %v", err)
 	}
 
-	runs, err := GitHubCellRuns(SetMedium, []string{lint}, named)
-	if err != nil || !slices.Contains(runs, "private\thello-maven-service\tlifecycle\tversion=0.2.0 "+lint) ||
+	runs, err := GitHubCellRuns(root, SetMedium, lint, named)
+	if err != nil || !slices.Contains(runs, "private\thello-maven-service\tlifecycle\tversion=0.2.0 nanolinter-image="+githubTestLintImage("java")) ||
 		!slices.Contains(runs, "public\thello-npm-package\tpull-request\tfixtures=test/live/github-fork head=fork") {
 		t.Errorf("medium runs %q, %v", runs, err)
 	}
 
 	// A fork's pull request runs public alone, in the full set too.
-	if full, err := GitHubCellRuns("", nil, named); err != nil || len(full) != len(GitHubCells) || !strings.HasPrefix(full[0], "both\t") ||
+	if full, err := GitHubCellRuns(root, "", lint, named); err != nil || len(full) != len(GitHubCells) || !strings.HasPrefix(full[0], "both\t") ||
 		!slices.Contains(full, "public\thello-npm-package\tpull-request\tfixtures=test/live/github-fork head=fork") {
 		t.Errorf("the full set gave %d runs of %d cells, %v", len(full), len(GitHubCells), err)
 	}
 
 	// version= is a release's: a pull request refuses it, offline.
-	if _, err := GitHubCellRuns(SetSmall, []string{"version=0.3.0"}, named); !errors.Is(err, errs.ErrValidation) {
+	if _, err := GitHubCellRuns(root, SetSmall, append(lint, "version=0.3.0"), named); !errors.Is(err, errs.ErrValidation) {
 		t.Errorf("a setting a pull request does not take gave %v", err)
 	}
+}
+
+// A cell lints with the run's image of the flavor its demo's pull-request
+// fixture pins, and a run is refused before it starts for a flavor it names
+// no image for, or a lint image not given per flavor.
+func TestGitHubCellRunsLintEachDemoWithItsFlavor(t *testing.T) {
+	t.Parallel()
+
+	root := reporoot.Path(t)
+	release := func(name string) string {
+		if name == GitHubReleaseTokenFileEnv {
+			return "/a/file"
+		}
+
+		return ""
+	}
+
+	runs, err := GitHubCellRuns(root, SetSmall, githubTestLintImages(), release)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for demo, flavor := range map[string]string{"hello-maven": "java", "hello-gradle": "kotlin", "hello-cargo-cli": "rust", "hello-meta": "core"} {
+		if !slices.Contains(runs, "both\t"+demo+"\tpull-request\tnanolinter-image="+githubTestLintImage(flavor)) {
+			t.Errorf("%s does not lint with the %s image: %q", demo, flavor, runs)
+		}
+	}
+
+	for name, extra := range map[string][]string{
+		"no kotlin image":   slices.DeleteFunc(githubTestLintImages(), func(word string) bool { return strings.Contains(word, "=kotlin:") }),
+		"one image for all": {"nanolinter-image=" + githubTestLintImage("java")},
+		"a flavor twice":    append(githubTestLintImages(), "nanolinter-image=java:"+githubTestLintImage("java")),
+		"no digest":         {"nanolinter-image=java:ghcr.io/o/nanolinter-java:latest"},
+	} {
+		if _, err := GitHubCellRuns(root, SetSmall, extra, release); !errors.Is(err, errs.ErrUsage) {
+			t.Errorf("%s: gave %v", name, err)
+		}
+	}
+}
+
+// githubTestLintImage is a pullable-shaped lint image of a flavor.
+func githubTestLintImage(flavor string) string {
+	return "ghcr.io/o/nanolinter-" + flavor + "@sha256:" + strings.Repeat("a", 64)
+}
+
+// githubTestLintImages names an image for every flavor the fixtures pin.
+func githubTestLintImages() []string {
+	var words []string
+
+	for _, flavor := range []string{"core", "go", "java", "javascript-typescript", "kotlin", "rust", "swift"} {
+		words = append(words, "nanolinter-image="+flavor+":"+githubTestLintImage(flavor))
+	}
+
+	return words
 }

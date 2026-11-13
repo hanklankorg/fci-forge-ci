@@ -5,6 +5,9 @@ package livetest
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 
@@ -130,18 +133,27 @@ func (cell GitHubCell) variant() bool {
 // GitHubCellRuns are the cells of a run set as `just test-live-github-cells`
 // runs them, one a line: the visibility ("both", the cell's one in a set
 // below the full one, or the only one it can run with), the demo, the event and the cell's settings with the
-// run's own (extra, as the lint image), tab-separated, the settings
-// space-separated. A variant takes its own settings alone. A delta run
+// run's own (extra), tab-separated, the settings space-separated. The run
+// names its lint images per flavor, nanolinter-image=<flavor>:<reference> as
+// the prepare's job-image= does, and a cell gets the image of the flavor its
+// demo's pull-request fixture pins (githubFixtureLintFlavor). A variant takes
+// its own settings alone. A delta run
 // (FORGE_CI_LIVE_AFTER) has what set runs and its set after did not
 // (GitHubCell.Visibilities): the cells outside the set after, and of a cell
 // the set after ran with one visibility, the other one.
 //
 // Everything a cell would be refused for later is refused here, before
-// anything runs: a setting its event does not take, and a release or a
-// lifecycle with no release credential named. The credential's file is the
+// anything runs: a setting its event does not take, a lint flavor the run
+// names no image for, and a release or a lifecycle with no release
+// credential named. The credential's file is the
 // trial's to read; only its variable is looked at.
-func GitHubCellRuns(set string, extra []string, getenv func(string) string) ([]string, error) {
+func GitHubCellRuns(root, set string, extra []string, getenv func(string) string) ([]string, error) {
 	set, err := ParseLiveSet(set)
+	if err != nil {
+		return nil, err
+	}
+
+	lintImages, extra, err := githubCellLintImages(extra)
 	if err != nil {
 		return nil, err
 	}
@@ -163,7 +175,12 @@ func GitHubCellRuns(set string, extra []string, getenv func(string) string) ([]s
 		// the run's settings: the trial refuses a setting no fixture passes.
 		words := slices.Clone(cell.Settings)
 		if !cell.variant() {
-			words = append(words, extra...)
+			lint, err := githubCellLintImage(root, cell.Demo, lintImages)
+			if err != nil {
+				return nil, fmt.Errorf("%s %s: %w", cell.Demo, cell.Event, err)
+			}
+
+			words = append(append(words, extra...), lint...)
 		}
 
 		if _, err := ParseGitHubTrialSettings(cell.Event, words); err != nil {
@@ -184,4 +201,69 @@ func GitHubCellRuns(set string, extra []string, getenv func(string) string) ([]s
 	}
 
 	return runs, nil
+}
+
+// githubFixtureLintFlavor is the Nanolinter flavor a demo's pull-request
+// fixture pins its placeholder lint image of, nanolinter:<flavor>@sha256:0...,
+// until a run names a real image.
+var githubFixtureLintFlavor = regexp.MustCompile(`(?m)^[ \t]*nanolinter-image:[ \t]*\S+/nanolinter:([a-z][a-z0-9-]*)@sha256:0{64}\b`)
+
+// githubCellLintImages takes the run's nanolinter-image=<flavor>:<reference>
+// words out of extra, one image a flavor, and returns them by flavor with the
+// other words.
+func githubCellLintImages(extra []string) (map[string]string, []string, error) {
+	images := map[string]string{}
+
+	var rest []string
+
+	for _, word := range extra {
+		value, lint := strings.CutPrefix(word, "nanolinter-image=")
+		if !lint {
+			rest = append(rest, word)
+
+			continue
+		}
+
+		flavor, image, found := strings.Cut(value, ":")
+		if !found || !jobImageFlavor.MatchString(flavor) || !pinnedImage.MatchString(image) {
+			return nil, nil, fmt.Errorf("setting %q: want nanolinter-image=<flavor>:<repository>@sha256:<digest>, one a flavor: %w", word, errs.ErrUsage)
+		}
+
+		if _, twice := images[flavor]; twice {
+			return nil, nil, fmt.Errorf("setting %q: the %s flavor is named twice: %w", word, flavor, errs.ErrUsage)
+		}
+
+		images[flavor] = image
+	}
+
+	return images, rest, nil
+}
+
+// githubCellLintImage is the nanolinter-image= setting of a demo's cell: the
+// run's image of the flavor its pull-request fixture pins, or none when the
+// fixture lints with no Nanolinter image.
+func githubCellLintImage(root, demo string, images map[string]string) ([]string, error) {
+	fixture := filepath.Join(demoConsumerDir(root, demo), "test", "live", "github", "workflows", "pullrequest.yml")
+
+	body, err := os.ReadFile(fixture) //nolint:gosec // G304: a shipped demo's fixture, under the repository root.
+	if os.IsNotExist(err) {
+		return nil, nil
+	} else if err != nil {
+		return nil, err
+	}
+
+	pinned := githubFixtureLintFlavor.FindSubmatch(body)
+	if pinned == nil {
+		return nil, nil
+	}
+
+	flavor := string(pinned[1])
+
+	image, named := images[flavor]
+	if !named {
+		return nil, fmt.Errorf("its fixture lints with the %s flavor: pass nanolinter-image=%s:<repository>@sha256:<digest> of an image GitHub's runners can pull: %w",
+			flavor, flavor, errs.ErrUsage)
+	}
+
+	return []string{"nanolinter-image=" + image}, nil
 }

@@ -381,7 +381,7 @@ func runSetMode(mode string, args []string) (bool, error) {
 	case mode == "affected-rows" && len(args) == 2:
 		return true, printAffectedRows(args[0], args[1], os.Stdin)
 	case mode == "github-cells" && len(args) >= 1:
-		cells, err := livetest.GitHubCellRuns(args[0], args[1:], os.Getenv)
+		cells, err := livetest.GitHubCellRuns(".", args[0], args[1:], os.Getenv)
 		for _, cell := range cells {
 			fmt.Println(cell)
 		}
