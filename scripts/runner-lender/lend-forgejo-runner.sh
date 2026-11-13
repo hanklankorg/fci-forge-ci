@@ -38,7 +38,7 @@ fail() {
   exit 1
 }
 
-# Runner 13.2.0 deletes an ephemeral registration after completing a job, not
+# Runner 13.2.1 deletes an ephemeral registration after completing a job, not
 # when its idle poller is interrupted. It has no unregister command or runner
 # RPC. Do not report a successful retirement that needs forge-side authority.
 idle_expired() {

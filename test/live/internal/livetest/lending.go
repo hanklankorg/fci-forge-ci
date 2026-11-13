@@ -25,7 +25,7 @@ import (
 
 // Same runner release as scripts/bootstrap/install-forgejo-runner.sh. The image
 // supplies the real worker without running the root bootstrap on the host.
-const lendingWorkerImage = "data.forgejo.org/forgejo/runner:13.2.0@sha256:ca3d5eea46004789a175d1369eec6829d3ea9bfbe2011a06625b4bdaa55f7552"
+const lendingWorkerImage = "data.forgejo.org/forgejo/runner:13.2.1@sha256:568cea8c15ddc01fc8f330124892f572af7db37fa28344a2c1914405793bf61d"
 
 const (
 	lendingIdle = "idle"
@@ -136,7 +136,7 @@ func requireLendingEngine(tb TB, ctx context.Context) string {
 	}
 
 	if _, imageErr := run(ctx, nil, "image", "exists", lendingWorkerImage); imageErr != nil {
-		tb.Fatalf("local lending requires the cached digest-pinned Forgejo 13.2.0 runner image")
+		tb.Fatalf("local lending requires the cached digest-pinned Forgejo 13.2.1 runner image")
 	}
 
 	return podman

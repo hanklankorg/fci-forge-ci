@@ -77,7 +77,7 @@ release; follow its workflow run to the final release, or use
 
 Forgejo ignores GitHub's `permissions:` declarations, so the layer and its
 examples leave them out. The automatic job token (`forgejo.token`) is scoped
-to the calling repository, but scoped does not mean read-only: in Forgejo 16
+to the calling repository, but scoped does not mean read-only: in Forgejo 16 and 17
 it can write to the repository in every run except a fork's pull request.
 Build jobs hold no signing key, but they do hold that token; a workload that
 needs a hard read-only boundary needs isolation from write credentials that
@@ -86,8 +86,8 @@ with the narrowest scopes, such as `read:repository`, `write:repository` and
 `write:package`, and pass them only to the steps that need them. The layer's
 workflows request no OIDC token.
 
-See Forgejo's [workflow differences](https://forgejo.org/docs/v16.0/user/actions/github-actions/)
-and [access-token scopes](https://forgejo.org/docs/v16.0/user/authentication/token-scope/).
+See Forgejo's [workflow differences](https://forgejo.org/docs/v17.0/user/actions/github-actions/)
+and [access-token scopes](https://forgejo.org/docs/v17.0/user/authentication/token-scope/).
 
 ### Network
 

@@ -195,8 +195,8 @@ func TestPinnedInstallers_VerifyExactDownloadBeforeInstalling(t *testing.T) {
 		{"yq", "https://github.com/mikefarah/yq/releases/download/v4.54.1/yq_linux_amd64", "8e34fc298390875de416e6a4afcb8cabeceb25d9aa8506c1a2f9353cf702ea5f", "", "", ""},
 		{"mise", "https://github.com/jdx/mise/releases/download/v2026.10.19/mise-v2026.10.19-linux-x64", "3162760f40b6b5f706c60641e4ef5ee7322bc6c54f72fc26a7111b337aa18d9d", "", "", ""},
 		{"publiccode-parser", "https://github.com/italia/publiccode-parser-go/releases/download/v5.4.3/publiccode-parser-go_Linux_x86_64.tar.gz", "211847305611417ac0b76af5169086232ea6c75ff6ae686227b6972a41599dd7", "publiccode-parser", "", ""},
-		{"forgejo-runner", "https://code.forgejo.org/forgejo/runner/releases/download/v13.2.0/forgejo-runner-13.2.0-linux-amd64", "fadaec897f5e6641c363f87ecaf75f866f99c81b7097ec6b433e4c48123fcad1", "", "", ""},
-		{"forgejo-runner", "https://code.forgejo.org/forgejo/runner/releases/download/v13.2.0/forgejo-runner-13.2.0-linux-arm64", "9d3d462ee83e4e629f959faeacceb20eed2f25290bddea402e65ace46a31afd9", "", "Linux", "aarch64"},
+		{"forgejo-runner", "https://code.forgejo.org/forgejo/runner/releases/download/v13.2.1/forgejo-runner-13.2.1-linux-amd64", "bb369fe1ecb50fdc983c0b1d993f19b0920df6e5864511892b3cdbf16d858b34", "", "", ""},
+		{"forgejo-runner", "https://code.forgejo.org/forgejo/runner/releases/download/v13.2.1/forgejo-runner-13.2.1-linux-arm64", "eeddb7902f79abe488972f4189fbe3ea02762ee827d1b406b469420bf0d62dd9", "", "Linux", "aarch64"},
 		{"trivy", "https://github.com/aquasecurity/trivy/releases/download/v0.76.1/trivy_0.76.1_Linux-ARM64.tar.gz", "e174dff2a6dba5e3ae41f8d0537a6324405bd08132497340304c6b20e0f16a1f", "trivy", "Linux", "aarch64"},
 		{"trivy", "https://github.com/aquasecurity/trivy/releases/download/v0.76.1/trivy_0.76.1_macOS-ARM64.tar.gz", "11a9b6cd2752011b54f01ea4bd0dbfa9f0c41dc6538d5a3f9d23955f471bf4e5", "trivy", "Darwin", "arm64"},
 		{"syft", "https://github.com/anchore/syft/releases/download/v1.55.0/syft_1.55.0_linux_arm64.tar.gz", "929bd163db2d7cd2255d3bcb8967208079813d7b46b0c952f7b794d8e2c7d304", "syft", "Linux", "aarch64"},
@@ -617,7 +617,7 @@ func TestInstallerResolvers_EveryPlatformAndAliasHasAPinnedAsset(t *testing.T) {
 		}},
 		// A runner is lent to a Linux job; there is no macOS build to lend.
 		{script: "install-forgejo-runner.sh", resolve: "resolve_forgejo_runner_asset", pin: "resolve_forgejo_runner_sha256", refusal: "ERROR: unsupported forgejo-runner platform: ", assets: map[string][]platform{
-			"forgejo-runner-13.2.0-linux-amd64": linuxAMD64, "forgejo-runner-13.2.0-linux-arm64": linuxARM64,
+			"forgejo-runner-13.2.1-linux-amd64": linuxAMD64, "forgejo-runner-13.2.1-linux-arm64": linuxARM64,
 		}, unsupported: append(darwinAMD64, darwinARM64...)},
 	} {
 		t.Run(tool.script, func(t *testing.T) {

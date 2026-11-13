@@ -422,7 +422,7 @@ lender's run for the reason.
 
 ### Unused-runner retirement limitation
 
-The pinned Forgejo runner 13.2.0 deletes an `--ephemeral` registration only
+The pinned Forgejo runner 13.2.1 deletes an `--ephemeral` registration only
 after it has run a job; it has no way to unregister itself. A lend that
 expires idle, or whose VM is cancelled, leaves its registration behind, and
 the lending script fails, saying that registration retirement is

@@ -496,7 +496,7 @@ just test-live '^TestRunnerLending_LocalLifecycle/(idle|cancel)$'
 
 It requires an accepted `forgeci` contract for a disposable Forgejo endpoint on
 either the Compose or k3s road, local rootless Podman and the cached digest-pinned
-Forgejo 13.2.0 runner image named in `test/live/internal/livetest/lending.go`. The lent
+Forgejo 13.2.1 runner image named in `test/live/internal/livetest/lending.go`. The lent
 worker remains a local rootless Podman container even when Forgejo runs on k3s.
 `LAB_TARGETS_FILE` selects a dedicated contract as usual; use a separate absolute
 path per road when retaining both contracts. No Forge Lab source change,

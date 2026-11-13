@@ -16,9 +16,9 @@
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/install-common.sh"
 
 # renovate: datasource=forgejo-releases depName=forgejo/runner registryUrl=https://code.forgejo.org
-readonly FORGEJO_RUNNER_VERSION="v13.2.0"
-readonly FORGEJO_RUNNER_SHA256_LINUX_AMD64="fadaec897f5e6641c363f87ecaf75f866f99c81b7097ec6b433e4c48123fcad1"
-readonly FORGEJO_RUNNER_SHA256_LINUX_ARM64="9d3d462ee83e4e629f959faeacceb20eed2f25290bddea402e65ace46a31afd9"
+readonly FORGEJO_RUNNER_VERSION="v13.2.1"
+readonly FORGEJO_RUNNER_SHA256_LINUX_AMD64="bb369fe1ecb50fdc983c0b1d993f19b0920df6e5864511892b3cdbf16d858b34"
+readonly FORGEJO_RUNNER_SHA256_LINUX_ARM64="eeddb7902f79abe488972f4189fbe3ea02762ee827d1b406b469420bf0d62dd9"
 
 resolve_forgejo_runner_asset() {
   local raw_os raw_arch os="" arch="" asset=""
