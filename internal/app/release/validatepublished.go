@@ -86,7 +86,11 @@ func ValidatePublishedRelease(ctx context.Context, reader provider.ReleaseReader
 		return fmt.Errorf("release %s on %s does not hold what was planned: %s: %w", tag, repo, strings.Join(problems, "; "), errs.ErrValidation)
 	}
 
-	_, _ = fmt.Fprintf(out, "Release %s on %s holds all %d planned files\n", tag, repo, len(planned))
+	if len(planned) == 0 {
+		_, _ = fmt.Fprintf(out, "Release %s on %s holds no file, as planned\n", tag, repo)
+	} else {
+		_, _ = fmt.Fprintf(out, "Release %s on %s holds all %d planned files\n", tag, repo, len(planned))
+	}
 
 	return nil
 }
@@ -102,10 +106,6 @@ func plannedReleaseFiles(in ValidatePublishedInput) (map[string]plannedFile, err
 	paths, err := plannedReleasePaths(in)
 	if err != nil {
 		return nil, err
-	}
-
-	if len(paths) == 0 {
-		return nil, fmt.Errorf("the release plan names no file to read back: %w", errs.ErrMissingInput)
 	}
 
 	planned := make(map[string]plannedFile, len(paths))
@@ -128,7 +128,10 @@ func plannedReleaseFiles(in ValidatePublishedInput) (map[string]plannedFile, err
 }
 
 // plannedReleasePaths resolves the planned files as `release publish` does
-// for the same input.
+// for the same input. An assembly may plan no file: a meta or container-only
+// project's release is published from it without one, and reading it back
+// still proves the release is visible and not a draft. A manifest or a dist
+// that names no file is refused where it is read, as publish refuses it.
 func plannedReleasePaths(in ValidatePublishedInput) ([]string, error) {
 	switch {
 	case in.AssemblyFile != "" && len(in.Assets) > 0:

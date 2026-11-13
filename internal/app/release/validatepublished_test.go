@@ -153,6 +153,54 @@ func TestValidatePublishedRelease_PlansAnAssemblyWithItsSignatures(t *testing.T)
 	}
 }
 
+// An assembly that plans no file, as a meta or container-only project's
+// does, is published by `release publish --strategy=recreate` as a release
+// without files. Reading it back still proves the release is visible and
+// not a draft, and a file on it is still a warning.
+func TestValidatePublishedRelease_ReadsBackAnAssemblyThatPlansNoFile(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name     string
+		forge    forgeRelease
+		wantErr  string // empty: the command succeeds
+		wantWarn string
+	}{
+		{name: "a release without files", forge: holding()},
+		{name: "a file the plan does not name warns", forge: holding(provider.ListedAsset{Name: "notes.pdf", Size: 1}), wantWarn: "holds notes.pdf"},
+		{name: "no release for the tag", wantErr: "no release v1.0.0 is visible"},
+		{name: "a release left a draft", forge: forgeRelease{release: &provider.ListedRelease{Tag: "v1.0.0", Draft: true}}, wantErr: "still a draft"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			var out, warnings bytes.Buffer
+
+			err := apprelease.ValidatePublishedRelease(t.Context(), tc.forge, &out,
+				output.NewAnnotator(&warnings, output.FormatText), apprelease.ValidatePublishedInput{
+					Tag: "v1.0.0", Repository: "owner/app", AssemblyFile: emptyAssembly(t),
+				})
+
+			switch {
+			case tc.wantErr == "" && err != nil:
+				t.Fatalf("err = %v, want success", err)
+			case tc.wantErr != "" && (!errors.Is(err, errs.ErrValidation) || !strings.Contains(err.Error(), tc.wantErr)):
+				t.Fatalf("err = %v, want a validation error naming %q", err, tc.wantErr)
+			}
+
+			if tc.wantWarn == "" && warnings.Len() != 0 || !strings.Contains(warnings.String(), tc.wantWarn) {
+				t.Errorf("warnings = %q, want %q", warnings.String(), tc.wantWarn)
+			}
+
+			if succeeded := strings.Contains(out.String(), "holds no file, as planned"); succeeded != (err == nil) {
+				t.Errorf("out = %q with err %v", out.String(), err)
+			}
+		})
+	}
+}
+
 func TestValidatePublishedRelease_RefusesInputThatNamesNoPlan(t *testing.T) {
 	t.Parallel()
 
@@ -169,7 +217,6 @@ func TestValidatePublishedRelease_RefusesInputThatNamesNoPlan(t *testing.T) {
 		{name: "assembly and assets", in: apprelease.ValidatePublishedInput{Tag: "v1.0.0", Repository: "owner/app", Assets: []string{file}, AssemblyFile: "a.json"}, want: errs.ErrUsage},
 		{name: "a planned file that is absent", in: apprelease.ValidatePublishedInput{Tag: "v1.0.0", Repository: "owner/app", Assets: []string{file + ".absent"}}, want: errs.ErrMissingInput},
 		{name: "a planned file that is a directory", in: apprelease.ValidatePublishedInput{Tag: "v1.0.0", Repository: "owner/app", Assets: []string{filepath.Dir(file)}}, want: errs.ErrMissingInput},
-		{name: "a plan that names no file", in: apprelease.ValidatePublishedInput{Tag: "v1.0.0", Repository: "owner/app", AssemblyFile: emptyAssembly(t)}, want: errs.ErrMissingInput},
 		{name: "two planned files with one name", in: apprelease.ValidatePublishedInput{Tag: "v1.0.0", Repository: "owner/app", Assets: []string{file, file}}, want: errs.ErrValidation},
 	}
 
