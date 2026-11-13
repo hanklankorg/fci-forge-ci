@@ -530,6 +530,19 @@ Prepare a directory once per commit with `just test-live-prepare`. Then run
 the cases of the Go tables on it with `just test-live-prepared`, or one
 consumer from its `demos` with `just test-live-consumer`.
 
+Every image a prepare builds on the host is tagged with the full commit:
+`localhost/forge-ci-live-signer:<commit>`,
+`localhost/forge-ci-live-kaniko-job:<commit>`,
+`localhost/forge-ci-buildah-job:<commit>` and
+`localhost/forge-ci-runtime-<target>:<commit>`. A prepare of another commit
+on the same host therefore builds beside a running lane's images rather than
+taking their names. The names matter although a lane pushes the archives to
+the lab registry: the lab's GitLab runner uses the host's Podman image store,
+finds a pushed job image there as the image the prepare built, and starts it
+by that image's local name, so a moved name fails the job with "no such
+image". Each recipe refuses image inputs with uncommitted changes, so the tag
+names what was built.
+
 ### Build resource budget
 
 An image build may be given a resource budget:
@@ -2785,8 +2798,10 @@ just runtime-image-archive go /absolute/images   # prints /absolute/images/forge
 
 It carries the engine the tree records, checked against
 `.engine/bin/forge-ci-linux-<arch>.sha256` as published images are, for this
-machine's architecture. A published runtime image carries the engine of its own
-release; pairing it with a newer candidate trials an older engine.
+machine's architecture. The image is `localhost/forge-ci-runtime-go:<commit>`,
+so commit the tree's image inputs first. A published runtime image carries the
+engine of its own release; pairing it with a newer candidate trials an older
+engine.
 
 Prepare the trusted job image separately and export it as a Docker image
 archive (`podman save --format=docker-archive`). The trial publishes it into

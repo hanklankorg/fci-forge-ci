@@ -165,24 +165,7 @@ build*) printf '%s\0' "$@" >>"$RECEIPT.argv"; if [[ $BUILD_STATUS == 143 ]]; the
 esac
 `)
 				archive := filepath.Join(root, "not-created")
-
-				var cmd *exec.Cmd
-
-				switch owner {
-				case "runtime":
-					cmd = exec.CommandContext(t.Context(), just, "--justfile", filepath.Join(root, "justfile"), "runtime-image-archive", "go", archive, "required", "3", "2048", "1")
-				case "buildah":
-					cmd = exec.CommandContext(t.Context(), just, "--justfile", filepath.Join(root, "justfile"), "buildah-job-image-archive", archive, "required", "3", "2048", "1")
-				default:
-					lab := t.TempDir()
-					if err := os.WriteFile(filepath.Join(lab, "justfile"), nil, 0o600); err != nil {
-						t.Fatal(err)
-					}
-
-					cmd = exec.CommandContext(t.Context(), testBash(t), filepath.Join(root, "scripts/ci/publish-live-image.sh"), owner, lab, archive)
-				}
-
-				cmd.Dir = root
+				cmd := imageOwnerCommand(t, just, root, owner, archive)
 				cmd.Env = append(os.Environ(), "PATH="+bin+string(os.PathListSeparator)+os.Getenv("PATH"), "GO="+filepath.Join(bin, "go"), "RECEIPT="+filepath.Join(root, "receipt"), "BUILD_STATUS="+status, "FORGE_CI_IMAGE_BUILD_BUDGET=required", "FORGE_CI_IMAGE_BUILD_CPUS=3", "FORGE_CI_IMAGE_BUILD_MEMORY_MIB=2048", "FORGE_CI_IMAGE_BUILD_COMPILER_JOBS=1")
 				output, err := cmd.CombinedOutput()
 
@@ -226,6 +209,117 @@ esac
 					if err != nil || !strings.HasPrefix(string(compiler), "1\x002048MiB\x00") || !strings.Contains(string(compiler), "-p=1") {
 						t.Fatalf("compiler: %q %v", compiler, err)
 					}
+				}
+			})
+		}
+	}
+}
+
+// imageOwnerCommand runs one image preparation owner of the tree copied to
+// root: the justfile's archive recipes, or publish-live-image.sh for a kind.
+func imageOwnerCommand(t *testing.T, just, root, owner, archive string) *exec.Cmd {
+	t.Helper()
+
+	var cmd *exec.Cmd
+
+	switch owner {
+	case "runtime":
+		cmd = exec.CommandContext(t.Context(), just, "--justfile", filepath.Join(root, "justfile"), "runtime-image-archive", "go", archive, "required", "3", "2048", "1")
+	case "buildah":
+		cmd = exec.CommandContext(t.Context(), just, "--justfile", filepath.Join(root, "justfile"), "buildah-job-image-archive", archive, "required", "3", "2048", "1")
+	default:
+		lab := t.TempDir()
+		if err := os.WriteFile(filepath.Join(lab, "justfile"), nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+
+		cmd = exec.CommandContext(t.Context(), testBash(t), filepath.Join(root, "scripts/ci/publish-live-image.sh"), owner, lab, archive)
+	}
+
+	cmd.Dir = root
+
+	return cmd
+}
+
+// Every image a live preparation builds on this host is tagged with the
+// commit it is built from, so a build for another commit never takes the
+// local name a running lane's GitLab job finds its image under; inputs with
+// uncommitted changes are refused before anything is built.
+func TestImagePreparationOwnersTagTheImageByCommit(t *testing.T) {
+	just, err := exec.LookPath("just")
+	if err != nil {
+		t.Skip("requires Just")
+	}
+
+	const commit = "0123456789abcdef0123456789abcdef01234567"
+
+	repositories := map[string]string{
+		"runtime":     "localhost/forge-ci-runtime-go",
+		"buildah":     "localhost/forge-ci-buildah-job",
+		"signer":      "localhost/forge-ci-live-signer",
+		"kaniko-job":  "localhost/forge-ci-live-kaniko-job",
+		"buildah-job": "localhost/forge-ci-live-buildah-job",
+	}
+	for owner, repository := range repositories {
+		for _, tree := range []string{"clean", "dirty"} {
+			t.Run(owner+"/"+tree, func(t *testing.T) {
+				root, bin := t.TempDir(), t.TempDir()
+				for _, name := range []string{"justfile", "scripts/ci/image-build-settings.sh", "scripts/ci/publish-live-image.sh"} {
+					copyImageFixture(t, root, name)
+				}
+
+				for _, directory := range []string{"containers/runtime", "scripts/bootstrap", "templates"} {
+					if err := os.MkdirAll(filepath.Join(root, directory), 0o700); err != nil {
+						t.Fatal(err)
+					}
+				}
+
+				writeExecutable(t, filepath.Join(root, "scripts/ci/engine-binary.sh"), "#!/usr/bin/env bash\nexit 0\n")
+				writeExecutable(t, filepath.Join(bin, "go"), fakeImageSettingsGo)
+				writeExecutable(t, filepath.Join(bin, "jq"), "#!/usr/bin/env bash\nexit 0\n")
+				writeExecutable(t, filepath.Join(bin, "just"), "#!/usr/bin/env bash\necho lab.invalid/forgeci/image@sha256:1\n")
+				writeExecutable(t, filepath.Join(bin, "git"), `#!/usr/bin/env bash
+case "$*" in
+*status*) [[ $TREE == clean ]] || echo " M containers/changed" ;;
+*rev-parse*) echo "$COMMIT" ;;
+*) echo fixture ;;
+esac
+`)
+				writeExecutable(t, filepath.Join(bin, "podman"), `#!/usr/bin/env bash
+case "$*" in
+info*) echo amd64 ;;
+"image exists"*) exit 1 ;;
+build*) printf '%s\0' "$@" >"$RECEIPT.build" ;;
+save*) printf '%s' "${@: -1}" >"$RECEIPT.save" && : >"${@: -2:1}" ;;
+*) exit 88 ;;
+esac
+`)
+
+				cmd := imageOwnerCommand(t, just, root, owner, filepath.Join(root, "archive"))
+				cmd.Env = append(os.Environ(), "PATH="+bin+string(os.PathListSeparator)+os.Getenv("PATH"), "GO="+filepath.Join(bin, "go"), "RECEIPT="+filepath.Join(root, "receipt"), "TREE="+tree, "COMMIT="+commit, "FORGE_CI_IMAGE_BUILD_BUDGET=required", "FORGE_CI_IMAGE_BUILD_CPUS=3", "FORGE_CI_IMAGE_BUILD_MEMORY_MIB=2048", "FORGE_CI_IMAGE_BUILD_COMPILER_JOBS=1")
+				output, err := cmd.CombinedOutput()
+				build, buildErr := os.ReadFile(filepath.Join(root, "receipt.build"))
+
+				if tree == "dirty" {
+					var exit *exec.ExitError
+					if !errors.As(err, &exit) || exit.ExitCode() != 2 || !strings.Contains(string(output), "uncommitted changes") || buildErr == nil {
+						t.Fatalf("dirty inputs admitted: %v: %s", err, output)
+					}
+
+					return
+				}
+
+				if err != nil || buildErr != nil {
+					t.Fatalf("build: %v %v: %s", err, buildErr, output)
+				}
+
+				image := repository + ":" + commit
+				if !strings.Contains(string(build), "\x00--tag\x00"+image+"\x00") {
+					t.Fatalf("built %q, want the tag %s", build, image)
+				}
+
+				if saved, err := os.ReadFile(filepath.Join(root, "receipt.save")); err != nil || string(saved) != image {
+					t.Fatalf("saved %q, want %s: %v", saved, image, err)
 				}
 			})
 		}

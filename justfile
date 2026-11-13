@@ -1246,6 +1246,19 @@ runtime-image-archive target directory budget="" cpus="" memory_mib="" compiler_
         printf 'the archive directory must be an absolute path, got %q\n' "$directory" >&2
         exit 2
     fi
+    # The image is keyed by the commit, as test-live-image's are: the lab's
+    # GitLab runner shares this host's image store and starts a job image it
+    # finds here by its local name, so a build for another commit must not
+    # take that name. Its inputs must be that commit's; the engine is checked
+    # against .engine/bin below.
+    inputs=(containers/runtime scripts/bootstrap templates .engine/bin)
+    if [[ -n "$(git status --porcelain --untracked-files=all -- "${inputs[@]}")" ]]; then
+        printf 'the %s runtime image inputs have uncommitted changes; commit or stash them first:\n' "$target" >&2
+        git status --short --untracked-files=all -- "${inputs[@]}" >&2
+        exit 2
+    fi
+    commit=$(git rev-parse --verify HEAD)
+    image="localhost/forge-ci-runtime-$target:$commit"
     # The image's whole build context, and nothing of the tree beyond it.
     context=$(mktemp -d "${TMPDIR:-/tmp}/forge-ci-runtime-image.XXXXXXXX")
     trap 'rm -rf -- "$context"' EXIT
@@ -1253,7 +1266,6 @@ runtime-image-archive target directory budget="" cpus="" memory_mib="" compiler_
     bash scripts/ci/engine-binary.sh build-checked "$arch" "$context/cli-prebuilt/forge-ci" >&2
     cp -R -- scripts/bootstrap "$context/scripts/bootstrap"
     cp -R -- templates "$context/templates"
-    image="localhost/forge-ci-runtime-$target:candidate"
     podman build "${image_build_args[@]}" --file containers/runtime/Containerfile --target "$target" --tag "$image" "$context" >&2
     mkdir -p -- "$directory"
     archive="$directory/forge-ci-runtime-$target.tar"
@@ -1280,9 +1292,16 @@ buildah-job-image-archive directory budget="" cpus="" memory_mib="" compiler_job
         printf 'the archive directory must be an absolute path, got %q\n' "$directory" >&2
         exit 2
     fi
-    image=localhost/forge-ci-buildah-job:candidate
+    # Keyed by the commit, as the runtime image archive is.
+    if [[ -n "$(git status --porcelain --untracked-files=all -- containers/buildah-job)" ]]; then
+        printf 'the Buildah job image inputs have uncommitted changes; commit or stash them first:\n' >&2
+        git status --short --untracked-files=all -- containers/buildah-job >&2
+        exit 2
+    fi
+    commit=$(git rev-parse --verify HEAD)
+    image="localhost/forge-ci-buildah-job:$commit"
     podman build "${image_build_args[@]}" --file containers/buildah-job/Containerfile \
-        --label "org.opencontainers.image.revision=$(git rev-parse --verify HEAD)" \
+        --label "org.opencontainers.image.revision=$commit" \
         --tag "$image" containers/buildah-job >&2
     mkdir -p -- "$directory"
     archive="$directory/forge-ci-buildah-job.tar"
