@@ -1150,7 +1150,12 @@ Cosign key, whatever `sign.method` names
 Swap matters for OpenPGP keys: the [swap policy](verification.md#swap-policy)
 keeps a GPG key off disk. Cosign reads its key in its own process. If you sign
 distro packages with `sign-distro-packages`, or the checksums and SBOMs with
-GPG, keep swap off on the signer runner.
+GPG, keep swap off on the signer runner, or run its job containers with swap
+disabled: with the Docker executor, set `memory` and `memory_swap` to the same
+value under `[runners.docker]` in the runner's `config.toml`. The container
+limit leaves `gitlab-runner`'s copy of the key swappable, so prefer host swap
+off on production signer runners
+([residual risk](verification.md#swap-policy)).
 
 ### Signing and publication are separate authorities
 

@@ -19,8 +19,8 @@ func SwapEnabled() (bool, error) { return false, nil }
 // "we looked and found none" are different claims, and the caller surfaces the
 // difference. Saying SwapAbsent here would assert a fact this build cannot
 // establish.
-func RequireNoSwap(debugAllowSwap bool) (SwapState, error) {
+func RequireNoSwap(debugAllowSwap bool) (SwapState, string, error) {
 	_ = debugAllowSwap
 
-	return SwapUndetermined, nil
+	return SwapUndetermined, "", nil
 }

@@ -50,13 +50,19 @@ func overriddenSwapNotice() string {
 	return "swap state was read from $FORGE_CI_PROC_SWAPS, not /proc/swaps — no active swap area was reported there, so the swap policy passed on an injected answer. See " + docslink.URL("verification.md#swap-policy") + "."
 }
 
+// A Notice, not silence: the host has swap, and the pass rests on the job's
+// cgroup forbidding its use, which the operator should be able to see.
+func cgroupSwapNotice(cgroup string) string {
+	return "swap is active on the host, but " + cgroup + "/memory.swap.max is 0, so this process's memory cannot be swapped out; the swap policy passed on the cgroup limit. See " + docslink.URL("verification.md#swap-policy") + "."
+}
+
 // debugAllowSwapFlag is the operator's opt-out from the swap-refusal
 // policy. Flag-only, so the override must reappear in argv each
 // invocation rather than being set once in the environment.
 func debugAllowSwapFlag() cli.Flag {
 	return &cli.BoolFlag{
 		Name:  "debug-allow-swap",
-		Usage: "DEBUG ONLY — bypass the swap-refusal policy when /proc/swaps reports an active swap area; emits a loud Warning annotation. NOT FOR PRODUCTION RELEASES; the supported fix is to disable swap on the runner. See " + docslink.URL("verification.md#swap-policy") + ".",
+		Usage: "DEBUG ONLY — bypass the swap-refusal policy when /proc/swaps reports an active swap area; emits a loud Warning annotation. NOT FOR PRODUCTION RELEASES; the supported fix is to disable swap on the runner, or for the job container (memory-swap equal to memory). See " + docslink.URL("verification.md#swap-policy") + ".",
 	}
 }
 
@@ -72,7 +78,7 @@ func debugAllowSwapFlag() cli.Flag {
 // silence, which is the wrong way round, since the person least likely to know
 // the check was skipped is the one who never chose to skip it.
 func requireNoSwapWithWarning(cmd *cli.Command) error {
-	state, err := safeexec.RequireNoSwap(cmd.Bool("debug-allow-swap"))
+	state, cgroup, err := safeexec.RequireNoSwap(cmd.Bool("debug-allow-swap"))
 	if err != nil {
 		return err
 	}
@@ -84,6 +90,8 @@ func requireNoSwapWithWarning(cmd *cli.Command) error {
 		deps.Annotator(cmd).Noticef("%s", undeterminedSwapNotice())
 	case safeexec.SwapOverridden:
 		deps.Annotator(cmd).Noticef("%s", overriddenSwapNotice())
+	case safeexec.SwapCgroupDisabled:
+		deps.Annotator(cmd).Noticef("%s", cgroupSwapNotice(cgroup))
 	case safeexec.SwapAbsent:
 	}
 

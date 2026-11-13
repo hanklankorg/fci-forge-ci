@@ -36,7 +36,7 @@ func TestSwapEnabled_RejectsOversizedInput(t *testing.T) {
 		t.Fatalf("oversized swap input: on=%t err=%v; want classified refusal", on, err)
 	}
 
-	state, err := safeexec.RequireNoSwap(false)
+	state, _, err := safeexec.RequireNoSwap(false)
 	if err != nil || state != safeexec.SwapUndetermined {
 		t.Fatalf("unreadable swap input: state=%s err=%v; want undetermined", state, err)
 	}
@@ -88,7 +88,7 @@ func TestSwapInputFIFOChild(t *testing.T) {
 		t.Fatalf("FIFO input: on=%t err=%v; want regular-file refusal", on, err)
 	}
 
-	state, err := safeexec.RequireNoSwap(false)
+	state, _, err := safeexec.RequireNoSwap(false)
 	if err != nil || state != safeexec.SwapUndetermined {
 		t.Fatalf("FIFO policy: state=%s err=%v; want undetermined", state, err)
 	}

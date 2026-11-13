@@ -1655,8 +1655,9 @@ just test-live-prepared <dir> forgejo '^TestForgejoLayer_ConsumerTrial$/^gpg-fil
 ```
 
 The sign job loads the GPG key in process, so the lane needs runners with
-swap off, as `distro-packages` does: on a runner with swap the release
-stops at the GPG step. After the release the trial verifies every `.asc`
+swap off, or job containers with swap disabled (memory-swap equal to
+memory), as `distro-packages` does: on a runner whose job can swap the
+release stops at the GPG step. After the release the trial verifies every `.asc`
 the release offers with its own GPG key and requires the signature to be
 that key's (`livetest.VerifyOpenPGPSignature`), verifies the Cosign bundles
 of the provenance and the evidence with its Cosign key, binds every file
@@ -1675,7 +1676,8 @@ place of a Cosign bundle and applies the same findings.
 just test-live-prepared <dir> gitlab '^TestGitLabRelease_ConsumerTrial$/^gpg-files$/^hello-go-cli$/^release$/^buildah$'
 ```
 
-The signer runner needs swap off for this lane too.
+The signer runner needs swap off, or `memory_swap` equal to `memory` for its
+job containers, for this lane too.
 
 ### Scenario lanes on GitLab
 

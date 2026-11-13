@@ -5,7 +5,7 @@ package safeexec
 
 // SwapState is why the swap policy let a run proceed.
 //
-// The gate has four ways of saying yes and they are not equivalent to an
+// The gate has five ways of saying yes and they are not equivalent to an
 // operator, so it reports which one applied instead of collapsing them into a
 // bare nil. Rendering is the caller's job: safeexec stays free of output
 // concerns, and the CLI layer already owns the annotations.
@@ -33,6 +33,13 @@ const (
 	// the answer, so the pass is not measured kernel state and the caller says
 	// so.
 	SwapOverridden
+
+	// SwapCgroupDisabled means the kernel has an active swap area, but the
+	// cgroup v2 memory controller forbids this process to use it:
+	// memory.swap.max is 0 for its cgroup or an ancestor. The kernel will not
+	// swap the process's memory out, so the policy holds; the caller says
+	// which cgroup was relied on, since the host itself still has swap.
+	SwapCgroupDisabled
 )
 
 // String names the state for logs and test failures.
@@ -46,6 +53,8 @@ func (s SwapState) String() string {
 		return "bypassed"
 	case SwapOverridden:
 		return "overridden"
+	case SwapCgroupDisabled:
+		return "cgroup-disabled"
 	}
 
 	return "unknown"

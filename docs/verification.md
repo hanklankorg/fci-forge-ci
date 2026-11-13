@@ -384,7 +384,7 @@ a step of its own whose environment holds only the three `RELEASE_GPG_*`
 secrets, and on GitLab in a subshell that holds the same three and unsets
 the job's other signing and publishing secrets and its job token. Either
 pins the key to `RELEASE_GPG_FINGERPRINT`, dates the signatures at the
-release commit's time, and needs a runner with swap off; the provenance
+release commit's time, and needs a sign job that cannot swap; the provenance
 statement, the evidence and the images are signed with the Cosign key. See
 [Forgejo signing](forgejo.md#signing) and [GitLab signing](gitlab.md#signing).
 
@@ -1087,12 +1087,20 @@ What this design does NOT defend against:
 
 ### Swap policy
 
-`release sign` and `release sbom-zip --sign` refuse to run when the kernel has an active swap area. The check reads `/proc/swaps`; if any line beyond the header is present, the binary exits `EX_CONFIG` (78) with an actionable error message.
+`release sign` and `release sbom-zip --sign` refuse to run when the process's memory can be swapped out. The check reads `/proc/swaps`; if any line beyond the header is present, swap is active on the host. `/proc/swaps` is host-wide, so a job container sees the host's swap even when the container itself may not use it. The check then reads the process's cgroup v2 path from `/proc/self/cgroup` and `memory.swap.max` for that cgroup and each ancestor under `/sys/fs/cgroup`. If any of them is `0`, the kernel will not swap the job's memory out: signing proceeds and a `::notice::` names the cgroup. Otherwise, including on cgroup v1 or when the files cannot be read, the binary exits `EX_CONFIG` (78) with an actionable error message.
+
+A job container started with swap disabled, memory-swap equal to memory, has `memory.swap.max` set to `0` and satisfies the policy on a host with swap. Configure it once in the runner setup:
+
+- Docker or Podman: `--memory 4g --memory-swap 4g`.
+- Forgejo runner: the same flags in `container.options` of the runner's `config.yml`.
+- GitLab Runner, Docker executor: `memory` and `memory_swap` set to the same value under `[runners.docker]`.
+
+The cgroup limit protects less than host swap off. It covers only the memory of the forge-ci process and its children. When the host has swap, the runner daemon (`forgejo-runner` or `act_runner`, `gitlab-runner`) and the container runtime hold the GPG key and passphrase while they deliver them to the job, and their pages can still be swapped out. Hibernation writes all memory to swap regardless of cgroup limits, and the limit is read once, when the check runs. Host swap off covers all of these: use it for production signer runners, and the cgroup route where that residual risk is accepted, for example on disposable or dedicated runners.
 
 **No setting skips the check quietly.** The fix is at the runner. The two overrides are described below, and each says in the log that it was used: the `--debug-allow-swap` flag, and the test hook `FORGE_CI_PROC_SWAPS`, which replaces only the file that is read. The error message lists:
 
-1. The one-line runner fix: `sudo swapoff -a` (persist in `/etc/fstab`).
-2. That a hosted runner is no exception. GitHub-hosted runners have swap on, so the GitHub release layer's GPG signing job runs on the plain runner, with the canonical CLI delivered for the run, and turns swap off first; a job container could not, because it starts before the first step. Sigstore and KMS signing hold no long-lived key in process and run in the admitted runtime image. On self-hosted runners, any forge, swap is turned off in the host setup.
+1. The runner fixes: `sudo swapoff -a` on the host (persist in `/etc/fstab`), or job containers with swap disabled, as above.
+2. That a hosted runner is no exception. GitHub-hosted runners have swap on, so the GitHub release layer's GPG signing job runs on the plain runner, with the canonical CLI delivered for the run, and turns swap off first; a job container could not, because it starts before the first step. Sigstore and KMS signing hold no long-lived key in process and run in the admitted runtime image. On self-hosted runners, any forge, swap is turned off in the host setup or for the job containers.
 3. Alternatives for operators who genuinely cannot disable swap: **Sigstore keyless** (`cosign sign` + OIDC; no long-lived private key) or forge-ci's **KMS-backed signing** (`sign.method: kms`; AWS KMS, GCP KMS, Azure Key Vault, OpenBao/Vault, or PKCS#11). The key remains in the provider; provider authentication and reachability are operator responsibilities.
 
 **Debug-only override.** Local debugging sometimes needs to exercise the signing path on a developer laptop where swap is on for unrelated reasons. The narrow escape hatch is the `--debug-allow-swap` CLI flag:
@@ -1107,13 +1115,14 @@ When set, the policy passes AND a loud `::warning::` annotation lands in the CI 
 
 **Soft-pass on indeterminate state.** If `/proc/swaps` cannot be read (restricted containers, hardened sandboxes), the policy soft-passes. Refusing on indeterminacy would block legitimate restricted-container deployments where the visibility loss is structural; positive evidence is required to claim swap is active.
 
-The policy is enforced in `internal/safeexec/swap_linux.go::RequireNoSwap`. Unit tests + black-box integration tests pin the contract:
+The policy is enforced in `internal/safeexec/swap_linux.go::RequireNoSwap`. Unit tests and black-box integration tests pin the contract; the cgroup rule is pinned by unit tests only, since `FORGE_CI_PROC_SWAPS` skips the cgroup check:
 
 - Active swap area → exit 78 with the documented error text.
+- Active swap area, `memory.swap.max` `0` on the process's cgroup or an ancestor → signing proceeds with a `::notice::` naming the cgroup (unit tests only).
 - No swap area → normal signing flow.
 - `/proc/swaps` unreadable → soft-pass.
 - `--debug-allow-swap` bypasses with a loud `::warning::` annotation. The flag is the only opt-out surface; `safeexec.RequireNoSwap(bool)` takes the operator decision as a parameter.
-- `FORGE_CI_PROC_SWAPS` names a file read instead of `/proc/swaps`. It is how the black-box suite injects swap state into the real binary. An override that reports swap still refuses; a pass read from it is announced with a `::notice::` saying the answer was injected rather than read from the kernel.
+- `FORGE_CI_PROC_SWAPS` names a file read instead of `/proc/swaps`. It is how the black-box suite injects swap state into the real binary. An override that reports swap still refuses, whatever the cgroup says; a pass read from it is announced with a `::notice::` saying the answer was injected rather than read from the kernel.
 
 The scope is narrow on purpose: only the two CLI paths that bring decrypted private-key material into the Go heap. `release gpg import`, `validate tag signature`, `version commit-push`, and so on are unaffected: they use public-key material or delegate to gpg-agent (libgcrypt's own secure-memory pool).
 

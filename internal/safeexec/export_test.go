@@ -18,6 +18,17 @@ func UseProcSwapsFixture(t *testing.T, path string) {
 	t.Cleanup(func() { procSwapsPath = previous })
 }
 
+// UseCgroupFixture points the cgroup reader at a /proc/self/cgroup file and a
+// cgroup v2 mount root for one test.
+func UseCgroupFixture(t *testing.T, selfCgroup, root string) {
+	t.Helper()
+
+	previousSelf, previousRoot := procSelfCgroupPath, cgroupRoot
+	procSelfCgroupPath, cgroupRoot = selfCgroup, root
+
+	t.Cleanup(func() { procSelfCgroupPath, cgroupRoot = previousSelf, previousRoot })
+}
+
 // UseInteractive fixes the terminal check for one test.
 func UseInteractive(t *testing.T, value bool) {
 	t.Helper()

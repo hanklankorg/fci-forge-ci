@@ -19,7 +19,7 @@ func TestSwapPolicyIsExplicitlyUndeterminedOutsideLinux(t *testing.T) {
 		t.Fatalf("SwapEnabled() = %t, %v; want false, nil", enabled, err)
 	}
 
-	state, err := safeexec.RequireNoSwap(true)
+	state, _, err := safeexec.RequireNoSwap(true)
 	if err != nil || state != safeexec.SwapUndetermined {
 		t.Fatalf("RequireNoSwap(true) = %s, %v; want undetermined, nil", state, err)
 	}

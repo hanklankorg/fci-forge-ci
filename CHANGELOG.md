@@ -555,6 +555,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The swap policy of `release sign` and `release sbom-zip --sign` no
+  longer refuses a job whose container runs with swap disabled.
+  `/proc/swaps` is host-wide, so a job container saw the host's swap and
+  the GPG step stopped although its memory could not be swapped out. When
+  `/proc/swaps` lists swap, the policy now passes if `memory.swap.max` is
+  `0` for the process's cgroup v2 or an ancestor, and says so in a Notice
+  naming the cgroup; cgroup v1 or unreadable files still refuse. Set
+  memory-swap equal to memory for the job containers in the runner setup:
+  `container.options` on Forgejo, `memory` and `memory_swap` under
+  `[runners.docker]` on GitLab. The refusal names these fixes. See
+  `docs/verification.md#swap-policy`.
 - On Forgejo, an artifact upload whose finalisation is refused with HTTP
   500 is finalised again, within the runtime client's retry bounds.
   Forgejo 17 confirms an artifact by opening every chunk of the run, so a

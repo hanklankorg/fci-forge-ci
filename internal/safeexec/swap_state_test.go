@@ -23,6 +23,7 @@ func TestSwapState_NamesEveryState(t *testing.T) {
 		{safeexec.SwapUndetermined, "undetermined"},
 		{safeexec.SwapBypassed, "bypassed"},
 		{safeexec.SwapOverridden, "overridden"},
+		{safeexec.SwapCgroupDisabled, "cgroup-disabled"},
 	} {
 		if got := tc.state.String(); got != tc.want {
 			t.Errorf("SwapState(%d).String() = %q, want %q", tc.state, got, tc.want)
@@ -31,7 +32,7 @@ func TestSwapState_NamesEveryState(t *testing.T) {
 
 	seen := map[string]bool{}
 
-	for _, state := range []safeexec.SwapState{safeexec.SwapAbsent, safeexec.SwapUndetermined, safeexec.SwapBypassed, safeexec.SwapOverridden} {
+	for _, state := range []safeexec.SwapState{safeexec.SwapAbsent, safeexec.SwapUndetermined, safeexec.SwapBypassed, safeexec.SwapOverridden, safeexec.SwapCgroupDisabled} {
 		label := state.String()
 		if seen[label] {
 			t.Errorf("two states render the same label %q", label)

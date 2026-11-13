@@ -1364,11 +1364,17 @@ Cosign key, whatever `sign.method` names
 
 ### Signing boundary
 
-With `sign.method: gpg`, the runner that runs the sign job needs swap off:
-the engine signs in process with OpenPGP and refuses to read the key while
-swap is active, and the signer container cannot turn it off
-([swap policy](verification.md#swap-policy)). Turn it off in the runner
-host's setup. Cosign signs in a subprocess and is exempt.
+With `sign.method: gpg`, the sign job must run without swap: the engine
+signs in process with OpenPGP and refuses to read the key while its memory
+can be swapped out, and the signer container cannot turn swap off
+([swap policy](verification.md#swap-policy)). Turn swap off in the runner
+host's setup, or run the job containers with swap disabled: set
+`--memory-swap` equal to `--memory` in `container.options` of the runner's
+`config.yml`, for example `--memory 4g --memory-swap 4g`. The container limit
+leaves the runner daemon's copy of the key swappable, so prefer host swap off
+on production signer runners
+([residual risk](verification.md#swap-policy)). Cosign signs in a
+subprocess and is exempt.
 
 The boundary is these properties together:
 
