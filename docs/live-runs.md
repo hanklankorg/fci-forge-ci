@@ -909,7 +909,22 @@ just test-live-github-cells <dir> <org-id> set=medium \
 
 Start it inside the hosted session, as a single trial; it starts none. It
 prepares the engine once, then runs each cell with the engine reused, one
-after another: the cells of one demo share package coordinates. Each demo's
+after another: the cells of one demo share package coordinates. Within a
+cell the two visibilities run side by side, each in a repository of its own
+named after it, and finish in the time of the slower one. A cell whose release
+publishes a package the organization names apart from the repository, an npm
+or Maven package in GitHub Packages or an image under a declared
+`image-name`, runs them one after the other instead
+(`livetest.GitHubReleaseSharesPackages`): both would publish the same package
+at the same version. Of the cells that is the release of `hello-npm-package`,
+`hello-monorepo` and `hello-android-library`, and the release and lifecycle of
+`hello-npm-service`; `TestGitHubReleaseSharesPackagesOfTheCells` holds the
+list. The cell's log holds both visibilities; `go test -v`
+names the subtest before each line it switches to (`=== CONT`, `=== NAME`),
+and the cell passes on the top-level `--- PASS` line alone. The two runs
+share the free organization's limit of 20 concurrent jobs on standard hosted
+runners, 5 on macOS; a job over it waits in the queue, within the run's
+90-minute bound, rather than failing. Each demo's
 pull-request fixture pins its Nanolinter flavor by a placeholder digest
 (`nanolinter:kotlin@sha256:0...`), so the run names one public image per
 flavor, `nanolinter-image=<flavor>:<digest reference>` as the prepare's
@@ -1459,7 +1474,8 @@ is the project's, and goes with the trial's project. The trial
 removes what its release published when it ends, and refuses to start where
 the version (Forgejo) or the package (GitHub) is already there. Two trials
 that publish the same package for the same owner therefore run one after
-the other, as the visibilities of one run do. A Maven package on GitHub is
+the other, as the two visibilities of such a GitHub cell do
+([Hosted GitHub cells](#hosted-github-cells)). A Maven package on GitHub is
 named after coordinates only the build knows, so the trial does not look for
 one beforehand: it reads back and removes the Maven packages bound to its own
 repository, and one an earlier run left under the same coordinates fails the

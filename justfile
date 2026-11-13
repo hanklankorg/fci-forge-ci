@@ -1016,7 +1016,10 @@ test-live-image kind forge_lab budget="" cpus="" memory_mib="" compiler_jobs="":
 # native trials. Release and lifecycle also need
 # FORGE_CI_LIVE_GITHUB_RELEASE_TOKEN_FILE, separate from the session credential.
 # The consumer's GitHub fixture workflows, pinned to that engine, run in a disposable
-# <prefix><name>-<visibility>-<session> repository, deleted afterwards. Other
+# <prefix><name>-<visibility>-<session> repository, deleted afterwards; the
+# two visibilities run side by side, unless the release publishes a package
+# the organization names apart from the repository (npm, Maven or an
+# image-name), when they run one after the other. Other
 # settings: workflow=<file> (not lifecycle), fixtures=<dir>, version=X.Y.Z and
 # image=<name> (release and lifecycle), RELEASE_PLATFORMS=<linux/amd64 and/or
 # linux/arm64> (default linux/amd64), nanolinter-image= and
@@ -1105,7 +1108,7 @@ test-live-consumer forge repo event *settings:
         fi
         scenario=TestGitHubLayer_ConsumerTrial
         [[ $event != lifecycle ]] || scenario=TestGitHubLayer_ConsumerLifecycle
-        GOTOOLCHAIN=local GOPROXY=off GOSUMDB=off exec go test -tags=live -count=1 -buildvcs=false -timeout=5h -v \
+        GOTOOLCHAIN=local GOPROXY=off GOSUMDB=off exec go test -tags=live -count=1 -buildvcs=false -timeout=5h -parallel=2 -v \
             -run="^${scenario}$" ./test/live/githubconsumer/
         ;;
     gitlab:*)
@@ -1469,7 +1472,9 @@ test-live-affected base forge set="set=full":
 # test-live-consumer github` call that reuses it, with the cell's settings,
 # the settings given here (one lint image a flavor the cells pin, as
 # nanolinter-image=<flavor>:<digest reference>) and, in a
-# set below the full one, the cell's one visibility. after=small or
+# set below the full one, the cell's one visibility. A cell with both runs
+# them side by side, unless its release publishes an organization package
+# (npm, Maven or an image-name), which the two would share. after=small or
 # after=medium right after the set runs the cells and visibilities of the
 # set that the set after did not. Run it inside Forge
 # Lab's hosted session, as a single trial: it starts no session. Before

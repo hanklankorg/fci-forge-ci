@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -15,6 +16,8 @@ import (
 	"github.com/google/go-github/v91/github"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/diggsweden/forge-ci/internal/testutil/reporoot"
 )
 
 func TestGitHubExactNestedPackageCleanup(t *testing.T) {
@@ -208,4 +211,45 @@ type cleanupErrors struct {
 func (tb *cleanupErrors) Cleanup(callback func()) { tb.cleanup = callback }
 func (tb *cleanupErrors) Errorf(format string, args ...any) {
 	tb.errors = append(tb.errors, fmt.Sprintf(format, args...))
+}
+
+// The visibilities of a cell run side by side unless its release publishes a
+// package the organization names apart from the repository. Every release
+// and lifecycle cell is held to the demos known to publish one.
+func TestGitHubReleaseSharesPackagesOfTheCells(t *testing.T) {
+	shared := []string{"hello-android-library", "hello-monorepo", "hello-npm-package", "hello-npm-service"}
+
+	for _, cell := range GitHubCells {
+		if cell.Event != TrialRelease && cell.Event != TrialLifecycle {
+			continue
+		}
+
+		t.Run(strings.Join(append([]string{cell.Demo, cell.Event}, cell.Settings...), " "), func(t *testing.T) {
+			settings, err := ParseGitHubTrialSettings(cell.Event, cell.Settings)
+			require.NoError(t, err)
+
+			fixtures := settings.Fixtures
+			if fixtures == "" {
+				fixtures = "test/live/github"
+			}
+
+			got, err := GitHubReleaseSharesPackages(demoConsumerDir(reporoot.Path(t), cell.Demo), fixtures, settings.Workflow)
+			require.NoError(t, err)
+			assert.Equal(t, slices.Contains(shared, cell.Demo), got)
+		})
+	}
+}
+
+// A container under a declared image-name is the organization's, whatever
+// the repository: both visibilities would publish it.
+func TestGitHubReleaseSharesAnImageName(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "test", "live", "github", "workflows", "release.yml"),
+		"jobs:\n  release:\n    with:\n      artifacts-config: .forge-ci/artifacts.yml\n")
+	writeFile(t, filepath.Join(root, ".forge-ci", "artifacts.yml"),
+		"artifacts:\n  - name: app\n    project-type: meta\ncontainers:\n  - name: app\n    from: [app]\n    container-file: Containerfile\n    image-name: example-org/shared-image\n")
+
+	shared, err := GitHubReleaseSharesPackages(root, "test/live/github", "release.yml")
+	require.NoError(t, err)
+	assert.True(t, shared)
 }

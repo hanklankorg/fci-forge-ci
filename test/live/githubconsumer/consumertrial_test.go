@@ -142,9 +142,52 @@ func TestGitHubLayer_ConsumerTrial(t *testing.T) {
 		t.Skip("the engine was prepared and no consumer ran; run the cell again with FORGE_CI_LIVE_ENGINE_MODE=reuse")
 	}
 
+	runVisibilities(t, root, fixtures, settings, func(t *testing.T, visibility livetest.ConsumerVisibility) {
+		t.Helper()
+		runTrial(t, livetest.OpenGitHubTrial(t, organizationID), engine, root, fixtures, settings, visibility, releaseToken)
+	})
+}
+
+// runVisibilities runs each visibility of a cell as a subtest of its own,
+// side by side. They share nothing they change: each has its own
+// repository, named after the visibility, its own client, keys and
+// temporary directories, and its own packages under that repository's
+// name; the engine is read once, before either starts, and never changed.
+//
+// A release that publishes a package the organization names apart from
+// the repository (livetest.GitHubReleaseSharesPackages) keeps them one
+// after the other: both would publish the same package at the same
+// version, which the registry takes once, and the one that came second
+// would find the other's package there.
+//
+// A development build is taken as safe: its snapshot publishes images
+// named under the repository alone. A development cell of a Maven library
+// would need the predicate too.
+func runVisibilities(t *testing.T, root, fixtures string, settings livetest.GitHubTrialSettings, run func(*testing.T, livetest.ConsumerVisibility)) {
+	t.Helper()
+
+	parallel := true
+
+	if settings.Event == livetest.TrialRelease || settings.Event == livetest.TrialLifecycle {
+		shared, err := livetest.GitHubReleaseSharesPackages(root, fixtures, settings.Workflow)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		parallel = !shared
+	}
+
+	if !parallel {
+		t.Log("the visibilities run one after the other: the release publishes a package the organization names apart from the repository")
+	}
+
 	for _, visibility := range livetest.ConsumerVisibilities(t) {
 		t.Run(visibility.Name, func(t *testing.T) {
-			runTrial(t, livetest.OpenGitHubTrial(t, organizationID), engine, root, fixtures, settings, visibility, releaseToken)
+			if parallel {
+				t.Parallel()
+			}
+
+			run(t, visibility)
 		})
 	}
 }

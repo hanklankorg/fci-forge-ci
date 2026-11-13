@@ -5,7 +5,11 @@
 
 # Runs the hosted GitHub cells of a run set, one after another, on the demos
 # of a prepared directory: the engine is prepared once, then each cell runs
-# `just test-live-consumer github` with the prepared engine reused.
+# `just test-live-consumer github` with the prepared engine reused. Within a
+# cell the trial runs its two visibilities side by side, each in its own
+# repository, unless the release publishes a package the organization names
+# apart from the repository (livetest.GitHubReleaseSharesPackages); the log
+# of a cell holds both, each line under the subtest Go names before it.
 #
 #   run-github-cells.sh <prepared-dir> <org-id> <set> [after=<set>] [setting ...]
 #

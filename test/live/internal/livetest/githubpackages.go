@@ -196,6 +196,40 @@ func githubReleasesMavenPackages(dir, workflow string) (bool, error) {
 	}), nil
 }
 
+// GitHubReleaseSharesPackages reports whether the release of workflow, a
+// fixture workflow of the consumer checkout at root under
+// <fixtures>/workflows, publishes a package the organization names without
+// the repository: whatever its plan sends to forge-packages, npm or Maven,
+// or an image under a declared image-name. The visibilities of one cell
+// would both publish that package, and a version is published once, so they
+// cannot run side by side. An image under the repository's own name, a
+// snapshot image included, is the repository's alone.
+//
+// The trial stages the artifacts configuration as it is, but for its sign
+// block (WithTrialKeySigning), so the checkout's declaration is the one the
+// staged release reads.
+func GitHubReleaseSharesPackages(root, fixtures, workflow string) (bool, error) {
+	body, err := os.ReadFile(filepath.Join(root, fixtures, "workflows", filepath.Base(workflow))) //nolint:gosec // the consumer's own fixture workflow, named by the trial.
+	if err != nil {
+		return false, fmt.Errorf("release workflow: %w", err)
+	}
+
+	declared, err := githubReleaseConfig(root, workflow, string(body))
+	if err != nil || declared == nil {
+		return false, err
+	}
+
+	if slices.ContainsFunc(declared.Containers, func(released config.Container) bool { return released.ImageName != "" }) {
+		return true, nil
+	}
+
+	if err := config.Derive(declared); err != nil {
+		return false, err
+	}
+
+	return len(pipeline.NewConfigPlan(declared).Artifacts.ForgePackages) > 0, nil
+}
+
 // mavenPackagesOf are the organization's Maven packages bound to the
 // repository. The registry names a package after coordinates only the build
 // knows, so the binding is what tells the trial's packages from another's.

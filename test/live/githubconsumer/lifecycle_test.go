@@ -68,11 +68,10 @@ func TestGitHubLayer_ConsumerLifecycle(t *testing.T) {
 		t.Skip("the engine was prepared and no consumer ran; run the cell again with FORGE_CI_LIVE_ENGINE_MODE=reuse")
 	}
 
-	for _, visibility := range livetest.ConsumerVisibilities(t) {
-		t.Run(visibility.Name, func(t *testing.T) {
-			runLifecycle(t, livetest.OpenGitHubTrial(t, organizationID), engine, root, fixtures, settings, visibility, releaseToken)
-		})
-	}
+	runVisibilities(t, root, fixtures, settings, func(t *testing.T, visibility livetest.ConsumerVisibility) {
+		t.Helper()
+		runLifecycle(t, livetest.OpenGitHubTrial(t, organizationID), engine, root, fixtures, settings, visibility, releaseToken)
+	})
 }
 
 func runLifecycle(t *testing.T, trial *livetest.GitHubTrial, engine livetest.GitHubEngine, root, fixtures string, settings livetest.GitHubTrialSettings, visibility livetest.ConsumerVisibility, releaseToken string) {
