@@ -816,23 +816,34 @@ just test-live-prepared <dir> forgejo '^TestForgejoLayer_' set=medium after=smal
 just test-live-prepared <dir> forgejo '^TestForgejoLayer_' set=full after=medium
 ```
 
-The three runs count as one only on the same commit and from the same
-prepared directory, with the same pattern. A delta run alone accepts
-nothing: it is not a run of its set. An `after` that is not below the set
-is a usage error, and the run's header records the set after as
-`forge_ci_live_after`. A pattern whose rows all ran in the set after, or
-that names only scenarios the set after ran, is refused. The full set
-after a smaller one runs every scenario a broad pattern matches but those
-the set after ran, which the launcher cannot list before the run, so such
-a pattern with nothing left is not refused: it ends `skipped`.
+The three runs count as one only as `preflight testing-evidence` takes them,
+below. A delta run alone accepts nothing: it is not a run of its set. An
+`after` that is not below the set is a usage error, and the run's header
+records the set after as `forge_ci_live_after` and the SHA-256 of the
+prepared directory's `prepared.env` as `forge_ci_live_prepared_env_sha256`,
+the hash alone and never the file's values. A pattern whose rows all ran in
+the set after, or that names only scenarios the set after ran, is refused.
+The full set after a smaller one runs every scenario a broad pattern
+matches but those the set after ran, which the launcher cannot list before
+the run, so such a pattern with nothing left is not refused: it ends
+`skipped`.
 
-`preflight testing-evidence` takes a delta run only beside the runs it
-completes: an earlier run of its set after on the same commit, provider
-and pattern, which ran to its end (not `interrupted`) and is a whole run or
-a delta run with such a run before it in turn. It then keeps the worse
-result of each case, so a failure of the earlier run is not hidden by the
-delta's pass; a later run that is no delta replaces both. A delta run without its runs before it is left out of the
-draft, and a `# left out:` line at the top names it.
+`preflight testing-evidence` keeps the latest result of each case, a
+prepared case with its visibility or the consumer of a run that names one
+with its scenario, axis values and release option, and marks each row
+with the worst result of its cases. A later run of other cases of a row therefore leaves a failed case
+standing, and only a later run of that case replaces its result.
+
+It takes a delta run only beside the runs it completes: an earlier run of
+its set after on the same commit, provider, pattern and
+`forge_ci_live_prepared_env_sha256`, which ran to its end (not
+`interrupted`) and is a whole run or a delta run with such a run before it
+in turn. Runs recorded before the hash was recorded have none, and match
+only each other. It then keeps the worse result of each case the two ran,
+so a failure of the earlier run is not hidden by the delta's pass; a later
+run of the case that is no delta replaces both. A delta run without its
+runs before it is left out of the draft, and a `# left out:` line at the
+top names it.
 
 ### Rows a change can affect
 

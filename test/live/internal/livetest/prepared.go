@@ -33,6 +33,11 @@ const PreparedEnv = "FORGE_CI_LIVE_PREPARED"
 // PreparedEnvFile is the prepared directory's KEY=value file.
 const PreparedEnvFile = "prepared.env"
 
+// preparedEnvHashEnv names the SHA-256 of the prepared.env a run took, which
+// its header records as the prepared directory's identity: the hash alone,
+// never the file's values.
+const preparedEnvHashEnv = "FORGE_CI_LIVE_PREPARED_ENV_SHA256"
+
 // preparedCommitKey names the commit a directory was prepared from.
 const preparedCommitKey = "PREPARED_COMMIT"
 

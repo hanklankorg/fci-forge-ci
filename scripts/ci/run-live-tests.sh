@@ -113,12 +113,17 @@ preflight_report=$(cd -- "$repo_root" && "$go_bin" run ./test/live/internal/live
 printf '%s\n' "$preflight_report"
 
 # Prepared images are of one commit. A run that takes them tests that commit
-# and nothing on top of it: the binaries below are built from this tree.
+# and nothing on top of it: the binaries below are built from this tree. The
+# header records the hash of the prepared.env it took, never its values, so
+# the delta runs of one prepared directory can be told apart from others.
+unset FORGE_CI_LIVE_PREPARED_ENV_SHA256
 if [[ -n "${FORGE_CI_LIVE_PREPARED:-}" ]]; then
   (cd -- "$repo_root" && "$go_bin" run ./test/live/internal/livetest/preflight prepared-source \
     "$FORGE_CI_LIVE_PREPARED" \
     "$(git -C "$repo_root" rev-parse --verify HEAD)" \
     "$(git -C "$repo_root" status --porcelain --untracked-files=all)")
+  FORGE_CI_LIVE_PREPARED_ENV_SHA256=$(sha256sum <"$FORGE_CI_LIVE_PREPARED/prepared.env" | cut -d' ' -f1)
+  export FORGE_CI_LIVE_PREPARED_ENV_SHA256
 fi
 
 # A pattern of a prepared run normally selects a lane: many rows of the Go
@@ -285,7 +290,7 @@ source_commit=$(git -C "$repo_root" rev-parse --verify HEAD 2>/dev/null || print
   for input in FORGE_CI_LIVE_DEMO FORGE_CI_LIVE_CONSUMER FORGE_CI_LIVE_CONSUMER_EVENT FORGE_CI_LIVE_CONSUMER_SETTINGS FORGE_CI_LIVE_CONSUMER_VISIBILITY FORGE_CI_LIVE_IMAGE_PLAN_JOB_IMAGE \
     FORGE_CI_LIVE_EXTERNAL_REGISTRY_TOKEN_FILE FORGE_CI_LIVE_EXTERNAL_REGISTRY_USER FORGE_CI_LIVE_GITLAB_IMAGE_BUILDER FORGE_CI_LIVE_FORGEJO_IMAGE_BUILDER \
     FORGE_CI_LIVE_ADMIN_LINT FORGE_CI_LIVE_ADMIN_VULNERABILITIES FORGE_CI_LIVE_ADMIN_APPLICATION_TESTS FORGE_CI_LIVE_ADMIN_REPRODUCIBLE_BUILDS \
-    FORGE_CI_LIVE_SET FORGE_CI_LIVE_AFTER; do
+    FORGE_CI_LIVE_SET FORGE_CI_LIVE_AFTER FORGE_CI_LIVE_PREPARED_ENV_SHA256; do
     [[ -z "${!input:-}" ]] || printf '%s=%q\n' "${input,,}" "${!input}"
   done
   printf '%s\n' "$preflight_report"

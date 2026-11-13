@@ -18,24 +18,31 @@ import (
 
 // SeedTestingEvidence drafts TestingMatricesEvidence lines from the runs
 // recorded under liveRuns, the live runner's <run>/verdict.json. A hosted
-// GitHub trial records no verdict there, so its mark is written by hand. For
-// every demo consumer it keeps the latest run of each flow on each provider:
-// passed as ✅, passed on a row's rerun as ✅+rerun, failed as ❌, anything
-// else as ⏳, with the run's date as the
-// note; a lifecycle run is kept for each set of the axis values its verdict
-// header records, which lead the note (evidenceAxes).
+// GitHub trial records no verdict there, so its mark is written by hand.
+//
+// A run is evidence for each case it ran: a prepared case with its
+// visibility, or the one consumer of a run that names it, with the axis
+// values its verdict header records (evidenceAxes). The seed keeps the
+// latest result of each case, so a later run of other cases of a flow
+// leaves a case's failure standing, and a rerun of exactly that case
+// replaces it. Each demo's flow on each provider is then marked with the
+// worst result of its cases (worstCase): passed as ✅, passed on a row's
+// rerun as ✅+rerun, failed as ❌, anything else as ⏳, with the date of the
+// run that gave it as the note. A lifecycle is marked for each set of the
+// axis values its cases ran with, which lead the note.
 //
 // A delta run of a run set (FORGE_CI_LIVE_AFTER) ran what the run of its set
 // after did not, and is evidence only beside that run: an earlier run of the
-// set after on the same commit and provider, with the same pattern, itself
-// a whole run or a delta run with such a run before it (deltaRunsBefore).
-// Its results then add to that run's rather than replacing them, the worse
-// of the two kept (keepLatest). A delta run without one is left out, and a
-// comment line at the top of the draft names it. It reads the recorded
-// facts and makes no judgement: the overlay is hand-kept, so the operator
-// reviews the draft before committing it.
+// set after on the same commit and provider, from the same prepared
+// directory and with the same pattern, itself a whole run or a delta run
+// with such a run before it (deltaRunsBefore). Its result of a case then
+// adds to that run's rather than replacing it, the worse of the two kept
+// (keepLatest). A delta run without one is left out, and a comment line at
+// the top of the draft names it. It reads the recorded facts and makes no
+// judgement: the overlay is hand-kept, so the operator reviews the draft
+// before committing it.
 func SeedTestingEvidence(liveRuns string) (string, error) {
-	latest := map[string]seededRun{}
+	latest := map[string]map[string]seededRun{}
 
 	leftOut, err := seedLiveRuns(liveRuns, latest)
 	if err != nil {
@@ -44,9 +51,10 @@ func SeedTestingEvidence(liveRuns string) (string, error) {
 
 	lines := make([]string, 0, len(latest))
 
-	for key, run := range latest {
-		// The axis values follow the flow in the key and the mark in the line.
-		words := strings.Fields(key)
+	for row, cases := range latest {
+		run := worstCase(cases)
+		// The axis values follow the flow in the row and the mark in the line.
+		words := strings.Fields(row)
 		lines = append(lines, strings.Join(slices.Concat(words[:3], []string{evidenceMark(run.verdict)}, words[3:], []string{run.date()}), " "))
 	}
 
@@ -68,15 +76,19 @@ func (run seededRun) date() string {
 	return run.at.Format(time.DateOnly)
 }
 
-// keepLatest records run under key unless a later run of it is recorded. A
-// later delta run on the commit of the recorded one keeps the worse verdict
-// of the two, as the parts of one run.
-func keepLatest(latest map[string]seededRun, key string, run seededRun) {
-	if key == "" {
+// keepLatest records run as the result of a case of an overlay row unless a
+// later run of the case is recorded. A later delta run on the commit of the
+// recorded one keeps the worse verdict of the two, as the parts of one run.
+func keepLatest(latest map[string]map[string]seededRun, row, key string, run seededRun) {
+	if row == "" {
 		return
 	}
 
-	kept, seen := latest[key]
+	if latest[row] == nil {
+		latest[row] = map[string]seededRun{}
+	}
+
+	kept, seen := latest[row][key]
 
 	later, earlier := run, kept
 	if kept.at.After(run.at) {
@@ -87,18 +99,46 @@ func keepLatest(latest map[string]seededRun, key string, run seededRun) {
 		later.verdict = worseResult(later.verdict, earlier.verdict)
 	}
 
-	latest[key] = later
+	latest[row][key] = later
 }
 
-// worseResult is the worse of two results of a case: failed, then
-// unfinished, then passed on rerun, then passed.
+// worstCase is the kept run of a row's cases with the worst result, the
+// latest of those with it.
+func worstCase(cases map[string]seededRun) seededRun {
+	var worst seededRun
+
+	for _, run := range cases {
+		if worst.at.IsZero() || resultRank(run.verdict) < resultRank(worst.verdict) ||
+			resultRank(run.verdict) == resultRank(worst.verdict) && run.at.After(worst.at) {
+			worst = run
+		}
+	}
+
+	return worst
+}
+
+// worseResult is the worse of two results of a case.
 func worseResult(one, other string) string {
-	worst := []string{liveVerdictFailed, "", seedPassedOnRerun, verdictPassed}
-	if slices.Index(worst, other) < slices.Index(worst, one) {
+	if resultRank(other) < resultRank(one) {
 		return other
 	}
 
 	return one
+}
+
+// resultRank orders the results of a case from the worst: failed, then
+// unfinished or any other verdict, then passed on rerun, then passed.
+func resultRank(result string) int {
+	switch result {
+	case liveVerdictFailed:
+		return 0
+	case seedPassedOnRerun:
+		return 2
+	case verdictPassed:
+		return 3
+	default:
+		return 1
+	}
 }
 
 // recordedRun is a verdict.json as read, with the time its run started.
@@ -118,10 +158,21 @@ func (run recordedRun) after() string {
 	return run.verdict.Run.Inputs[strings.ToLower(liveAfterEnv)]
 }
 
+// preparedEnvHash is the SHA-256 of the prepared.env of the prepared
+// directory the run took, none for a run of no prepared directory.
+func (run recordedRun) preparedEnvHash() string {
+	return run.verdict.Run.Inputs[strings.ToLower(preparedEnvHashEnv)]
+}
+
 // deltaRunsBefore reports whether a delta run has the runs it adds to: an
-// earlier run of its set after on its commit and provider, with its pattern,
-// that ran to its end and is a whole run or has such runs before it in turn.
-// An interrupted run may have left cases unrun, so a delta cannot complete it.
+// earlier run of its set after on its commit and provider, from its prepared
+// directory and with its pattern, that ran to its end and is a whole run or
+// has such runs before it in turn. An interrupted run may have left cases
+// unrun, so a delta cannot complete it.
+//
+// The prepared directory is the hash of its prepared.env the runs record
+// (preparedEnvHash), which must be the same: a run that records none, as
+// before the hash was recorded, matches only another that records none.
 func deltaRunsBefore(runs []recordedRun, delta recordedRun) bool {
 	if delta.after() == "" {
 		return true
@@ -134,7 +185,8 @@ func deltaRunsBefore(runs []recordedRun, delta recordedRun) bool {
 
 		return run.at.Before(delta.at) && run.verdict.Verdict != verdictInterrupted &&
 			run.set() == delta.after() && earlier.SourceCommit == header.SourceCommit &&
-			earlier.Provider == header.Provider && earlier.Scenario == header.Scenario && deltaRunsBefore(runs, run)
+			earlier.Provider == header.Provider && earlier.Scenario == header.Scenario &&
+			run.preparedEnvHash() == delta.preparedEnvHash() && deltaRunsBefore(runs, run)
 	})
 }
 
@@ -166,12 +218,15 @@ func readLiveRuns(liveRuns string) ([]recordedRun, error) {
 		runs = append(runs, recordedRun{file: file, verdict: verdict, at: at})
 	}
 
+	slices.SortStableFunc(runs, func(one, other recordedRun) int { return one.at.Compare(other.at) })
+
 	return runs, nil
 }
 
-// seedLiveRuns keeps the runs under liveRuns in latest, and gives a comment
-// line for each delta run it leaves out.
-func seedLiveRuns(liveRuns string, latest map[string]seededRun) ([]string, error) {
+// seedLiveRuns keeps the results of the cases the runs under liveRuns ran
+// in latest, by overlay row and case, and gives a comment line for each
+// delta run it leaves out.
+func seedLiveRuns(liveRuns string, latest map[string]map[string]seededRun) ([]string, error) {
 	runs, err := readLiveRuns(liveRuns)
 	if err != nil {
 		return nil, err
@@ -182,18 +237,26 @@ func seedLiveRuns(liveRuns string, latest map[string]seededRun) ([]string, error
 	for _, recorded := range runs {
 		verdict := recorded.verdict
 
-		key := evidenceKey(verdict.Run)
-		if strings.HasSuffix(key, " "+TrialLifecycle) {
-			key = strings.TrimSpace(key + " " + evidenceAxes(verdict.Run))
+		// A run that names its consumer is one case, its scenario with its
+		// axis values and release option; a lifecycle's row is qualified
+		// with the axis values too.
+		row, axes := evidenceKey(verdict.Run), evidenceAxes(verdict.Run)
+		if strings.HasSuffix(row, " "+TrialLifecycle) {
+			row = strings.TrimSpace(row + " " + axes)
 		}
 
-		cases := preparedCaseEvidence(verdict)
-		if key == "" && len(cases) == 0 {
+		consumerCase := verdict.Run.Scenario + " " + axes
+		if option := consumerSettings(verdict.Run)[settingReleaseOption]; option != "" {
+			consumerCase += " " + settingReleaseOption + "=" + option
+		}
+
+		rows := preparedCaseEvidence(verdict)
+		if row == "" && len(rows) == 0 {
 			continue
 		}
 
 		if !deltaRunsBefore(runs, recorded) {
-			leftOut = append(leftOut, fmt.Sprintf("# left out: %s, the %s set after %s, has no earlier complete run of the %s set on its commit with its pattern",
+			leftOut = append(leftOut, fmt.Sprintf("# left out: %s, the %s set after %s, has no earlier complete run of the %s set on its commit from its prepared directory with its pattern",
 				filepath.Base(filepath.Dir(recorded.file)), recorded.set(), recorded.after(), recorded.after()))
 
 			continue
@@ -201,11 +264,13 @@ func seedLiveRuns(liveRuns string, latest map[string]seededRun) ([]string, error
 
 		run := seededRun{at: recorded.at, verdict: verdict.Verdict, commit: verdict.Run.SourceCommit, delta: recorded.after() != ""}
 
-		keepLatest(latest, key, run)
+		keepLatest(latest, row, consumerCase, run)
 
-		for key, result := range cases {
-			run.verdict = result
-			keepLatest(latest, key, run)
+		for row, cases := range rows {
+			for key, result := range cases {
+				run.verdict = result
+				keepLatest(latest, row, key, run)
+			}
 		}
 	}
 
@@ -216,12 +281,13 @@ func seedLiveRuns(liveRuns string, latest map[string]seededRun) ([]string, error
 // its tests rather than its header: one process runs many cases, and each
 // names itself in its subtests, <test>/<case name>/<visibility>, under the
 // test that runs its forge's cases of its event (PreparedCaseTest). It gives
-// the overlay row of each case and visibility that ran and what became of
-// it: failed when a test under it failed, passed when all passed, passed on
-// rerun when they passed in the row's rerun (attempt 2), and otherwise
-// unfinished. A lifecycle is qualified as evidenceAxes qualifies
-// one, with the case's own builder and visibility.
-func preparedCaseEvidence(verdict LiveRunVerdict) map[string]string {
+// each case and visibility that ran, <test>/<case name>/<visibility>, by its
+// overlay row, and what became of it: failed when a test under it failed,
+// passed when all passed, passed on rerun when they passed in the row's
+// rerun (attempt 2), and otherwise unfinished. A case with a release option
+// is a case of its demo's release row. A lifecycle row is qualified as
+// evidenceAxes qualifies one, with the case's own builder and visibility.
+func preparedCaseEvidence(verdict LiveRunVerdict) map[string]map[string]string {
 	type forgeCase struct {
 		PreparedCase
 
@@ -236,19 +302,28 @@ func preparedCaseEvidence(verdict LiveRunVerdict) map[string]string {
 		}
 	}
 
-	evidence := map[string]string{}
+	evidence := map[string]map[string]string{}
 
 	for _, test := range verdict.Tests {
-		// The test, the four elements of the case name, the visibility.
+		// The test, the four or, with an option, five elements of the case
+		// name, the visibility. A visibility is never an option's name.
 		elements := strings.Split(test.Name, "/")
-		if len(elements) < 6 {
+
+		name := 5
+		if _, isOption := cases[strings.Join(elements[:min(6, len(elements))], "/")]; isOption {
+			name = 6
+		}
+
+		if len(elements) <= name {
 			continue
 		}
 
-		c, isCase := cases[strings.Join(elements[:5], "/")]
+		c, isCase := cases[strings.Join(elements[:name], "/")]
 		if !isCase {
 			continue
 		}
+
+		visibility, caseKey := elements[name], strings.Join(elements[:name+1], "/")
 
 		flow := c.Event
 		if flow == TrialSnapshot {
@@ -258,7 +333,7 @@ func preparedCaseEvidence(verdict LiveRunVerdict) map[string]string {
 		key := c.forge + " " + c.Demo + " " + flow
 		if flow == TrialLifecycle {
 			key = strings.Join(slices.Concat(
-				[]string{key, settingVisibility + "=" + elements[5], settingImageBuilder + "=" + c.Builder}, adminAxes(verdict.Run)), " ")
+				[]string{key, settingVisibility + "=" + visibility, settingImageBuilder + "=" + c.Builder}, adminAxes(verdict.Run)), " ")
 		}
 
 		result := ""
@@ -272,12 +347,16 @@ func preparedCaseEvidence(verdict LiveRunVerdict) map[string]string {
 			result = liveVerdictFailed
 		}
 
+		if evidence[key] == nil {
+			evidence[key] = map[string]string{}
+		}
+
 		// The worst of a case's tests is the case's.
-		if had, seen := evidence[key]; seen {
+		if had, seen := evidence[key][caseKey]; seen {
 			result = worseResult(result, had)
 		}
 
-		evidence[key] = result
+		evidence[key][caseKey] = result
 	}
 
 	return evidence
@@ -336,13 +415,7 @@ func evidenceAxes(run LiveRunHeader) string {
 
 	axes := []string{settingVisibility + "=" + cmp.Or(input(consumerVisibilityEnv), visibilityBoth)}
 
-	variables := map[string]string{}
-
-	for line := range strings.SplitSeq(input("FORGE_CI_LIVE_CONSUMER_SETTINGS"), "\n") {
-		if key, value, isVariable := strings.Cut(line, "="); isVariable {
-			variables[key] = value
-		}
-	}
+	variables := consumerSettings(run)
 
 	builder, err := "", error(nil)
 
@@ -358,6 +431,20 @@ func evidenceAxes(run LiveRunHeader) string {
 	}
 
 	return strings.Join(append(axes, adminAxes(run)...), " ")
+}
+
+// consumerSettings are the consumer settings a run's header records, by
+// name.
+func consumerSettings(run LiveRunHeader) map[string]string {
+	settings := map[string]string{}
+
+	for line := range strings.SplitSeq(run.Inputs["forge_ci_live_consumer_settings"], "\n") {
+		if key, value, isSetting := strings.Cut(line, "="); isSetting {
+			settings[key] = value
+		}
+	}
+
+	return settings
 }
 
 // seedPassedOnRerun is a prepared case that passed in its row's rerun, as
