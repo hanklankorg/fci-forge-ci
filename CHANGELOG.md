@@ -258,6 +258,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The GitLab release renders its changelog beside the consumer checks,
+  once `Check: release request` has authorized the request, rather than
+  after them. `Prepare: release commit and tag` now needs
+  `Check: consumer checks` itself, so nothing is committed, tagged or
+  published before the checks pass.
 - **BREAKING**: `forge-ci plan release` and
   `forge-ci container snapshot-images plan` refuse a forge's call that
   passes no `--runner-input`, exit 2, as the base stage plans do. GitHub's

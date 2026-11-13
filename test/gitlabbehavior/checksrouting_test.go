@@ -79,8 +79,10 @@ func TestReleaseChecksRoutingAndPreparationBarrier(t *testing.T) {
 		t.Fatalf("consumer checks lost authorization, fresh revalidation, or secret isolation: %+v", checks)
 	}
 
-	if !reflect.DeepEqual(jobs["Prepare: changelog"].Needs, []any{"Check: consumer checks"}) {
-		t.Fatalf("the changelog can bypass successful checks: %+v", jobs["Prepare: changelog"])
+	// The changelog runs beside the checks once the request is authorized;
+	// the release commit waits for both.
+	if !reflect.DeepEqual(jobs["Prepare: changelog"].Needs, []any{map[string]any{"job": "Check: release request", "artifacts": false}}) {
+		t.Fatalf("the changelog can bypass authorization: %+v", jobs["Prepare: changelog"])
 	}
 
 	// The plan's version jobs, whichever it names, wait for the checks and
@@ -95,15 +97,17 @@ func TestReleaseChecksRoutingAndPreparationBarrier(t *testing.T) {
 
 	families := map[string][]string{"version": {"java", "node", "rust"}, "build": {"java", "node", "go", "rust", "android"}}
 
-	prepareNeeds := make([]any, 0, 1+len(families["version"]))
-	prepareNeeds = append(prepareNeeds, map[string]any{"job": "Prepare: changelog", "artifacts": true})
+	prepareNeeds := make([]any, 0, 2+len(families["version"]))
+	prepareNeeds = append(prepareNeeds,
+		map[string]any{"job": "Check: consumer checks", "artifacts": false},
+		map[string]any{"job": "Prepare: changelog", "artifacts": true})
 
 	for _, family := range families["version"] {
 		prepareNeeds = append(prepareNeeds, map[string]any{"job": "Prepare: version " + family, "artifacts": true, "optional": true})
 	}
 
 	if prepare := jobs["Prepare: release commit and tag"]; !reflect.DeepEqual(prepare.Needs, prepareNeeds) {
-		t.Fatalf("release preparation lost required changelog or optional version barrier: %+v", prepare)
+		t.Fatalf("release preparation lost the checks, changelog or optional version barrier: %+v", prepare)
 	}
 
 	if family := jobs[".forge-ci-release-build-family"]; !reflect.DeepEqual(family.Needs, []any{

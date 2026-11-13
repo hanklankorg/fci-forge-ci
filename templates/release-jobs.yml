@@ -470,7 +470,11 @@ stages: [check, prepare, build, images, sign, publish]
   before_script: [readonly rc_job_role=changelog, *forge-ci-release-start]
   retry: *forge-ci-release-retry
   after_script: [rc_handoff=_release-render, *forge-ci-release-handoff]
-  needs: ["Check: consumer checks"]
+  # Beside the consumer checks: the changelog changes nothing outside the
+  # pipeline, and the release commit waits for both.
+  needs:
+    - job: "Check: release request"
+      artifacts: false
   script:
     - rc_render_changelog
   artifacts:
@@ -537,6 +541,8 @@ stages: [check, prepare, build, images, sign, publish]
     name: release/prepare
     action: prepare
   needs:
+    - job: "Check: consumer checks"
+      artifacts: false
     - job: "Prepare: changelog"
       artifacts: true
     - job: "Prepare: version java"
