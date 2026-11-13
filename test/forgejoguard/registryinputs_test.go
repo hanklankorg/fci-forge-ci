@@ -150,9 +150,9 @@ func TestBaseImagesStageKeepsItsTokenAndItsGates(t *testing.T) {
 	}
 
 	for job, want := range map[string]string{
-		"fetch-inputs": "${{ inputs['parent-base-json'] != '' }}",
-		"build":        "${{ always() && needs.plan.result == 'success' && (needs.fetch-inputs.result == 'success' || (needs.fetch-inputs.result == 'skipped' && inputs['parent-base-json'] == '')) }}",
-		"publish":      "${{ always() && needs.build.result == 'success' }}",
+		"fetch-inputs": "${{ needs.coordinates.result == 'success' && needs.plan.result == 'success' && inputs['parent-base-json'] != '' }}",
+		"build":        "${{ always() && needs.coordinates.result == 'success' && needs.plan.result == 'success' && (needs.fetch-inputs.result == 'success' || (needs.fetch-inputs.result == 'skipped' && inputs['parent-base-json'] == '')) }}",
+		"publish":      "${{ always() && needs.coordinates.result == 'success' && needs.plan.result == 'success' && needs.build.result == 'success' }}",
 	} {
 		if got := scalarString(mappingValue(workflow.jobs[job].node, "if")); got != want {
 			t.Errorf("job %s runs if %q, want %q", job, got, want)

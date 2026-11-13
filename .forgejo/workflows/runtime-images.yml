@@ -153,7 +153,7 @@ jobs:
           printf 'signer_image=%s\ngo_build_image=%s\nbuilder=%s\nbuilder_job_image=%s\ntransparency_log=%s\n' "$SIGNER_IMAGE_INPUT" "$GO_BUILD_IMAGE_INPUT" "$builder" "$builder_job_image" "$TRANSPARENCY_LOG_INPUT" >>"${FORGEJO_OUTPUT:?}"
   plan:
     needs: coordinates
-    if: forgejo.ref == 'refs/heads/main'
+    if: ${{ needs.coordinates.result == 'success' && forgejo.ref == 'refs/heads/main' }}
     runs-on: ${{ fromJSON(inputs['runs-on']) }}
     container: ${{ needs.coordinates.outputs.signer_image }}
     timeout-minutes: 10
@@ -236,6 +236,7 @@ jobs:
           printf 'run-id=%s\n' "$RUNTIME_RUN_ID" >>"$FORGEJO_OUTPUT"
   build-cli:
     needs: [coordinates, plan]
+    if: ${{ needs.coordinates.result == 'success' && needs.plan.result == 'success' }}
     runs-on: ${{ fromJSON(inputs['runs-on']) }}
     container: ${{ needs.coordinates.outputs.go_build_image }}
     timeout-minutes: 20
@@ -276,6 +277,7 @@ jobs:
           forge-ci artifact upload --name runtime-cli --dir runtime-cli/ --retention-days 1 --if-no-files error
   request-runner:
     needs: [coordinates, plan, build-cli]
+    if: ${{ needs.coordinates.result == 'success' && needs.plan.result == 'success' && needs.build-cli.result == 'success' }}
     runs-on: ${{ fromJSON(inputs['runs-on']) }}
     container: ${{ needs.coordinates.outputs.signer_image }}
     timeout-minutes: 20
@@ -327,6 +329,7 @@ jobs:
           done <<<"$requests"
   build:
     needs: [coordinates, plan, build-cli, request-runner]
+    if: ${{ needs.coordinates.result == 'success' && needs.plan.result == 'success' && needs.build-cli.result == 'success' && needs.request-runner.result == 'success' }}
     runs-on: ${{ fromJSON(inputs[format('build-runs-on-linux-{0}', matrix.arch)]) }}
     container: ${{ needs.coordinates.outputs.builder_job_image }}
     timeout-minutes: 120
@@ -388,6 +391,7 @@ jobs:
         run: test -z "${REGISTRY_AUTH_FILE:-}" || rm -f -- "$REGISTRY_AUTH_FILE"
   collect:
     needs: [coordinates, plan, build]
+    if: ${{ needs.coordinates.result == 'success' && needs.plan.result == 'success' && needs.build.result == 'success' }}
     runs-on: ${{ fromJSON(inputs['runs-on']) }}
     container: ${{ needs.coordinates.outputs.signer_image }}
     timeout-minutes: 10
@@ -431,6 +435,7 @@ jobs:
         run: bash "$RUNTIME_LAYER_ROOT/scripts/ci/runtime-images.sh" collect
   request-smoke-runner:
     needs: [coordinates, collect]
+    if: ${{ needs.coordinates.result == 'success' && needs.collect.result == 'success' }}
     runs-on: ${{ fromJSON(inputs['runs-on']) }}
     container: ${{ needs.coordinates.outputs.signer_image }}
     timeout-minutes: 20
@@ -483,6 +488,7 @@ jobs:
           fi
   smoke:
     needs: [coordinates, collect, request-smoke-runner]
+    if: ${{ needs.coordinates.result == 'success' && needs.collect.result == 'success' && needs.request-smoke-runner.result == 'success' }}
     runs-on: ${{ fromJSON(inputs[matrix.arch == 'arm64' && 'runs-on-linux-arm64' || 'runs-on']) }}
     # Run the exact candidate digest as a native job container. No nested
     # Podman/user namespaces are needed. Credentials are consumed
@@ -529,6 +535,7 @@ jobs:
             --dir smoke-receipt --retention-days 30 --if-no-files error
   assemble:
     needs: [coordinates, plan, smoke]
+    if: ${{ needs.coordinates.result == 'success' && needs.plan.result == 'success' && needs.smoke.result == 'success' }}
     runs-on: ${{ fromJSON(inputs['runs-on']) }}
     container: ${{ needs.coordinates.outputs.signer_image }}
     timeout-minutes: 60
@@ -593,6 +600,7 @@ jobs:
         run: test -z "${REGISTRY_AUTH_FILE:-}" || rm -f -- "$REGISTRY_AUTH_FILE"
   sign:
     needs: [coordinates, plan, assemble]
+    if: ${{ needs.coordinates.result == 'success' && needs.plan.result == 'success' && needs.assemble.result == 'success' }}
     runs-on: ${{ fromJSON(inputs['signer-runs-on']) }}
     container: ${{ needs.coordinates.outputs.signer_image }}
     timeout-minutes: 30
@@ -678,6 +686,7 @@ jobs:
         run: test -z "${REGISTRY_AUTH_FILE:-}" || rm -f -- "$REGISTRY_AUTH_FILE"
   publish:
     needs: [coordinates, plan, sign]
+    if: ${{ needs.coordinates.result == 'success' && needs.plan.result == 'success' && needs.sign.result == 'success' }}
     runs-on: ${{ fromJSON(inputs['runs-on']) }}
     container: ${{ needs.coordinates.outputs.signer_image }}
     timeout-minutes: 30

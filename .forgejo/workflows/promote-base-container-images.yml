@@ -195,6 +195,7 @@ jobs:
   promote-base-container-images:
     name: Promote base container images
     needs: coordinates
+    if: ${{ needs.coordinates.result == 'success' }}
     runs-on: ${{ fromJSON(inputs['runs-on']) }}
     container:
       image: ${{ needs.coordinates.outputs.signer_image }}

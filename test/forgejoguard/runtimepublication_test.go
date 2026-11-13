@@ -34,7 +34,7 @@ func TestRuntimePublicationBarriersAndSigningBoundary(t *testing.T) {
 	require.Contains(t, jobNeeds(runtimeWorkflow.jobs["smoke"]), "request-smoke-runner")
 	require.Contains(t, jobNeeds(runtimeWorkflow.jobs["request-smoke-runner"]), "collect")
 
-	require.Equal(t, "forgejo.ref == 'refs/heads/main'", scalarString(mappingValue(runtimeWorkflow.jobs["plan"].node, "if")))
+	require.Equal(t, "${{ needs.coordinates.result == 'success' && forgejo.ref == 'refs/heads/main' }}", scalarString(mappingValue(runtimeWorkflow.jobs["plan"].node, "if")))
 
 	for name, target := range runtimeWorkflow.jobs {
 		text := target.node.String()

@@ -555,6 +555,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Security: on Forgejo 17, a publication job of
+  `sign-and-publish-release.yml` could start after the signer refused the
+  release. In a called workflow Forgejo 17 evaluates a job's own `if` but
+  not the implicit success of its needs, so `Publish: images`,
+  `Publish: release`, `Publish: tidy up` and `Publish: packages` ran after
+  `Sign: files and images` had failed; with images, promotion could have
+  moved stage tags from the unsigned build. Every job of the Forgejo
+  workflows that needs another now names `needs.<job>.result == 'success'`
+  for each need in its own condition, among them the release commit and
+  tag of `prepare-release.yml` and the image publication of
+  `release-images.yml`, `runtime-images.yml`, `base-images.yml` and
+  `snapshot-images.yml`, and `test/forgejoguard` refuses a job that does
+  not.
 - The swap policy of `release sign` and `release sbom-zip --sign` no
   longer refuses a job whose container runs with swap disabled.
   `/proc/swaps` is host-wide, so a job container saw the host's swap and

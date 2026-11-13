@@ -119,14 +119,16 @@ func TestPrepareReleaseIsolatesTheVersionBumpFromTheSigningJob(t *testing.T) {
 // runs 65 and 67, 2026-10-16), and an empty matrix blocks its dependants
 // (forgejo/forgejo#12191). So the version job is never skipped: a plan
 // without a family runs one empty row, each step but the note is conditioned
-// on the row's family, and the signing job needs it plainly.
+// on the row's family, and the signing job needs it on its success alone.
 func TestPrepareReleaseGoesOnWithoutAVersionBump(t *testing.T) {
 	t.Parallel()
 
 	parsed := loadWorkflow(t, ".forgejo/workflows/prepare-release.yml")
 	for _, name := range []string{"plan", "version", "prepare"} {
-		if condition := scalarString(mappingValue(parsed.jobs[name].node, "if")); condition != "" {
-			t.Errorf("job %s has a condition, which Forgejo evaluates on the server before any runner: %s", name, condition)
+		want := needsGate(jobNeeds(parsed.jobs[name]))
+		if condition := scalarString(mappingValue(parsed.jobs[name].node, "if")); condition != want {
+			t.Errorf("job %s runs if %q, want its needs' success alone (%q): any other condition could skip the job on the server before any runner",
+				name, condition, want)
 		}
 	}
 

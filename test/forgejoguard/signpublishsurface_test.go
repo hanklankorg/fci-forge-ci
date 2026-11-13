@@ -125,9 +125,9 @@ func TestSignPublishWorkflowCallSurface(t *testing.T) {
 	}
 }
 
-// The secret-free coordinates job gates the whole ladder, and the jobs after it
-// run unconditionally: an `if:` on one of them would let a release publish
-// while an earlier stage was skipped.
+// The secret-free coordinates job gates the whole ladder, and each job after
+// it runs on the success of its needs alone: any other condition could let a
+// release publish while an earlier stage was skipped or had failed.
 func TestSignPublishJobLadder(t *testing.T) {
 	t.Parallel()
 
@@ -163,16 +163,17 @@ func TestSignPublishJobLadder(t *testing.T) {
 			continue
 		}
 
-		// The packages job alone has a condition: the sign job's plain
+		// Each stage runs on the success of all its needs and nothing else.
+		// The packages job alone adds a condition: the sign job's plain
 		// "false" skips it, so a release without distro packages starts no
 		// signer container and maps no token for nothing.
-		wantCondition := ""
+		wantCondition := needsGate(want)
 		if name == "packages" {
-			wantCondition = "${{ needs.sign.outputs.distro-packages != 'false' }}"
+			wantCondition = needsGate(want, "needs.sign.outputs.distro-packages != 'false'")
 		}
 
 		if condition := scalarString(mappingValue(target.node, "if")); condition != wantCondition {
-			t.Errorf("job %s is conditional on %q, want %q; every other stage after coordinates runs unconditionally",
+			t.Errorf("job %s is conditional on %q, want %q; every stage after coordinates runs on its needs' success alone",
 				name, condition, wantCondition)
 		}
 	}
@@ -737,8 +738,8 @@ func TestDistroPackagesAreAdmittedBeforeTheReleaseIsPublic(t *testing.T) {
 
 	signer := loadWorkflow(t, signPublishWorkflow)
 
-	if condition := scalarString(mappingValue(signer.jobs["packages"].node, "if")); condition != "${{ needs.sign.outputs.distro-packages != 'false' }}" {
-		t.Errorf("the packages job runs on %q, want the sign job's distro-packages output alone", condition)
+	if condition := scalarString(mappingValue(signer.jobs["packages"].node, "if")); !strings.HasSuffix(condition, " && needs.sign.outputs.distro-packages != 'false' }}") {
+		t.Errorf("the packages job runs on %q, want the sign job's distro-packages output after its needs' success", condition)
 	}
 
 	// Fail closed: only "false" skips the job, and the step after its

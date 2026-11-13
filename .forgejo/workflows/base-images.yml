@@ -202,6 +202,7 @@ jobs:
   plan:
     name: "Check: base plan"
     needs: coordinates
+    if: ${{ needs.coordinates.result == 'success' }}
     runs-on: ${{ fromJSON(inputs['runs-on']) }}
     timeout-minutes: 10
     outputs:
@@ -292,7 +293,7 @@ jobs:
   fetch-inputs:
     name: "Fetch parent: ${{ matrix.build.name }} (${{ matrix.build.arch }})"
     needs: [coordinates, plan]
-    if: ${{ inputs['parent-base-json'] != '' }}
+    if: ${{ needs.coordinates.result == 'success' && needs.plan.result == 'success' && inputs['parent-base-json'] != '' }}
     runs-on: ${{ fromJSON(inputs[format('build-runs-on-linux-{0}', matrix.build.arch)]) }}
     timeout-minutes: 45
     strategy:
@@ -397,7 +398,7 @@ jobs:
     name: "Build: ${{ matrix.build.name }} (${{ matrix.build.arch }})"
     needs: [coordinates, plan, fetch-inputs]
     # A root has no parent to fetch, so its fetch job is skipped.
-    if: ${{ always() && needs.plan.result == 'success' && (needs.fetch-inputs.result == 'success' || (needs.fetch-inputs.result == 'skipped' && inputs['parent-base-json'] == '')) }}
+    if: ${{ always() && needs.coordinates.result == 'success' && needs.plan.result == 'success' && (needs.fetch-inputs.result == 'success' || (needs.fetch-inputs.result == 'skipped' && inputs['parent-base-json'] == '')) }}
     # Each architecture builds on a runner of its own architecture: a build
     # runs the Containerfile's steps, and none may rely on CPU emulation.
     runs-on: ${{ fromJSON(inputs[format('build-runs-on-linux-{0}', matrix.build.arch)]) }}
@@ -543,7 +544,7 @@ jobs:
   publish:
     name: "Publish: unsigned base candidate"
     needs: [coordinates, plan, build]
-    if: ${{ always() && needs.build.result == 'success' }}
+    if: ${{ always() && needs.coordinates.result == 'success' && needs.plan.result == 'success' && needs.build.result == 'success' }}
     runs-on: ${{ fromJSON(inputs['runs-on']) }}
     timeout-minutes: 45
     outputs:

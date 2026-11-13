@@ -171,6 +171,7 @@ jobs:
   plan:
     name: "Check: plan"
     needs: coordinates
+    if: ${{ needs.coordinates.result == 'success' }}
     runs-on: ${{ fromJSON(inputs['runs-on']) }}
     env:
       FORGE_CI_REPOSITORY_URL: ${{ needs.coordinates.outputs.helpers_repository }}
@@ -246,7 +247,7 @@ jobs:
   produce:
     name: "Build: ${{ matrix.artifact.name }}"
     needs: [coordinates, plan]
-    if: ${{ needs.plan.outputs.enabled == 'true' && inputs['context-artifact'] == '' }}
+    if: ${{ needs.coordinates.result == 'success' && needs.plan.result == 'success' && needs.plan.outputs.enabled == 'true' && inputs['context-artifact'] == '' }}
     runs-on: ${{ fromJSON(inputs['runs-on']) }}
     # Select a validated coordinate by key, never a logical expression's value.
     # format preserves an empty container (the runner default) for the no-op row.
@@ -332,7 +333,7 @@ jobs:
   files:
     name: "Build: ${{ matrix.file.name }} files"
     needs: [coordinates, plan]
-    if: ${{ needs.plan.outputs.has-files == 'true' }}
+    if: ${{ needs.coordinates.result == 'success' && needs.plan.result == 'success' && needs.plan.outputs.has-files == 'true' }}
     runs-on: ${{ fromJSON(inputs['runs-on']) }}
     # Select a validated coordinate by key, never a logical expression's value.
     container: ${{ format('{0}', needs.coordinates.outputs[fromJSON('{"go":"artifact_job_image_go","maven":"artifact_job_image_java","gradle":"artifact_job_image_java","npm":"artifact_job_image_node","cargo":"artifact_job_image_rust"}')[matrix.file.project_type]]) }}
@@ -408,7 +409,7 @@ jobs:
   context:
     name: "Prepare: image inputs"
     needs: [coordinates, plan, produce]
-    if: ${{ !failure() && !cancelled() && needs.plan.outputs.enabled == 'true' && inputs['context-artifact'] == '' }}
+    if: ${{ needs.coordinates.result == 'success' && needs.plan.result == 'success' && needs.produce.result == 'success' && needs.plan.outputs.enabled == 'true' && inputs['context-artifact'] == '' }}
     runs-on: ${{ fromJSON(inputs['runs-on']) }}
     env:
       FORGE_CI_REPOSITORY_URL: ${{ needs.coordinates.outputs.helpers_repository }}
@@ -455,7 +456,7 @@ jobs:
   build:
     name: "Build: ${{ matrix.build.name }} (${{ matrix.build.arch }})"
     needs: [coordinates, plan, context]
-    if: ${{ !failure() && !cancelled() && needs.plan.outputs.enabled == 'true' && (needs.context.result == 'success' || inputs['context-artifact'] != '') }}
+    if: ${{ !cancelled() && needs.coordinates.result == 'success' && needs.plan.result == 'success' && needs.plan.outputs.enabled == 'true' && (needs.context.result == 'success' || (needs.context.result == 'skipped' && inputs['context-artifact'] != '')) }}
     # The build input of the row's own architecture, selected by key. The
     # no-op row of a plan without an image has no architecture and never
     # runs; it names the plain runner input so its labels still evaluate.
@@ -539,7 +540,7 @@ jobs:
   publish:
     name: "Publish: ${{ matrix.image.name }}"
     needs: [coordinates, plan, build]
-    if: ${{ needs.plan.outputs.enabled == 'true' && needs.build.result == 'success' }}
+    if: ${{ needs.coordinates.result == 'success' && needs.plan.result == 'success' && needs.plan.outputs.enabled == 'true' && needs.build.result == 'success' }}
     runs-on: ${{ fromJSON(inputs['runs-on']) }}
     env:
       FORGE_CI_REPOSITORY_URL: ${{ needs.coordinates.outputs.helpers_repository }}
@@ -617,7 +618,7 @@ jobs:
   collect:
     name: Summary
     needs: [coordinates, plan, build, publish]
-    if: ${{ !failure() && !cancelled() && needs.plan.result == 'success' }}
+    if: ${{ !cancelled() && needs.coordinates.result == 'success' && needs.plan.result == 'success' && ((needs.build.result == 'success' && needs.publish.result == 'success') || (needs.plan.outputs.enabled != 'true' && needs.build.result == 'skipped' && needs.publish.result == 'skipped')) }}
     runs-on: ${{ fromJSON(inputs['runs-on']) }}
     env:
       FORGE_CI_REPOSITORY_URL: ${{ needs.coordinates.outputs.helpers_repository }}

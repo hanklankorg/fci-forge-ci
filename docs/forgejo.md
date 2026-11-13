@@ -1382,6 +1382,12 @@ The boundary is these properties together:
   publish job, and the release token never enters the sign or promote job.
   The only hand-off between them is the signed `dist/`, carried with its
   digest.
+- **Each job states the success it waits for.** A job of the layer's
+  workflows that needs another runs only on
+  `needs.<job>.result == 'success'` for each need, written in its own `if`.
+  Forgejo 17 does not apply the implicit success of a job's needs inside a
+  called workflow, so without it a refused signing would still start
+  promotion, publication and the packages.
 - **Trust is established again in every job.** Each privileged job creates a
   private workspace, checks the layer out at `forge-ci-sha`, verifies the
   checkout, downloads the binary that checkout names in a step of its own,

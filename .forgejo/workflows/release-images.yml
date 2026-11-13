@@ -222,6 +222,7 @@ jobs:
   plan:
     name: "Check: plan"
     needs: coordinates
+    if: ${{ needs.coordinates.result == 'success' }}
     runs-on: ${{ fromJSON(inputs['runs-on']) }}
     timeout-minutes: 10
     outputs:
@@ -329,6 +330,7 @@ jobs:
   fetch-inputs:
     name: "Fetch registry inputs: ${{ matrix.build.name }} (${{ matrix.build.arch }})"
     needs: [coordinates, plan]
+    if: ${{ needs.coordinates.result == 'success' && needs.plan.result == 'success' }}
     runs-on: ${{ fromJSON(inputs[format('build-runs-on-linux-{0}', matrix.build.arch)]) }}
     timeout-minutes: 45
     strategy:
@@ -407,6 +409,7 @@ jobs:
   build:
     name: "Build: ${{ matrix.build.name }} (${{ matrix.build.arch }})"
     needs: [coordinates, plan, fetch-inputs]
+    if: ${{ needs.coordinates.result == 'success' && needs.plan.result == 'success' && needs.fetch-inputs.result == 'success' }}
     # Each architecture builds on a runner of its own architecture: a build
     # runs the Containerfile's steps, and none may rely on CPU emulation.
     runs-on: ${{ fromJSON(inputs[format('build-runs-on-linux-{0}', matrix.build.arch)]) }}
@@ -635,6 +638,7 @@ jobs:
   publish:
     name: "Publish: ${{ matrix.image.name }}"
     needs: [coordinates, plan, build]
+    if: ${{ needs.coordinates.result == 'success' && needs.plan.result == 'success' && needs.build.result == 'success' }}
     runs-on: ${{ fromJSON(inputs['runs-on']) }}
     timeout-minutes: 45
     strategy:
@@ -889,6 +893,7 @@ jobs:
   collect:
     name: Summary
     needs: [coordinates, plan, publish]
+    if: ${{ needs.coordinates.result == 'success' && needs.plan.result == 'success' && needs.publish.result == 'success' }}
     runs-on: ${{ fromJSON(inputs['runs-on']) }}
     timeout-minutes: 10
     outputs:

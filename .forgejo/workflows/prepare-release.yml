@@ -272,6 +272,7 @@ jobs:
   plan:
     name: "Prepare: version plan"
     needs: coordinates
+    if: ${{ needs.coordinates.result == 'success' }}
     runs-on: ${{ fromJSON(inputs['runs-on']) }}
     timeout-minutes: 5
     outputs:
@@ -386,6 +387,7 @@ jobs:
   render:
     name: "Prepare: changelog"
     needs: coordinates
+    if: ${{ needs.coordinates.result == 'success' }}
     runs-on: ${{ fromJSON(inputs['runs-on']) }}
     timeout-minutes: 10
     steps:
@@ -594,6 +596,7 @@ jobs:
   version:
     name: "Prepare: version ${{ matrix.version.family || 'none' }}"
     needs: [coordinates, plan, render]
+    if: ${{ needs.coordinates.result == 'success' && needs.plan.result == 'success' && needs.render.result == 'success' }}
     runs-on: ${{ fromJSON(inputs['runs-on']) }}
     timeout-minutes: 20
     # Select a validated coordinate by key, never a logical expression's value.
@@ -766,9 +769,12 @@ jobs:
   # This fresh job receives only two data files and never runs the renderer.
   prepare:
     name: "Prepare: release commit and tag"
-    # No condition: every job above runs whether or not the plan bumps, so
-    # the default rule, all of them successful, is the whole requirement.
+    # Every job above runs whether or not the plan bumps, so all of them
+    # successful is the whole requirement. It is stated, not left to the
+    # forge's default: Forgejo 17 does not apply that default inside a
+    # called workflow, and this job pushes the release commit and tag.
     needs: [coordinates, plan, render, version]
+    if: ${{ needs.coordinates.result == 'success' && needs.plan.result == 'success' && needs.render.result == 'success' && needs.version.result == 'success' }}
     runs-on: ${{ fromJSON(inputs['runs-on']) }}
     timeout-minutes: 10
     outputs:

@@ -348,7 +348,7 @@ snapshot_build_files cli
 	}
 
 	files := workflow.Jobs["files"]
-	if files.If != "${{ needs.plan.outputs.has-files == 'true' }}" {
+	if files.If != "${{ needs.coordinates.result == 'success' && needs.plan.result == 'success' && needs.plan.outputs.has-files == 'true' }}" {
 		t.Fatalf("the files job must run only for a plan with file outputs: %q", files.If)
 	}
 
@@ -613,7 +613,7 @@ func TestSnapshotForgejoAutomaticProducerAndGatherOrdering(t *testing.T) {
 		}
 	}
 
-	if !strings.Contains(fmt.Sprint(workflow.Jobs["context"].Needs), "produce") || !strings.Contains(workflow.Jobs["context"].If, "!failure()") {
+	if !strings.Contains(fmt.Sprint(workflow.Jobs["context"].Needs), "produce") || !strings.Contains(workflow.Jobs["context"].If, "needs.produce.result == 'success'") {
 		t.Fatal("gather must wait for every producer to succeed")
 	}
 
@@ -703,8 +703,11 @@ func TestSnapshotForgejoPlanWithoutImageSettlesEveryJob(t *testing.T) {
 		t.Errorf("the summary must wait for every image job: %s", needs)
 	}
 
-	// Skipped image jobs do not stop the summary; a failed or cancelled one does.
-	if want := "${{ !failure() && !cancelled() && needs.plan.result == 'success' }}"; collect.If != want {
+	// Image jobs skipped by a plan without images do not stop the summary; a
+	// failed, cancelled or otherwise skipped one does.
+	if want := "${{ !cancelled() && needs.coordinates.result == 'success' && needs.plan.result == 'success' && " +
+		"((needs.build.result == 'success' && needs.publish.result == 'success') || " +
+		"(needs.plan.outputs.enabled != 'true' && needs.build.result == 'skipped' && needs.publish.result == 'skipped')) }}"; collect.If != want {
 		t.Errorf("the summary runs if %q, want %q", collect.If, want)
 	}
 }

@@ -43,6 +43,14 @@
 # the original digest-verified release-images.json ledger. Promotion failures
 # retain verified partial tags for a forward retry instead of deleting state.
 #
+# Every job that needs another names each need's success in its own `if`
+# (`needs.<job>.result == 'success'`). Forgejo 17 started promote, publish,
+# cleanup and packages in this called workflow after sign had failed: it
+# evaluates a job's own condition but not the implicit success() of its
+# needs, so no job here relies on that default. cleanup, too, runs only
+# after a successful publish; after a failure the candidate tags stay for a
+# forward retry.
+#
 # Each secret-isolated job deliberately repeats its private workspace, exact
 # helper checkout, and live HEAD verification before job-specific engine use.
 # Keep that trust establishment visible in each job; do not replace it with an
@@ -276,6 +284,7 @@ jobs:
   sign:
     name: "Sign: files and images"
     needs: coordinates
+    if: ${{ needs.coordinates.result == 'success' }}
     runs-on: ${{ fromJSON(inputs['signer-runs-on']) }}
     container:
       image: ${{ needs.coordinates.outputs.signer_image }}
@@ -745,6 +754,7 @@ jobs:
   promote:
     name: "Publish: images"
     needs: [coordinates, sign]
+    if: ${{ needs.coordinates.result == 'success' && needs.sign.result == 'success' }}
     runs-on: ${{ fromJSON(inputs['runs-on']) }}
     container:
       image: ${{ needs.coordinates.outputs.signer_image }}
@@ -958,6 +968,7 @@ jobs:
   cleanup:
     name: "Publish: tidy up"
     needs: [coordinates, publish]
+    if: ${{ needs.coordinates.result == 'success' && needs.publish.result == 'success' }}
     runs-on: ${{ fromJSON(inputs['runs-on']) }}
     container:
       image: ${{ needs.coordinates.outputs.signer_image }}
@@ -1114,6 +1125,7 @@ jobs:
   publish:
     name: "Publish: release"
     needs: [coordinates, sign, promote]
+    if: ${{ needs.coordinates.result == 'success' && needs.sign.result == 'success' && needs.promote.result == 'success' }}
     runs-on: ${{ fromJSON(inputs['runs-on']) }}
     container:
       image: ${{ needs.coordinates.outputs.signer_image }}
@@ -1361,7 +1373,7 @@ jobs:
     # Only its plain "false" skips the job. Any other word, an empty one
     # included, starts it, and its first step after the bootstrap requires "true": a lost
     # output fails the release and does not skip its packages.
-    if: ${{ needs.sign.outputs.distro-packages != 'false' }}
+    if: ${{ needs.coordinates.result == 'success' && needs.sign.result == 'success' && needs.publish.result == 'success' && needs.sign.outputs.distro-packages != 'false' }}
     runs-on: ${{ fromJSON(inputs['runs-on']) }}
     container:
       image: ${{ needs.coordinates.outputs.signer_image }}

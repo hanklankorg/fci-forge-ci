@@ -188,6 +188,7 @@ jobs:
   sign-container-images:
     name: Sign container images
     needs: coordinates
+    if: ${{ needs.coordinates.result == 'success' }}
     runs-on: ${{ fromJSON(inputs['signer-runs-on']) }}
     container:
       image: ${{ needs.coordinates.outputs.signer_image }}
