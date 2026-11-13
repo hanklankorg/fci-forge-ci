@@ -114,8 +114,8 @@ No channel-tag relaxation or implicit tag rewriting is introduced.
 
 Upstream sources inspected read-only:
 
-- https://codeberg.org/forgejo/forgejo/src/tag/v16.0.6/routers/api/packages/npm/npm.go
-- https://codeberg.org/forgejo/forgejo/src/tag/v16.0.6/go.mod
+- https://code.forgejo.org/forgejo/forgejo/src/tag/v16.0.6/routers/api/packages/npm/npm.go
+- https://code.forgejo.org/forgejo/forgejo/src/tag/v16.0.6/go.mod
 - https://github.com/6543/go-version/blob/v1.3.1/version.go
 
 `UploadPackage` calls `CreatePackageAndAddFile` before looping over DistTags
