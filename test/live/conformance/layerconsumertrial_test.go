@@ -95,6 +95,7 @@ const (
 	forgejoConsumerRelease forgejoReleaseCase = iota
 	forgejoPreseededProvenanceRelease
 	forgejoInterruptedRecoveryRelease
+	forgejoRerunAfterInterruptionRelease
 )
 
 func runForgejoConsumerTrial(t *testing.T, root string, releaseCase forgejoReleaseCase, private bool) {
@@ -165,7 +166,7 @@ func runForgejoConsumerTrial(t *testing.T, root string, releaseCase forgejoRelea
 	switch releaseCase {
 	case forgejoPreseededProvenanceRelease:
 		consumer = livetest.WithPreseededForgejoProvenance(t, consumer)
-	case forgejoInterruptedRecoveryRelease:
+	case forgejoInterruptedRecoveryRelease, forgejoRerunAfterInterruptionRelease:
 		consumer = livetest.WithForgejoRecoveryCheckpoint(t, consumer)
 	case forgejoConsumerRelease:
 	}
@@ -295,6 +296,10 @@ func runForgejoConsumerTrial(t *testing.T, root string, releaseCase forgejoRelea
 		return
 	} else if releaseCase == forgejoInterruptedRecoveryRelease {
 		recoverForgejoReleaseAfterHandoff(t, scenario, requester, keys, settings, external, main, facts.Secrets, plan.Secrets)
+
+		return
+	} else if releaseCase == forgejoRerunAfterInterruptionRelease {
+		rerunForgejoReleaseAfterHandoff(t, scenario, requester, keys, settings, external, main, facts.Secrets, plan.Secrets)
 
 		return
 	} else if run, released := requestRelease(t, scenario, requester, keys, settings, external, main, 0, facts.Secrets, plan.Secrets); released == "" {

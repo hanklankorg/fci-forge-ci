@@ -15,7 +15,7 @@ downstream publication have different recovery contracts:
 |---|---|
 | GitHub publication after successful signing | Retry the failed publisher with the original signed checkpoint, as described below. |
 | GitHub preparation/prerequisites with an existing final tag | Use the [exact-tag recovery criteria](#final-git-tag-exists); a matching tag name alone is insufficient. |
-| Forgejo preparation after pushing the final tag | Preparation refuses an existing final tag. Preserve successful handoffs for downstream jobs; if preparation itself cannot complete, use a new version and request. |
+| Forgejo preparation after pushing the final tag | Preparation refuses an existing final tag. Preserve successful handoffs for downstream jobs; if preparation itself cannot complete, use a new version and request. On Forgejo 17 or later, a run cancelled after the unsigned hand-off is finished in the same run by `POST /api/v1/repos/{owner}/{repo}/actions/jobs/{job}/rerun` on its first cancelled job, which reruns the jobs that need it with the earlier jobs' hand-off; held by `TestForgejoRelease_RerunAfterInterruption` (Forgejo 17 or later; not yet live-proven, see [Testing matrices](testing-matrices.md)). |
 | GitLab | Retry the failed job in the same pipeline; see [GitLab](#gitlab). |
 
 Releases start from the original release request, not a fresh event on the final

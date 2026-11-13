@@ -1344,8 +1344,9 @@ signatures, or image signatures on the local registry.
 
 #### Release refusal and interrupted recovery
 
-The lanes `trust-refusal-forgejo` and `recovery-forgejo` run a shipped demo's
-own release workflow to another end than a release. Each scenario runs on
+The lanes `trust-refusal-forgejo`, `recovery-forgejo` and
+`forgejo17-forgejo` run a shipped demo's own release workflow to another end
+than a release. Each such scenario runs on
 the private lane's release case of its demo (`livetest.PreparedScenarioCase`),
 so the lane fixes private repositories and a prepare of the lane holds its
 images; its fixture is staged in the harness's private index, never in the
@@ -1353,25 +1354,33 @@ checkout:
 
 ```bash
 just test-live-prepare ~/src/forge-lab ~/prepared/refusal-recovery \
-  trust-refusal-forgejo recovery-forgejo \
+  trust-refusal-forgejo recovery-forgejo forgejo17-forgejo \
   job-image=go:localhost/nanolinter-go:dev
 just test-live-prepared ~/prepared/refusal-recovery forgejo '^TestForgejoRelease_RejectsPreseededProvenance$'
 just test-live-prepared ~/prepared/refusal-recovery forgejo '^TestForgejoRelease_InterruptedRecovery$'
+just test-live-prepared ~/prepared/refusal-recovery forgejo '^TestForgejoRelease_RerunAfterInterruption$'
 ```
 
 | Scenario | Demo | Expected end |
 |---|---|---|
 | `TestForgejoRelease_RejectsPreseededProvenance` | `hello-go-cli` | The run fails in `Sign: files and images` with `unsigned dist must not hold dist/slsa-provenance.intoto.json: signing writes it`; no `signed-dist` artifact, no publication job on a runner, no release, no new package. The release commit and final tag exist: `prepare-release.yml` pushes them before the build |
 | `TestForgejoRelease_InterruptedRecovery` | `hello-go-cli` | The run is cancelled once the harness's job `Fixture: recovery checkpoint reached` succeeded, after the unsigned hand-off and before signing: the version's tag exists and nothing is published. The harness then creates the variable `FIXTURE_HOLD_BEFORE_SIGNING`, puts a commit on `main` and requests the next patch version. That run succeeds with the release every row is held to. The interrupted version keeps its tag on the commit its run prepared and has no release and no package; the repository has four tags, one release and two runs |
+| `TestForgejoRelease_RerunAfterInterruption` | `hello-go-cli` | Forgejo 17 or later. The run is cancelled at the same checkpoint. The harness creates `FIXTURE_HOLD_BEFORE_SIGNING` and reruns the cancelled job `Fixture: recovery checkpoint hold` (`POST /repos/{owner}/{repo}/actions/jobs/{job}/rerun`, 204), which reruns the jobs that need it in the same run. The hold and `Sign: files and images` run at attempt 2, every job that succeeded at attempt 1 keeps it, and signing takes attempt 1's `build-dist`. The run succeeds with the release every row is held to, on the commit attempt 1 prepared; the repository has two tags, one release and one run, and the owner the packages the release publishes, and no other (this demo publishes none, so the owner's packages are unchanged) |
 
 The recovery the second proves
 is the next patch version, the one
-[docs/forgejo.md](forgejo.md#quick-start) gives for every Forgejo. Running
-the cancelled run's failed jobs again is not proven by a test: Forgejo 16.0.6
-offers it in its web interface only, and its API has no such call
-(`POST /repos/{owner}/{repo}/actions/runs/{run}/rerun-failed-jobs` answers
-404), so the harness, which does not script the web interface, cannot ask
-for it. The demo releases files alone.
+[docs/forgejo.md](forgejo.md#quick-start) gives for every Forgejo. The third
+runs the cancelled jobs again, in Forgejo 17 or later: its API reruns a run
+(`/actions/runs/{run}/rerun`) or a job and the jobs that need it
+(`/actions/jobs/{job}/rerun`), and still has no call that reruns the failed
+jobs alone. On an older Forgejo the row skips, naming the version the forge
+gives (`livetest.NeedsForgejo17Actions`). The demo releases files alone.
+
+The lane `forgejo17-forgejo` also runs `TestInRunner_NativeStepSummary`,
+which needs no consumer: on Forgejo 17 or later a job has
+`FORGEJO_STEP_SUMMARY`, and a report's summary goes to that file and not to
+the job log. Forgejo has no API that reads a stored summary, so the job
+checks the file itself and the run's conclusion is the result.
 
 #### Local release-image output readback
 

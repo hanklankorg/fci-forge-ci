@@ -123,7 +123,7 @@ func TestRunSetSelectsScenariosBesideTheRows(t *testing.T) {
 		{forge: forgeForgejo, set: SetSmall, run: "^TestForgejoLayer_", rows: true, want: ""},
 		{forge: forgeForgejo, set: SetMedium, run: "^TestForgejoLayer_", rows: true, want: ""},
 		{forge: forgeForgejo, set: SetSmall, run: "^TestForgejoLayer_|^TestForgejoLayer_RustDevelopment$", rows: true, want: "^TestForgejoLayer_RustDevelopment$"},
-		{forge: forgeForgejo, set: SetMedium, run: "^TestForgejo", rows: true, want: recovery + "|^TestForgejoRelease_RejectsPreseededProvenance$"},
+		{forge: forgeForgejo, set: SetMedium, run: "^TestForgejo", rows: true, want: recovery + "|^TestForgejoRelease_RejectsPreseededProvenance$|^" + forgejoRerunTest + "$"},
 	} {
 		t.Setenv(liveProviderEnv, test.forge)
 		t.Setenv(liveSetEnv, test.set)
@@ -246,7 +246,7 @@ func TestDeltaRunsAreTheFullRun(t *testing.T) {
 func TestDeltaRunSelectsTheScenariosItsSetAfterDidNot(t *testing.T) {
 	const (
 		rust    = "^TestForgejoLayer_RustDevelopment$"
-		lanes   = "^TestForgejoRelease_InterruptedRecovery$|^TestForgejoRelease_RejectsPreseededProvenance$"
+		lanes   = "^TestForgejoRelease_InterruptedRecovery$|^TestForgejoRelease_RejectsPreseededProvenance$|^" + forgejoRerunTest + "$"
 		pattern = "^TestForgejo|" + rust
 	)
 

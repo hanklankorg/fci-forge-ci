@@ -268,6 +268,40 @@ func summaryProbe(target livetest.Target, assetURL string) string {
 	return summaryWorkflow(target.Forge, livetest.ProbePrelude(target, assetURL))
 }
 
+// A step summary reaches Forgejo's native summary file, on Forgejo 17 or
+// later.
+//
+// PAR-RUN-4 holds the job-log fallback with no summary file nominated. This
+// is the other half on the Forgejo that keeps a job's summary: its runner
+// nominates FORGEJO_STEP_SUMMARY, and the same report goes to that file and
+// not to the job log. Forgejo has no API that reads a stored summary, so the
+// job checks the file itself and the run's conclusion is the result.
+func TestInRunner_NativeStepSummary(t *testing.T) {
+	livetest.RegisterLiveScenario(t)
+
+	const tag = "v0.0.3-native-summary"
+
+	for _, forge := range livetest.ForgesMeeting(t, forgesClaiming(t, alwaysValidatesTokens, "releases"), livetest.NeedsInRunner, livetest.NeedsForgejo17Actions) {
+		t.Run(string(forge), func(t *testing.T) {
+			t.Parallel()
+
+			target := livetest.Accept(t, forge)
+			repo := livetest.NewPublicScratchRepo(t, target, "inrunner-native-summary", livetest.ReadProbeAssetAnonymously)
+
+			livetest.PrepareTag(t, target, repo, tag)
+			livetest.PublishBinaryAsset(t, target, repo, tag, t.TempDir())
+
+			assetURL := livetest.ReleaseAssetURL(t, target, repo, tag, "forge-ci")
+
+			conclusion := livetest.RunWorkflow(t, target, repo, "native-step-summary",
+				nativeSummaryWorkflow(livetest.ProbePrelude(target, assetURL)))
+			if conclusion != "success" {
+				t.Errorf("%s: run concluded %q — the step summary did not reach FORGEJO_STEP_SUMMARY alone", forge, conclusion)
+			}
+		})
+	}
+}
+
 // PAR-RUN-5: step outputs land where the runner will actually read them.
 //
 // This is the third convention the runner dialect decides, after annotations and

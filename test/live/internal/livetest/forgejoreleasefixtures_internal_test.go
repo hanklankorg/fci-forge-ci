@@ -17,6 +17,7 @@ import (
 var forgejoFixtureDemos = slices.Compact([]string{
 	preparedScenarioDemos["TestForgejoRelease_RejectsPreseededProvenance"],
 	preparedScenarioDemos["TestForgejoRelease_InterruptedRecovery"],
+	preparedScenarioDemos[forgejoRerunTest],
 })
 
 func forgejoDemoRelease(t *testing.T, demo string) (string, map[string]any) {

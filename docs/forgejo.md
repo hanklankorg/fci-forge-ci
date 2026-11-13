@@ -229,9 +229,14 @@ the steps are these.
 
 If a release fails or is cancelled partway, do not delete the tag, the
 release or a published image. Once the prepare job has pushed `vX.Y.Z`, a new
-request for that version is refused: re-run the failed jobs of that run from
-the web interface (no test proves this path), or release the next patch
-version from a new commit. If
+request for that version is refused: re-run the failed jobs of that run, or
+release the next patch version from a new commit. On Forgejo 17 or later,
+`POST /api/v1/repos/{owner}/{repo}/actions/jobs/{job}/rerun` on the first
+cancelled job reruns it and the jobs that need it in the same run, for a run
+cancelled between the unsigned hand-off and signing. That is held by
+`TestForgejoRelease_RerunAfterInterruption` (Forgejo 17 or later; not yet
+live-proven, see [Testing matrices](testing-matrices.md)); a re-run from the
+web interface is held by no test. If
 the prepare job itself failed after pushing the tag, only the next patch
 version recovers. See [Failed Release Recovery](failed-release-recovery.md).
 

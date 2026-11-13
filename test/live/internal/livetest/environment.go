@@ -4,9 +4,14 @@
 package livetest
 
 import (
+	"context"
+	"fmt"
+	"net/http"
 	"strconv"
+	"strings"
 
 	"codefloe.com/itiquette/forge-lab-contract/labcontract"
+	"github.com/diggsweden/forge-ci/internal/domain/errs"
 	"github.com/diggsweden/forge-ci/internal/domain/provider"
 )
 
@@ -52,6 +57,12 @@ const (
 
 	// NeedsPackages requires the contract to advertise a package registry.
 	NeedsPackages
+
+	// NeedsForgejo17Actions is a Forgejo of major version 17 or later, as
+	// the forge itself answers GET /api/v1/version: the first to keep a
+	// job's step summary and to rerun a job over its API. The contract does
+	// not say which version it names, so this need asks the forge.
+	NeedsForgejo17Actions
 )
 
 // Requires reports whether forge satisfies every need, logging the first that
@@ -153,6 +164,8 @@ func meetsNeed(tb TB, forge provider.ForgeAPI, contract *labcontract.Contract, n
 
 			return false
 		}
+	case NeedsForgejo17Actions:
+		return meetsForgejo17Actions(tb, forge)
 	default:
 		// An unwired Need is a programming error, not a skip: silently
 		// treating it as satisfied is how a gate stops gating.
@@ -207,6 +220,8 @@ func (n Need) String() string {
 		return "NeedsFulcio"
 	case NeedsPackages:
 		return "NeedsPackages"
+	case NeedsForgejo17Actions:
+		return "NeedsForgejo17Actions"
 	default:
 		return "Need(" + strconv.Itoa(int(n)) + ")"
 	}
@@ -216,5 +231,76 @@ func (n Need) String() string {
 // exhaustiveness guard the default case cannot provide on its own: a new Need
 // that nobody wired would otherwise only fail the first time a scenario used it.
 func allNeeds() []Need {
-	return []Need{NeedsInRunner, NeedsFulcio, NeedsPackages}
+	return []Need{NeedsInRunner, NeedsFulcio, NeedsPackages, NeedsForgejo17Actions}
+}
+
+// meetsForgejo17Actions asks the accepted Forgejo target its version, and
+// logs why when it is older than 17.
+func meetsForgejo17Actions(tb TB, forge provider.ForgeAPI) bool {
+	tb.Helper()
+
+	if forge != provider.ForgeForgejo {
+		tb.Logf("SKIP %s: the Actions of Forgejo 17 are Forgejo's", forge)
+
+		return false
+	}
+
+	// Accept skips the test when the contract names no Forgejo endpoint.
+	target := Accept(tb, forge)
+
+	version, err := forgeVersion(Context(tb), target)
+	if err != nil {
+		tb.Fatalf("livetest: %v", err)
+
+		return false
+	}
+
+	reason, err := forgejo17ActionsSkip(version)
+	if err != nil {
+		tb.Fatalf("livetest: %s at %s: %v", forge, target.Host, err)
+
+		return false
+	}
+
+	if reason != "" {
+		tb.Logf("SKIP %s: %s at %s", forge, reason, target.Host)
+
+		return false
+	}
+
+	return true
+}
+
+// forgeVersion is the version the forge gives for itself.
+func forgeVersion(ctx context.Context, target Target) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, timeoutAPI)
+	defer cancel()
+
+	var answer struct {
+		Version string `json:"version"`
+	}
+
+	if _, err := decode(ctx, target, http.MethodGet, target.BaseURL()+"/api/v1/version", nil, &answer, http.StatusOK); err != nil {
+		return "", fmt.Errorf("read the version of %s: %w", target.Host, err)
+	}
+
+	return answer.Version, nil
+}
+
+// forgejo17ActionsSkip says why a Forgejo that gives version for itself is
+// older than 17, or "" when it is 17 or later. A Forgejo version starts with
+// its major number and a dot, as 17.0.1+gitea-1.22.0 does.
+func forgejo17ActionsSkip(version string) (string, error) {
+	major, _, dotted := strings.Cut(version, ".")
+
+	number, err := strconv.Atoi(major)
+	if !dotted || err != nil || number < 0 || major != strconv.Itoa(number) {
+		return "", fmt.Errorf("the forge gives its version as %q, which starts with no major number: %w", version, errs.ErrValidation)
+	}
+
+	if number < 17 {
+		return fmt.Sprintf("Forgejo %s keeps no step summary and reruns no job over its API; that needs Forgejo 17 or later", version), nil
+	}
+
+	return "", nil
 }

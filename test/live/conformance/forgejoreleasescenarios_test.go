@@ -60,9 +60,9 @@ func TestForgejoRelease_RejectsPreseededProvenance(t *testing.T) {
 // The cancelled run has prepared the release and released nothing: main is
 // one signed commit ahead with the final tag on it, no signing or publication
 // job was taken by a runner, and there is no release and no package of the
-// version. That is where the version stays: a final tag is never released a
-// second time, and the forge's API (Forgejo 16.0.6) has no call that runs a
-// cancelled run again; its web interface has, and no test proves that path.
+// version. In this recovery that is where the version stays: a final tag is
+// never released a second time. Running the cancelled jobs again instead is
+// TestForgejoRelease_RerunAfterInterruption's, on Forgejo 17 or later.
 //
 // The hold is then released and the next patch version requested on a new
 // commit of main. That run must succeed with the release every trial is held
@@ -77,6 +77,40 @@ func TestForgejoRelease_InterruptedRecovery(t *testing.T) {
 		for _, visibility := range livetest.ConsumerVisibilities(t) {
 			t.Run(visibility.Name, func(t *testing.T) {
 				runForgejoConsumerTrial(t, root, forgejoInterruptedRecoveryRelease, visibility.Private)
+			})
+		}
+	})
+}
+
+// A release interrupted between the unsigned hand-off and signing is
+// finished by running its cancelled jobs again, in the same run, through
+// the API Forgejo 17 added for it.
+//
+// The release is interrupted as in TestForgejoRelease_InterruptedRecovery.
+// The hold is then released and the first job the run cancelled after the
+// checkpoint, the hold, is rerun with the jobs that need it: signing and
+// publication. They run at attempt 2 in the run that was cancelled, and no
+// run is added. The jobs before the checkpoint are not rerun, so signing
+// takes the build-dist hand-off attempt 1 uploaded: whether Forgejo serves a
+// rerun job an earlier attempt's artifacts is what this row proves.
+//
+// The run must end in the release every trial is held to, of the version
+// that was interrupted and on the commit its first attempt prepared: one
+// release, the two tags of one request, and the packages the release
+// publishes, and no other.
+func TestForgejoRelease_RerunAfterInterruption(t *testing.T) {
+	livetest.RegisterLiveScenario(t)
+
+	if livetest.Selected(t, provider.ForgeForgejo) && !livetest.Requires(t, provider.ForgeForgejo, livetest.NeedsForgejo17Actions) {
+		t.Skip("this Forgejo cannot rerun a job over its API; the logged SKIP names its version")
+	}
+
+	forScenarioConsumer(t, provider.ForgeForgejo, "the rerun after an interruption requires a reviewed native release consumer or a prepared directory", func(t *testing.T, root string) {
+		t.Helper()
+
+		for _, visibility := range livetest.ConsumerVisibilities(t) {
+			t.Run(visibility.Name, func(t *testing.T) {
+				runForgejoConsumerTrial(t, root, forgejoRerunAfterInterruptionRelease, visibility.Private)
 			})
 		}
 	})
@@ -179,52 +213,10 @@ func recoverForgejoReleaseAfterHandoff(t *testing.T, scenario layerScenario, req
 	t.Helper()
 
 	target, repo := scenario.target, scenario.repo
-	requestTag, finalTag := "release-request/v"+settings.Version, "v"+settings.Version
+	finalTag := "v" + settings.Version
 	packages := awaitedPackages(t, target, repo, settings)
 
-	requester.PushTag(t, target, repo, requestTag, layerMain, "Request release "+finalTag)
-
-	interrupted := livetest.WaitForConsumerRun(t, target, repo, settings.Workflow, "push", livetest.ForgejoRecoveryCheckpointReached)
-	before := livetest.RunJobs(t, target, repo, interrupted.ID)
-	scenario.logJobs(t, before, secrets...)
-	requireInterrupted(t, target, repo, interrupted, finalTag)
-
-	// Interrupted at the checkpoint, and before any signing or publication.
-	reached := false
-
-	for _, job := range before {
-		switch {
-		case job.Name == livetest.ForgejoRecoveryCheckpointReached:
-			reached = job.Status == jobSuccess && job.Started()
-		case job.Name == forgejoSignJob || slices.Contains(forgejoPublishJobs, job.Name):
-			if job.Status == jobSuccess || job.Started() {
-				t.Errorf("job %q ended %s on a runner in the run that was interrupted before signing", job.Name, job.Status)
-			}
-		case job.Name == livetest.ForgejoRecoveryCheckpointHold && job.Status == jobSuccess:
-			t.Errorf("job %q succeeded in the run that was interrupted before signing", job.Name)
-		}
-	}
-
-	if !reached {
-		t.Fatalf("the interrupted run has no successful job %q on a runner, so it was not interrupted at the checkpoint", livetest.ForgejoRecoveryCheckpointReached)
-	}
-
-	prepared := requireReleaseGit(t, target, repo, keys, request, requestTag, finalTag)
-	scenario.requireNone(t, "/releases")
-
-	if tags := livetest.RepoCount(t, target, repo, "/tags"); tags != 2 {
-		t.Errorf("the interrupted run left %d tags, want the request tag and the prepared final tag", tags)
-	}
-
-	for _, name := range packages {
-		if listed := livetest.PublishedPackageVersions(t, target, repo, "npm", name); slices.Contains(listed, settings.Version) {
-			t.Errorf("the interrupted run published %s@%s before signing", name, settings.Version)
-		}
-	}
-
-	if t.Failed() {
-		t.FailNow()
-	}
+	interrupted, _, prepared := interruptForgejoReleaseAtHandoff(t, scenario, requester, keys, settings, request, packages, secrets...)
 
 	// The recovery: the hold is released, and the next patch version is
 	// requested on a new commit of main, as after any release.
@@ -279,4 +271,162 @@ func recoverForgejoReleaseAfterHandoff(t *testing.T, scenario layerScenario, req
 
 	requireRunIDs(t, target, repo, interrupted.ID, recovered.ID)
 	t.Logf("run %d was interrupted at %q and left %s without a release; run %d released v%s of %s", interrupted.ID, livetest.ForgejoRecoveryCheckpointReached, finalTag, recovered.ID, next, released)
+}
+
+func rerunForgejoReleaseAfterHandoff(t *testing.T, scenario layerScenario, requester livetest.RequestSigner, keys releaseKeys, settings livetest.TrialSettings, external *livetest.ExternalRegistry, request string, secrets ...map[string]string) {
+	t.Helper()
+
+	target, repo := scenario.target, scenario.repo
+	finalTag := "v" + settings.Version
+	packages := awaitedPackages(t, target, repo, settings)
+	distro := awaitedDistroPackages(t, target, repo, settings)
+	owned := livetest.OwnerPackages(t, target)
+
+	interrupted, before, prepared := interruptForgejoReleaseAtHandoff(t, scenario, requester, keys, settings, request, packages, secrets...)
+
+	at := slices.IndexFunc(before, func(job livetest.RunJob) bool { return job.Name == livetest.ForgejoRecoveryCheckpointHold })
+	if at < 0 || before[at].Status != runCancelled {
+		t.Fatalf("the interrupted run has no cancelled job %q, the first after the checkpoint, to rerun", livetest.ForgejoRecoveryCheckpointHold)
+	}
+
+	hold := before[at]
+
+	// The rerun of the hold runs again what the interruption stopped, and
+	// nothing else: every job that did not succeed is the hold or one that
+	// needs it, signing and publication or the job that calls them.
+	for _, job := range before {
+		if job.Status != jobSuccess && job.ID != hold.ID && job.Name != forgejoSignJob &&
+			!slices.Contains(forgejoPublishJobs, job.Name) && len(job.RunsOn) != 0 {
+			t.Fatalf("job %q ended %s in the interrupted run, and it is neither the hold nor a job that needs it, so a rerun of the hold would leave it as it is", job.Name, job.Status)
+		}
+	}
+
+	// The hold's rerun reads the variable and ends at once; signing and
+	// publication need the hold and are rerun with it.
+	livetest.SetRepoVariable(t, target, repo, livetest.ForgejoRecoveryHoldVariable, livetest.ForgejoRecoveryHoldReleased)
+	livetest.RerunJob(t, target, repo, hold)
+
+	run := livetest.WaitForRerun(t, target, repo, settings.Workflow, "push", interrupted, hold)
+
+	// Before the run is judged, so a run that published and then failed
+	// leaves no package behind.
+	distro = publishedDistroPackages(t, target, repo, distro)
+
+	after := livetest.RunJobs(t, target, repo, run.ID)
+	scenario.logJobs(t, after, secrets...)
+	logArtifacts(t, run, livetest.RunArtifacts(t, target, repo, run.ID))
+
+	if run.Status != jobSuccess {
+		for _, job := range after {
+			t.Logf("rerun: job %q ended %s at attempt %d", job.Name, job.Status, job.Attempt)
+		}
+
+		t.Logf("rerun: the jobs before the checkpoint were not rerun, so %q at attempt 2 downloads the build-dist artifact of attempt 1; "+
+			"if it failed there, Forgejo does not serve a rerun job an earlier attempt's artifacts", forgejoSignJob)
+	}
+
+	released := requireReleased(t, scenario, keys, settings, external, request, run, packages, distro)
+
+	// The rerun is the one asked for: the hold and signing at attempt 2, and
+	// every job that had succeeded at its first attempt, the hand-off's
+	// build among them, not run again.
+	attempts := make(map[int64]int64, len(after))
+	for _, job := range after {
+		attempts[job.ID] = job.Attempt
+
+		if job.Name == forgejoSignJob && (job.Attempt != 2 || !job.Started()) {
+			t.Errorf("job %q ended %s at attempt %d, want it signed on a runner at attempt 2", job.Name, job.Status, job.Attempt)
+		}
+	}
+
+	if attempts[hold.ID] != 2 {
+		t.Errorf("job %q is at attempt %d after its rerun, want 2", hold.Name, attempts[hold.ID])
+	}
+
+	for _, job := range before {
+		if job.Status == jobSuccess && attempts[job.ID] != 1 {
+			t.Errorf("job %q succeeded at attempt 1 and is at attempt %d after the rerun, want it not run again", job.Name, attempts[job.ID])
+		}
+	}
+
+	// One release of the version, on the commit its first attempt prepared.
+	if released != prepared {
+		t.Errorf("the rerun released %s, want the commit %s attempt 1 prepared", released, prepared)
+	}
+
+	if releases := livetest.RepoCount(t, target, repo, "/releases"); releases != 1 {
+		t.Errorf("the repository has %d releases after the rerun, want the one of %s", releases, finalTag)
+	}
+
+	if tags := livetest.RepoCount(t, target, repo, "/tags"); tags != 2 {
+		t.Errorf("the repository has %d tags after the rerun, want the request tag and the final tag", tags)
+	}
+
+	// The packages the release publishes, which requireReleased checks,
+	// and no other. A release of files alone publishes none, so the
+	// owner's packages are as they were.
+	if len(packages) == 0 && len(distro) == 0 {
+		scenario.requireSamePackages(t, owned)
+	}
+
+	requireRunIDs(t, target, repo, interrupted.ID)
+	t.Logf("run %d was interrupted at %q; rerunning %q released %s of %s in the same run", interrupted.ID, livetest.ForgejoRecoveryCheckpointReached, hold.Name, finalTag, released)
+}
+
+// interruptForgejoReleaseAtHandoff requests the release of settings.Version
+// at request and judges the run that is cancelled at the recovery
+// checkpoint: interrupted there, before any signing or publication, with the
+// version prepared and nothing of it released. It returns the run, its jobs
+// and the prepared release commit.
+func interruptForgejoReleaseAtHandoff(t *testing.T, scenario layerScenario, requester livetest.RequestSigner, keys releaseKeys, settings livetest.TrialSettings, request string, packages []string, secrets ...map[string]string) (livetest.WorkflowRun, []livetest.RunJob, string) {
+	t.Helper()
+
+	target, repo := scenario.target, scenario.repo
+	requestTag, finalTag := "release-request/v"+settings.Version, "v"+settings.Version
+
+	requester.PushTag(t, target, repo, requestTag, layerMain, "Request release "+finalTag)
+
+	interrupted := livetest.WaitForConsumerRun(t, target, repo, settings.Workflow, "push", livetest.ForgejoRecoveryCheckpointReached)
+	before := livetest.RunJobs(t, target, repo, interrupted.ID)
+	scenario.logJobs(t, before, secrets...)
+	requireInterrupted(t, target, repo, interrupted, finalTag)
+
+	// Interrupted at the checkpoint, and before any signing or publication.
+	reached := false
+
+	for _, job := range before {
+		switch {
+		case job.Name == livetest.ForgejoRecoveryCheckpointReached:
+			reached = job.Status == jobSuccess && job.Started()
+		case job.Name == forgejoSignJob || slices.Contains(forgejoPublishJobs, job.Name):
+			if job.Status == jobSuccess || job.Started() {
+				t.Errorf("job %q ended %s on a runner in the run that was interrupted before signing", job.Name, job.Status)
+			}
+		case job.Name == livetest.ForgejoRecoveryCheckpointHold && job.Status == jobSuccess:
+			t.Errorf("job %q succeeded in the run that was interrupted before signing", job.Name)
+		}
+	}
+
+	if !reached {
+		t.Fatalf("the interrupted run has no successful job %q on a runner, so it was not interrupted at the checkpoint", livetest.ForgejoRecoveryCheckpointReached)
+	}
+
+	prepared := requireReleaseGit(t, target, repo, keys, request, requestTag, finalTag)
+	scenario.requireNone(t, "/releases")
+
+	if tags := livetest.RepoCount(t, target, repo, "/tags"); tags != 2 {
+		t.Errorf("the interrupted run left %d tags, want the request tag and the prepared final tag", tags)
+	}
+
+	for _, name := range packages {
+		if listed := livetest.PublishedPackageVersions(t, target, repo, "npm", name); slices.Contains(listed, settings.Version) {
+			t.Errorf("the interrupted run published %s@%s before signing", name, settings.Version)
+		}
+	}
+
+	if t.Failed() {
+		t.FailNow()
+	}
+
+	return interrupted, before, prepared
 }

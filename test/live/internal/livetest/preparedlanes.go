@@ -30,7 +30,8 @@ type PreparedLane struct {
 // PreparedLanes are the lanes, by name. `just test-live-prepared <dir>
 // <forge> <pattern>` runs a lane's cases and scenarios from a prepared
 // directory. A scenario of harness-inputs-gitlab, recovery-forgejo or
-// trust-refusal-forgejo takes its consumer from there too
+// trust-refusal-forgejo, and the rerun of forgejo17-forgejo, takes its
+// consumer from there too
 // (PreparedScenarioCase), and build-capability-gitlab the Buildah
 // job image. interruption-manual-gitlab takes the operator's hand and runs
 // through `just test-live-gitlab-interrupted-job`.
@@ -69,9 +70,19 @@ var PreparedLanes = []PreparedLane{
 	// The release scenarios that expect another end than a release.
 	{Name: "recovery-forgejo", Forge: forgeForgejo, Scenarios: []string{"TestForgejoRelease_InterruptedRecovery"}},
 	{Name: "trust-refusal-forgejo", Forge: forgeForgejo, Scenarios: []string{"TestForgejoRelease_RejectsPreseededProvenance"}},
+	// The scenarios of Forgejo 17 or later (NeedsForgejo17Actions), which
+	// skip on an older Forgejo: the native step summary, and the rerun of
+	// an interrupted release in its own run.
+	{Name: "forgejo17-forgejo", Forge: forgeForgejo, Scenarios: []string{forgejoNativeSummaryTest, forgejoRerunTest}},
 }
 
-const gitlabBranchProtectionTest = "TestGitLabRelease_ConsumerBranchProtection"
+const (
+	gitlabBranchProtectionTest = "TestGitLabRelease_ConsumerBranchProtection"
+	forgejoRerunTest           = "TestForgejoRelease_RerunAfterInterruption"
+	// An in-runner probe, which runs the binary the launcher hands every
+	// run and takes nothing from the prepared directory.
+	forgejoNativeSummaryTest = "TestInRunner_NativeStepSummary"
+)
 
 // The lanes named in code: the first by what does not run it, the others
 // because their scenarios take their images from the prepared directory
@@ -93,8 +104,9 @@ const (
 // kaniko job image. The Buildah probe of build-capability-gitlab runs
 // private with Buildah, on the prepared Buildah job image. A missing image
 // is refused, naming its key. Another scenario takes nothing here: one of
-// harness-inputs-gitlab, recovery-forgejo or trust-refusal-forgejo takes a
-// case (PreparedScenarioCase), and the interruption nothing at all.
+// harness-inputs-gitlab, recovery-forgejo or trust-refusal-forgejo, and the
+// rerun of forgejo17-forgejo, takes a case (PreparedScenarioCase), and the
+// interruption and the native summary probe nothing at all.
 func PreparedScenarioEnvironment(scenario string, prepared map[string]string) (map[string]string, error) {
 	at := slices.IndexFunc(PreparedLanes, func(lane PreparedLane) bool { return slices.Contains(lane.Scenarios, scenario) })
 	if at < 0 {
@@ -133,9 +145,10 @@ func PreparedScenarioEnvironment(scenario string, prepared map[string]string) (m
 }
 
 // preparedScenarioDemos are the demos the scenarios of harness-inputs-gitlab,
-// recovery-forgejo and trust-refusal-forgejo run on, by scenario. The first
-// push, the refused hand-offs and the Forgejo recovery need a native release
-// build, the Go CLI's. The GitLab recovery needs one policy-owned release
+// recovery-forgejo, trust-refusal-forgejo and the rerun of
+// forgejo17-forgejo run on, by scenario. The first push, the refused
+// hand-offs and the Forgejo recovery and rerun need a native release build,
+// the Go CLI's. The GitLab recovery needs one policy-owned release
 // image in the project's own repository under the version's tag, the Maven
 // service's.
 var preparedScenarioDemos = map[string]string{
@@ -145,6 +158,7 @@ var preparedScenarioDemos = map[string]string{
 
 	"TestForgejoRelease_InterruptedRecovery":        "hello-go-cli",
 	"TestForgejoRelease_RejectsPreseededProvenance": "hello-go-cli",
+	forgejoRerunTest: "hello-go-cli",
 }
 
 // PreparedScenarioCase is the consumer a scenario takes from the prepared

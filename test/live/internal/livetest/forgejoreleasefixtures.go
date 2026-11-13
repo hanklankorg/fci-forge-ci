@@ -27,7 +27,7 @@ const (
 	// ForgejoRecoveryHoldVariable is the repository variable the hold reads.
 	// While the repository has none the hold lasts until the run is
 	// cancelled; creating it as ForgejoRecoveryHoldReleased lets the next
-	// release request pass.
+	// release request, or a rerun of the hold, pass.
 	ForgejoRecoveryHoldVariable = "FIXTURE_HOLD_BEFORE_SIGNING"
 	// ForgejoRecoveryHoldReleased is the one value that ends the hold.
 	ForgejoRecoveryHoldReleased = "released"
@@ -55,8 +55,8 @@ var errForgejoReleaseFixture = errors.New("release fixture does not fit the cons
 
 // forgejoRecoveryHoldScript holds while the variable is unset and fails when
 // nothing cancelled it, so an unobserved checkpoint never lets signing start.
-// The run of the next request reads the variable; the first one's shell
-// cannot.
+// The run of the next request, or a rerun of the hold, reads the variable;
+// the first attempt's shell cannot.
 const forgejoRecoveryHoldScript = `set -eu
 case "${FIXTURE_HOLD}" in
   ` + ForgejoRecoveryHoldReleased + `) exit 0 ;;

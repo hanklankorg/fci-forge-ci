@@ -114,10 +114,68 @@ jobs:
         run: |
           ` + indent(prelude, 10) + `
           unset FORGEJO_STEP_SUMMARY GITHUB_STEP_SUMMARY CI_SUMMARY_FILE
-          ` + indent(report, 10) + ` > summary-log.txt
+          ` + indent(report, 10) + ` > summary-log.txt 2>&1
           cat summary-log.txt
           grep -q 'Xcode Build Summary' summary-log.txt
 `
+}
+
+// nativeSummaryWorkflow writes the same summary as summaryWorkflow on a
+// Forgejo runner that nominates its native summary file, and requires the
+// summary in that file and in neither stream of the job log.
+func nativeSummaryWorkflow(prelude string) string {
+	const report = `run_product report build xcode --xcode-version 16.0 \
+  --scheme Demo --version v1.0.0`
+
+	return `on: [push]
+jobs:
+  detect:
+    runs-on: ubuntu-latest
+    steps:
+      - name: the summary must reach the native summary file and not the job log
+        run: |
+          ` + indent(prelude, 10) + `
+          test -n "$FORGEJO_STEP_SUMMARY"
+          ` + indent(report, 10) + ` > summary-log.txt 2>&1
+          cat summary-log.txt
+          grep -q 'Xcode Build Summary' "$FORGEJO_STEP_SUMMARY"
+          if grep -q 'Xcode Build Summary' summary-log.txt; then
+            echo 'the summary went to the job log beside the native summary file' >&2
+            exit 1
+          fi
+`
+}
+
+// The native probe passes only on a summary that reached the nominated file
+// alone: not on one printed to the log, nor without a nominated file.
+func TestNativeSummaryProbeRequiresTheFileAlone(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name, sink string
+		env        []string
+		pass       bool
+	}{
+		{"file", `>> "$FORGEJO_STEP_SUMMARY"`, []string{"FORGEJO_STEP_SUMMARY=native.md"}, true},
+		{"log", "", []string{"FORGEJO_STEP_SUMMARY=native.md"}, false},
+		{"file and log", `| tee -a "$FORGEJO_STEP_SUMMARY"`, []string{"FORGEJO_STEP_SUMMARY=native.md"}, false},
+		{"file and standard error", `| tee -a "$FORGEJO_STEP_SUMMARY" >&2`, []string{"FORGEJO_STEP_SUMMARY=native.md"}, false},
+		{"no file", `>> "${FORGEJO_STEP_SUMMARY:-native.md}"`, nil, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			prelude := `run_product() {
+  printf '%s\n' 'Xcode Build Summary' ` + tc.sink + `
+}`
+			fixture := decodeProbeFixture(t, nativeSummaryWorkflow(prelude))
+
+			err := runProbeShell(t, fixture.Jobs["detect"].Steps[0].Run, tc.env...)
+			if (err == nil) != tc.pass {
+				t.Fatalf("native summary probe: %v, want pass %t", err, tc.pass)
+			}
+		})
+	}
 }
 
 func TestSummaryFallbackProbeClearsRunnerFileAliases(t *testing.T) {

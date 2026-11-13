@@ -104,6 +104,7 @@ var liveEffects = []liveEffect{
 	{Prefix: "test/live/conformance/forgejo", Forges: []string{forgeForgejo}},
 	{Prefix: "test/live/conformance/gitlab", Forges: []string{forgeGitLab}},
 	{Prefix: "test/live/internal/livetest/gitlab", Forges: []string{forgeGitLab}},
+	{Prefix: "test/live/internal/livetest/forgejorerun.go", Forges: []string{forgeForgejo}},
 	{Prefix: "test/live/internal/livetest/github", Forges: []string{matrixGitHub}},
 	{Prefix: "test/live/githubconsumer/", Forges: []string{matrixGitHub}},
 	{Prefix: "test/live/"},

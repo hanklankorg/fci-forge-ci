@@ -137,6 +137,8 @@ Kept scenario lines, by lane:
 | k3s-private-gitlab | `TestGitLabBootstrap_PublishesAndDownloadsTheRecordedBinary` | ✅ (2026-11-11, V 20261111T084422Z) |
 | recovery-forgejo | `TestForgejoRelease_InterruptedRecovery` | ✅ (2026-11-11, V 20261111T181858Z) |
 | trust-refusal-forgejo | `TestForgejoRelease_RejectsPreseededProvenance` | ✅ (2026-11-11, V 20261111T182823Z) |
+| forgejo17-forgejo | `TestInRunner_NativeStepSummary` | 📝 |
+| forgejo17-forgejo | `TestForgejoRelease_RerunAfterInterruption` | 📝 |
 
 <!-- /generated:e2e-variants -->
 

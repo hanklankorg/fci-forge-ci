@@ -384,7 +384,8 @@ func TestForgejoKanikoCaseRunsAsThePreparedAccount(t *testing.T) {
 
 // A scenario of a lane takes its images and its lane's settings from
 // the prepared directory, a consumer case from there, or, the interruption
-// alone, nothing; so none is left to the caller's environment. A missing
+// and the native summary probe alone, nothing; so none is left to the
+// caller's environment. A missing
 // image is refused, naming its key.
 func TestPreparedScenarioEnvironment_GivesALanesScenarioItsImagesAndSettings(t *testing.T) {
 	t.Parallel()
@@ -415,7 +416,7 @@ func TestPreparedScenarioEnvironment_GivesALanesScenarioItsImagesAndSettings(t *
 				}
 			case lane.Name == laneBuildCapabilityGitLab:
 				want = map[string]string{consumerVisibilityEnv: visibilityPrivate, GitLabImageBuilderEnv: ImageBuilderBuildah, gitLabBuildArchiveEnv: "/c/buildah.tar"}
-			case !takesCase && lane.Name != laneInterruptionManualGitLab:
+			case !takesCase && lane.Name != laneInterruptionManualGitLab && scenario != forgejoNativeSummaryTest:
 				t.Errorf("%s: %s takes neither a lane's environment nor a case from the prepared directory", lane.Name, scenario)
 			}
 

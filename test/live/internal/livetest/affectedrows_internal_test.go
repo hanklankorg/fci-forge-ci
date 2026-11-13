@@ -119,13 +119,18 @@ func TestAffectedRowsAreNarrowedByTheTable(t *testing.T) {
 			func(PreparedCase) bool { return false }, nil},
 		{"another forge's workflow", forgeGitLab, []string{".forgejo/workflows/release-images.yml", ".github/workflows/build-go.yml"},
 			func(PreparedCase) bool { return false }, nil},
+		{"Forgejo's rerun helper on GitLab", forgeGitLab, []string{"test/live/internal/livetest/forgejorerun.go"},
+			func(PreparedCase) bool { return false }, nil},
+		{"Forgejo's rerun helper", forgeForgejo, []string{"test/live/internal/livetest/forgejorerun.go"},
+			func(PreparedCase) bool { return true },
+			[]string{"TestForgejoRelease_InterruptedRecovery", "TestForgejoRelease_RejectsPreseededProvenance", forgejoNativeSummaryTest, forgejoRerunTest}},
 		{"the snapshot workflow", forgeForgejo, []string{".forgejo/workflows/snapshot-images.yml"}, snapshot, nil},
 		{"the snapshot script GitLab reads too", forgeGitLab, []string{".forgejo/bin/snapshot-images.sh"}, snapshot, nil},
 		{"a demo, and the scenarios that run on it", forgeForgejo, []string{demosDir + "/hello-go-cli/consumer/go.mod"}, goCLI,
-			[]string{"TestForgejoRelease_InterruptedRecovery", "TestForgejoRelease_RejectsPreseededProvenance"}},
+			[]string{"TestForgejoRelease_InterruptedRecovery", "TestForgejoRelease_RejectsPreseededProvenance", forgejoRerunTest}},
 		{"two changes", forgeForgejo, []string{"examples/go-cli/forgejo/release.yml", ".forgejo/bin/snapshot-images.sh"},
 			func(c PreparedCase) bool { return goCLI(c) || snapshot(c) },
-			[]string{"TestForgejoRelease_InterruptedRecovery", "TestForgejoRelease_RejectsPreseededProvenance"}},
+			[]string{"TestForgejoRelease_InterruptedRecovery", "TestForgejoRelease_RejectsPreseededProvenance", forgejoRerunTest}},
 	} {
 		cases, scenarios := affectedCases(t, test.forge, test.paths...)
 		if want := caseNames(test.forge, test.cases); !slices.Equal(cases, want) {

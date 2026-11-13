@@ -5,12 +5,14 @@ package livetest
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"regexp"
 	"slices"
 	"strings"
 	"testing"
 
+	"github.com/diggsweden/forge-ci/internal/domain/errs"
 	"github.com/diggsweden/forge-ci/internal/domain/provider"
 )
 
@@ -109,8 +111,45 @@ func TestRequires_HandlesEveryNeed(t *testing.T) {
 
 	for _, need := range allNeeds() {
 		tb := &recordingTB{}
-		if !Requires(tb, provider.ForgeGitLab, need) || tb.fatal != "" || len(tb.logs) != 0 {
+		met := Requires(tb, provider.ForgeGitLab, need)
+
+		// The forge answers this one, and GitLab is never a Forgejo.
+		if need == NeedsForgejo17Actions {
+			if met || tb.fatal != "" || !slices.Equal(tb.logs, []string{"SKIP gitlab: the Actions of Forgejo 17 are Forgejo's"}) {
+				t.Errorf("Need %s must skip GitLab with a logged reason: %+v", need, tb)
+			}
+
+			continue
+		}
+
+		if !met || tb.fatal != "" || len(tb.logs) != 0 {
 			t.Errorf("Need %s must be satisfied by the complete fixture: %+v", need, tb)
+		}
+	}
+}
+
+// A Forgejo older than 17 is skipped by a reason naming the version it gave,
+// 17 and later meet the need, and a version without a major number is no
+// answer at all.
+func TestForgejo17ActionsSkip_ReadsTheMajorVersion(t *testing.T) {
+	t.Parallel()
+
+	for version, skipped := range map[string]bool{
+		"16.0.6+gitea-1.22.0":               true,
+		"1.21.11-1+gitea-1.21.11":           true,
+		"17.0.1+gitea-1.22.0":               false,
+		"17.0.0-26-363f3dc30b+gitea-1.22.0": false,
+		"18.0.0":                            false,
+	} {
+		reason, err := forgejo17ActionsSkip(version)
+		if err != nil || (reason != "") != skipped || (skipped && !strings.Contains(reason, "Forgejo "+version+" ")) {
+			t.Errorf("%s: skip %q, %v; want a skip naming the version: %t", version, reason, err, skipped)
+		}
+	}
+
+	for _, version := range []string{"", "17", "v17.0.1", "+17.0.1", "017.0.1", "development"} {
+		if reason, err := forgejo17ActionsSkip(version); !errors.Is(err, errs.ErrValidation) || reason != "" {
+			t.Errorf("%q: skip %q, %v; want a refusal", version, reason, err)
 		}
 	}
 }
@@ -121,7 +160,7 @@ func TestRequires_HandlesEveryNeed(t *testing.T) {
 func TestAllNeeds_ListsEveryNeed(t *testing.T) {
 	setCurrentContract(t, writeContract(t, composeFixtureBody(t)))
 
-	want := []Need{NeedsInRunner, NeedsFulcio, NeedsPackages}
+	want := []Need{NeedsInRunner, NeedsFulcio, NeedsPackages, NeedsForgejo17Actions}
 	got := allNeeds()
 
 	counts := make(map[Need]int)
