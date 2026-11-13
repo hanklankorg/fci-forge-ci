@@ -410,7 +410,7 @@ func ForgejoRecoveryHoldDependants(body string) ([]string, error) {
 	}
 
 	if _, held := jobs[forgejoRecoveryHoldJob]; !held {
-		return nil, fmt.Errorf("the release workflow has no job %s", forgejoRecoveryHoldJob)
+		return nil, fmt.Errorf("the release workflow has no job %s: %w", forgejoRecoveryHoldJob, errForgejoReleaseFixture)
 	}
 
 	needs := make(map[string][]string, len(jobs))
