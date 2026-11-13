@@ -555,6 +555,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Security: the engine and the Go runtime image build on Go 1.27.4,
+  which fixes GO-2026-6859, an HTTP/1 server crash from a
+  `MaxBytesReader` header race in `net/http` that govulncheck reports as
+  reachable through the engine's HTTP paths.
 - Security: on Forgejo 17, a publication job of
   `sign-and-publish-release.yml` could start after the signer refused the
   release. In a called workflow Forgejo 17 evaluates a job's own `if` but
