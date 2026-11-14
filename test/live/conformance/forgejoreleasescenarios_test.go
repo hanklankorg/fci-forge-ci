@@ -88,11 +88,14 @@ func TestForgejoRelease_InterruptedRecovery(t *testing.T) {
 //
 // The release is interrupted as in TestForgejoRelease_InterruptedRecovery.
 // The hold is then released and the first job the run cancelled after the
-// checkpoint, the hold, is rerun with the jobs that need it: signing and
-// publication. They run at attempt 2 in the run that was cancelled, and no
-// run is added. The jobs before the checkpoint are not rerun, so signing
-// takes the build-dist hand-off attempt 1 uploaded: whether Forgejo serves a
-// rerun job an earlier attempt's artifacts is what this row proves.
+// checkpoint, the hold, is rerun with the jobs that need it, the caller of
+// signing and publication among them. They run in the run that was
+// cancelled, and no run is added: the hold at attempt 2, and signing at
+// attempt 1, since Forgejo creates a called workflow's jobs when its caller
+// is unblocked, and the interruption came before that. The jobs before
+// the checkpoint are not rerun, so signing takes the build-dist hand-off
+// attempt 1 uploaded: whether Forgejo serves a rerun job an earlier
+// attempt's artifacts is what this row proves.
 //
 // The run must end in the release every trial is held to, of the version
 // that was interrupted and on the commit its first attempt prepared: one
@@ -296,19 +299,25 @@ func rerunForgejoReleaseAfterHandoff(t *testing.T, scenario layerScenario, reque
 		t.Fatalf("read the jobs that need the hold from %s: %v", settings.Workflow, err)
 	}
 
+	// The interruption came before the caller of signing and publication was
+	// unblocked, so Forgejo has not created their jobs yet.
+	if slices.ContainsFunc(before, func(job livetest.RunJob) bool { return job.Name == forgejoSignJob }) {
+		t.Errorf("job %q is in the interrupted run, want it created when the rerun unblocks its caller", forgejoSignJob)
+	}
+
 	// The rerun of the hold runs again what the interruption stopped, and
 	// nothing else: every job that did not succeed is the hold or one that
-	// needs it, directly or through another job, or signing and publication
-	// or the job that calls them.
+	// needs it, directly or through another job, or the job that calls
+	// signing and publication.
 	for _, job := range before {
-		if job.Status != jobSuccess && job.ID != hold.ID && !slices.Contains(dependants, job.Name) && job.Name != forgejoSignJob &&
-			!slices.Contains(forgejoPublishJobs, job.Name) && len(job.RunsOn) != 0 {
+		if job.Status != jobSuccess && job.ID != hold.ID && !slices.Contains(dependants, job.Name) && len(job.RunsOn) != 0 {
 			t.Fatalf("job %q ended %s in the interrupted run, and it is neither the hold nor a job that needs it, so a rerun of the hold would leave it as it is", job.Name, job.Status)
 		}
 	}
 
-	// The hold's rerun reads the variable and ends at once; signing and
-	// publication need the hold and are rerun with it.
+	// The hold's rerun reads the variable and ends at once; the caller of
+	// signing and publication needs the hold, is rerun with it, and Forgejo
+	// then creates their jobs.
 	livetest.SetRepoVariable(t, target, repo, livetest.ForgejoRecoveryHoldVariable, livetest.ForgejoRecoveryHoldReleased)
 	livetest.RerunJob(t, target, repo, hold)
 
@@ -327,22 +336,35 @@ func rerunForgejoReleaseAfterHandoff(t *testing.T, scenario layerScenario, reque
 			t.Logf("rerun: job %q ended %s at attempt %d", job.Name, job.Status, job.Attempt)
 		}
 
-		t.Logf("rerun: the jobs before the checkpoint were not rerun, so %q at attempt 2 downloads the build-dist artifact of attempt 1; "+
+		t.Logf("rerun: the jobs before the checkpoint were not rerun, so %q, created by the rerun, downloads the build-dist artifact of attempt 1; "+
 			"if it failed there, Forgejo does not serve a rerun job an earlier attempt's artifacts", forgejoSignJob)
 	}
 
 	released := requireReleased(t, scenario, keys, settings, external, request, run, packages, distro)
 
-	// The rerun is the one asked for: the hold and signing at attempt 2, and
-	// every job that had succeeded at its first attempt, the hand-off's
-	// build among them, not run again.
+	// The rerun is the one asked for: the hold at attempt 2, signing created
+	// by the rerun and taken by a runner once, and every job that had
+	// succeeded at its first attempt, the hand-off's build among them, not
+	// run again.
 	attempts := make(map[int64]int64, len(after))
+	signed := 0
+
 	for _, job := range after {
 		attempts[job.ID] = job.Attempt
 
-		if job.Name == forgejoSignJob && (job.Attempt != 2 || !job.Started()) {
-			t.Errorf("job %q ended %s at attempt %d, want it signed on a runner at attempt 2", job.Name, job.Status, job.Attempt)
+		if job.Name != forgejoSignJob {
+			continue
 		}
+
+		signed++
+
+		if job.Attempt != 1 || !job.Started() {
+			t.Errorf("job %q ended %s at attempt %d, want it signed on a runner at its first attempt", job.Name, job.Status, job.Attempt)
+		}
+	}
+
+	if signed != 1 {
+		t.Errorf("the rerun has %d jobs %q, want one", signed, forgejoSignJob)
 	}
 
 	if attempts[hold.ID] != 2 {
